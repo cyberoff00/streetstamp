@@ -23,6 +23,8 @@ final class LifelogStore: ObservableObject {
     private var cachedDistanceMeters: Double = 0
     private var cachedGlobePolyline: [CoordinateCodable] = []
     private var cachedGlobePolylineSourceCount: Int = -1
+    private var downsampleCache: [Int: [CoordinateCodable]] = [:]
+    private var downsampleCacheSourceCount: Int = -1
     private let syntheticMaxPoints = 320
 
     init(paths: StoragePath) {
@@ -39,6 +41,8 @@ final class LifelogStore: ObservableObject {
         cachedDistanceMeters = 0
         cachedGlobePolyline = []
         cachedGlobePolylineSourceCount = -1
+        downsampleCache = [:]
+        downsampleCacheSourceCount = -1
     }
 
     func load() {
@@ -51,6 +55,8 @@ final class LifelogStore: ObservableObject {
             cachedDistanceMeters = 0
             cachedGlobePolyline = []
             cachedGlobePolylineSourceCount = 0
+            downsampleCache = [:]
+            downsampleCacheSourceCount = 0
             return
         }
 
@@ -59,6 +65,8 @@ final class LifelogStore: ObservableObject {
         cachedDistanceMeters = totalDistanceMeters(coords: payload.coordinates)
         cachedGlobePolyline = []
         cachedGlobePolylineSourceCount = -1
+        downsampleCache = [:]
+        downsampleCacheSourceCount = -1
 
         if let last = payload.coordinates.last {
             lastAccepted = CLLocation(latitude: last.lat, longitude: last.lon)
@@ -126,9 +134,30 @@ final class LifelogStore: ObservableObject {
 
         coordinates.append(c)
         cachedGlobePolylineSourceCount = -1
+        downsampleCacheSourceCount = -1
         lastAccepted = loc
         lastAcceptedAt = loc.timestamp
         persistAsync()
+    }
+
+    func sampledCoordinates(maxPoints: Int) -> [CoordinateCodable] {
+        let target = max(maxPoints, 2)
+        if downsampleCacheSourceCount != coordinates.count {
+            downsampleCache.removeAll(keepingCapacity: true)
+            downsampleCacheSourceCount = coordinates.count
+        }
+        if let cached = downsampleCache[target] {
+            return cached
+        }
+        let sampled = downsample(coords: coordinates, maxPoints: target)
+        downsampleCache[target] = sampled
+        return sampled
+    }
+
+    func mapPolyline(maxPoints: Int) -> [CLLocationCoordinate2D] {
+        sampledCoordinates(maxPoints: maxPoints).map {
+            CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon)
+        }
     }
 
     private func persistAsync() {

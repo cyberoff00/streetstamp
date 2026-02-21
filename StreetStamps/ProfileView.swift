@@ -530,14 +530,9 @@ struct RecentJourneysView: View {
                 Button {
                     dismiss()
                 } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 14, weight: .semibold))
-                        Text("BACK")
-                            .font(.system(size: 12, weight: .semibold))
-                            .tracking(0.5)
-                    }
-                    .foregroundColor(.black.opacity(0.6))
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.black.opacity(0.6))
                 }
 
                 Spacer()
@@ -816,13 +811,8 @@ struct EquipmentLibraryView: View {
                     Button {
                         dismiss()
                     } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 14, weight: .semibold))
-                            Text("BACK")
-                                .font(.system(size: 12, weight: .semibold))
-                                .tracking(0.5)
-                        }
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.black.opacity(0.6))
                     }
                     

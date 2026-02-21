@@ -968,13 +968,8 @@ struct JourneyMemoryDetailView: View {
                 }
                 dismiss()
             } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "arrow.left")
-                        .font(.system(size: 16, weight: .medium))
-                    Text("BACK")
-                        .font(.system(size: 14, weight: .bold))
-                        .tracking(0.55)
-                }
+                Image(systemName: "arrow.left")
+                    .font(.system(size: 16, weight: .medium))
                 .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
                 .frame(height: 20)
             }
@@ -1656,12 +1651,9 @@ private struct JourneyMemoryDetailExportSnapshotView: View {
         VStack(alignment: .leading, spacing: 18) {
 
             // Keep the same top spacing as the real page but hide the BACK control
-            HStack(spacing: 8) {
+            HStack(spacing: 0) {
                 Image(systemName: "arrow.left")
                     .font(.system(size: 16, weight: .medium))
-                Text("BACK")
-                    .font(.system(size: 14, weight: .bold))
-                    .tracking(0.55)
             }
             .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
             .frame(height: 20)

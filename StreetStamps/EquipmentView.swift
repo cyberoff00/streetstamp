@@ -116,24 +116,16 @@ struct EquipmentView: View {
             Button {
                 dismiss()
             } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "arrow.left")
-                        .font(.system(size: 16, weight: .bold))
-                    Text("BACK")
-                        .font(.system(size: AppTypography.bodySize, weight: .black))
-                        .tracking(-0.2)
-                }
+                Image(systemName: "arrow.left")
+                    .font(.system(size: 16, weight: .bold))
                 .foregroundColor(.black)
+                .frame(width: 28, height: 28)
             }
             .buttonStyle(.plain)
 
             Text(L10n.t("equipment_title").uppercased())
-                .font(.system(size: AppTypography.headerSize, weight: .black))
-                .tracking(-0.4)
-                .foregroundColor(.black)
+                .appHeaderStyle()
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
 
             HStack(spacing: 6) {
                 Image(systemName: "bitcoinsign.circle.fill")
@@ -246,9 +238,16 @@ struct EquipmentView: View {
     private var itemGrid: some View {
         if let category = store.catalog.categories.first(where: { $0.id == selectedCategoryId }) {
             let columns = [GridItem(.adaptive(minimum: 150), spacing: 16, alignment: .top)]
+            let visibleItems = category.items.filter { item in
+                let ownership = ownershipState(category: category, item: item)
+                if activeSegment == .myGear {
+                    return ownership != .locked
+                }
+                return true
+            }
 
             LazyVGrid(columns: columns, spacing: 16) {
-                ForEach(category.items) { item in
+                ForEach(visibleItems) { item in
                     let ownership = ownershipState(category: category, item: item)
 
                     Button {
@@ -431,12 +430,6 @@ private struct GearCard: View {
                         .font(.system(size: 22, weight: .bold))
                         .foregroundColor(FigmaTheme.subtext)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-
-                if ownership == .equipped {
-                    pill(text: "SELECTED", fill: FigmaTheme.primary, textColor: .white)
-                        .padding(.top, 16)
-                        .padding(.leading, 16)
                 }
 
                 if ownership == .locked {

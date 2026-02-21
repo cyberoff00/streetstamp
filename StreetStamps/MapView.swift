@@ -826,15 +826,10 @@ struct MapView: View {
                     }
                 }
             } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "arrow.left")
-                        .font(.system(size: 16, weight: .medium))
-                    Text("BACK")
-                        .font(.system(size: 24 / 2, weight: .black))
-                        .tracking(-0.45)
-                }
+                Image(systemName: "arrow.left")
+                    .font(.system(size: 16, weight: .medium))
                 .foregroundColor(.black)
-                .frame(width: 86, alignment: .leading)
+                .frame(width: 32, alignment: .leading)
             }
             .buttonStyle(.plain)
 

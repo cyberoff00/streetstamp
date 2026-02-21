@@ -23,6 +23,7 @@ struct LifelogView: View {
     @State private var showDisableConfirm = false
     @State private var shareItem: LifelogShareImageItem? = nil
     @State private var didCenterOnEnter = false
+    @State private var avatarPulse = false
     @AppStorage(MapAppearanceSettings.storageKey) private var mapAppearanceRaw = MapAppearanceSettings.current.rawValue
 
     private var mapAppearance: MapAppearanceStyle {
@@ -32,8 +33,18 @@ struct LifelogView: View {
     private var panelBackground: Color { isDarkAppearance ? Color.black.opacity(0.80) : FigmaTheme.card.opacity(0.96) }
     private var panelText: Color { isDarkAppearance ? .white : .black }
 
-    private var lineCoords: [CLLocationCoordinate2D] {
-        lifelogStore.coordinates.map { CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon) }
+    private var pathCoords: [CLLocationCoordinate2D] {
+        lifelogStore.mapPolyline(maxPoints: 900)
+    }
+
+    private var fogRevealCoords: [CLLocationCoordinate2D] {
+        lifelogStore.mapPolyline(maxPoints: 90)
+    }
+
+    private var footprintCoords: [CLLocationCoordinate2D] {
+        let sampled = lifelogStore.mapPolyline(maxPoints: 260)
+        guard sampled.count > 3 else { return [] }
+        return Array(sampled.dropLast().suffix(28))
     }
 
     private var allJourneysForGlobe: [JourneyRoute] {
@@ -41,6 +52,12 @@ struct LifelogView: View {
             return [lifelogStore.syntheticJourney] + store.journeys
         }
         return store.journeys
+    }
+
+    private var currentDisplayLocation: CLLocation? {
+        if let loc = lifelogStore.currentLocation { return loc }
+        if let loc = locationHub.currentLocation { return loc }
+        return locationHub.lastKnownLocation
     }
 
     var body: some View {
@@ -78,6 +95,7 @@ struct LifelogView: View {
         }
         .onAppear {
             didCenterOnEnter = false
+            avatarPulse = true
             if locationHub.authorizationStatus != .authorizedAlways {
                 showEnableHint = true
             }
@@ -99,14 +117,33 @@ struct LifelogView: View {
 
     private var mapLayer: some View {
         Map(position: $position) {
-            if lineCoords.count >= 2 {
-                MapPolyline(coordinates: lineCoords)
+            ForEach(fogRevealCoords.indices, id: \.self) { idx in
+                MapCircle(center: fogRevealCoords[idx], radius: 220)
+                    .foregroundStyle(Color.white.opacity(isDarkAppearance ? 0.04 : 0.08))
+            }
+
+            if pathCoords.count >= 2 {
+                MapPolyline(coordinates: pathCoords)
                     .stroke(Color(red: 0.05, green: 0.67, blue: 0.54), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
             }
 
-            if let loc = lifelogStore.currentLocation {
+            ForEach(footprintCoords.indices, id: \.self) { idx in
+                let alpha = 0.20 + (Double(idx) / Double(max(footprintCoords.count - 1, 1))) * 0.58
+                Annotation("", coordinate: footprintCoords[idx]) {
+                    FootstepMarker(opacity: alpha)
+                }
+            }
+
+            if let loc = currentDisplayLocation {
                 Annotation("", coordinate: loc.coordinate) {
                     ZStack {
+                        Circle()
+                            .stroke(UITheme.accent.opacity(0.28), lineWidth: 2)
+                            .frame(width: 62, height: 62)
+                            .scaleEffect(avatarPulse ? 1.16 : 0.92)
+                            .opacity(avatarPulse ? 0.12 : 0.35)
+                            .animation(.easeInOut(duration: 1.7).repeatForever(autoreverses: true), value: avatarPulse)
+
                         Circle()
                             .fill(FigmaTheme.card.opacity(0.95))
                             .frame(width: 46, height: 46)
@@ -117,6 +154,19 @@ struct LifelogView: View {
             }
         }
         .mapStyle(.standard(elevation: .flat, pointsOfInterest: .excludingAll, showsTraffic: false))
+        .overlay {
+            LinearGradient(
+                colors: [
+                    Color.black.opacity(isDarkAppearance ? 0.24 : 0.08),
+                    Color.clear,
+                    Color.black.opacity(isDarkAppearance ? 0.20 : 0.06)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+        }
     }
 
     private var header: some View {
@@ -129,6 +179,17 @@ struct LifelogView: View {
                 .appHeaderStyle()
 
             Spacer()
+
+            Button {
+                centerOnCurrent(force: true)
+            } label: {
+                Image(systemName: "scope")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(FigmaTheme.text)
+                    .frame(width: 42, height: 42)
+                    .background(FigmaTheme.card.opacity(0.92))
+                    .clipShape(Circle())
+            }
 
             Button {
                 globeJourneysSnapshot = allJourneysForGlobe
@@ -313,5 +374,22 @@ struct LifelogView: View {
     private func normalizedDisplayName(_ name: String) -> String {
         let value = name.trimmingCharacters(in: .whitespacesAndNewlines)
         return value.isEmpty ? "EXPLORER" : value
+    }
+}
+
+private struct FootstepMarker: View {
+    let opacity: Double
+
+    var body: some View {
+        HStack(spacing: 1) {
+            Circle()
+                .fill(Color(red: 0.98, green: 0.95, blue: 0.80).opacity(opacity))
+                .frame(width: 4.5, height: 4.5)
+            Circle()
+                .fill(Color(red: 0.98, green: 0.95, blue: 0.80).opacity(opacity * 0.9))
+                .frame(width: 3.8, height: 3.8)
+        }
+        .rotationEffect(.degrees(-18))
+        .shadow(color: .black.opacity(0.12), radius: 1.2, y: 0.8)
     }
 }
