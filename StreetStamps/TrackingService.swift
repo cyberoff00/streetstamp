@@ -2,6 +2,7 @@ import Foundation
 import CoreLocation
 import UIKit
 import Combine
+import UserNotifications
 
 @MainActor
 final class TrackingService: ObservableObject {
@@ -192,6 +193,15 @@ final class TrackingService: ObservableObject {
     private var bag = Set<AnyCancellable>()
     private let hub = LocationHub.shared
 
+    // MARK: - Long stationary reminder (1h / 100m start-end displacement)
+
+    private var longStationaryAnchorLocation: CLLocation?
+    private var longStationaryAnchorTime: Date?
+    private let longStationaryWindow: TimeInterval = 60 * 60
+    private let longStationaryThresholdMeters: Double = 100
+    private let longStationaryNotificationID = "streetstamps.long_stationary_reminder"
+    private let longStationaryNotificationPermissionAskedKey = "streetstamps.long_stationary_reminder.notification_asked.v1"
+
     // MARK: - ✅ Render cache internals
 
     private let renderQueue = DispatchQueue(label: "ss.render.cache", qos: .userInitiated)
@@ -299,6 +309,15 @@ final class TrackingService: ObservableObject {
             }
             .store(in: &bag)
 
+        hub.$headingDegrees
+            .removeDuplicates { abs($0 - $1) < 1.0 }
+            .sink { [weak self] heading in
+                guard let self else { return }
+                let h = heading.truncatingRemainder(dividingBy: 360)
+                self.headingDegrees = h >= 0 ? h : (h + 360)
+            }
+            .store(in: &bag)
+
         // ✅ gating subscription
         hub.$countryISO2
             .map { ($0 ?? "").uppercased() }
@@ -387,6 +406,8 @@ final class TrackingService: ObservableObject {
         isRealtimeRenderingEnabled = true
 
         resetOneEuro()
+        resetLongStationaryReminderState()
+        requestLongStationaryNotificationPermissionIfNeeded()
 
         // ✅ 根据模式选择启动方式
         if mode == .sport {
@@ -488,6 +509,8 @@ final class TrackingService: ObservableObject {
         isPaused = false
         stationarySince = nil
         isInForegroundStationaryPowerMode = false
+        resetLongStationaryReminderState()
+        requestLongStationaryNotificationPermissionIfNeeded()
         startForegroundHighPower()
     }
 
@@ -503,6 +526,8 @@ final class TrackingService: ObservableObject {
         if !hub.isUsingMock {
             hub.enterLowPower()
         }
+        resetLongStationaryReminderState()
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [longStationaryNotificationID])
         wasExplicitlyPaused = false  // ✅ 结束时重置
     }
 
@@ -511,6 +536,7 @@ final class TrackingService: ObservableObject {
         updateLiveActivity(memoriesCount: 0)
         guard isTracking else { return }
         isPaused = true
+        resetLongStationaryReminderState()
         wasExplicitlyPaused = true  // ✅ 标记为主动暂停
     }
 
@@ -520,6 +546,8 @@ final class TrackingService: ObservableObject {
         
         guard isTracking else { return }
         isPaused = false
+        resetLongStationaryReminderState()
+        requestLongStationaryNotificationPermissionIfNeeded()
         wasExplicitlyPaused = false  // ✅ 恢复后清除标记
     }
 
@@ -708,14 +736,12 @@ final class TrackingService: ObservableObject {
         // Always update "blue dot" states
         userLocation = loc
         lastHorizontalAccuracy = loc.horizontalAccuracy
-        if loc.course >= 0 {
-            let h = loc.course.truncatingRemainder(dividingBy: 360)
-            headingDegrees = h >= 0 ? h : (h + 360)
-        }
 
         guard isTracking else { return }
         guard !isPaused else { return } // keep blue dot, stop recording
         if loc.horizontalAccuracy < 0 { return }
+
+        evaluateLongStationaryReminder(with: loc)
 
         // Mode inference (tuning only)
         let speed = max(0, loc.speed)
@@ -975,6 +1001,72 @@ final class TrackingService: ObservableObject {
 
         publishIfNeeded()
         rebuildRenderCache(force: false)
+    }
+
+    private func resetLongStationaryReminderState() {
+        longStationaryAnchorLocation = nil
+        longStationaryAnchorTime = nil
+    }
+
+    private func requestLongStationaryNotificationPermissionIfNeeded() {
+        guard AppSettings.isLongStationaryReminderEnabled else { return }
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: longStationaryNotificationPermissionAskedKey) else { return }
+        defaults.set(true, forKey: longStationaryNotificationPermissionAskedKey)
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    private func evaluateLongStationaryReminder(with location: CLLocation) {
+        guard AppSettings.isLongStationaryReminderEnabled else {
+            resetLongStationaryReminderState()
+            return
+        }
+        guard location.horizontalAccuracy >= 0, location.horizontalAccuracy <= 120 else { return }
+
+        if longStationaryAnchorLocation == nil || longStationaryAnchorTime == nil {
+            longStationaryAnchorLocation = location
+            longStationaryAnchorTime = location.timestamp
+            return
+        }
+
+        guard let anchor = longStationaryAnchorLocation, let anchorTime = longStationaryAnchorTime else { return }
+        guard location.timestamp >= anchorTime else {
+            longStationaryAnchorLocation = location
+            longStationaryAnchorTime = location.timestamp
+            return
+        }
+
+        let elapsed = location.timestamp.timeIntervalSince(anchorTime)
+        if elapsed < longStationaryWindow { return }
+
+        let startToEnd = location.distance(from: anchor)
+        if startToEnd <= longStationaryThresholdMeters {
+            scheduleLongStationaryReminderNotification()
+        }
+
+        // Whether reminded or not, restart a new 1-hour window from current point.
+        longStationaryAnchorLocation = location
+        longStationaryAnchorTime = location.timestamp
+    }
+
+    private func scheduleLongStationaryReminderNotification() {
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { [longStationaryNotificationID] settings in
+            guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { return }
+
+            let content = UNMutableNotificationContent()
+            content.title = "Long Stationary Reminder"
+            content.body = "Journey 已持续 1 小时位移不足 100m，建议暂停后再继续。"
+            content.sound = .default
+
+            let request = UNNotificationRequest(
+                identifier: longStationaryNotificationID,
+                content: content,
+                trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+            )
+            center.removePendingNotificationRequests(withIdentifiers: [longStationaryNotificationID])
+            center.add(request)
+        }
     }
 
     private func appendMissingConnectionSegment(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D, at t: Date) {

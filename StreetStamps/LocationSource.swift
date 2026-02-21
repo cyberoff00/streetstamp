@@ -10,10 +10,10 @@ import Combine
 
 protocol LocationSource: AnyObject {
     var locationPublisher: AnyPublisher<CLLocation, Never> { get }
+    var headingPublisher: AnyPublisher<Double, Never> { get }
     var authorizationStatus: CLAuthorizationStatus { get }
 
     func requestPermissionIfNeeded()
     func start()
     func stop()
 }
-

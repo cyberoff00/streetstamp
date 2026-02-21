@@ -68,9 +68,82 @@ enum DataMigrator {
         let legacyPhotosDir = docs.appendingPathComponent("StreetStampsPhotos", isDirectory: true)
         try moveContentsIfExists(from: legacyPhotosDir, to: paths.photosDir, fm: fm)
 
+        try rebuildJourneyIndexIfNeeded(journeysDir: paths.journeysDir, fm: fm)
+
         // Write marker (atomic-ish)
         let markerData = Data("migrated_v1".utf8)
         fm.createFile(atPath: paths.migrationMarkerV1.path, contents: markerData)
+    }
+
+    /// Migrate additional legacy user IDs into the given target user path.
+    /// This is idempotent per legacy user ID.
+    static func migrateLegacyUsersIfNeeded(
+        paths: StoragePath,
+        legacyUserIDs: [String],
+        skipUserIDs: Set<String> = []
+    ) throws {
+        try paths.ensureBaseDirectoriesExist()
+        let fm = FileManager.default
+        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first!
+
+        let normalized = Array(Set(legacyUserIDs.map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty && !skipUserIDs.contains($0) }))
+
+        guard !normalized.isEmpty else { return }
+
+        for legacyID in normalized {
+            let marker = paths.userRoot.appendingPathComponent(".migrated_legacy_\(safeMarkerPart(legacyID))", isDirectory: false)
+            if fm.fileExists(atPath: marker.path) { continue }
+
+            let legacyJourneysRootInDocs = docs
+                .appendingPathComponent("Journeys", isDirectory: true)
+                .appendingPathComponent(legacyID, isDirectory: true)
+            try moveContentsIfExists(from: legacyJourneysRootInDocs, to: paths.journeysDir, fm: fm)
+
+            // Also migrate from old Application Support user root if legacy builds already used per-user app-support layout.
+            let legacyUserRootInAppSupport = paths.appSupportRoot
+                .appendingPathComponent("StreetStamps", isDirectory: true)
+                .appendingPathComponent(legacyID, isDirectory: true)
+            let legacyJourneysRootInAppSupport = legacyUserRootInAppSupport.appendingPathComponent("Journeys", isDirectory: true)
+            let legacyPhotosRootInAppSupport = legacyUserRootInAppSupport.appendingPathComponent("Photos", isDirectory: true)
+            let legacyThumbRootInAppSupport = legacyUserRootInAppSupport.appendingPathComponent("Thumbnails", isDirectory: true)
+            let legacyCachesRootInAppSupport = legacyUserRootInAppSupport.appendingPathComponent("Caches", isDirectory: true)
+
+            try moveContentsIfExists(from: legacyJourneysRootInAppSupport, to: paths.journeysDir, fm: fm)
+            try moveContentsIfExists(from: legacyPhotosRootInAppSupport, to: paths.photosDir, fm: fm)
+            try moveContentsIfExists(from: legacyThumbRootInAppSupport, to: paths.thumbnailsDir, fm: fm)
+            try moveFileIfExists(
+                from: legacyCachesRootInAppSupport.appendingPathComponent("lifelog_route.json", isDirectory: false),
+                to: paths.lifelogRouteURL,
+                fm: fm
+            )
+            try moveFileIfExists(
+                from: legacyCachesRootInAppSupport.appendingPathComponent("city_cache.json", isDirectory: false),
+                to: paths.cityCacheURL,
+                fm: fm
+            )
+            try moveFileIfExists(
+                from: legacyCachesRootInAppSupport.appendingPathComponent("route_cache.json", isDirectory: false),
+                to: paths.routeCacheURL,
+                fm: fm
+            )
+
+            let markerData = Data("ok".utf8)
+            fm.createFile(atPath: marker.path, contents: markerData)
+        }
+
+        // Global legacy files are shared, migrate once to target if missing.
+        let legacyCityCache = docs.appendingPathComponent("city_cache.json", isDirectory: false)
+        try moveFileIfExists(from: legacyCityCache, to: paths.cityCacheURL, fm: fm)
+
+        let legacyRouteCache = docs.appendingPathComponent("route_cache.json", isDirectory: false)
+        try moveFileIfExists(from: legacyRouteCache, to: paths.routeCacheURL, fm: fm)
+
+        let legacyPhotosDir = docs.appendingPathComponent("StreetStampsPhotos", isDirectory: true)
+        try moveContentsIfExists(from: legacyPhotosDir, to: paths.photosDir, fm: fm)
+
+        try rebuildJourneyIndexIfNeeded(journeysDir: paths.journeysDir, fm: fm)
     }
     
     // MARK: - Intercity Routes to Starting City Migration (V3)
@@ -248,5 +321,45 @@ enum DataMigrator {
             try fm.removeItem(at: dir)
         }
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+    }
+
+    private static func safeMarkerPart(_ value: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        return value.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" }.map(String.init).joined()
+    }
+
+    private static func rebuildJourneyIndexIfNeeded(journeysDir: URL, fm: FileManager) throws {
+        guard fm.fileExists(atPath: journeysDir.path) else { return }
+        let indexURL = journeysDir.appendingPathComponent("index.json", isDirectory: false)
+
+        if fm.fileExists(atPath: indexURL.path),
+           let data = try? Data(contentsOf: indexURL),
+           let ids = try? JSONDecoder().decode([String].self, from: data),
+           !ids.isEmpty {
+            return
+        }
+
+        let entries = try fm.contentsOfDirectory(at: journeysDir, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
+        var ids: [String] = []
+        ids.reserveCapacity(entries.count)
+
+        for url in entries {
+            guard (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) != true else { continue }
+            let name = url.lastPathComponent
+            if name == "index.json" { continue }
+            if name.hasSuffix(".meta.json") {
+                ids.append(String(name.dropLast(".meta.json".count)))
+                continue
+            }
+            if name.hasSuffix(".json"),
+               !name.hasSuffix(".delta.json") {
+                ids.append(String(name.dropLast(".json".count)))
+            }
+        }
+
+        let unique = Array(Set(ids.filter { !$0.isEmpty }))
+        guard !unique.isEmpty else { return }
+        let out = try JSONEncoder().encode(unique)
+        try out.write(to: indexURL, options: .atomic)
     }
 }

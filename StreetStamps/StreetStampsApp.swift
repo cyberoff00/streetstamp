@@ -46,6 +46,14 @@ struct StreetStampsApp: App {
                     }
                 }
                 .onChange(of: sessionStore.currentUserID) { _, uid in
+                    let paths = StoragePath(userID: uid)
+                    sessionStore.bootstrapFileSystem()
+                    journeyStore.rebind(paths: paths)
+                    journeyStore.load()
+                    cityCache.rebind(paths: paths)
+                    lifelogStore.rebind(paths: paths)
+                    lifelogStore.load()
+                    lifelogStore.bind(to: locationHub)
                     socialStore.switchUser(uid)
                 }
                 .fullScreenCover(isPresented: $showAuthEntry) {

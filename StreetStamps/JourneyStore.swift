@@ -57,8 +57,8 @@ final class JourneyStore: ObservableObject {
     @Published var latestOngoing: JourneyRoute? = nil
     @Published private(set) var hasLoaded: Bool = false
 
-    private let fileStore: JourneysFileStore
-    private let indexStore: JourneysIndexStore
+    private var fileStore: JourneysFileStore
+    private var indexStore: JourneysIndexStore
 
     private let ioQueue = DispatchQueue(label: "ss.journeys.store", qos: .utility)
 
@@ -86,6 +86,21 @@ final class JourneyStore: ObservableObject {
     init(paths: StoragePath) {
         self.fileStore = JourneysFileStore(baseURL: paths.journeysDir)
         self.indexStore = JourneysIndexStore(baseURL: paths.journeysDir)
+    }
+
+    func rebind(paths: StoragePath) {
+        pendingMetaPersist?.cancel()
+        pendingMetaPersist = nil
+        currentPersistJourneyId = nil
+        lastSeenCoordCount = 0
+        lastDeltaPersistCoordCount = 0
+        lastDeltaPersistAt = .distantPast
+        latestOngoing = nil
+        journeys = []
+        hasLoaded = false
+
+        fileStore = JourneysFileStore(baseURL: paths.journeysDir)
+        indexStore = JourneysIndexStore(baseURL: paths.journeysDir)
     }
 
     /// Load journeys from file-backed store.

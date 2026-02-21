@@ -560,7 +560,9 @@ struct MapView: View {
 
     @EnvironmentObject private var journeyStore: JourneyStore
     @EnvironmentObject private var cityCache: CityCache
+    @EnvironmentObject private var lifelogStore: LifelogStore
     @EnvironmentObject private var sessionStore: UserSessionStore
+    @AppStorage(AppSettings.avatarHeadlightEnabledKey) private var avatarHeadlightEnabled = true
 
     @StateObject private var mapController = JourneyMapController()
     @State private var cameraDistance: CLLocationDistance = 900
@@ -666,6 +668,18 @@ struct MapView: View {
                     userID: sessionStore.currentUserID,
                     existing: editingMemory,
                     onSave: { draft in
+                        if draft == nil {
+                            if let existingID = editingMemory?.id,
+                               let idx = journeyRoute.memories.firstIndex(where: { $0.id == existingID }) {
+                                let removed = journeyRoute.memories.remove(at: idx)
+                                for path in removed.imagePaths {
+                                    PhotoStore.delete(named: path, userID: sessionStore.currentUserID)
+                                }
+                                if journeyRoute.endTime == nil { persistSnapshot(.memoryAdded) }
+                            }
+                            editingMemory = nil
+                            return
+                        }
                         guard var m = draft else { return }
                         if let existingID = editingMemory?.id,
                            let idx = journeyRoute.memories.firstIndex(where: { $0.id == existingID }) {
@@ -762,6 +776,7 @@ struct MapView: View {
             controller: mapController,
             userCoordinate: mapUserCoord(),
             headingDegrees: tracking.headingDegrees,
+            headlightEnabled: avatarHeadlightEnabled,
             travelMode: tracking.mode,
             segments: displaySegments,
             liveTail: liveTail,
@@ -808,40 +823,42 @@ struct MapView: View {
     }
 
     private var topTrackingHeader: some View {
-        HStack(spacing: 8) {
-            Button {
-                if tracking.isPaused {
-                    exitToastMessage = L10n.t("journey_paused")
-                    showExitWarning = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        showExitWarning = false
-                        exitToHomePaused()
-                    }
-                } else {
-                    exitToastMessage = L10n.t("continue_background")
-                    showExitWarning = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        showExitWarning = false
-                        exitToHomeLowPower()
-                    }
-                }
-            } label: {
-                Image(systemName: "arrow.left")
-                    .font(.system(size: 16, weight: .medium))
-                .foregroundColor(.black)
-                .frame(width: 32, alignment: .leading)
-            }
-            .buttonStyle(.plain)
-
+        ZStack {
             Text(journeyRoute.displayCityName.uppercased())
                 .font(.system(size: 20, weight: .black))
                 .tracking(-0.9)
                 .foregroundColor(.black)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
-                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 64)
 
-            Color.clear.frame(width: 72, height: 1)
+            HStack {
+                Button {
+                    if tracking.isPaused {
+                        exitToastMessage = L10n.t("journey_paused")
+                        showExitWarning = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                            showExitWarning = false
+                            exitToHomePaused()
+                        }
+                    } else {
+                        exitToastMessage = L10n.t("continue_background")
+                        showExitWarning = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                            showExitWarning = false
+                            exitToHomeLowPower()
+                        }
+                    }
+                } label: {
+                    Image(systemName: "arrow.left")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.black)
+                        .frame(width: 32, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+
+                Spacer()
+            }
         }
         .padding(.horizontal, 16)
         .frame(height: 56)
@@ -908,7 +925,7 @@ struct MapView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark")
                         .font(.system(size: 18, weight: .black))
-                    Text("FINISH")
+                    Text(L10n.t("finish_upper"))
                         .font(.system(size: 34 / 2, weight: .black))
                         .tracking(-0.85)
                 }
@@ -1217,6 +1234,7 @@ struct MapView: View {
             route: journeyRoute,
             journeyStore: journeyStore,
             cityCache: cityCache,
+            lifelogStore: lifelogStore,
             source: .userConfirmedFinish
         ) { updated in
             journeyRoute = updated
@@ -1558,6 +1576,7 @@ struct MemoryEditorSheet: View {
     @State private var viewerIndex = 0
     @State private var showExpanded = false
     @State private var showDiscardAlert = false
+    @State private var showDeleteAlert = false
 
     // ✅ Used to decide whether we should auto-resume the editor when user returns
     // (Back gesture / swipe-dismiss). Save & Cancel will set this to true.
@@ -1565,6 +1584,10 @@ struct MemoryEditorSheet: View {
 
     /// ✅ 镜像开关：默认不镜像
     @State private var mirrorSelfie: Bool = false
+    @State private var initialTitle: String
+    @State private var initialNotes: String
+    @State private var initialImagePaths: [String]
+    @State private var initialMirrorSelfie: Bool
     private let maxPhotos = 3
 
     private func hideKeyboard() {
@@ -1595,6 +1618,11 @@ struct MemoryEditorSheet: View {
             _imagePaths = State(initialValue: existing?.imagePaths ?? [])
             _mirrorSelfie = State(initialValue: false)
         }
+
+        _initialTitle = State(initialValue: existing?.title ?? "")
+        _initialNotes = State(initialValue: existing?.notes ?? "")
+        _initialImagePaths = State(initialValue: existing?.imagePaths ?? [])
+        _initialMirrorSelfie = State(initialValue: false)
     }
 
 private var draftMemoryID: String { existing?.id ?? "new" }
@@ -1608,16 +1636,17 @@ private func clearDraft() {
     MemoryDraftStore.clear(userID: userID, memoryID: draftMemoryID)
 }
 
-private var hasDraft: Bool {
-        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-        !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-        !imagePaths.isEmpty
+private var hasUnsavedChanges: Bool {
+        title.trimmingCharacters(in: .whitespacesAndNewlines) != initialTitle.trimmingCharacters(in: .whitespacesAndNewlines) ||
+        notes.trimmingCharacters(in: .whitespacesAndNewlines) != initialNotes.trimmingCharacters(in: .whitespacesAndNewlines) ||
+        imagePaths != initialImagePaths ||
+        mirrorSelfie != initialMirrorSelfie
     }
     private var canAddPhoto: Bool { imagePaths.count < maxPhotos }
     private var remainingPhotoSlots: Int { max(0, maxPhotos - imagePaths.count) }
 
     private func dismissSmart() {
-        if hasDraft { showDiscardAlert = true }
+        if hasUnsavedChanges { showDiscardAlert = true }
         else { closeWithoutSaving() }
     }
 
@@ -1654,18 +1683,18 @@ private var hasDraft: Bool {
 .onChange(of: notes) { _ in persistDraft() }
 .onChange(of: imagePaths) { _ in persistDraft() }
 .onChange(of: mirrorSelfie) { _ in persistDraft() }
-.interactiveDismissDisabled(hasDraft)
+.interactiveDismissDisabled(hasUnsavedChanges)
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             // ✅ If the app is backgrounded / killed, keep the draft
-            persistDraft()
-            if !didExitExplicitly {
+            if !didExitExplicitly, hasUnsavedChanges {
+                persistDraft()
                 MemoryDraftResumeStore.set(true, userID: userID, memoryID: draftMemoryID)
             }
         }
         .onDisappear {
             // ✅ Back gesture / swipe-dismiss should keep editing state
             // unless user explicitly saved or canceled.
-            if !didExitExplicitly {
+            if !didExitExplicitly, hasUnsavedChanges {
                 persistDraft()
                 MemoryDraftResumeStore.set(true, userID: userID, memoryID: draftMemoryID)
             }
@@ -1708,6 +1737,7 @@ private var hasDraft: Bool {
                     mirrorSelfie: $mirrorSelfie,
                     maxPhotos: maxPhotos,
                     isNew: existing == nil,
+                    onDelete: existing == nil ? nil : { deleteExistingMemory() },
                     onClose: { showExpanded = false },
                     onSave: { saveAndDismiss() }
                 )
@@ -1723,9 +1753,15 @@ private var hasDraft: Bool {
         }
         .alert("丢弃更改？", isPresented: $showDiscardAlert) {
             Button(L10n.t("cancel"), role: .cancel) {}
-            Button("丢弃", role: .destructive) { closeWithoutSaving() }
+            Button(L10n.t("discard"), role: .destructive) { closeWithoutSaving() }
         } message: {
-            Text("当前编辑内容不会保存。")
+            Text(L10n.t("discard_edit_message"))
+        }
+        .alert(L10n.t("delete_memory_confirm_title"), isPresented: $showDeleteAlert) {
+            Button(L10n.t("cancel"), role: .cancel) {}
+            Button(L10n.t("delete"), role: .destructive) { deleteExistingMemory() }
+        } message: {
+            Text(L10n.t("delete_memory_confirm_message"))
         }
     }
 
@@ -1756,6 +1792,18 @@ private var hasDraft: Bool {
                     .clipShape(Circle())
             }
             .buttonStyle(.plain)
+
+            if existing != nil {
+                Button { showDeleteAlert = true } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.red.opacity(0.85))
+                        .frame(width: 32, height: 32)
+                        .background(Color.red.opacity(0.10))
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(.horizontal, 24)
         .frame(height: 58)
@@ -1764,71 +1812,45 @@ private var hasDraft: Bool {
 
     private var content: some View {
         VStack(spacing: 0) {
-            ZStack(alignment: .bottomLeading) {
-                VStack(spacing: 8) {
-                    MemoryNotesEditor(text: $notes, isFocused: $notesFocused, placeholder: L10n.t("memory_notes_placeholder"))
-                        .frame(minHeight: 188, maxHeight: 240)
-                        .padding(.horizontal, 6)
-                        .padding(.top, 8)
+            VStack(spacing: 8) {
+                MemoryNotesEditor(text: $notes, isFocused: $notesFocused, placeholder: L10n.t("memory_notes_placeholder"))
+                    .frame(minHeight: 188, maxHeight: 240)
+                    .padding(.horizontal, 6)
+                    .padding(.top, 8)
 
-                    if !imagePaths.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 10) {
-                                ForEach(Array(imagePaths.enumerated()), id: \.offset) { idx, p in
-                                    ZStack(alignment: .topTrailing) {
-                                        PhotoThumb(path: p, userID: userID)
-                                            .onTapGesture {
-                                                viewerIndex = idx
-                                                showPhotoViewer = true
-                                            }
-
-                                        Button {
-                                            let removed = imagePaths.remove(at: idx)
-                                            PhotoStore.delete(named: removed, userID: userID)
-                                        } label: {
-                                            Image(systemName: "xmark.circle.fill")
-                                                .font(.system(size: 16))
-                                                .foregroundColor(.black.opacity(0.6))
-                                                .background(Color.white.opacity(0.75).clipShape(Circle()))
+                if !imagePaths.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(Array(imagePaths.enumerated()), id: \.offset) { idx, p in
+                                ZStack(alignment: .topTrailing) {
+                                    PhotoThumb(path: p, userID: userID)
+                                        .onTapGesture {
+                                            viewerIndex = idx
+                                            showPhotoViewer = true
                                         }
-                                        .buttonStyle(.plain)
-                                        .padding(4)
+
+                                    Button {
+                                        let removed = imagePaths.remove(at: idx)
+                                        PhotoStore.delete(named: removed, userID: userID)
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.system(size: 16))
+                                            .foregroundColor(.black.opacity(0.6))
+                                            .background(Color.white.opacity(0.75).clipShape(Circle()))
                                     }
+                                    .buttonStyle(.plain)
+                                    .padding(4)
                                 }
                             }
-                            .padding(.horizontal, 4)
-                            .padding(.bottom, 44)
                         }
+                        .padding(.horizontal, 4)
+                        .padding(.bottom, 8)
                     }
                 }
-                .padding(.horizontal, 14)
-                .padding(.top, 8)
-                .padding(.bottom, 8)
-
-                HStack(spacing: 12) {
-                    Button { showCamera = true } label: {
-                        Image(systemName: "camera")
-                            .font(.system(size: 20, weight: .medium))
-                            .foregroundColor(Color.black.opacity(0.82))
-                            .frame(width: 32, height: 32)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!canAddPhoto)
-                    .opacity(canAddPhoto ? 1 : 0.35)
-
-                    Button { showPhotoLibrary = true } label: {
-                        Image(systemName: "photo")
-                            .font(.system(size: 20, weight: .medium))
-                            .foregroundColor(Color.black.opacity(0.82))
-                            .frame(width: 32, height: 32)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!canAddPhoto)
-                    .opacity(canAddPhoto ? 1 : 0.35)
-                }
-                .padding(.leading, 20)
-                .padding(.bottom, 12)
             }
+            .padding(.horizontal, 14)
+            .padding(.top, 8)
+            .padding(.bottom, 8)
             .frame(minHeight: 290)
             .background(Color.white)
             .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
@@ -1844,9 +1866,27 @@ private var hasDraft: Bool {
 
     private var footer: some View {
         HStack {
-            Text("照片 \(imagePaths.count)/\(maxPhotos)")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(FigmaTheme.subtext)
+            HStack(spacing: 12) {
+                Button { showCamera = true } label: {
+                    Image(systemName: "camera")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundColor(Color.black.opacity(0.82))
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .disabled(!canAddPhoto)
+                .opacity(canAddPhoto ? 1 : 0.35)
+
+                Button { showPhotoLibrary = true } label: {
+                    Image(systemName: "photo")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundColor(Color.black.opacity(0.82))
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .disabled(!canAddPhoto)
+                .opacity(canAddPhoto ? 1 : 0.35)
+            }
             Spacer()
 
             Button { saveAndDismiss() } label: {
@@ -1893,6 +1933,15 @@ private var hasDraft: Bool {
         didExitExplicitly = true
         clearDraft()
         MemoryDraftResumeStore.set(false, userID: userID, memoryID: draftMemoryID)
+        isPresented = false
+    }
+
+    private func deleteExistingMemory() {
+        guard existing != nil else { return }
+        didExitExplicitly = true
+        clearDraft()
+        MemoryDraftResumeStore.set(false, userID: userID, memoryID: draftMemoryID)
+        onSave(nil)
         isPresented = false
     }
 
@@ -1962,6 +2011,7 @@ struct MemoryEditorPage: View {
     let maxPhotos: Int
     let isNew: Bool
 
+    let onDelete: (() -> Void)?
     let onClose: () -> Void
     let onSave: () -> Void
 
@@ -1970,6 +2020,7 @@ struct MemoryEditorPage: View {
     @State private var showPhotoLibrary: Bool = false
     @State private var showPhotoViewer: Bool = false
     @State private var viewerIndex: Int = 0
+    @State private var showDeleteConfirm: Bool = false
     private var canAddPhoto: Bool { imagePaths.count < maxPhotos }
     private var remainingPhotoSlots: Int { max(0, maxPhotos - imagePaths.count) }
 
@@ -2019,75 +2070,57 @@ struct MemoryEditorPage: View {
                 onClose: { showPhotoViewer = false }
             )
         }
+        .alert(L10n.t("delete_memory_confirm_title"), isPresented: $showDeleteConfirm) {
+            Button(L10n.t("cancel"), role: .cancel) {}
+            Button(L10n.t("delete"), role: .destructive) {
+                onDelete?()
+            }
+        } message: {
+            Text(L10n.t("delete_memory_confirm_message"))
+        }
     }
 
     private var content: some View {
         VStack(spacing: 0) {
-            ZStack(alignment: .bottomLeading) {
-                VStack(spacing: 8) {
-                    MemoryNotesEditor(text: $notes, isFocused: $notesFocused, placeholder: L10n.t("memory_notes_placeholder"))
-                        .frame(minHeight: 188, maxHeight: 240)
-                        .padding(.horizontal, 6)
-                        .padding(.top, 8)
+            VStack(spacing: 8) {
+                MemoryNotesEditor(text: $notes, isFocused: $notesFocused, placeholder: L10n.t("memory_notes_placeholder"))
+                    .frame(minHeight: 188, maxHeight: 240)
+                    .padding(.horizontal, 6)
+                    .padding(.top, 8)
 
-                    if !imagePaths.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 10) {
-                                ForEach(Array(imagePaths.enumerated()), id: \.offset) { idx, p in
-                                    ZStack(alignment: .topTrailing) {
-                                        PhotoThumb(path: p, userID: userID)
-                                            .onTapGesture {
-                                                viewerIndex = idx
-                                                showPhotoViewer = true
-                                            }
-
-                                        Button {
-                                            let removed = imagePaths.remove(at: idx)
-                                            PhotoStore.delete(named: removed, userID: userID)
-                                        } label: {
-                                            Image(systemName: "xmark.circle.fill")
-                                                .font(.system(size: 16))
-                                                .foregroundColor(.black.opacity(0.6))
-                                                .background(Color.white.opacity(0.75).clipShape(Circle()))
+                if !imagePaths.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(Array(imagePaths.enumerated()), id: \.offset) { idx, p in
+                                ZStack(alignment: .topTrailing) {
+                                    PhotoThumb(path: p, userID: userID)
+                                        .onTapGesture {
+                                            viewerIndex = idx
+                                            showPhotoViewer = true
                                         }
-                                        .buttonStyle(.plain)
-                                        .padding(4)
+
+                                    Button {
+                                        let removed = imagePaths.remove(at: idx)
+                                        PhotoStore.delete(named: removed, userID: userID)
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.system(size: 16))
+                                            .foregroundColor(.black.opacity(0.6))
+                                            .background(Color.white.opacity(0.75).clipShape(Circle()))
                                     }
+                                    .buttonStyle(.plain)
+                                    .padding(4)
                                 }
                             }
-                            .padding(.horizontal, 4)
-                            .padding(.bottom, 44)
                         }
+                        .padding(.horizontal, 4)
+                        .padding(.bottom, 8)
                     }
                 }
-                .padding(.horizontal, 14)
-                .padding(.top, 8)
-                .padding(.bottom, 8)
-
-                HStack(spacing: 12) {
-                    Button { showCamera = true } label: {
-                        Image(systemName: "camera")
-                            .font(.system(size: 20, weight: .medium))
-                            .foregroundColor(Color.black.opacity(0.82))
-                            .frame(width: 32, height: 32)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!canAddPhoto)
-                    .opacity(canAddPhoto ? 1 : 0.35)
-
-                    Button { showPhotoLibrary = true } label: {
-                        Image(systemName: "photo")
-                            .font(.system(size: 20, weight: .medium))
-                            .foregroundColor(Color.black.opacity(0.82))
-                            .frame(width: 32, height: 32)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!canAddPhoto)
-                    .opacity(canAddPhoto ? 1 : 0.35)
-                }
-                .padding(.leading, 20)
-                .padding(.bottom, 12)
             }
+            .padding(.horizontal, 14)
+            .padding(.top, 8)
+            .padding(.bottom, 8)
             .frame(minHeight: 290)
             .background(Color.white)
             .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
@@ -2103,9 +2136,27 @@ struct MemoryEditorPage: View {
 
     private var footer: some View {
         HStack {
-            Text("照片 \(imagePaths.count)/\(maxPhotos)")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(FigmaTheme.subtext)
+            HStack(spacing: 12) {
+                Button { showCamera = true } label: {
+                    Image(systemName: "camera")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundColor(Color.black.opacity(0.82))
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .disabled(!canAddPhoto)
+                .opacity(canAddPhoto ? 1 : 0.35)
+
+                Button { showPhotoLibrary = true } label: {
+                    Image(systemName: "photo")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundColor(Color.black.opacity(0.82))
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .disabled(!canAddPhoto)
+                .opacity(canAddPhoto ? 1 : 0.35)
+            }
             Spacer()
 
             Button(action: onSave) {
@@ -2142,6 +2193,18 @@ struct MemoryEditorPage: View {
                     .clipShape(Circle())
             }
             .buttonStyle(.plain)
+
+            if onDelete != nil {
+                Button { showDeleteConfirm = true } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.red.opacity(0.85))
+                        .frame(width: 32, height: 32)
+                        .background(Color.red.opacity(0.10))
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(.horizontal, 24)
         .frame(height: 58)
@@ -2434,61 +2497,19 @@ private final class RobotAnnotation: NSObject, MKAnnotation {
     }
 }
 
-private struct HeadlightConeShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        let radius = min(rect.width, rect.height) * 0.54
-        let spread = Angle.degrees(34)
-        var path = Path()
-        path.move(to: center)
-        path.addArc(
-            center: center,
-            radius: radius,
-            startAngle: .degrees(-90) - spread,
-            endAngle: .degrees(-90) + spread,
-            clockwise: false
-        )
-        path.closeSubpath()
-        return path
-    }
-}
-
-private struct RobotHeadingHaloView: View {
-    let headingDegrees: Double
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .fill(Color.green.opacity(0.16))
-                .frame(width: 68, height: 68)
-
-            HeadlightConeShape()
-                .fill(
-                    LinearGradient(
-                        colors: [Color.green.opacity(0.42), Color.green.opacity(0.03)],
-                        startPoint: .center,
-                        endPoint: .top
-                    )
-                )
-                .frame(width: 88, height: 88)
-                .blur(radius: 4)
-                .rotationEffect(.degrees(headingDegrees))
-
-            HeadlightConeShape()
-                .stroke(Color.green.opacity(0.22), lineWidth: 1)
-                .frame(width: 86, height: 86)
-                .rotationEffect(.degrees(headingDegrees))
-        }
-    }
-}
-
 private struct RobotMapMarkerView: View {
     let face: RobotFace
     let headingDegrees: Double
+    let showsHeadlight: Bool
 
     var body: some View {
-        RobotRendererView(size: 96, face: face, loadout: AvatarLoadoutStore.load())
-            .frame(width: 96, height: 96)
+        ZStack {
+            if showsHeadlight {
+                AvatarHeadlightConeView(headingDegrees: headingDegrees)
+            }
+            RobotRendererView(size: AvatarMapMarkerStyle.visualSize, face: face, loadout: AvatarLoadoutStore.load())
+        }
+        .frame(width: AvatarMapMarkerStyle.annotationSize, height: AvatarMapMarkerStyle.annotationSize)
     }
 }
 
@@ -2498,6 +2519,7 @@ private struct JourneyMKMapView: UIViewRepresentable {
 
     let userCoordinate: CLLocationCoordinate2D?
     let headingDegrees: Double
+    let headlightEnabled: Bool
     let travelMode: TravelMode
 
     let segments: [RenderRouteSegment]
@@ -2659,7 +2681,12 @@ private struct JourneyMKMapView: UIViewRepresentable {
             cameraHeading: Double
         ) {
             view.canShowCallout = false
-            view.bounds = CGRect(x: 0, y: 0, width: 112, height: 112)
+            view.bounds = CGRect(
+                x: 0,
+                y: 0,
+                width: AvatarMapMarkerStyle.annotationSize,
+                height: AvatarMapMarkerStyle.annotationSize
+            )
             view.backgroundColor = .clear
             view.centerOffset = .zero
             view.displayPriority = .required
@@ -2670,7 +2697,11 @@ private struct JourneyMKMapView: UIViewRepresentable {
 
             let displayHeading = normalizedHeading(worldHeading - cameraHeading)
             let hosting = UIHostingController(
-                rootView: RobotMapMarkerView(face: face, headingDegrees: displayHeading)
+                rootView: RobotMapMarkerView(
+                    face: face,
+                    headingDegrees: displayHeading,
+                    showsHeadlight: parent.headlightEnabled
+                )
             )
             hosting.view.backgroundColor = .clear
             hosting.view.frame = view.bounds

@@ -43,7 +43,7 @@ struct MyJourneysView: View {
 
     private var filterChipTitle: String {
         let cal = Calendar.current
-        guard let start = selectedStartDate else { return "All time" }
+        guard let start = selectedStartDate else { return L10n.t("all_time") }
         let end = selectedEndDate ?? start
         let df = DateFormatter()
         df.locale = Locale.current
@@ -94,7 +94,7 @@ struct MyJourneysView: View {
 
                 Spacer()
 
-                Text("MY JOURNEYS")
+                Text(L10n.t("my_journeys_title"))
                     .appHeaderStyle()
 
                 Spacer()
@@ -141,7 +141,7 @@ struct MyJourneysView: View {
             .padding(.horizontal, 18)
             .padding(.top, 8)
 
-            Text("\(filteredJourneys.count) journeys")
+            Text(String(format: L10n.t("journeys_count"), filteredJourneys.count))
                 .appCaptionStyle()
                 .padding(.bottom, 10)
         }
@@ -236,7 +236,7 @@ private struct JourneyCalendarRangePopover: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Date Range")
+            Text(L10n.t("date_range"))
                 .font(.system(size: 15, weight: .bold))
                 .foregroundColor(.black)
 
@@ -261,7 +261,7 @@ private struct JourneyCalendarRangePopover: View {
             monthGrid
 
             HStack(spacing: 8) {
-                Button("Clear") {
+                Button(L10n.t("clear")) {
                     onClear()
                 }
                 .font(.system(size: 12, weight: .semibold))
@@ -271,7 +271,7 @@ private struct JourneyCalendarRangePopover: View {
                 .background(Color.black.opacity(0.08))
                 .clipShape(Capsule())
 
-                Button("Apply") {
+                Button(L10n.t("apply")) {
                     onApply()
                 }
                 .font(.system(size: 12, weight: .semibold))
@@ -1051,12 +1051,12 @@ struct JourneyRouteDetailView: View {
             }
         }
         .navigationBarBackButtonHidden(true)
-        .confirmationDialog("Delete this journey?", isPresented: $showDeleteConfirm) {
-            Button("Delete", role: .destructive) {
+        .confirmationDialog(L10n.t("delete_journey_confirm_title"), isPresented: $showDeleteConfirm) {
+            Button(L10n.t("delete"), role: .destructive) {
                 store.deleteJourney(id: journeyID)
                 dismiss()
             }
-            Button("Cancel", role: .cancel) {}
+            Button(L10n.t("cancel"), role: .cancel) {}
         }
         .sheet(isPresented: $showShareSheet) {
             if let shareImage {
@@ -1079,7 +1079,7 @@ struct JourneyRouteDetailView: View {
 
             Spacer()
 
-            Text("Journey Route")
+            Text(L10n.t("journey_route_title"))
                 .font(.system(size: 22, weight: .bold))
                 .foregroundColor(.black)
 

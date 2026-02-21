@@ -14,9 +14,11 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
     
     private let manager = CLLocationManager()
     private let subject = PassthroughSubject<CLLocation, Never>()
+    private let headingSubject = CurrentValueSubject<Double, Never>(0)
     private let authSubject = CurrentValueSubject<CLAuthorizationStatus, Never>(.notDetermined)
     
     var locationPublisher: AnyPublisher<CLLocation, Never> { subject.eraseToAnyPublisher() }
+    var headingPublisher: AnyPublisher<Double, Never> { headingSubject.eraseToAnyPublisher() }
     var authorizationStatus: CLAuthorizationStatus { manager.authorizationStatus }
     var authorizationPublisher: AnyPublisher<CLAuthorizationStatus, Never> { authSubject.eraseToAnyPublisher() }
     
@@ -63,6 +65,7 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
     
     func stop() {
         manager.stopUpdatingLocation()
+        manager.stopUpdatingHeading()
         manager.stopMonitoringSignificantLocationChanges()
         // ✅ 停止时关闭后台更新
         manager.allowsBackgroundLocationUpdates = false
@@ -90,6 +93,7 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         manager.distanceFilter = kCLDistanceFilterNone
         
         manager.startUpdatingLocation()
+        startHeadingUpdatesIfPossible()
         requestImmediateLocationRefresh()
     }
     
@@ -105,6 +109,7 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         manager.distanceFilter = 5  // 5米才更新
         
         manager.startUpdatingLocation()
+        startHeadingUpdatesIfPossible()
         requestImmediateLocationRefresh()
     }
     
@@ -121,6 +126,7 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         manager.distanceFilter = 20
 
         manager.startUpdatingLocation()
+        startHeadingUpdatesIfPossible()
         requestImmediateLocationRefresh()
     }
     
@@ -136,6 +142,7 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
         manager.distanceFilter = 200
         manager.startUpdatingLocation()
+        startHeadingUpdatesIfPossible()
         requestImmediateLocationRefresh()
         return
         #endif
@@ -146,6 +153,7 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
             manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
             manager.distanceFilter = 50
             manager.startUpdatingLocation()
+            startHeadingUpdatesIfPossible()
             requestImmediateLocationRefresh()
         }
     }
@@ -163,6 +171,7 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         manager.distanceFilter = 5
         
         manager.startUpdatingLocation()
+        startHeadingUpdatesIfPossible()
         requestImmediateLocationRefresh()
     }
     
@@ -179,6 +188,7 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         manager.distanceFilter = kCLDistanceFilterNone
         
         manager.startUpdatingLocation()
+        startHeadingUpdatesIfPossible()
         requestImmediateLocationRefresh()
     }
     
@@ -195,7 +205,14 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         manager.distanceFilter = 30  // 30米才更新
         
         manager.startUpdatingLocation()
+        startHeadingUpdatesIfPossible()
         requestImmediateLocationRefresh()
+    }
+
+    private func startHeadingUpdatesIfPossible() {
+        guard CLLocationManager.headingAvailable() else { return }
+        manager.headingFilter = 2
+        manager.startUpdatingHeading()
     }
     
     // MARK: - CLLocationManagerDelegate
@@ -220,5 +237,15 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
                 manager.requestAlwaysAuthorization()
             }
         }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
+        let raw = (newHeading.trueHeading >= 0) ? newHeading.trueHeading : newHeading.magneticHeading
+        let h = raw.truncatingRemainder(dividingBy: 360)
+        headingSubject.send(h >= 0 ? h : (h + 360))
+    }
+
+    func locationManagerShouldDisplayHeadingCalibration(_ manager: CLLocationManager) -> Bool {
+        false
     }
 }

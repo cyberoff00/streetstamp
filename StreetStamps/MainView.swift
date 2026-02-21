@@ -15,6 +15,7 @@ struct MainView: View {
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var locationHub: LocationHub
     @EnvironmentObject private var cityCache: CityCache
+    @EnvironmentObject private var lifelogStore: LifelogStore
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var flow: AppFlowCoordinator
     
@@ -58,7 +59,7 @@ struct MainView: View {
                 VStack(spacing: 0) {
                     Spacer().frame(height: titleTop)
 
-                    Text("JOURNEY")
+                    Text(L10n.t("journey_title"))
                         .font(.system(size: min(72, proxy.size.width * 0.183), weight: .black))
                         .tracking(-3.2)
                         .foregroundColor(.black)
@@ -404,6 +405,7 @@ struct MainView: View {
                     route: ended,
                     journeyStore: store,
                     cityCache: cityCache,
+                    lifelogStore: lifelogStore,
                     source: .resumeDeclined
                 ) { updated in
                     ongoingJourney = updated
@@ -458,7 +460,7 @@ struct TrackingModeSelector: View {
         VStack(spacing: 0) {
             // Header bar
             HStack {
-                Text("SELECT MODE")
+                Text(L10n.t("select_mode"))
                     .font(.system(size: 16, weight: .bold))
                     .tracking(1)
                     .foregroundColor(.white)
@@ -597,8 +599,8 @@ private let london   = CLLocationCoordinate2D(latitude: 51.5072, longitude: -0.1
 var body: some View {
     NavigationView {
         List {
-            Section("🇨🇳 中国测试") {
-                NavigationLink("完整测试板块") {
+            Section(L10n.t("debug_cn_test_section")) {
+                NavigationLink(L10n.t("debug_cn_test_full")) {
                     DebugChinaTestModule()
                 }
             }

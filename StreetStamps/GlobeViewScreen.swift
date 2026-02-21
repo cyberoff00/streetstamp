@@ -56,7 +56,7 @@ struct GlobeViewScreen: View {
 
             Spacer()
 
-            Text("GLOBAL VIEW")
+            Text(L10n.t("globe_view_title"))
                 .appHeaderStyle()
                 .foregroundColor(.white)
                 .shadow(color: .black.opacity(0.25), radius: 6, x: 0, y: 2)
@@ -104,7 +104,7 @@ struct GlobeViewScreen: View {
                     .foregroundColor(.black)
                     .lineLimit(1)
 
-                Text("Lv.1  ·  \(totalEP) EP")
+                Text(String(format: L10n.t("level_ep_format"), totalEP))
                     .appCaptionStyle()
                     .foregroundColor(.black.opacity(0.62))
                     .lineLimit(1)
@@ -121,7 +121,7 @@ struct GlobeViewScreen: View {
                 }
                 .frame(height: 6)
 
-                Text("\(cityCount) \(localizedLabel(zh: "城市", en: "Cities"))  ·  \(totalJourneys) \(localizedLabel(zh: "旅程", en: "Trips"))  ·  \(totalMemories) \(localizedLabel(zh: "记忆", en: "Memories"))  ·  \(distanceKmDisplay)km")
+                Text(String(format: L10n.t("summary_stats_line"), cityCount, totalJourneys, totalMemories, distanceKmDisplay))
                     .appFootnoteStyle()
                     .foregroundColor(.black.opacity(0.56))
                     .lineLimit(1)
@@ -134,7 +134,7 @@ struct GlobeViewScreen: View {
                     shareItem = GlobeShareImageItem(image: image)
                 }
             } label: {
-                Label(localizedLabel(zh: "分享", en: "Share"), systemImage: "square.and.arrow.up")
+                Label(L10n.t("share"), systemImage: "square.and.arrow.up")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 12)
@@ -155,16 +155,9 @@ struct GlobeViewScreen: View {
         .shadow(color: Color.black.opacity(0.10), radius: 16, x: 0, y: 8)
     }
 
-    private func localizedLabel(zh: String, en: String) -> String {
-        if Locale.preferredLanguages.first?.hasPrefix("zh") == true {
-            return zh
-        }
-        return en
-    }
-
     private func normalizedDisplayName(_ name: String) -> String {
         let value = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        return value.isEmpty ? "EXPLORER" : value
+        return value.isEmpty ? L10n.t("explorer_fallback") : value
     }
 
     private func captureCurrentPageImage() -> UIImage? {

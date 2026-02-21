@@ -53,8 +53,6 @@ struct PopSharingCard: View {
     @State private var selectedVisibility: JourneyVisibility = .private
     @State private var customTitle: String = ""
     @State private var activityTag: String = ""
-    @State private var isCustomActivityInput = false
-    @State private var customActivityInput = ""
     @State private var overallMemory: String = ""
     @State private var hideMapDetails = false
     private var canRenderCard: Bool { journey.coordinates.count >= 1 && !journey.isTooShort }
@@ -115,15 +113,8 @@ struct PopSharingCard: View {
                 selectedVisibility = journey.visibility
                 customTitle = (journey.customTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
                     ? (journey.customTitle ?? "")
-                    : journey.displayCityName
+                    : ""
                 activityTag = journey.activityTag ?? ""
-                if !activityTag.isEmpty && !activityPresets.contains(activityTag) {
-                    isCustomActivityInput = true
-                    customActivityInput = activityTag
-                } else {
-                    isCustomActivityInput = false
-                    customActivityInput = ""
-                }
                 overallMemory = journey.overallMemory ?? ""
                 hideMapDetails = (privacyMode == .hidden)
                 if finalCardImage == nil && canRenderCard {
@@ -150,14 +141,14 @@ struct PopSharingCard: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
-            .alert("丢弃旅程？", isPresented: $showDiscardConfirm) {
-                Button("取消", role: .cancel) {}
-                Button("丢弃", role: .destructive) {
+            .alert(L10n.t("discard_journey_title"), isPresented: $showDiscardConfirm) {
+                Button(L10n.t("cancel"), role: .cancel) {}
+                Button(L10n.t("discard"), role: .destructive) {
                     isPresented = false
                     store.deleteJourney(id: journey.id)
                 }
             } message: {
-                Text("这条旅程将不会被保存。")
+                Text(L10n.t("share_discard_message"))
             }
         }
     
@@ -166,7 +157,7 @@ struct PopSharingCard: View {
 
     private var header: some View {
         ZStack {
-            Text("保存旅程记录")
+            Text(L10n.t("share_save_journey_title"))
                 .appHeaderStyle()
                 .foregroundColor(.black)
 
@@ -176,7 +167,7 @@ struct PopSharingCard: View {
                     Button(role: .destructive) {
                         showDiscardConfirm = true
                     } label: {
-                        Label("丢弃旅程", systemImage: "trash")
+                        Label(L10n.t("discard_journey"), systemImage: "trash")
                     }
                 } label: {
                     Image(systemName: "ellipsis")
@@ -198,7 +189,7 @@ struct PopSharingCard: View {
     private var preview: some View {
         VStack(spacing: 12) {
             HStack {
-                Text("旅程卡片")
+                Text(L10n.t("share_journey_card"))
                     .font(.system(size: 14, weight: .black))
                     .foregroundColor(.black)
                 Spacer()
@@ -209,7 +200,7 @@ struct PopSharingCard: View {
                     }
                 } label: {
                     HStack(spacing: 8) {
-                        Text("可分享或保存")
+                        Text(L10n.t("share_or_save"))
                             .font(.system(size: 12, weight: .regular))
                             .foregroundColor(.black.opacity(0.45))
                         if showShareActions {
@@ -297,7 +288,7 @@ struct PopSharingCard: View {
             .frame(height: 160)
             .overlay(
                 VStack(spacing: 12) {
-                    Text("当前旅程太短或卡片未生成，暂不展示图片。")
+                    Text(L10n.t("share_image_unavailable"))
                         .font(.system(size: 14, weight: .medium))
                         .foregroundColor(.gray)
                         .multilineTextAlignment(.center)
@@ -309,10 +300,10 @@ struct PopSharingCard: View {
     private var actions: some View {
         VStack(spacing: 22) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("旅程名称（可不填）")
+                Text(L10n.t("share_journey_name_optional"))
                     .font(.system(size: 14, weight: .black))
                     .foregroundColor(.black.opacity(0.85))
-                TextField("给这段旅程起个名字", text: $customTitle)
+                TextField(L10n.t("share_journey_name_placeholder"), text: $customTitle)
                     .font(.system(size: 14, weight: .regular))
                     .padding(.horizontal, 22)
                     .frame(height: 52)
@@ -321,56 +312,39 @@ struct PopSharingCard: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("活动类型（可不填）")
+                Text(L10n.t("share_activity_optional"))
                     .font(.system(size: 14, weight: .black))
                     .foregroundColor(.black.opacity(0.85))
-                Menu {
-                    ForEach(activityPresets, id: \.self) { item in
-                        Button(item) {
-                            activityTag = item
-                            isCustomActivityInput = false
-                            customActivityInput = ""
+                HStack(spacing: 8) {
+                    TextField(L10n.t("share_activity_placeholder"), text: $activityTag)
+                        .font(.system(size: 14, weight: .regular))
+                        .textInputAutocapitalization(.never)
+
+                    Menu {
+                        ForEach(activityPresets, id: \.self) { item in
+                            Button(item) {
+                                activityTag = item
+                            }
                         }
-                    }
-                    Divider()
-                    Button("自定义") {
-                        isCustomActivityInput = true
-                        if customActivityInput.isEmpty {
-                            customActivityInput = activityTag
+                        Divider()
+                        Button(L10n.t("clear")) {
+                            activityTag = ""
                         }
-                    }
-                } label: {
-                    HStack {
-                        Text(activityTag.isEmpty ? "选择活动类型" : activityTag)
-                            .font(.system(size: 14, weight: .regular))
-                            .foregroundColor(activityTag.isEmpty ? .gray : .black)
-                        Spacer()
+                    } label: {
                         Image(systemName: "chevron.down")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(.black.opacity(0.5))
                     }
-                    .padding(.horizontal, 22)
-                    .frame(height: 52)
-                    .background(Color.white)
-                    .clipShape(Capsule(style: .continuous))
                 }
+                .padding(.horizontal, 22)
+                .frame(height: 52)
+                .background(Color.white)
+                .clipShape(Capsule(style: .continuous))
                 .buttonStyle(.plain)
-
-                if isCustomActivityInput {
-                    TextField("输入自定义活动类型", text: $customActivityInput)
-                        .font(.system(size: 14, weight: .regular))
-                        .padding(.horizontal, 18)
-                        .frame(height: 44)
-                        .background(Color.white.opacity(0.94))
-                        .clipShape(Capsule(style: .continuous))
-                        .onChange(of: customActivityInput) { v in
-                            activityTag = v
-                        }
-                }
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("整体感受（Overall Memory，可不填）")
+                Text(L10n.t("share_overall_memory_optional"))
                     .font(.system(size: 14, weight: .black))
                     .foregroundColor(.black.opacity(0.85))
                 TextEditor(text: $overallMemory)
@@ -382,7 +356,7 @@ struct PopSharingCard: View {
             }
 
             HStack(spacing: 10) {
-                Picker("可见性", selection: $selectedVisibility) {
+                Picker(L10n.t("visibility"), selection: $selectedVisibility) {
                     ForEach(JourneyVisibility.allCases) { v in
                         Text(v.titleCN).tag(v)
                     }
@@ -391,15 +365,15 @@ struct PopSharingCard: View {
             }
 
             Button(action: completeJourneyAndMaybeUnlock) {
-                Text("Save")
+                Text(L10n.t("save"))
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(.white)
-                    .frame(width: 176, height: 60)
+                    .frame(width: 236, height: 60)
                     .background(Color.black)
                     .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                     .shadow(color: Color.black.opacity(0.30), radius: 14, x: 0, y: 4)
             }
-            .frame(maxWidth: .infinity, alignment: .trailing)
+            .frame(maxWidth: .infinity, alignment: .center)
             .padding(.top, 6)
         }
         .padding(.horizontal, 22)

@@ -41,6 +41,10 @@ struct ProfileView: View {
         cityCache.cachedCities.count
     }
 
+    private var totalMemories: Int {
+        store.journeys.reduce(0) { $0 + $1.memories.count }
+    }
+
     private var levelValue: Int {
         max(1, Int((totalDistance / 50.0).rounded(.down)) + 1)
     }
@@ -88,7 +92,7 @@ struct ProfileView: View {
 
             Spacer()
 
-            Text("PROFILE")
+            Text(L10n.t("profile_title"))
                 .appHeaderStyle()
                 .tracking(0.2)
                 .lineLimit(1)
@@ -155,7 +159,7 @@ struct ProfileView: View {
             .padding(.top, 32)
 
             HStack(spacing: 6) {
-                Text("MYDEARFRIENDK")
+                Text(L10n.t("profile_display_name_placeholder"))
                     .font(.system(size: 20, weight: .black))
                     .tracking(-0.4)
                 Image(systemName: "pencil")
@@ -164,20 +168,20 @@ struct ProfileView: View {
             }
             .padding(.top, 24)
 
-            Text("EXPLORER")
+            Text(L10n.t("explorer_fallback"))
                 .font(.system(size: 13, weight: .regular))
                 .tracking(0.2)
                 .foregroundColor(FigmaTheme.subtext)
                 .padding(.top, 6)
 
             HStack(spacing: 8) {
-                Text("Lv.\(levelValue)")
+                Text(String(format: L10n.t("level_format"), levelValue))
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.black.opacity(0.62))
                 Text("·")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(.black.opacity(0.42))
-                Text("\(epValue.formatted()) EP")
+                Text(String(format: L10n.t("ep_format"), epValue.formatted()))
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.black.opacity(0.72))
             }
@@ -197,7 +201,7 @@ struct ProfileView: View {
                     icon: "tshirt",
                     iconColor: FigmaTheme.primary,
                     iconBg: FigmaTheme.primary.opacity(0.14),
-                    title: "EQUIPMENT"
+                    title: L10n.t("equipment_title_upper")
                 )
             }
             .buttonStyle(.plain)
@@ -209,7 +213,7 @@ struct ProfileView: View {
                     icon: "map",
                     iconColor: Color(red: 184 / 255, green: 148 / 255, blue: 125 / 255),
                     iconBg: Color(red: 184 / 255, green: 148 / 255, blue: 125 / 255).opacity(0.14),
-                    title: "MY JOURNEY"
+                    title: L10n.t("my_journey_title_upper")
                 )
             }
             .buttonStyle(.plain)
@@ -219,7 +223,7 @@ struct ProfileView: View {
     private var bottomStatsRow: some View {
         HStack(spacing: 14) {
             profileStatTile(icon: "mappin.and.ellipse", value: "\(totalJourneys)", label: "TRIPS")
-            profileStatTile(icon: "arrow.up.right", value: "\(Int(totalDistance.rounded()))km", label: "DISTANCE")
+            profileStatTile(icon: "sparkles", value: "\(totalMemories)", label: "MEMORIES")
             profileStatTile(icon: "paperplane", value: "\(citiesVisited)", label: "CITIES")
         }
     }
@@ -541,7 +545,7 @@ struct RecentJourneysView: View {
             .padding(.top, 12)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("RECENT JOURNEYS")
+                Text(L10n.t("recent_journeys_title"))
                     .appHeaderStyle()
                     .foregroundColor(.black)
 
@@ -606,13 +610,13 @@ struct RecentJourneyCard: View {
     private var localizedCountryName: String {
         let iso = (journey.countryISO2 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard iso.count == 2 else {
-            return Locale.preferredLanguages.first?.hasPrefix("zh") == true ? "未知国家" : "Unknown Country"
+            return L10n.t("unknown_country")
         }
         return Locale.current.localizedString(forRegionCode: iso) ?? iso
     }
 
     private var detailButtonText: String {
-        Locale.preferredLanguages.first?.hasPrefix("zh") == true ? "查看旅程记忆" : "View Journey Memories"
+        L10n.t("view_journey_memories")
     }
 
     var body: some View {
@@ -747,7 +751,7 @@ struct RecentJourneyCard: View {
         let saver = ImageSaver { err in
             DispatchQueue.main.async {
                 self.imageSaver = nil
-                self.saveToastText = (err == nil) ? "Saved to Photos" : "Failed to Save"
+                self.saveToastText = (err == nil) ? L10n.t("share_saved_to_photos") : L10n.t("save_failed")
                 withAnimation(.easeInOut(duration: 0.15)) {
                     self.showSaveToast = true
                 }
@@ -806,51 +810,50 @@ struct EquipmentLibraryView: View {
             UITheme.bg.ignoresSafeArea()
             
             VStack(spacing: 0) {
-                // Back button and title
-                HStack {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.black.opacity(0.6))
-                    }
-                    
-                    Spacer()
-                }
-                .padding(.horizontal, 24)
-                .padding(.top, 12)
-                
-                // Title
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("EQUIPMENT")
+                // Header
+                ZStack {
+                    Text(L10n.t("equipment_title_upper"))
                         .font(.system(size: 26, weight: .black))
                         .tracking(1)
                         .foregroundColor(.black)
-                    
-                    Text(String(format: L10n.t("equipment_collected_count"), locale: Locale.current, collectedCount, equipmentItems.count))
-                        .font(.system(size: 11, weight: .medium))
-                        .tracking(1)
-                        .foregroundColor(.black.opacity(0.5))
+
+                    HStack {
+                        Button {
+                            dismiss()
+                        } label: {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.black.opacity(0.6))
+                        }
+
+                        Spacer()
+                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 24)
-                .padding(.top, 16)
-                .padding(.bottom, 20)
+                .padding(.top, 12)
+
+                Text(String(format: L10n.t("equipment_collected_count"), locale: Locale.current, collectedCount, equipmentItems.count))
+                    .font(.system(size: 11, weight: .medium))
+                    .tracking(1)
+                    .foregroundColor(.black.opacity(0.5))
+                    .padding(.top, 10)
+                    .padding(.bottom, 16)
                 
                 // Equipment grid
                 ScrollView {
                     LazyVGrid(columns: [
-                        GridItem(.flexible(), spacing: 16),
-                        GridItem(.flexible(), spacing: 16)
-                    ], spacing: 16) {
+                        GridItem(.flexible(), spacing: 10),
+                        GridItem(.flexible(), spacing: 10),
+                        GridItem(.flexible(), spacing: 10)
+                    ], spacing: 10) {
                         ForEach(equipmentItems) { item in
                             EquipmentCard(item: item)
                         }
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 40)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
                 }
+                .frame(maxHeight: 360)
             }
         }
         .navigationBarHidden(true)
@@ -892,20 +895,20 @@ struct EquipmentCard: View {
     let item: EquipmentItem
     
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
             // Icon area
             ZStack {
                 RoundedRectangle(cornerRadius: 12)
                     .fill(item.isCollected ? Color.white : Color.black.opacity(0.05))
-                    .frame(height: 80)
+                    .frame(height: 62)
                 
                 if item.isCollected {
                     Image(systemName: item.icon)
-                        .font(.system(size: 32, weight: .medium))
+                        .font(.system(size: 24, weight: .medium))
                         .foregroundColor(.black.opacity(0.7))
                 } else {
                     Image(systemName: "lock.fill")
-                        .font(.system(size: 24, weight: .medium))
+                        .font(.system(size: 18, weight: .medium))
                         .foregroundColor(.black.opacity(0.3))
                 }
             }
@@ -917,22 +920,22 @@ struct EquipmentCard: View {
             // Name and rarity
             VStack(spacing: 4) {
                 Text(item.name)
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.system(size: 10, weight: .bold))
                     .tracking(0.3)
                     .foregroundColor(item.isCollected ? .black : .black.opacity(0.4))
                     .lineLimit(1)
                 
                 Text(item.rarity.label)
-                    .font(.system(size: 9, weight: .bold))
+                    .font(.system(size: 8, weight: .bold))
                     .tracking(0.5)
                     .foregroundColor(item.isCollected ? item.rarity.color : .black.opacity(0.3))
             }
         }
-        .padding(12)
+        .padding(10)
         .background(Color.white)
-        .cornerRadius(16)
+        .cornerRadius(14)
         .overlay(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: 14)
                 .stroke(item.rarity == .rare && item.isCollected ? UITheme.accent.opacity(0.3) : Color.black.opacity(0.06), lineWidth: 1)
         )
     }

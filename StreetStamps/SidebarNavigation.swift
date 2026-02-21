@@ -106,7 +106,7 @@ struct SidebarMenuView: View {
                         Divider()
                             .overlay(Color.black.opacity(0.06))
 
-                        Text("JOURNEY DIARY V1.0")
+                        Text(L10n.t("journey_diary_version"))
                             .font(.system(size: 10, weight: .semibold))
                             .tracking(0.6)
                             .foregroundColor(.black.opacity(0.5))
@@ -137,7 +137,7 @@ struct SidebarMenuView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 24) {
             HStack(spacing: 8) {
-                Text("EXPLORE")
+                Text(L10n.t("explore"))
                     .appHeaderStyle()
                     .foregroundColor(.black)
                 Spacer(minLength: 0)
@@ -178,7 +178,7 @@ struct SidebarMenuView: View {
                         .foregroundColor(.black)
                         .lineLimit(1)
 
-                    Text("EXPLORER")
+                    Text(L10n.t("explorer_fallback"))
                         .font(.system(size: 12, weight: .regular))
                         .tracking(0.3)
                         .foregroundColor(Color(red: 0.42, green: 0.42, blue: 0.42))

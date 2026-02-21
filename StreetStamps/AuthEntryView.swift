@@ -6,8 +6,8 @@ enum AuthEntryMode: String {
 
     var primaryButtonTitle: String {
         switch self {
-        case .signIn: return "SIGN IN"
-        case .register: return "CREATE ACCOUNT"
+        case .signIn: return L10n.t("auth_sign_in")
+        case .register: return L10n.t("auth_create_account")
         }
     }
 }
@@ -79,16 +79,16 @@ struct AuthEntryView: View {
             }
         }
         .interactiveDismissDisabled()
-        .alert("提示", isPresented: $showMessage) {
-            Button("好", role: .cancel) {}
+        .alert(L10n.t("prompt"), isPresented: $showMessage) {
+            Button(L10n.t("ok"), role: .cancel) {}
         } message: {
             Text(messageText)
         }
-        .alert("游客模式", isPresented: $showGuestNotice) {
-            Button("取消", role: .cancel) {}
-            Button("继续") { onContinueGuest() }
+        .alert(L10n.t("guest_mode_title"), isPresented: $showGuestNotice) {
+            Button(L10n.t("cancel"), role: .cancel) {}
+            Button(L10n.t("resume_prompt_continue")) { onContinueGuest() }
         } message: {
-            Text("游客账号无法使用好友功能，后续可随时在账号中心注册或登录。")
+            Text(L10n.t("guest_mode_message"))
         }
         .onAppear {
             if let initialMode {
@@ -124,12 +124,12 @@ struct AuthEntryView: View {
 
     private var titleBlock: some View {
         VStack(spacing: 8) {
-                Text(mode == .signIn ? "SIGN IN" : "SIGN UP")
+                Text(mode == .signIn ? L10n.t("auth_sign_in") : L10n.t("auth_sign_up"))
                     .appHeaderStyle()
                     .lineLimit(1)
                     .minimumScaleFactor(0.65)
 
-            Text(mode == .signIn ? "Enter your credentials to continue" : "Create your adventure account")
+            Text(mode == .signIn ? L10n.t("auth_sign_in_subtitle") : L10n.t("auth_create_account_subtitle"))
                 .appBodyStrongStyle()
                 .foregroundColor(FigmaTheme.subtext)
                 .lineLimit(2)
@@ -142,7 +142,7 @@ struct AuthEntryView: View {
     private var formBlock: some View {
         VStack(alignment: .leading, spacing: 14) {
             if mode == .register {
-                fieldLabel("FULL NAME")
+                fieldLabel(L10n.t("auth_full_name"))
                 fieldContainer(
                     icon: "person",
                     placeholder: "Cyber Kaka",
@@ -153,7 +153,7 @@ struct AuthEntryView: View {
                 )
             }
 
-            fieldLabel("EMAIL")
+            fieldLabel(L10n.t("auth_email"))
             fieldContainer(
                 icon: "envelope",
                 placeholder: "your@email.com",
@@ -163,7 +163,7 @@ struct AuthEntryView: View {
                 focused: .email
             )
 
-            fieldLabel("PASSWORD")
+            fieldLabel(L10n.t("auth_password"))
             fieldContainer(
                 icon: "lock",
                 placeholder: "••••••••",
@@ -187,8 +187,8 @@ struct AuthEntryView: View {
             } else {
                 HStack {
                     Spacer()
-                    Button("Forgot password?") {
-                        messageText = "请在账户中心使用“修改密码”功能。"
+                    Button(L10n.t("auth_forgot_password")) {
+                        messageText = L10n.t("auth_forgot_password_hint")
                         showMessage = true
                     }
                     .font(.system(size: 14, weight: .semibold))
@@ -199,7 +199,7 @@ struct AuthEntryView: View {
     }
 
     private var authPrimaryButton: some View {
-        Button(submitting ? "PROCESSING..." : mode.primaryButtonTitle) {
+        Button(submitting ? L10n.t("processing") : mode.primaryButtonTitle) {
             submitEmailAuth()
         }
         .disabled(submitting)
@@ -215,9 +215,9 @@ struct AuthEntryView: View {
     private var switchModeRow: some View {
         HStack(spacing: 8) {
             if mode == .signIn {
-                Text("Don't have an account?")
+                Text(L10n.t("auth_no_account"))
                     .foregroundColor(.black.opacity(0.56))
-                Button("Sign up") {
+                Button(L10n.t("auth_sign_up")) {
                     withAnimation(.easeInOut(duration: 0.16)) {
                         mode = .register
                     }
@@ -225,9 +225,9 @@ struct AuthEntryView: View {
                 .foregroundColor(accent)
                 .fontWeight(.bold)
             } else {
-                Text("Already have an account?")
+                Text(L10n.t("auth_have_account"))
                     .foregroundColor(.black.opacity(0.56))
-                Button("Sign in") {
+                Button(L10n.t("auth_sign_in_lower")) {
                     withAnimation(.easeInOut(duration: 0.16)) {
                         mode = .signIn
                     }
@@ -244,7 +244,7 @@ struct AuthEntryView: View {
             Rectangle()
                 .fill(Color.black.opacity(0.10))
                 .frame(height: 1)
-            Text("OR")
+            Text(L10n.t("or"))
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(.black.opacity(0.56))
             Rectangle()
@@ -267,7 +267,7 @@ struct AuthEntryView: View {
     }
 
     private var guestButton: some View {
-        Button("Continue as Guest") {
+        Button(L10n.t("continue_as_guest")) {
             showGuestNotice = true
         }
         .frame(maxWidth: .infinity)
@@ -371,14 +371,14 @@ struct AuthEntryView: View {
         let trimmedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !trimmedEmail.isEmpty, !trimmedPassword.isEmpty else {
-            messageText = "请先填写邮箱和密码"
+            messageText = L10n.t("auth_fill_email_password")
             showMessage = true
             return
         }
 
         if mode == .register,
            trimmedPassword != confirmPassword.trimmingCharacters(in: .whitespacesAndNewlines) {
-            messageText = "两次密码不一致"
+            messageText = L10n.t("auth_password_mismatch")
             showMessage = true
             return
         }

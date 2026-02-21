@@ -10,8 +10,8 @@ private enum FriendsTopTab: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .activity: return "ACTIVITY FEED"
-        case .allFriends: return "ALL FRIENDS"
+        case .activity: return L10n.t("friends_tab_activity")
+        case .allFriends: return L10n.t("friends_tab_all")
         }
     }
 }
@@ -25,9 +25,9 @@ private enum AddFriendMethod: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .inviteCode: return "邀请码"
-        case .handle: return "Handle"
-        case .qrToken: return "二维码"
+        case .inviteCode: return L10n.t("friends_add_method_invite")
+        case .handle: return L10n.t("friends_add_method_handle")
+        case .qrToken: return L10n.t("friends_add_method_qr")
         }
     }
 }
@@ -103,7 +103,7 @@ struct FriendsHubView: View {
                 VStack(spacing: 14) {
                     if tab == .activity {
                         if feedEvents.isEmpty {
-                            emptyState("还没有好友动态")
+                            emptyState(L10n.t("friends_empty_activity"))
                         } else {
                             ForEach(feedEvents) { event in
                                 if let friend = sortedFriends.first(where: { $0.id == event.friendID }) {
@@ -126,7 +126,7 @@ struct FriendsHubView: View {
                         }
                     } else {
                         if sortedFriends.isEmpty {
-                            emptyState("还没有好友，点击右上角 + 添加")
+                            emptyState(L10n.t("friends_empty_all"))
                         } else {
                             ForEach(sortedFriends) { friend in
                                 Button {
@@ -210,7 +210,7 @@ struct FriendsHubView: View {
 
             Spacer()
 
-            Text("FRIENDS")
+            Text(L10n.t("friends_title"))
                 .appHeaderStyle()
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
@@ -281,7 +281,7 @@ struct FriendsHubView: View {
 
     private func activeText(for friend: FriendProfileSnapshot) -> String {
         let date = lastActiveDate(of: friend)
-        return "Active \(shortAgoText(from: date).lowercased())"
+        return String(format: L10n.t("friends_active_ago"), shortAgoText(from: date).lowercased())
     }
 
     private func shortAgoText(from date: Date) -> String {
@@ -310,7 +310,7 @@ struct FriendsHubView: View {
                         friendID: friend.id,
                         timestamp: eventDate,
                         journeyID: latestJourney.id,
-                        title: "Completed \(latestJourney.title)",
+                        title: String(format: L10n.t("friends_event_completed"), latestJourney.title),
                         location: city,
                         meta: "\(formatDistance(latestJourney.distance))  \(formatDuration(start: latestJourney.startTime, end: latestJourney.endTime))"
                     )
@@ -326,7 +326,7 @@ struct FriendsHubView: View {
                             friendID: friend.id,
                             timestamp: eventDate.addingTimeInterval(-120),
                             journeyID: latestJourney.id,
-                            title: "Added \(memoryCount) new memories",
+                            title: String(format: L10n.t("friends_event_added_memories"), memoryCount),
                             location: city,
                             meta: "\(max(photos, memoryCount)) photos"
                         )
@@ -342,7 +342,7 @@ struct FriendsHubView: View {
                         friendID: friend.id,
                         timestamp: friend.createdAt.addingTimeInterval(-240),
                         journeyID: nil,
-                        title: "Visited \(city.name)",
+                        title: String(format: L10n.t("friends_event_visited"), city.name),
                         location: city.countryISO2 ?? "",
                         meta: ""
                     )
@@ -397,9 +397,9 @@ private struct FriendActivityCard: View {
 
     private var badgeLabel: String {
         switch event.kind {
-        case .journey: return "JOURNEY"
-        case .memory: return "MEMORY"
-        case .city: return "CITY"
+        case .journey: return L10n.t("friends_badge_journey")
+        case .memory: return L10n.t("friends_badge_memory")
+        case .city: return L10n.t("friends_badge_city")
         }
     }
 
@@ -537,7 +537,7 @@ private struct AddFriendSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 14) {
-                Picker("方式", selection: $method) {
+                Picker(L10n.t("friends_add_method_picker"), selection: $method) {
                     ForEach(AddFriendMethod.allCases) { item in
                         Text(item.title).tag(item)
                     }
@@ -549,10 +549,10 @@ private struct AddFriendSheet: View {
                     .disableAutocorrection(true)
                     .textFieldStyle(.roundedBorder)
 
-                TextField("好友备注（可选）", text: $friendNote)
+                TextField(L10n.t("friends_add_note_optional"), text: $friendNote)
                     .textFieldStyle(.roundedBorder)
 
-                Button(submitting ? "添加中..." : "添加好友") {
+                Button(submitting ? L10n.t("friends_add_submitting") : L10n.t("friends_add_submit")) {
                     Task {
                         await submit()
                     }
@@ -563,15 +563,15 @@ private struct AddFriendSheet: View {
                 Spacer(minLength: 0)
             }
             .padding(16)
-            .navigationTitle("添加好友")
+            .navigationTitle(L10n.t("friends_add_title"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") { dismiss() }
+                    Button(L10n.t("close")) { dismiss() }
                 }
             }
-            .alert("提示", isPresented: $showMessage) {
-                Button("好", role: .cancel) {}
+            .alert(L10n.t("prompt"), isPresented: $showMessage) {
+                Button(L10n.t("ok"), role: .cancel) {}
             } message: {
                 Text(message)
             }
@@ -639,7 +639,7 @@ private struct AddFriendSheet: View {
             await onAdded()
             dismiss()
         } catch {
-            message = "添加失败：\(error.localizedDescription)"
+            message = String(format: L10n.t("friends_add_failed"), error.localizedDescription)
             showMessage = true
         }
     }
@@ -740,7 +740,7 @@ private struct FriendProfileScreen: View {
                                 dismiss()
                             }
                         } label: {
-                            Text("删除好友")
+                            Text(L10n.t("friends_delete"))
                                 .font(.system(size: 13, weight: .bold))
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 12)
@@ -844,7 +844,7 @@ private struct FriendJourneysScreen: View {
             .padding(12)
         }
         .background(Color(red: 251.0/255.0, green: 251.0/255.0, blue: 249.0/255.0).ignoresSafeArea())
-        .navigationTitle("Journeys")
+        .navigationTitle(L10n.t("journeys_title"))
     }
 }
 
@@ -864,7 +864,7 @@ private struct FriendCitiesScreen: View {
                     .foregroundColor(.secondary)
             }
         }
-        .navigationTitle("Cities")
+        .navigationTitle(L10n.t("cities_title"))
     }
 }
 
@@ -927,11 +927,11 @@ private struct FriendJourneyRouteScreen: View {
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Journey Memories")
+                            Text(L10n.t("journey_memories"))
                                 .font(.system(size: 14, weight: .black))
 
                             if journey.memories.isEmpty {
-                                Text("暂无记忆")
+                                Text(L10n.t("no_memories_yet"))
                                     .font(.system(size: 12, weight: .semibold))
                                     .foregroundColor(.secondary)
                             } else {
@@ -988,9 +988,9 @@ private struct FriendJourneyRouteScreen: View {
                     .padding(12)
                 }
                 .background(Color(red: 251.0/255.0, green: 251.0/255.0, blue: 249.0/255.0).ignoresSafeArea())
-                .navigationTitle("Journey Route")
+                .navigationTitle(L10n.t("journey_route_title"))
             } else {
-                Text("内容不可见或已不存在")
+                Text(L10n.t("content_unavailable"))
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.secondary)
             }

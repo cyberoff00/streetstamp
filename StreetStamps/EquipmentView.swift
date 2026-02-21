@@ -39,20 +39,17 @@ struct EquipmentView: View {
 
             VStack(spacing: 0) {
                 header
-
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 20) {
-                        segmentRow
-                        avatarPreviewCard
-                        categoryRow
-                        itemGrid
-                    }
-                    .frame(maxWidth: 430)
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 24)
-                    .padding(.top, 24)
-                    .padding(.bottom, 32)
+                VStack(spacing: 20) {
+                    segmentRow
+                    avatarPreviewCard
+                    categoryRow
+                    itemGrid
                 }
+                .frame(maxWidth: 430)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 24)
+                .padding(.top, 24)
+                .padding(.bottom, 20)
             }
 
             if let feedbackMessage {
@@ -85,25 +82,25 @@ struct EquipmentView: View {
         .onChange(of: economy) { _, newValue in
             EquipmentEconomyStore.save(newValue)
         }
-        .confirmationDialog("Buy Coins", isPresented: $showCoinPurchaseDialog, titleVisibility: .visible) {
-            Button("+200 Coins") { addCoins(200) }
-            Button("+1000 Coins") { addCoins(1000) }
-            Button("+5000 Coins") { addCoins(5000) }
-            Button("Cancel", role: .cancel) { }
+        .confirmationDialog(L10n.t("buy_coins"), isPresented: $showCoinPurchaseDialog, titleVisibility: .visible) {
+            Button(L10n.t("add_200_coins")) { addCoins(200) }
+            Button(L10n.t("add_1000_coins")) { addCoins(1000) }
+            Button(L10n.t("add_5000_coins")) { addCoins(5000) }
+            Button(L10n.t("cancel"), role: .cancel) { }
         }
-        .alert("Not enough coins", isPresented: $showInsufficientCoinsAlert) {
-            Button("Add +1000", role: .none) {
+        .alert(L10n.t("not_enough_coins"), isPresented: $showInsufficientCoinsAlert) {
+            Button(L10n.t("add_1000"), role: .none) {
                 addCoins(1000)
             }
-            Button("Cancel", role: .cancel) { }
+            Button(L10n.t("cancel"), role: .cancel) { }
         } message: {
-            Text("You need \(itemPrice) coins to unlock this item.")
+            Text(String(format: L10n.t("need_coins_to_unlock"), itemPrice))
         }
-        .alert("Confirm purchase", isPresented: $showPurchaseConfirmAlert) {
-            Button("Buy \(itemPrice) coins", role: .none) {
+        .alert(L10n.t("confirm_purchase"), isPresented: $showPurchaseConfirmAlert) {
+            Button(String(format: L10n.t("buy_n_coins"), itemPrice), role: .none) {
                 confirmPendingPurchase()
             }
-            Button("Cancel", role: .cancel) {
+            Button(L10n.t("cancel"), role: .cancel) {
                 pendingPurchase = nil
             }
         } message: {
@@ -112,47 +109,53 @@ struct EquipmentView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "arrow.left")
-                    .font(.system(size: 16, weight: .bold))
-                .foregroundColor(.black)
-                .frame(width: 28, height: 28)
-            }
-            .buttonStyle(.plain)
-
+        ZStack {
             Text(L10n.t("equipment_title").uppercased())
                 .appHeaderStyle()
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .padding(.horizontal, 80)
 
-            HStack(spacing: 6) {
-                Image(systemName: "bitcoinsign.circle.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(FigmaTheme.primary)
-
-                Text("\(economy.coins)")
-                    .font(.system(size: AppTypography.captionSize, weight: .black))
-                    .foregroundColor(.black)
-
+            HStack(spacing: 12) {
                 Button {
-                    showCoinPurchaseDialog = true
+                    dismiss()
                 } label: {
-                    Image(systemName: "plus.circle.fill")
+                    Image(systemName: "arrow.left")
                         .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(FigmaTheme.primary)
+                        .foregroundColor(.black)
+                        .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
+
+                Spacer()
+
+                HStack(spacing: 6) {
+                    Image(systemName: "bitcoinsign.circle.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(FigmaTheme.primary)
+
+                    Text("\(economy.coins)")
+                        .font(.system(size: AppTypography.captionSize, weight: .black))
+                        .foregroundColor(.black)
+
+                    Button {
+                        showCoinPurchaseDialog = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(FigmaTheme.primary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 30)
+                .background(Color.white)
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                )
             }
-            .padding(.horizontal, 10)
-            .frame(height: 30)
-            .background(Color.white)
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
-            )
         }
         .padding(.horizontal, 24)
         .padding(.top, 14)
@@ -237,7 +240,11 @@ struct EquipmentView: View {
     @ViewBuilder
     private var itemGrid: some View {
         if let category = store.catalog.categories.first(where: { $0.id == selectedCategoryId }) {
-            let columns = [GridItem(.adaptive(minimum: 150), spacing: 16, alignment: .top)]
+            let columns = [
+                GridItem(.flexible(), spacing: 10, alignment: .top),
+                GridItem(.flexible(), spacing: 10, alignment: .top),
+                GridItem(.flexible(), spacing: 10, alignment: .top)
+            ]
             let visibleItems = category.items.filter { item in
                 let ownership = ownershipState(category: category, item: item)
                 if activeSegment == .myGear {
@@ -246,24 +253,28 @@ struct EquipmentView: View {
                 return true
             }
 
-            LazyVGrid(columns: columns, spacing: 16) {
-                ForEach(visibleItems) { item in
-                    let ownership = ownershipState(category: category, item: item)
+            ScrollView(showsIndicators: true) {
+                LazyVGrid(columns: columns, spacing: 10) {
+                    ForEach(visibleItems) { item in
+                        let ownership = ownershipState(category: category, item: item)
 
-                    Button {
-                        handleTap(category: category, item: item, ownership: ownership)
-                    } label: {
-                        GearCard(
-                            title: L10n.t(item.nameKey).uppercased(),
-                            imageName: store.imageName(item.images, face: .front),
-                            ownership: ownership,
-                            mode: activeSegment,
-                            price: itemPrice
-                        )
+                        Button {
+                            handleTap(category: category, item: item, ownership: ownership)
+                        } label: {
+                            GearCard(
+                                title: L10n.t(item.nameKey).uppercased(),
+                                imageName: store.imageName(item.images, face: .front),
+                                ownership: ownership,
+                                mode: activeSegment,
+                                price: itemPrice
+                            )
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
+                .padding(.bottom, 8)
             }
+            .frame(height: 290)
         } else {
             EmptyView()
         }
@@ -423,26 +434,26 @@ private struct GearCard: View {
                         .resizable()
                         .interpolation(.none)
                         .scaledToFit()
-                        .padding(26)
+                        .padding(16)
                         .opacity(ownership == .locked ? 0.55 : 1)
                 } else {
                     Image(systemName: "minus")
-                        .font(.system(size: 22, weight: .bold))
+                        .font(.system(size: 16, weight: .bold))
                         .foregroundColor(FigmaTheme.subtext)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
 
                 if ownership == .locked {
                     pill(text: "LOCKED", fill: Color.black.opacity(0.7), textColor: .white)
-                        .padding(.top, 16)
-                        .padding(.leading, 16)
+                        .padding(.top, 10)
+                        .padding(.leading, 10)
                 }
             }
-            .frame(height: 156)
+            .frame(height: 104)
 
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 7) {
                 Text(title)
-                    .font(.system(size: AppTypography.captionSize, weight: .black))
+                    .font(.system(size: 10, weight: .black))
                     .tracking(-0.2)
                     .foregroundColor(.black)
                     .lineLimit(1)
@@ -451,12 +462,12 @@ private struct GearCard: View {
                 actionPill
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 16)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 10)
             .background(.white)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-        .shadow(color: Color.black.opacity(0.06), radius: 20, x: 0, y: 4)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .shadow(color: Color.black.opacity(0.06), radius: 12, x: 0, y: 3)
     }
 
     @ViewBuilder
@@ -502,11 +513,11 @@ private struct GearCard: View {
 
     private func pill(text: String, fill: Color, textColor: Color) -> some View {
         Text(text)
-            .font(.system(size: 9, weight: .black))
-            .tracking(0.6)
+            .font(.system(size: 7.5, weight: .black))
+            .tracking(0.4)
             .foregroundColor(textColor)
-            .padding(.horizontal, 12)
-            .frame(height: 36)
+            .padding(.horizontal, 8)
+            .frame(height: 26)
             .background(Capsule().fill(fill))
     }
 }

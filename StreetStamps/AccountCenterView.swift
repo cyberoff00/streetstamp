@@ -5,6 +5,7 @@ struct AccountCenterView: View {
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var journeyStore: JourneyStore
     @EnvironmentObject private var cityCache: CityCache
+    @EnvironmentObject private var lifelogStore: LifelogStore
     @EnvironmentObject private var socialStore: SocialGraphStore
 
     @State private var backendBaseURL = BackendConfig.baseURLString
@@ -21,6 +22,7 @@ struct AccountCenterView: View {
     @State private var isLoading = false
     @State private var message = ""
     @State private var showMessage = false
+    @State private var recoveryCandidates: [GuestRecoveryCandidate] = []
 
     var body: some View {
         ScrollView {
@@ -29,6 +31,7 @@ struct AccountCenterView: View {
                 authCard
                 accountCard
                 migrationCard
+                recoveryCard
             }
             .padding(16)
         }
@@ -37,6 +40,7 @@ struct AccountCenterView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             await refreshMeIfPossible()
+            scanRecoveryCandidates()
         }
         .alert("提示", isPresented: $showMessage) {
             Button("好", role: .cancel) {}
@@ -205,7 +209,7 @@ struct AccountCenterView: View {
             .buttonStyle(.borderedProminent)
             .disabled(isLoading || !sessionStore.isLoggedIn)
 
-            Text("迁移规则：private 保留本地；friendsOnly/public 上传云端。")
+            Text("迁移规则：private 保留本地；friendsOnly/public 上传云端。Lifelog 不上传云端，仅支持本机/手动恢复。")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(.secondary)
 
@@ -213,6 +217,76 @@ struct AccountCenterView: View {
                 Text(MigrationStatusStore.lastMessage())
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(.black.opacity(0.7))
+            }
+        }
+        .cardStyle()
+    }
+
+    private var recoveryCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("游客数据恢复")
+                .font(.system(size: 13, weight: .bold))
+
+            Text("用于找回旧 guest 目录里的旅程、笔记和照片。")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.secondary)
+
+            Text("当前用户：\(sessionStore.currentUserID)")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.secondary)
+                .textSelection(.enabled)
+
+            HStack(spacing: 10) {
+                Button(isLoading ? "扫描中..." : "扫描旧 guest") {
+                    scanRecoveryCandidates()
+                }
+                .buttonStyle(.bordered)
+                .disabled(isLoading)
+
+                Button(isLoading ? "重跑中..." : "强制重跑迁移") {
+                    Task { await forceReplayMigration() }
+                }
+                .buttonStyle(.bordered)
+                .disabled(isLoading)
+            }
+
+            if recoveryCandidates.isEmpty {
+                Text("未发现可恢复的旧 guest 数据。")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.secondary)
+            } else {
+                ForEach(recoveryCandidates) { item in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(item.userID)
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .textSelection(.enabled)
+
+                        Text("旅程 \(item.journeyCount) · 笔记 \(item.memoryCount) · 照片 \(item.photoCount) · Lifelog点 \(item.lifelogPointCount)")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.secondary)
+
+                        if !item.topCities.isEmpty {
+                            Text("城市预览：\(item.topCities.joined(separator: "、"))")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.secondary)
+                        }
+
+                        if let dt = item.lastModified {
+                            Text("最近更新时间：\(dt.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.secondary)
+                        }
+
+                        Button(isLoading ? "恢复中..." : "恢复这个 guest 到当前用户") {
+                            Task { await recoverGuestData(sourceUserID: item.userID) }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isLoading)
+                    }
+                    .padding(10)
+                    .background(Color.black.opacity(0.03))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
             }
         }
         .cardStyle()
@@ -344,13 +418,58 @@ struct AccountCenterView: View {
                 journeyStore: journeyStore,
                 cityCache: cityCache
             )
-            let msg = "迁移完成，已上传 \(report.uploadedJourneys) 条旅程，\(report.uploadedMemories) 条记忆（媒体 \(report.uploadedMediaFiles) 个），私密本地 \(report.localOnlyPrivateJourneys) 条"
+            let msg = "迁移完成，已上传 \(report.uploadedJourneys) 条旅程，\(report.uploadedMemories) 条记忆（媒体 \(report.uploadedMediaFiles) 个），私密本地 \(report.localOnlyPrivateJourneys) 条。Lifelog 未上传云端。"
             MigrationStatusStore.save(msg)
             await socialStore.reloadFromBackendIfPossible(accessToken: sessionStore.currentAccessToken)
             toast(msg)
         } catch {
             toast("迁移失败：\(error.localizedDescription)")
         }
+    }
+
+    private func scanRecoveryCandidates() {
+        recoveryCandidates = GuestDataRecoveryService.discoverCandidates(currentUserID: sessionStore.currentUserID)
+    }
+
+    private func recoverGuestData(sourceUserID: String) async {
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            let result = try GuestDataRecoveryService.recover(
+                from: sourceUserID,
+                to: sessionStore.currentUserID
+            )
+
+            journeyStore.load()
+            cityCache.loadFromDisk()
+            cityCache.rebuildFromJourneyStore()
+            lifelogStore.load()
+
+            scanRecoveryCandidates()
+
+            let msg = "恢复完成：新增旅程 \(result.mergedJourneyCount) 条，拷贝旅程文件 \(result.copiedJourneyFiles) 个，照片 \(result.copiedPhotos) 个，缩略图 \(result.copiedThumbnails) 个\(result.replacedLifelog ? "，并替换了 Lifelog" : "")"
+            toast(msg)
+        } catch {
+            toast("恢复失败：\(error.localizedDescription)")
+        }
+    }
+
+    private func forceReplayMigration() async {
+        isLoading = true
+        defer { isLoading = false }
+
+        let report = sessionStore.forceReplayLegacyMigration()
+        journeyStore.load()
+        cityCache.loadFromDisk()
+        cityCache.rebuildFromJourneyStore()
+        lifelogStore.load()
+        scanRecoveryCandidates()
+
+        let ids = report.discoveredLegacyUserIDs.isEmpty
+            ? "无"
+            : report.discoveredLegacyUserIDs.joined(separator: ", ")
+        toast("已强制重跑。移除 marker \(report.removedMarkers) 个；扫描到 legacy ID: \(ids)")
     }
 
     private func updateVisibility() async {

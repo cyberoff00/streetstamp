@@ -65,11 +65,11 @@ final class WatchJourneyRecorder: NSObject, ObservableObject {
     private let endedChunkPointSize: Int = 120
     private let maxSegmentPointCount: Int = 30_000
     private let maxRecordingDuration: TimeInterval = 24 * 3600
-    private let lowMovementWindow: TimeInterval = 90 * 60
+    private let lowMovementWindow: TimeInterval = 60 * 60
     private let lowMovementThresholdMeters: Double = 100
     private let lowMovementMaxAccuracyMeters: Double = 100
-    private let lowMovementReminderCooldown: TimeInterval = 30 * 60
-    private let lowMovementReminderSnooze: TimeInterval = 30 * 60
+    private let lowMovementReminderCooldown: TimeInterval = 60 * 60
+    private let lowMovementReminderSnooze: TimeInterval = 60 * 60
     private let boundaryCheckInterval: TimeInterval = 20
 
     private let stateSaveInterval: TimeInterval = 8
@@ -602,7 +602,7 @@ final class WatchJourneyRecorder: NSObject, ObservableObject {
         else { return }
 
         lastInactivityReminderAt = now
-        inactivityAlertMessage = "近90分钟位移范围不足100m，是否暂停？"
+        inactivityAlertMessage = "近60分钟首尾位移不足100m，是否暂停？"
         inactivityAlertPresented = true
         statusText = "低位移提醒"
     }

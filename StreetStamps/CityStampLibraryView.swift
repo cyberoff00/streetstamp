@@ -10,9 +10,36 @@ import UIKit
 // =======================================================
 
 struct CityStampLibraryView: View {
+    private struct CityDigest: Equatable {
+        let id: String
+        let name: String
+        let countryISO2: String?
+        let journeyIDs: [String]
+        let explorations: Int
+        let memories: Int
+        let thumbnailBasePath: String?
+        let thumbnailRoutePath: String?
+        let boundaryCount: Int
+        let hasAnchor: Bool
+
+        init(_ city: CachedCity) {
+            id = city.id
+            name = city.name
+            countryISO2 = city.countryISO2
+            journeyIDs = city.journeyIds
+            explorations = city.explorations
+            memories = city.memories
+            thumbnailBasePath = city.thumbnailBasePath
+            thumbnailRoutePath = city.thumbnailRoutePath
+            boundaryCount = city.boundary?.count ?? 0
+            hasAnchor = city.anchor != nil
+        }
+    }
+
     @StateObject private var vm = CityLibraryVM()
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var cache: CityCache
+    @State private var digestByCityID: [String: CityDigest] = [:]
 
     // ✅ Delete confirmations
     @State private var cityToDelete: City? = nil
@@ -52,16 +79,40 @@ struct CityStampLibraryView: View {
             if store.hasLoaded {
                 cache.rebuildFromJourneyStore()
                 vm.load(journeyStore: store, cityCache: cache)
+                digestByCityID = makeDigestMap(from: cache.cachedCities)
             }
         }
         .onChange(of: store.hasLoaded) { loaded in
             if loaded {
                 cache.rebuildFromJourneyStore()
                 vm.load(journeyStore: store, cityCache: cache)
+                digestByCityID = makeDigestMap(from: cache.cachedCities)
             }
         }
-        .onReceive(cache.$cachedCities) { _ in
-            vm.load(journeyStore: store, cityCache: cache)
+        .onReceive(cache.$cachedCities) { nextCities in
+            guard store.hasLoaded else { return }
+
+            let nextDigests = makeDigestMap(from: nextCities)
+            if digestByCityID.isEmpty {
+                vm.load(journeyStore: store, cityCache: cache)
+                digestByCityID = nextDigests
+                return
+            }
+
+            let previousKeys = Set(digestByCityID.keys)
+            let nextKeys = Set(nextDigests.keys)
+
+            let removed = previousKeys.subtracting(nextKeys)
+            for key in removed {
+                vm.removeCity(cityKey: key)
+            }
+
+            let maybeChanged = nextKeys.filter { digestByCityID[$0] != nextDigests[$0] }
+            for key in maybeChanged {
+                vm.upsertCity(cityKey: key, journeyStore: store, cityCache: cache)
+            }
+
+            digestByCityID = nextDigests
         }
         .alert(L10n.t("delete_city_alert_title"), isPresented: $showDeleteCityAlert, presenting: cityToDelete) { city in
             Button(L10n.t("delete"), role: .destructive) {
@@ -72,6 +123,14 @@ struct CityStampLibraryView: View {
         } message: { city in
             Text(String(format: L10n.t("delete_city_alert_message"), locale: Locale.current, (city.displayName ?? city.name)))
         }
+    }
+
+    private func makeDigestMap(from cities: [CachedCity]) -> [String: CityDigest] {
+        var out: [String: CityDigest] = [:]
+        for city in cities where !(city.isTemporary ?? false) {
+            out[city.id] = CityDigest(city)
+        }
+        return out
     }
 
     private var headerBar: some View {

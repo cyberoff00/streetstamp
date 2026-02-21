@@ -26,6 +26,7 @@ enum JourneyFinalizer {
         route: JourneyRoute,
         journeyStore: JourneyStore,
         cityCache: CityCache,
+        lifelogStore: LifelogStore,
         source: JourneyFinalizeSource,
         completion: @escaping (JourneyRoute) -> Void
     ) {
@@ -37,6 +38,7 @@ enum JourneyFinalizer {
             Task { @MainActor in
                 journeyStore.upsertSnapshotThrottled(updated, coordCount: updated.coordinates.count)
                 journeyStore.flushPersist()
+                lifelogStore.archiveJourneyPointsIfNeeded(updated)
                 notify?()
                 completion(updated)
             }

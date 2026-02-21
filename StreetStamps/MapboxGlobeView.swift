@@ -37,6 +37,7 @@ struct MapboxGlobeView: View {
     // ====== IDs ======
     private let countriesSourceId = "ss-countries-source"
     private let countriesLayerId  = "ss-countries-fill"
+    private let countriesBorderLayerId = "ss-countries-border"
 
     private let footprintsSourceId = "ss-footprints-source"
     private let footprintsLayerId  = "ss-footprints-heat"
@@ -236,15 +237,40 @@ struct MapboxGlobeView: View {
             fill.fillColor = .constant(StyleColor(.cyan))
             fill.fillOpacity = .expression(Exp(.interpolate) {
                 Exp(.linear); Exp(.zoom)
-                0;  0.22
-                2;  0.18
-                6;  0.10
-                10; 0.06
-                14; 0.05
+                0;  0.30
+                2;  0.28
+                6;  0.26
+                10; 0.24
+                14; 0.22
             })
             fill.fillOutlineColor = .constant(StyleColor(UIColor.cyan.withAlphaComponent(0.45)))
 
             try? style.addLayer(fill)
+        }
+
+        // --- Country boundary stroke (always visible) ---
+        if !style.layerExists(withId: countriesBorderLayerId) {
+            var border = LineLayer(id: countriesBorderLayerId)
+            border.source = countriesSourceId
+            border.sourceLayer = "country_boundaries"
+            border.lineColor = .constant(StyleColor(UIColor.cyan.withAlphaComponent(0.95)))
+            border.lineCap = .constant(.round)
+            border.lineJoin = .constant(.round)
+            border.lineOpacity = .expression(Exp(.interpolate) {
+                Exp(.linear); Exp(.zoom)
+                0;  0.85
+                2;  0.82
+                8;  0.80
+                14; 0.78
+            })
+            border.lineWidth = .expression(Exp(.interpolate) {
+                Exp(.linear); Exp(.zoom)
+                0;  0.8
+                3;  1.0
+                8;  1.5
+                14; 2.2
+            })
+            try? style.addLayer(border)
         }
 
         // --- Footprints heatmap (region highlight: light red; never disappears) ---
@@ -287,73 +313,6 @@ struct MapboxGlobeView: View {
             })
 
             try? style.addLayer(heat)
-        }
-
-        
-        // --- Cities glow + pin (visible only at far zoom; zoom in fades out) ---
-        if !style.layerExists(withId: citiesGlowLayerId) {
-            var glow = CircleLayer(id: citiesGlowLayerId)
-            glow.source = citiesSourceId
-
-            glow.circleColor = .constant(StyleColor(UIColor.cyan))
-            glow.circleBlur  = .expression(Exp(.interpolate) {
-                Exp(.linear); Exp(.zoom)
-                1.0; 0.95
-                4.0; 0.85
-                6.0; 0.75
-            })
-            glow.circleRadius = .expression(Exp(.interpolate) {
-                Exp(.linear); Exp(.zoom)
-                1.0; 10
-                3.0; 14
-                5.5; 18
-                6.2; 18
-            })
-            glow.circleOpacity = .expression(Exp(.interpolate) {
-                Exp(.linear); Exp(.zoom)
-                1.0; 0.35
-                4.5; 0.24
-                5.8; 0.12
-                6.2; 0.00
-            })
-
-            try? style.addLayer(glow)
-        }
-
-        if !style.layerExists(withId: citiesLayerId) {
-            var sym = SymbolLayer(id: citiesLayerId)
-            sym.source = citiesSourceId
-
-            sym.iconImage = .constant(.name(cityIconId))
-            sym.iconAllowOverlap = .constant(true)
-            sym.iconIgnorePlacement = .constant(true)
-
-            sym.iconSize = .expression(Exp(.interpolate) {
-                Exp(.linear); Exp(.zoom)
-                1.0; 0.85
-                3.0; 0.80
-                5.5; 0.72
-                6.2; 0.65
-            })
-
-            sym.iconOpacity = .expression(Exp(.interpolate) {
-                Exp(.linear); Exp(.zoom)
-                1.0; 0.95
-                4.8; 0.75
-                5.9; 0.30
-                6.2; 0.00
-            })
-
-            sym.iconHaloColor = .constant(StyleColor(UIColor.cyan.withAlphaComponent(0.9)))
-            sym.iconHaloWidth = .expression(Exp(.interpolate) {
-                Exp(.linear); Exp(.zoom)
-                1.0; 1.6
-                5.5; 1.2
-                6.2; 0.0
-            })
-            sym.iconHaloBlur = .constant(0.8)
-
-            try? style.addLayer(sym)
         }
 
         // --- Routes glow (far zoom MUST be visible) ---
@@ -490,7 +449,7 @@ struct MapboxGlobeView: View {
         if !style.layerExists(withId: routesLayerId) {
             var line = LineLayer(id: routesLayerId)
             line.source = routesSourceId
-            line.minZoom = 1.8
+            line.minZoom = 1.0
 
             // Solid routes only (exclude flight dashed)
             line.filter = Exp(.eq) { Exp(.get) { "isFlight" }; false }
@@ -521,6 +480,72 @@ struct MapboxGlobeView: View {
             })
 
             try? style.addLayer(line)
+        }
+
+        // --- Cities glow + pin (always visible, and kept above routes) ---
+        if !style.layerExists(withId: citiesGlowLayerId) {
+            var glow = CircleLayer(id: citiesGlowLayerId)
+            glow.source = citiesSourceId
+
+            glow.circleColor = .constant(StyleColor(UIColor.cyan))
+            glow.circleBlur  = .expression(Exp(.interpolate) {
+                Exp(.linear); Exp(.zoom)
+                1.0; 0.95
+                4.0; 0.88
+                8.0; 0.82
+                14.0; 0.76
+            })
+            glow.circleRadius = .expression(Exp(.interpolate) {
+                Exp(.linear); Exp(.zoom)
+                1.0; 10
+                3.0; 14
+                8.0; 17
+                14.0; 19
+            })
+            glow.circleOpacity = .expression(Exp(.interpolate) {
+                Exp(.linear); Exp(.zoom)
+                1.0; 0.36
+                5.0; 0.34
+                10.0; 0.32
+                14.0; 0.30
+            })
+
+            try? style.addLayer(glow)
+        }
+
+        if !style.layerExists(withId: citiesLayerId) {
+            var sym = SymbolLayer(id: citiesLayerId)
+            sym.source = citiesSourceId
+
+            sym.iconImage = .constant(.name(cityIconId))
+            sym.iconAllowOverlap = .constant(true)
+            sym.iconIgnorePlacement = .constant(true)
+
+            sym.iconSize = .expression(Exp(.interpolate) {
+                Exp(.linear); Exp(.zoom)
+                1.0; 0.85
+                3.0; 0.82
+                8.0; 0.76
+                14.0; 0.72
+            })
+
+            sym.iconOpacity = .expression(Exp(.interpolate) {
+                Exp(.linear); Exp(.zoom)
+                1.0; 0.95
+                8.0; 0.92
+                14.0; 0.90
+            })
+
+            sym.iconHaloColor = .constant(StyleColor(UIColor.cyan.withAlphaComponent(0.9)))
+            sym.iconHaloWidth = .expression(Exp(.interpolate) {
+                Exp(.linear); Exp(.zoom)
+                1.0; 1.6
+                8.0; 1.4
+                14.0; 1.3
+            })
+            sym.iconHaloBlur = .constant(0.8)
+
+            try? style.addLayer(sym)
         }
     }
 
@@ -585,6 +610,11 @@ struct MapboxGlobeView: View {
         do {
             try style.updateLayer(withId: countriesLayerId, type: FillLayer.self) { layer in
                 layer.filter = filterExpr
+            }
+            if style.layerExists(withId: countriesBorderLayerId) {
+                try style.updateLayer(withId: countriesBorderLayerId, type: LineLayer.self) { layer in
+                    layer.filter = filterExpr
+                }
             }
         } catch {
             print("⚠️ updateCountryGlow failed:", error)
@@ -733,12 +763,12 @@ struct MapboxGlobeView: View {
         let distKm = max(0, j.distance / 1000.0)
 
         if let s = j.startCityKey, let e = j.endCityKey,
-           !s.isEmpty, !e.isEmpty, s != e {
+           !s.isEmpty, !e.isEmpty, s != e, distKm >= 120 {
             return true
         }
 
         // Heuristics: long distance + sparse points (common for flights)
-        if distKm >= 500, coords.count <= 25 {
+        if distKm >= 180, coords.count <= 35 {
             return true
         }
 
@@ -754,6 +784,52 @@ struct MapboxGlobeView: View {
         }
 
         return false
+    }
+
+    private func greatCircleArc(_ start: CLLocationCoordinate2D, _ end: CLLocationCoordinate2D, points: Int = 32) -> [CLLocationCoordinate2D] {
+        let total = max(2, points)
+
+        func toVec(_ c: CLLocationCoordinate2D) -> (Double, Double, Double) {
+            let lat = c.latitude * .pi / 180
+            let lon = c.longitude * .pi / 180
+            let x = cos(lat) * cos(lon)
+            let y = cos(lat) * sin(lon)
+            let z = sin(lat)
+            return (x, y, z)
+        }
+
+        func toCoord(_ v: (Double, Double, Double)) -> CLLocationCoordinate2D {
+            let lon = atan2(v.1, v.0)
+            let hyp = sqrt(v.0 * v.0 + v.1 * v.1)
+            let lat = atan2(v.2, hyp)
+            return CLLocationCoordinate2D(latitude: lat * 180 / .pi, longitude: lon * 180 / .pi)
+        }
+
+        let a = toVec(start)
+        let b = toVec(end)
+        let dotRaw = a.0 * b.0 + a.1 * b.1 + a.2 * b.2
+        let dot = min(1.0, max(-1.0, dotRaw))
+        let omega = acos(dot)
+
+        if omega < 1e-6 {
+            return [start, end]
+        }
+
+        var out: [CLLocationCoordinate2D] = []
+        out.reserveCapacity(total)
+        for idx in 0..<total {
+            let t = Double(idx) / Double(total - 1)
+            let sinOmega = sin(omega)
+            let s0 = sin((1 - t) * omega) / sinOmega
+            let s1 = sin(t * omega) / sinOmega
+            let v = (
+                s0 * a.0 + s1 * b.0,
+                s0 * a.1 + s1 * b.1,
+                s0 * a.2 + s1 * b.2
+            )
+            out.append(toCoord(v))
+        }
+        return out
     }
 
 private func makeRoutesFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
@@ -787,7 +863,7 @@ private func makeRoutesFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
             if isFlight, let a = coords.first, let b = coords.last {
                 pending.append(
                     PendingRouteFeature(
-                        line: Turf.LineString([a, b]),
+                        line: Turf.LineString(greatCircleArc(a, b)),
                         journeyId: j.id,
                         isFlight: true,
                         distanceKm: max(0, j.distance / 1000.0),

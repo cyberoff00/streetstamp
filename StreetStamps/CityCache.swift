@@ -378,13 +378,13 @@ final class CityCache: ObservableObject {
     // ✅ Cancel stale callbacks
     private var geocodeTask: Task<Void, Never>? = nil
 
-    private let fileURL: URL
+    private var fileURL: URL
     private unowned let journeyStore: JourneyStore
-    private let thumbnails: CityThumbnailCache
-    private let migrationMarkerV2URL: URL
-    private let migrationMarkerV3URL: URL
-    private let migrationMarkerV4URL: URL
-    private let paths: StoragePath
+    private var thumbnails: CityThumbnailCache
+    private var migrationMarkerV2URL: URL
+    private var migrationMarkerV3URL: URL
+    private var migrationMarkerV4URL: URL
+    private var paths: StoragePath
     private var cancellables: Set<AnyCancellable> = []
 
     init(paths: StoragePath, journeyStore: JourneyStore) {
@@ -411,6 +411,21 @@ final class CityCache: ObservableObject {
                 self?.rebuildFromJourneyStore()
             }
             .store(in: &cancellables)
+    }
+
+    func rebind(paths: StoragePath) {
+        self.paths = paths
+        self.fileURL = paths.cityCacheURL
+        self.thumbnails = CityThumbnailCache(dir: paths.thumbnailsDir)
+        self.migrationMarkerV2URL = paths.migrationMarkerV2_thumbnailPaths
+        self.migrationMarkerV3URL = paths.migrationMarkerV3_intercityToStartingCity
+        self.migrationMarkerV4URL = paths.migrationMarkerV4_removeLegacyThumbnails
+
+        loadFromDisk()
+        migrateThumbnailPathsIfNeeded()
+        migrateInterCityRoutesToStartingCitiesIfNeeded()
+        removeLegacyDiskThumbnailsIfNeeded()
+        rebuildFromJourneyStore()
     }
     
     /// Migrate thumbnail paths from absolute paths to relative paths (filenames only).
@@ -993,6 +1008,9 @@ final class CityCache: ObservableObject {
         // Check if thumbnail already exists using the static resolver
         if CityThumbnailCache.thumbnailExists(cachedCities[idx].thumbnailBasePath) { return }
 
+        let baseURL = thumbnails.urlBase(cityKey: cityKey)
+        let baseFilename = thumbnails.filenameBase(cityKey: cityKey)
+
         Task.detached(priority: .utility) { [weak self] in
             guard let self else { return }
 
@@ -1022,15 +1040,12 @@ final class CityCache: ObservableObject {
                 ) { img in
                     guard let img else { cont.resume(); return }
 
-                    let url = self.thumbnails.urlBase(cityKey: cityKey)
-                    self.thumbnails.save(img, to: url)
-                    
                     // Store only the filename (relative path), not the full path
-                    let filename = self.thumbnails.filenameBase(cityKey: cityKey)
 
                     Task { @MainActor in
+                        self.thumbnails.save(img, to: baseURL)
                         guard let idx2 = self.cachedCities.firstIndex(where: { $0.id == cityKey }) else { return }
-                        self.cachedCities[idx2].thumbnailBasePath = filename
+                        self.cachedCities[idx2].thumbnailBasePath = baseFilename
                         self.notifyCitiesChanged()
                         self.saveToDisk()
                     }
@@ -1041,6 +1056,9 @@ final class CityCache: ObservableObject {
     }
 
     private func generateRouteThumbnail(cityKey: String) {
+        let routeURL = thumbnails.urlRoute(cityKey: cityKey)
+        let routeFilename = thumbnails.filenameRoute(cityKey: cityKey)
+
         Task.detached(priority: .utility) { [weak self] in
             guard let self else { return }
 
@@ -1098,15 +1116,12 @@ final class CityCache: ObservableObject {
                 ) { img in
                     guard let img else { cont.resume(); return }
 
-                    let url = self.thumbnails.urlRoute(cityKey: cityKey)
-                    self.thumbnails.save(img, to: url)
-                    
                     // Store only the filename (relative path), not the full path
-                    let filename = self.thumbnails.filenameRoute(cityKey: cityKey)
 
                     Task { @MainActor in
+                        self.thumbnails.save(img, to: routeURL)
                         guard let idx2 = self.cachedCities.firstIndex(where: { $0.id == cityKey }) else { return }
-                        self.cachedCities[idx2].thumbnailRoutePath = filename
+                        self.cachedCities[idx2].thumbnailRoutePath = routeFilename
                         self.notifyCitiesChanged()
                         self.saveToDisk()
                     }

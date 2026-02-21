@@ -865,6 +865,9 @@ struct CityDeepView: View {
         case .island:
             return prefix + (isChineseLocale() ? "Island（整岛）" : "Island") + suffix
         case .country:
+            if shouldDisplayRegionForCurrentCity {
+                return prefix + (isChineseLocale() ? "Region（区域）" : "Region") + suffix
+            }
             return prefix + (isChineseLocale() ? "Country（国家）" : "Country") + suffix
         }
     }
@@ -917,12 +920,18 @@ struct CityDeepView: View {
         case .subAdmin: return "SubAdmin"
         case .admin: return "Admin"
         case .island: return "Island"
-        case .country: return "Country"
+        case .country:
+            return shouldDisplayRegionForCurrentCity ? "Region" : "Country"
         }
     }
 
     private func isChineseLocale() -> Bool {
         Locale.preferredLanguages.first?.hasPrefix("zh") == true
+    }
+
+    private var shouldDisplayRegionForCurrentCity: Bool {
+        let iso = (effectiveCountryISO2 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return ["HK", "MO", "TW"].contains(iso)
     }
 }
 

@@ -55,7 +55,7 @@ struct JourneyMemoryMainView: View {
 
     private var filterChipTitle: String {
         let cal = Calendar.current
-        guard let start = selectedStartDate else { return "All time" }
+        guard let start = selectedStartDate else { return L10n.t("all_time") }
         let end = selectedEndDate ?? start
         let df = DateFormatter()
         df.locale = Locale.current
@@ -162,7 +162,7 @@ struct JourneyMemoryMainView: View {
 
                 Spacer(minLength: 0)
 
-                Text("MEMORIES")
+                Text(L10n.t("memories_title"))
                     .appHeaderStyle()
                     .multilineTextAlignment(.center)
                     .allowsTightening(true)
@@ -332,7 +332,7 @@ private struct JourneyMemoryCalendarRangePopover: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Date Range")
+            Text(L10n.t("date_range"))
                 .font(.system(size: 15, weight: .bold))
                 .foregroundColor(.black)
 
@@ -357,7 +357,7 @@ private struct JourneyMemoryCalendarRangePopover: View {
             monthGrid
 
             HStack(spacing: 8) {
-                Button("Clear") {
+                Button(L10n.t("clear")) {
                     onClear()
                 }
                 .font(.system(size: 12, weight: .semibold))
@@ -367,7 +367,7 @@ private struct JourneyMemoryCalendarRangePopover: View {
                 .background(Color.black.opacity(0.08))
                 .clipShape(Capsule())
 
-                Button("Apply") {
+                Button(L10n.t("apply")) {
                     onApply()
                 }
                 .font(.system(size: 12, weight: .semibold))
@@ -690,7 +690,7 @@ private struct JourneyEntryRow: View {
         let notes = mem.notes.trimmingCharacters(in: .whitespacesAndNewlines)
         if !notes.isEmpty { return notes }
         let title = mem.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return title.isEmpty ? "Tap to view memories" : title
+        return title.isEmpty ? L10n.t("tap_to_view_memories") : title
     }
     
     var body: some View {
@@ -1139,13 +1139,13 @@ Divider()
 
     private var overallMemorySection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("OVERALL MEMORY")
+            Text(L10n.t("overall_memory"))
                 .font(.system(size: 12, weight: .bold))
                 .tracking(1.2)
                 .foregroundColor(Color(red: 0.60, green: 0.63, blue: 0.69))
 
             if isEditing {
-                TextField("记录这段旅程的整体感受", text: $draftOverallMemory, axis: .vertical)
+                TextField(L10n.t("overall_memory_placeholder"), text: $draftOverallMemory, axis: .vertical)
                     .lineLimit(4...8)
                     .textFieldStyle(.plain)
                     .font(.system(size: 14))
@@ -1331,7 +1331,7 @@ private struct ExportMemoryTimelineItem: View {
         let notes = memory.notes.trimmingCharacters(in: .whitespacesAndNewlines)
         if !notes.isEmpty { return notes }
         let title = memory.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return title.isEmpty ? "No Notes" : title
+        return title.isEmpty ? L10n.t("no_notes") : title
     }
 
     var body: some View {
@@ -1370,7 +1370,7 @@ struct ReadOnlyMemoryTimelineItem: View {
         let notes = memory.notes.trimmingCharacters(in: .whitespacesAndNewlines)
         if !notes.isEmpty { return notes }
         let title = memory.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return title.isEmpty ? "No Notes" : title
+        return title.isEmpty ? L10n.t("no_notes") : title
     }
 
     var body: some View {
@@ -1538,7 +1538,7 @@ private struct EditableMemoryTimelineItem: View {
                 .disabled(memory.imagePaths.count >= maxPhotos)
                 .opacity(memory.imagePaths.count >= maxPhotos ? 0.35 : 1.0)
 
-                Text("照片 \(memory.imagePaths.count)/\(maxPhotos)")
+                Text(String(format: L10n.t("photo_count"), memory.imagePaths.count, maxPhotos))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.gray)
 
