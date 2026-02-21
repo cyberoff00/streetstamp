@@ -7,10 +7,34 @@ final class LifelogStore: ObservableObject {
     @Published private(set) var coordinates: [CoordinateCodable] = []
     @Published private(set) var currentLocation: CLLocation?
     @Published private(set) var isEnabled: Bool = true
+    @Published private(set) var availableDays: [Date] = []
 
     private struct PersistedPayload: Codable {
+        var points: [LifelogTrackPoint]
         var coordinates: [CoordinateCodable]
         var isEnabled: Bool
+    }
+
+    private struct LifelogTrackPoint: Codable {
+        var lat: Double
+        var lon: Double
+        var timestamp: Date
+
+        init(lat: Double, lon: Double, timestamp: Date) {
+            self.lat = lat
+            self.lon = lon
+            self.timestamp = timestamp
+        }
+
+        init(_ coord: CoordinateCodable, timestamp: Date) {
+            self.lat = coord.lat
+            self.lon = coord.lon
+            self.timestamp = timestamp
+        }
+
+        var coord: CoordinateCodable {
+            CoordinateCodable(lat: lat, lon: lon)
+        }
     }
 
     private let minDistanceMeters: CLLocationDistance = 25
@@ -25,6 +49,7 @@ final class LifelogStore: ObservableObject {
     private var cachedGlobePolylineSourceCount: Int = -1
     private var downsampleCache: [Int: [CoordinateCodable]] = [:]
     private var downsampleCacheSourceCount: Int = -1
+    private var points: [LifelogTrackPoint] = []
     private let syntheticMaxPoints = 320
 
     init(paths: StoragePath) {
@@ -43,6 +68,8 @@ final class LifelogStore: ObservableObject {
         cachedGlobePolylineSourceCount = -1
         downsampleCache = [:]
         downsampleCacheSourceCount = -1
+        points = []
+        availableDays = []
     }
 
     func load() {
@@ -50,6 +77,7 @@ final class LifelogStore: ObservableObject {
             let data = try? Data(contentsOf: persistURL),
             let payload = try? JSONDecoder().decode(PersistedPayload.self, from: data)
         else {
+            points = []
             coordinates = []
             isEnabled = true
             cachedDistanceMeters = 0
@@ -57,18 +85,29 @@ final class LifelogStore: ObservableObject {
             cachedGlobePolylineSourceCount = 0
             downsampleCache = [:]
             downsampleCacheSourceCount = 0
+            availableDays = []
             return
         }
 
-        coordinates = payload.coordinates
+        let loadedPoints: [LifelogTrackPoint]
+        if !payload.points.isEmpty {
+            loadedPoints = payload.points
+        } else {
+            // Legacy fallback: old payload has only coordinates.
+            let fallbackTS = Date()
+            loadedPoints = payload.coordinates.map { LifelogTrackPoint($0, timestamp: fallbackTS) }
+        }
+        points = loadedPoints
+        coordinates = loadedPoints.map(\.coord)
         isEnabled = payload.isEnabled
-        cachedDistanceMeters = totalDistanceMeters(coords: payload.coordinates)
+        cachedDistanceMeters = totalDistanceMeters(coords: coordinates)
         cachedGlobePolyline = []
         cachedGlobePolylineSourceCount = -1
         downsampleCache = [:]
         downsampleCacheSourceCount = -1
+        refreshAvailableDays()
 
-        if let last = payload.coordinates.last {
+        if let last = coordinates.last {
             lastAccepted = CLLocation(latitude: last.lat, longitude: last.lon)
             lastAcceptedAt = Date()
         }
@@ -133,14 +172,23 @@ final class LifelogStore: ObservableObject {
         }
 
         coordinates.append(c)
+        points.append(LifelogTrackPoint(c, timestamp: loc.timestamp))
         cachedGlobePolylineSourceCount = -1
         downsampleCacheSourceCount = -1
         lastAccepted = loc
         lastAcceptedAt = loc.timestamp
+        refreshAvailableDays()
         persistAsync()
     }
 
     func sampledCoordinates(maxPoints: Int) -> [CoordinateCodable] {
+        sampledCoordinates(day: nil, maxPoints: maxPoints)
+    }
+
+    func sampledCoordinates(day: Date?, maxPoints: Int) -> [CoordinateCodable] {
+        if day != nil {
+            return downsample(coords: coordsFor(day: day), maxPoints: max(maxPoints, 2))
+        }
         let target = max(maxPoints, 2)
         if downsampleCacheSourceCount != coordinates.count {
             downsampleCache.removeAll(keepingCapacity: true)
@@ -155,13 +203,17 @@ final class LifelogStore: ObservableObject {
     }
 
     func mapPolyline(maxPoints: Int) -> [CLLocationCoordinate2D] {
-        sampledCoordinates(maxPoints: maxPoints).map {
+        mapPolyline(day: nil, maxPoints: maxPoints)
+    }
+
+    func mapPolyline(day: Date?, maxPoints: Int) -> [CLLocationCoordinate2D] {
+        sampledCoordinates(day: day, maxPoints: maxPoints).map {
             CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon)
         }
     }
 
     private func persistAsync() {
-        let payload = PersistedPayload(coordinates: coordinates, isEnabled: isEnabled)
+        let payload = PersistedPayload(points: points, coordinates: coordinates, isEnabled: isEnabled)
         let url = persistURL
         DispatchQueue.global(qos: .utility).async {
             do {
@@ -198,6 +250,20 @@ final class LifelogStore: ObservableObject {
         cachedGlobePolyline = sampled
         cachedGlobePolylineSourceCount = coordinates.count
         return sampled
+    }
+
+    private func coordsFor(day: Date?) -> [CoordinateCodable] {
+        guard let day else { return coordinates }
+        let cal = Calendar.current
+        return points
+            .filter { cal.isDate($0.timestamp, inSameDayAs: day) }
+            .map(\.coord)
+    }
+
+    private func refreshAvailableDays() {
+        let cal = Calendar.current
+        let uniq = Set(points.map { cal.startOfDay(for: $0.timestamp) })
+        availableDays = uniq.sorted(by: >)
     }
 
     private func downsample(coords: [CoordinateCodable], maxPoints: Int) -> [CoordinateCodable] {
