@@ -301,10 +301,21 @@ final class LifelogStore: ObservableObject {
     func backfillHistoricalJourneysIfNeeded(from journeys: [JourneyRoute]) async {
         guard !hasBackfilledHistoricalJourneys else { return }
 
+        let completed = journeys
+            .filter { $0.endTime != nil }
+            .sorted { lhs, rhs in
+                let lStart = lhs.startTime ?? lhs.endTime ?? .distantPast
+                let rStart = rhs.startTime ?? rhs.endTime ?? .distantPast
+                if lStart != rStart { return lStart < rStart }
+                let lEnd = lhs.endTime ?? lhs.startTime ?? .distantPast
+                let rEnd = rhs.endTime ?? rhs.startTime ?? .distantPast
+                if lEnd != rEnd { return lEnd < rEnd }
+                return lhs.id < rhs.id
+            }
+
         var processed = 0
-        for journey in journeys {
+        for journey in completed {
             if Task.isCancelled { return }
-            guard journey.endTime != nil else { continue }
             _ = archiveJourneyPointsIfNeeded(journey, persistAfter: false)
             processed += 1
             if processed % 12 == 0 {
@@ -517,6 +528,73 @@ final class LifelogStore: ObservableObject {
         cachedGlobePolyline = sampled
         cachedGlobePolylineSourceCount = coordinates.count
         return sampled
+    }
+
+    func globeJourneys(
+        maxPointsPerSegment: Int = 280,
+        splitDistanceMeters: CLLocationDistance = 25_000,
+        splitTimeGapSeconds: TimeInterval = 2 * 60 * 60
+    ) -> [JourneyRoute] {
+        guard points.count >= 2 else {
+            if hasTrack { return [syntheticJourney] }
+            return []
+        }
+
+        var groups: [[LifelogTrackPoint]] = []
+        var current: [LifelogTrackPoint] = [points[0]]
+
+        for idx in 1..<points.count {
+            let prev = points[idx - 1]
+            let now = points[idx]
+
+            let dt = now.timestamp.timeIntervalSince(prev.timestamp)
+            let a = CLLocation(latitude: prev.lat, longitude: prev.lon)
+            let b = CLLocation(latitude: now.lat, longitude: now.lon)
+            let d = b.distance(from: a)
+
+            if dt > splitTimeGapSeconds || d > splitDistanceMeters {
+                if current.count >= 2 {
+                    groups.append(current)
+                }
+                current = [now]
+            } else {
+                current.append(now)
+            }
+        }
+
+        if current.count >= 2 {
+            groups.append(current)
+        }
+
+        if groups.isEmpty {
+            return [syntheticJourney]
+        }
+
+        var out: [JourneyRoute] = []
+        out.reserveCapacity(groups.count)
+
+        for (index, segment) in groups.enumerated() {
+            let coords = segment.map { CoordinateCodable(lat: $0.lat, lon: $0.lon) }
+            let sampled = downsample(coords: coords, maxPoints: max(2, maxPointsPerSegment))
+            guard sampled.count >= 2 else { continue }
+
+            var route = JourneyRoute()
+            let startTS = segment.first?.timestamp ?? .distantPast
+            let endTS = segment.last?.timestamp ?? startTS
+            route.id = "lifelog.globe.segment.\(index).\(Int(startTS.timeIntervalSince1970))"
+            route.startTime = startTS
+            route.endTime = endTS
+            route.cityName = "Lifelog"
+            route.currentCity = "Lifelog"
+            route.canonicalCity = "Lifelog"
+            route.cityKey = "Lifelog|"
+            route.coordinates = sampled
+            route.thumbnailCoordinates = sampled
+            route.distance = totalDistanceMeters(coords: sampled)
+            out.append(route)
+        }
+
+        return out
     }
 
     private func coordsFor(day: Date?) -> [CoordinateCodable] {

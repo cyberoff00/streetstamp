@@ -16,7 +16,7 @@ enum NavigationTab: Int, CaseIterable, Identifiable {
 
     /// Sidebar order aligned with current product UI.
     static var allCases: [NavigationTab] {
-        [.start, .memory, .cities, .lifelog, .profile, .settings]
+        [.start, .memory, .cities, .friends, .lifelog, .profile, .settings]
     }
 
     var title: String {

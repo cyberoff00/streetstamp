@@ -2,6 +2,7 @@ import SwiftUI
 import AuthenticationServices
 
 struct AccountCenterView: View {
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var journeyStore: JourneyStore
     @EnvironmentObject private var cityCache: CityCache
@@ -23,21 +24,37 @@ struct AccountCenterView: View {
     @State private var message = ""
     @State private var showMessage = false
     @State private var recoveryCandidates: [GuestRecoveryCandidate] = []
+    @State private var showAuthSheet = false
+    @State private var authSheetMode: AuthEntryMode = .signIn
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 14) {
-                backendCard
-                authCard
-                accountCard
-                migrationCard
-                recoveryCard
+        VStack(spacing: 0) {
+            topBar
+
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 18) {
+                    sectionTitle("ACCOUNT")
+                    accountPanel
+
+                    sectionTitle("DATA")
+                    dataPanel
+
+                    sectionTitle("SECURITY")
+                    securityPanel
+
+                    if !sessionStore.isLoggedIn {
+                        sectionTitle("DEVELOPER")
+                        backendCard
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
+                .padding(.bottom, 24)
             }
-            .padding(16)
         }
         .background(FigmaTheme.background.ignoresSafeArea())
-        .navigationTitle("账户中心")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .navigationBarHidden(true)
         .task {
             await refreshMeIfPossible()
             scanRecoveryCandidates()
@@ -47,6 +64,225 @@ struct AccountCenterView: View {
         } message: {
             Text(message)
         }
+        .sheet(isPresented: $showAuthSheet) {
+            AuthEntryView(
+                onContinueGuest: { showAuthSheet = false },
+                initialMode: authSheetMode,
+                onAuthenticated: {
+                    Task { await refreshMeIfPossible() }
+                    showAuthSheet = false
+                }
+            )
+            .environmentObject(sessionStore)
+        }
+    }
+
+    private var topBar: some View {
+        HStack(spacing: 8) {
+            Button {
+                dismiss()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 18, weight: .medium))
+                    Text("BACK")
+                        .font(.system(size: 14, weight: .black))
+                }
+                .foregroundColor(.black)
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+
+            Text("Account Center")
+                .font(.system(size: 24, weight: .black))
+                .foregroundColor(.black)
+
+            Spacer()
+
+            Button {
+                dismiss()
+            } label: {
+                Text("Done")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(FigmaTheme.primary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 10)
+        .background(Color.white.opacity(0.92))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.black.opacity(0.08))
+                .frame(height: 1)
+        }
+    }
+
+    private func sectionTitle(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 33 * 0.48, weight: .black))
+            .foregroundColor(FigmaTheme.subtext)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var accountPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if sessionStore.isLoggedIn {
+                Text(displayNameDraft.isEmpty ? "Explorer" : displayNameDraft)
+                    .font(.system(size: 32 * 0.58, weight: .black))
+                    .foregroundColor(.black)
+
+                Group {
+                    TextField("昵称（可重复）", text: $displayNameDraft)
+                        .textFieldStyle(.roundedBorder)
+                    TextField("handle（唯一）", text: $handleDraft)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled(true)
+                        .textFieldStyle(.roundedBorder)
+                }
+                .font(.system(size: 14, weight: .semibold))
+
+                Picker("主页可见性", selection: $profileVisibility) {
+                    ForEach(ProfileVisibility.allCases) { v in
+                        Text(v.titleCN).tag(v)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                HStack(spacing: 8) {
+                    capsuleAction("保存昵称", filled: true) { Task { await updateDisplayName() } }
+                    capsuleAction("保存 Handle", filled: false) { Task { await updateHandle() } }
+                    capsuleAction("可见性", filled: false) { Task { await updateVisibility() } }
+                }
+
+                capsuleAction("退出登录", filled: false) {
+                    sessionStore.logoutToGuest()
+                    myProfile = nil
+                    toast("已切回游客模式")
+                }
+            } else {
+                Text("Guest Mode")
+                    .font(.system(size: 32 * 0.58, weight: .black))
+                    .foregroundColor(.black)
+
+                Divider().overlay(Color.black.opacity(0.08))
+
+                Text("Please login to access your account")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(FigmaTheme.subtext)
+
+                capsuleAction("LOGIN", filled: true) {
+                    authSheetMode = .signIn
+                    showAuthSheet = true
+                }
+                capsuleAction("REGISTER", filled: false) {
+                    authSheetMode = .register
+                    showAuthSheet = true
+                }
+            }
+        }
+        .cardStyle()
+        .onChange(of: profileVisibility) { _, newValue in
+            ProfileSharingSettings.visibility = newValue
+        }
+    }
+
+    private var dataPanel: some View {
+        VStack(spacing: 0) {
+            infoRow(
+                icon: "externaldrive",
+                title: "Check Local Data Migration",
+                subtitle: "Verify device Lifelog data migration"
+            ) {
+                scanRecoveryCandidates()
+                if recoveryCandidates.isEmpty {
+                    toast("未发现可恢复的本地数据")
+                } else {
+                    toast("发现 \(recoveryCandidates.count) 组可恢复本地数据")
+                }
+            }
+            Divider().overlay(Color.black.opacity(0.08))
+            infoRow(
+                icon: "arrow.triangle.2.circlepath",
+                title: "Lifelog Device Transfer",
+                subtitle: "Import/Export data to new device"
+            ) {
+                toast("Lifelog 不上云，请使用本地导入/导出手动迁移")
+            }
+            if sessionStore.isLoggedIn {
+                Divider().overlay(Color.black.opacity(0.08))
+                infoRow(
+                    icon: "icloud.and.arrow.up",
+                    title: "Sync Shareable Journeys",
+                    subtitle: "Upload public/friendsOnly journeys and memories"
+                ) {
+                    Task { await migrateAll() }
+                }
+            }
+        }
+        .cardStyle()
+    }
+
+    private var securityPanel: some View {
+        VStack(spacing: 0) {
+            infoRow(
+                icon: "key",
+                title: "Change Password",
+                subtitle: "Update account password"
+            ) {
+                toast("后端尚未提供改密接口，先保留此入口")
+            }
+        }
+        .cardStyle()
+    }
+
+    private func infoRow(icon: String, title: String, subtitle: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(FigmaTheme.primary)
+                    .frame(width: 40, height: 40)
+                    .background(Color.black.opacity(0.03))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.system(size: 16, weight: .black))
+                        .foregroundColor(.black)
+                    Text(subtitle)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(FigmaTheme.subtext)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(FigmaTheme.subtext)
+            }
+            .padding(.vertical, 14)
+            .padding(.horizontal, 8)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func capsuleAction(_ title: String, filled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 14, weight: .black))
+                .foregroundColor(filled ? .white : .black)
+                .frame(maxWidth: .infinity)
+                .frame(height: 48)
+                .background(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .fill(filled ? FigmaTheme.primary : Color.clear)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .stroke(Color.black.opacity(filled ? 0 : 0.12), lineWidth: filled ? 0 : 2)
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     private var backendCard: some View {

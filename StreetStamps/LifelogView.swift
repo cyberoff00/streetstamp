@@ -128,6 +128,7 @@ struct LifelogView: View {
             GlobeViewScreen(showSidebar: .constant(false), externalJourneys: globeJourneysSnapshot)
                 .environmentObject(store)
                 .environmentObject(cityCache)
+                .environmentObject(lifelogStore)
         }
         .sheet(item: $shareItem) { item in
             ShareSheet(activityItems: [item.image])

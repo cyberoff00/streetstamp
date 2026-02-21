@@ -68,25 +68,16 @@ enum RouteRenderingPipeline {
             .distance(from: CLLocation(latitude: b.latitude, longitude: b.longitude))
     }
 
-    /// Flight-like when points are very sparse relative to distance (or a huge single jump).
+    /// Flight-like only when points are sparse AND the overall movement span is large.
+    /// This avoids promoting normal tracked routes to "flight" just because of one bad jump.
     private static func isFlightLike(_ coords: [CLLocationCoordinate2D]) -> Bool {
         guard coords.count >= 2 else { return false }
         let first = coords.first!
         let last = coords.last!
-        let total = distanceMeters(first, last)
-
-        var hasBigJump = false
-        if coords.count >= 3 {
-            for i in 1..<coords.count {
-                if distanceMeters(coords[i-1], coords[i]) > 20_000 {
-                    hasBigJump = true
-                    break
-                }
-            }
-        }
-
-        let fewPointsButFar = (coords.count <= 6 && total > 80_000)
-        return hasBigJump || fewPointsButFar
+        let spanMeters = distanceMeters(first, last)
+        let sparsePoints = coords.count <= 8
+        let largeSpan = spanMeters >= 120_000
+        return sparsePoints && largeSpan
     }
 
     /// Build solid/dashed segments based on distance only (time isn't always available for cached routes).

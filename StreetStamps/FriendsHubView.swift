@@ -36,6 +36,8 @@ private enum FriendsRoute: Hashable, Identifiable {
     case profile(String)
     case journeys(String)
     case cities(String)
+    case equipment(String)
+    case publicMemories(String)
     case journey(friendID: String, journeyID: String)
 
     var id: String {
@@ -46,6 +48,10 @@ private enum FriendsRoute: Hashable, Identifiable {
             return "journeys_\(friendID)"
         case .cities(let friendID):
             return "cities_\(friendID)"
+        case .equipment(let friendID):
+            return "equipment_\(friendID)"
+        case .publicMemories(let friendID):
+            return "public_memories_\(friendID)"
         case .journey(let friendID, let journeyID):
             return "journey_\(friendID)_\(journeyID)"
         }
@@ -97,10 +103,10 @@ struct FriendsHubView: View {
             header
             tabSwitcher
 
-            Divider().overlay(Color.black.opacity(0.08))
+            Divider().overlay(Color.black.opacity(0.06))
 
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 14) {
+                VStack(spacing: 16) {
                     if tab == .activity {
                         if feedEvents.isEmpty {
                             emptyState(L10n.t("friends_empty_activity"))
@@ -139,9 +145,9 @@ struct FriendsHubView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 10)
-                .padding(.top, 14)
-                .padding(.bottom, 24)
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+                .padding(.bottom, 30)
             }
             .refreshable {
                 await refreshRemoteFriends()
@@ -159,6 +165,10 @@ struct FriendsHubView: View {
                 FriendJourneysScreen(friendID: friendID)
             case .cities(let friendID):
                 FriendCitiesScreen(friendID: friendID)
+            case .equipment(let friendID):
+                FriendEquipmentScreen(friendID: friendID)
+            case .publicMemories(let friendID):
+                FriendPublicMemoriesScreen(friendID: friendID)
             case .journey(let friendID, let journeyID):
                 FriendJourneyRouteScreen(friendID: friendID, journeyID: journeyID)
             }
@@ -199,11 +209,17 @@ struct FriendsHubView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             Button {
                 dismiss()
             } label: {
-                Image(systemName: "chevron.left")
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 18, weight: .medium))
+                    Text("BACK")
+                        .font(.system(size: 14, weight: .black))
+                        .tracking(0.3)
+                }
                 .foregroundColor(.black)
             }
             .buttonStyle(.plain)
@@ -211,7 +227,8 @@ struct FriendsHubView: View {
             Spacer()
 
             Text(L10n.t("friends_title"))
-                .appHeaderStyle()
+                .font(.system(size: 32, weight: .black))
+                .tracking(-0.4)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
 
@@ -221,23 +238,19 @@ struct FriendsHubView: View {
                 Button {
                     showAddFriendSheet = true
                 } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 18, weight: .semibold))
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 24, weight: .bold))
                         .foregroundColor(.black)
-                        .frame(width: 34, height: 34)
-                        .background(Color.white)
-                        .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
             } else {
-                Color.clear
-                    .frame(width: 34, height: 34)
+                Color.clear.frame(width: 24, height: 24)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 12)
-        .padding(.bottom, 10)
-        .background(FigmaTheme.background)
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 12)
+        .background(Color.white.opacity(0.92))
     }
 
     private var tabSwitcher: some View {
@@ -249,20 +262,27 @@ struct FriendsHubView: View {
                     }
                 } label: {
                     Text(item.title)
-                        .appBodyStrongStyle()
-                        .foregroundColor(tab == item ? .white : Color.black.opacity(0.55))
+                        .font(.system(size: 14, weight: .black))
+                        .foregroundColor(tab == item ? .white : FigmaTheme.subtext)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 54)
+                        .frame(height: 44)
                         .background(
                             Capsule()
                                 .fill(tab == item ? FigmaTheme.primary : Color.clear)
+                                .shadow(
+                                    color: tab == item ? FigmaTheme.primary.opacity(0.22) : .clear,
+                                    radius: 10,
+                                    x: 0,
+                                    y: 6
+                                )
                         )
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.bottom, 14)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
+        .background(Color.white.opacity(0.92))
     }
 
     private func emptyState(_ text: String) -> some View {
@@ -296,61 +316,86 @@ struct FriendsHubView: View {
         var events: [FriendFeedEvent] = []
 
         for friend in friends {
-            let sortedJourneys = friend.journeys.sorted {
-                ($0.endTime ?? $0.startTime ?? .distantPast) > ($1.endTime ?? $1.startTime ?? .distantPast)
+            let publicJourneys = friend.journeys
+                .filter { $0.visibility == .public }
+                .sorted {
+                    feedTimestamp(for: $0) > feedTimestamp(for: $1)
+                }
+
+            guard !publicJourneys.isEmpty else { continue }
+
+            let firstJourneyByCity: [String: String] = {
+                var map: [String: String] = [:]
+                let ascending = publicJourneys.sorted {
+                    feedTimestamp(for: $0) < feedTimestamp(for: $1)
+                }
+                for journey in ascending {
+                    let cityKey = normalizeCityKey(journey.title)
+                    guard !cityKey.isEmpty, map[cityKey] == nil else { continue }
+                    map[cityKey] = journey.id
+                }
+                return map
             }
 
-            if let latestJourney = sortedJourneys.first {
-                let eventDate = latestJourney.endTime ?? latestJourney.startTime ?? friend.createdAt
-                let city = friend.unlockedCityCards.first?.name ?? latestJourney.title
+            for journey in publicJourneys.prefix(12) {
+                let eventDate = feedTimestamp(for: journey)
+                let cityName = journey.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                let cityKey = normalizeCityKey(cityName)
+                let memoryCount = journey.memories.count
+                let photoCount = journey.memories.reduce(0) { $0 + $1.imageURLs.count }
+                let unlockedNewCity = !cityKey.isEmpty && firstJourneyByCity[cityKey] == journey.id
+
+                let kind: FriendFeedEvent.Kind
+                if unlockedNewCity {
+                    kind = .city
+                } else if memoryCount > 0 {
+                    kind = .memory
+                } else {
+                    kind = .journey
+                }
+
+                let eventTitle: String
+                let metaText: String
+                switch kind {
+                case .city:
+                    eventTitle = String(format: L10n.t("friends_event_visited"), cityName.isEmpty ? "Unknown City" : cityName)
+                    metaText = ""
+                case .memory:
+                    eventTitle = String(format: L10n.t("friends_event_added_memories"), memoryCount)
+                    metaText = "\(max(photoCount, memoryCount)) photos"
+                case .journey:
+                    eventTitle = String(format: L10n.t("friends_event_completed"), journey.title)
+                    metaText = "\(formatDistance(journey.distance))  \(formatDuration(start: journey.startTime, end: journey.endTime))"
+                }
+
                 events.append(
                     FriendFeedEvent(
-                        id: "journey_\(friend.id)_\(latestJourney.id)",
-                        kind: .journey,
+                        id: "feed_\(friend.id)_\(journey.id)",
+                        kind: kind,
                         friendID: friend.id,
                         timestamp: eventDate,
-                        journeyID: latestJourney.id,
-                        title: String(format: L10n.t("friends_event_completed"), latestJourney.title),
-                        location: city,
-                        meta: "\(formatDistance(latestJourney.distance))  \(formatDuration(start: latestJourney.startTime, end: latestJourney.endTime))"
-                    )
-                )
-
-                let memoryCount = latestJourney.memories.count
-                if memoryCount > 0 {
-                    let photos = latestJourney.memories.reduce(0) { $0 + $1.imageURLs.count }
-                    events.append(
-                        FriendFeedEvent(
-                            id: "memory_\(friend.id)_\(latestJourney.id)",
-                            kind: .memory,
-                            friendID: friend.id,
-                            timestamp: eventDate.addingTimeInterval(-120),
-                            journeyID: latestJourney.id,
-                            title: String(format: L10n.t("friends_event_added_memories"), memoryCount),
-                            location: city,
-                            meta: "\(max(photos, memoryCount)) photos"
-                        )
-                    )
-                }
-            }
-
-            if let city = friend.unlockedCityCards.first {
-                events.append(
-                    FriendFeedEvent(
-                        id: "city_\(friend.id)_\(city.id)",
-                        kind: .city,
-                        friendID: friend.id,
-                        timestamp: friend.createdAt.addingTimeInterval(-240),
-                        journeyID: nil,
-                        title: String(format: L10n.t("friends_event_visited"), city.name),
-                        location: city.countryISO2 ?? "",
-                        meta: ""
+                        journeyID: journey.id,
+                        title: eventTitle,
+                        location: cityName,
+                        meta: metaText
                     )
                 )
             }
         }
 
-        return events.sorted { $0.timestamp > $1.timestamp }
+        return events
+            .sorted { $0.timestamp > $1.timestamp }
+            .prefix(60)
+            .map { $0 }
+    }
+
+    private func feedTimestamp(for journey: FriendSharedJourney) -> Date {
+        let memoryDate = journey.memories.map(\.timestamp).max() ?? .distantPast
+        return max(memoryDate, journey.endTime ?? journey.startTime ?? .distantPast)
+    }
+
+    private func normalizeCityKey(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     private func formatDistance(_ meters: Double) -> String {
@@ -371,6 +416,38 @@ struct FriendsHubView: View {
         loadingRemote = true
         defer { loadingRemote = false }
         await socialStore.reloadFromBackendIfPossible(accessToken: sessionStore.currentAccessToken)
+        await pollUnreadNotifications()
+    }
+
+    @MainActor
+    private func pollUnreadNotifications() async {
+        guard BackendConfig.isEnabled,
+              let token = sessionStore.currentAccessToken,
+              !token.isEmpty else { return }
+        do {
+            let unread = try await BackendAPIClient.shared.fetchNotifications(token: token, unreadOnly: true)
+            guard !unread.isEmpty else { return }
+
+            let likeItems = unread.filter { $0.type == "journey_like" }
+            if let latest = likeItems.sorted(by: { $0.createdAt > $1.createdAt }).first {
+                toastText = latest.message
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showToast = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showToast = false
+                    }
+                }
+            }
+
+            try? await BackendAPIClient.shared.markNotificationsRead(
+                token: token,
+                ids: unread.map(\.id)
+            )
+        } catch {
+            // Keep social feed resilient even if reminder endpoint fails.
+        }
     }
 }
 
@@ -405,73 +482,74 @@ private struct FriendActivityCard: View {
 
     private var agoText: String {
         let delta = max(1, Int(Date().timeIntervalSince(event.timestamp)))
-        if delta < 3600 { return "\(max(1, delta / 60))M AGO" }
-        if delta < 86400 { return "\(max(1, delta / 3600))H AGO" }
-        if delta < 7 * 86400 { return "\(max(1, delta / 86400))D AGO" }
-        return "\(max(1, delta / (7 * 86400)))W AGO"
+        if delta < 3600 { return "\(max(1, delta / 60))m ago".uppercased() }
+        if delta < 86400 { return "\(max(1, delta / 3600))h ago".uppercased() }
+        if delta < 7 * 86400 { return "\(max(1, delta / 86400))d ago".uppercased() }
+        return "\(max(1, delta / (7 * 86400)))w ago".uppercased()
     }
 
     var body: some View {
-        Button(action: onOpenEvent) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .top, spacing: 12) {
-                    Button(action: onOpenProfile) {
-                        RobotRendererView(size: 38, face: .front, loadout: friend.loadout)
-                            .frame(width: 62, height: 62)
-                            .background(Color(red: 227.0 / 255.0, green: 239.0 / 255.0, blue: 235.0 / 255.0))
-                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(friend.displayName)
-                                .font(.system(size: 16, weight: .bold))
-                            Spacer(minLength: 4)
-                            Text(agoText)
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(.black.opacity(0.55))
-                        }
-                        Text(event.title)
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundColor(.black.opacity(0.68))
-                            .lineLimit(2)
-
-                        if !event.location.isEmpty {
-                            HStack(spacing: 5) {
-                                Image(systemName: "location")
-                                    .font(.system(size: 11, weight: .semibold))
-                                Text(event.location)
-                                    .font(.system(size: 14, weight: .medium))
-                            }
-                            .foregroundColor(.black.opacity(0.58))
-                        }
-                    }
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Button(action: onOpenProfile) {
+                    RobotRendererView(size: 36, face: .front, loadout: friend.loadout)
+                        .frame(width: 56, height: 56)
+                        .background(Color(red: 227.0 / 255.0, green: 239.0 / 255.0, blue: 235.0 / 255.0))
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
+                .buttonStyle(.plain)
 
-                HStack {
-                    HStack(spacing: 8) {
-                        Text(badgeLabel)
-                            .font(.system(size: 11, weight: .semibold))
-                        if !event.meta.isEmpty {
-                            Text(event.meta)
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(.black.opacity(0.62))
-                        }
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(friend.displayName)
+                            .font(.system(size: 15, weight: .black))
+                        Spacer(minLength: 4)
+                        Text(agoText)
+                            .font(.system(size: 10, weight: .semibold))
+                            .tracking(0.6)
+                            .foregroundColor(FigmaTheme.subtext)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(badgeColor)
-                    .clipShape(Capsule())
-                    .foregroundColor(badgeTextColor)
+                    Text(event.title)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(FigmaTheme.subtext)
+                        .lineLimit(2)
 
-                    Spacer()
+                    if !event.location.isEmpty {
+                        HStack(spacing: 5) {
+                            Image(systemName: "location")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text(event.location)
+                                .font(.system(size: 13, weight: .medium))
+                        }
+                        .foregroundColor(FigmaTheme.subtext)
+                    }
                 }
             }
-            .padding(16)
-            .figmaSurfaceCard(radius: 32)
+
+            HStack(spacing: 10) {
+                Text(badgeLabel)
+                    .font(.system(size: 12, weight: .black))
+                    .tracking(0.6)
+                    .foregroundColor(badgeTextColor)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .background(badgeColor)
+                    .clipShape(Capsule())
+
+                if !event.meta.isEmpty {
+                    Text(event.meta)
+                        .font(.system(size: 12, weight: .black))
+                        .foregroundColor(FigmaTheme.subtext)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+            }
         }
-        .buttonStyle(.plain)
+        .padding(18)
+        .figmaSurfaceCard(radius: 32)
+        .contentShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+        .onTapGesture(perform: onOpenEvent)
     }
 }
 
@@ -489,30 +567,30 @@ private struct AllFriendsCard: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            RobotRendererView(size: 38, face: .front, loadout: friend.loadout)
-                .frame(width: 62, height: 62)
+            RobotRendererView(size: 36, face: .front, loadout: friend.loadout)
+                .frame(width: 56, height: 56)
                 .background(Color(red: 227.0 / 255.0, green: 239.0 / 255.0, blue: 235.0 / 255.0))
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(friend.displayName)
-                    .font(.system(size: 16, weight: .bold))
+                    .font(.system(size: 15, weight: .black))
                     .foregroundColor(.black)
                 Text(activeText)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.black.opacity(0.55))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(FigmaTheme.subtext)
             }
 
             Spacer(minLength: 12)
 
             VStack(alignment: .trailing, spacing: 3) {
                 Text(distanceLabel)
-                    .font(.system(size: 16, weight: .bold))
+                    .font(.system(size: 16, weight: .black))
                     .foregroundColor(.black)
                 Text(cityLabel)
                     .font(.system(size: 12, weight: .semibold))
                     .tracking(1)
-                    .foregroundColor(.black.opacity(0.48))
+                    .foregroundColor(FigmaTheme.subtext)
             }
         }
         .padding(16)
@@ -673,7 +751,7 @@ private struct FriendProfileScreen: View {
     var body: some View {
         let f = friend ?? fallbackFriend
 
-        VStack(spacing: 14) {
+        VStack(spacing: 0) {
             HStack {
                 Button {
                     dismiss()
@@ -682,22 +760,44 @@ private struct FriendProfileScreen: View {
                         .foregroundColor(.black)
                 }
                 .buttonStyle(.plain)
+
                 Spacer()
+
                 Text(f.displayName)
                     .font(.system(size: 20, weight: .bold))
+
                 Spacer()
-                Color.clear.frame(width: 60)
+
+                Color.clear.frame(width: 44)
             }
             .padding(.horizontal, 12)
             .padding(.top, 10)
+            .padding(.bottom, 8)
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 14) {
                     VStack(spacing: 8) {
-                        RobotRendererView(size: 92, face: .front, loadout: f.loadout)
-                            .frame(width: 130, height: 130)
-                            .background(Color(red: 227.0/255.0, green: 239.0/255.0, blue: 235.0/255.0))
-                            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                        ZStack(alignment: .topTrailing) {
+                            RobotRendererView(size: 92, face: .front, loadout: f.loadout)
+                                .frame(width: 130, height: 130)
+                                .background(Color(red: 227.0 / 255.0, green: 239.0 / 255.0, blue: 235.0 / 255.0))
+                                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+
+                            NavigationLink(value: FriendsRoute.equipment(friendID)) {
+                                Image(systemName: "tshirt.fill")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundColor(.black)
+                                    .frame(width: 30, height: 30)
+                                    .background(Color.white)
+                                    .clipShape(Circle())
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .offset(x: 8, y: -8)
+                        }
 
                         Text(f.displayName)
                             .font(.system(size: 18, weight: .bold))
@@ -723,13 +823,28 @@ private struct FriendProfileScreen: View {
                         ProfileStatChip(title: "Cities", value: "\(f.stats.totalUnlockedCities)")
                     }
 
-                    NavigationLink(value: FriendsRoute.journeys(friendID)) {
-                        FriendSectionLink(title: "Journeys", subtitle: "查看好友公开/好友可见旅程")
-                    }
-                    .buttonStyle(.plain)
+                    HStack(spacing: 10) {
+                        NavigationLink(value: FriendsRoute.cities(friendID)) {
+                            FriendEntryCard(
+                                icon: "map",
+                                title: "CITY LIBRARY",
+                                subtitle: "好友城市卡片（只读）"
+                            )
+                        }
+                        .buttonStyle(.plain)
 
-                    NavigationLink(value: FriendsRoute.cities(friendID)) {
-                        FriendSectionLink(title: "Cities", subtitle: "查看好友解锁城市卡片")
+                        NavigationLink(value: FriendsRoute.journeys(friendID)) {
+                            FriendEntryCard(
+                                icon: "point.topleft.down.curvedto.point.bottomright.up",
+                                title: "JOURNEY ROUTES",
+                                subtitle: "筛选公开/好友可见线路"
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    NavigationLink(value: FriendsRoute.publicMemories(friendID)) {
+                        FriendSectionLink(title: "Public Journey Memories", subtitle: "仅查看公开旅程的 memory 内容")
                     }
                     .buttonStyle(.plain)
 
@@ -808,40 +923,114 @@ private struct FriendSectionLink: View {
     }
 }
 
+private struct FriendEntryCard: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundColor(.black.opacity(0.82))
+            Text(title)
+                .font(.system(size: 12, weight: .black))
+                .foregroundColor(.black)
+                .lineLimit(1)
+            Text(subtitle)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.black.opacity(0.55))
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, minHeight: 106, alignment: .topLeading)
+        .padding(12)
+        .background(Color.white)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
 private struct FriendJourneysScreen: View {
+    private enum VisibilityFilter: String, CaseIterable, Identifiable {
+        case all
+        case `public`
+        case friendsOnly
+
+        var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .all: return "全部"
+            case .public: return "公开"
+            case .friendsOnly: return "好友可见"
+            }
+        }
+    }
+
     @EnvironmentObject private var socialStore: SocialGraphStore
     let friendID: String
+    @State private var filter: VisibilityFilter = .all
 
     var body: some View {
         let friend = socialStore.friends.first(where: { $0.id == friendID })
-        let journeys = friend?.journeys.sorted { ($0.endTime ?? $0.startTime ?? .distantPast) > ($1.endTime ?? $1.startTime ?? .distantPast) } ?? []
+        let allJourneys = friend?.journeys.sorted {
+            ($0.endTime ?? $0.startTime ?? .distantPast) > ($1.endTime ?? $1.startTime ?? .distantPast)
+        } ?? []
+        let journeys: [FriendSharedJourney]
+        switch filter {
+        case .all:
+            journeys = allJourneys
+        case .public:
+            journeys = allJourneys.filter { $0.visibility == .public }
+        case .friendsOnly:
+            journeys = allJourneys.filter { $0.visibility == .friendsOnly }
+        }
 
-        ScrollView {
-            VStack(spacing: 10) {
-                ForEach(journeys) { journey in
-                    NavigationLink(value: FriendsRoute.journey(friendID: friendID, journeyID: journey.id)) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(journey.title)
-                                    .font(.system(size: 15, weight: .bold))
-                                    .foregroundColor(.black)
-                                Text(journey.visibility.titleCN)
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundColor(.black.opacity(0.55))
-                            }
-                            Spacer()
-                            Text(String(format: "%.1fkm", journey.distance / 1000.0))
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundColor(.black)
-                        }
-                        .padding(14)
-                        .background(Color.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
+        VStack(spacing: 0) {
+            Picker("可见度", selection: $filter) {
+                ForEach(VisibilityFilter.allCases) { item in
+                    Text(item.label).tag(item)
                 }
             }
-            .padding(12)
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 12)
+            .padding(.top, 10)
+            .padding(.bottom, 8)
+
+            ScrollView {
+                VStack(spacing: 10) {
+                    if journeys.isEmpty {
+                        Text("这个筛选下暂无可见线路")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.top, 24)
+                    }
+
+                    ForEach(journeys) { journey in
+                        NavigationLink(value: FriendsRoute.journey(friendID: friendID, journeyID: journey.id)) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(journey.title)
+                                        .font(.system(size: 15, weight: .bold))
+                                        .foregroundColor(.black)
+                                    Text(journey.visibility.titleCN)
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundColor(.black.opacity(0.55))
+                                }
+                                Spacer()
+                                Text(String(format: "%.1fkm", journey.distance / 1000.0))
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundColor(.black)
+                            }
+                            .padding(14)
+                            .background(Color.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(12)
+            }
         }
         .background(Color(red: 251.0/255.0, green: 251.0/255.0, blue: 249.0/255.0).ignoresSafeArea())
         .navigationTitle(L10n.t("journeys_title"))
@@ -868,11 +1057,140 @@ private struct FriendCitiesScreen: View {
     }
 }
 
+private struct FriendEquipmentScreen: View {
+    @EnvironmentObject private var socialStore: SocialGraphStore
+    @ObservedObject private var catalogStore: AvatarCatalogStore = .shared
+
+    let friendID: String
+
+    private var friend: FriendProfileSnapshot? {
+        socialStore.friends.first(where: { $0.id == friendID })
+    }
+
+    private func equippedName(categoryID: String, itemID: String?) -> String {
+        guard let itemID, !itemID.isEmpty else { return "None" }
+        let nameKey = catalogStore.item(categoryId: categoryID, itemId: itemID)?.nameKey ?? itemID
+        return L10n.t(nameKey)
+    }
+
+    var body: some View {
+        if let friend {
+            ScrollView {
+                VStack(spacing: 12) {
+                    RobotRendererView(size: 150, face: .front, loadout: friend.loadout)
+                        .frame(width: 180, height: 180)
+                        .background(Color(red: 227.0/255.0, green: 239.0/255.0, blue: 235.0/255.0))
+                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        FriendEquipmentRow(title: "Hair", value: equippedName(categoryID: "hair", itemID: friend.loadout.hairId))
+                        FriendEquipmentRow(title: "Outfit", value: equippedName(categoryID: "outfit", itemID: friend.loadout.outfitId))
+                        FriendEquipmentRow(title: "Accessory", value: equippedName(categoryID: "accessory", itemID: friend.loadout.accessoryId))
+                        FriendEquipmentRow(title: "Expression", value: equippedName(categoryID: "expression", itemID: friend.loadout.expressionId))
+                    }
+                    .padding(14)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .padding(12)
+            }
+            .background(Color(red: 251.0/255.0, green: 251.0/255.0, blue: 249.0/255.0).ignoresSafeArea())
+            .navigationTitle("\(friend.displayName) Equipment")
+        } else {
+            Text(L10n.t("content_unavailable"))
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.secondary)
+        }
+    }
+}
+
+private struct FriendEquipmentRow: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(.black.opacity(0.7))
+            Spacer()
+            Text(value)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.black)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct FriendPublicMemoriesScreen: View {
+    @EnvironmentObject private var socialStore: SocialGraphStore
+    let friendID: String
+
+    private struct PublicMemoryItem: Identifiable {
+        let id: String
+        let journeyTitle: String
+        let memory: FriendSharedMemory
+    }
+
+    private var items: [PublicMemoryItem] {
+        guard let friend = socialStore.friends.first(where: { $0.id == friendID }) else { return [] }
+        return friend.journeys
+            .filter { $0.visibility == .public }
+            .flatMap { journey in
+                journey.memories.map {
+                    PublicMemoryItem(id: "\(journey.id)_\($0.id)", journeyTitle: journey.title, memory: $0)
+                }
+            }
+            .sorted { $0.memory.timestamp > $1.memory.timestamp }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 10) {
+                if items.isEmpty {
+                    Text("暂无公开旅程记忆")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.top, 24)
+                }
+
+                ForEach(items) { item in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(item.memory.title.isEmpty ? "Untitled" : item.memory.title)
+                            .font(.system(size: 14, weight: .bold))
+                        Text(item.journeyTitle)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.black.opacity(0.5))
+                        if !item.memory.notes.isEmpty {
+                            Text(item.memory.notes)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.black.opacity(0.68))
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+            }
+            .padding(12)
+        }
+        .background(Color(red: 251.0/255.0, green: 251.0/255.0, blue: 249.0/255.0).ignoresSafeArea())
+        .navigationTitle("Public Memories")
+    }
+}
+
 private struct FriendJourneyRouteScreen: View {
     @EnvironmentObject private var socialStore: SocialGraphStore
+    @EnvironmentObject private var sessionStore: UserSessionStore
 
     let friendID: String
     let journeyID: String
+
+    @State private var likeCount: Int = 0
+    @State private var likedByMe: Bool = false
+    @State private var likesLoading = false
 
     private var friend: FriendProfileSnapshot? {
         socialStore.friends.first(where: { $0.id == friendID })
@@ -912,6 +1230,31 @@ private struct FriendJourneyRouteScreen: View {
                                     .padding(.vertical, 4)
                                     .background(Color.black.opacity(0.07))
                                     .clipShape(Capsule())
+                            }
+                            HStack(spacing: 10) {
+                                Button {
+                                    Task { await toggleLike() }
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: likedByMe ? "heart.fill" : "heart")
+                                            .font(.system(size: 13, weight: .bold))
+                                            .foregroundColor(likedByMe ? .red : .black.opacity(0.7))
+                                        Text("\(likeCount)")
+                                            .font(.system(size: 12, weight: .bold))
+                                            .foregroundColor(.black.opacity(0.72))
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(Color.black.opacity(0.06))
+                                    .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(likesLoading || !sessionStore.isLoggedIn)
+
+                                if likesLoading {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                }
                             }
                             Text(String(format: "%.2fkm", journey.distance / 1000.0))
                                 .font(.system(size: 13, weight: .semibold))
@@ -989,11 +1332,64 @@ private struct FriendJourneyRouteScreen: View {
                 }
                 .background(Color(red: 251.0/255.0, green: 251.0/255.0, blue: 249.0/255.0).ignoresSafeArea())
                 .navigationTitle(L10n.t("journey_route_title"))
+                .task {
+                    await loadLikeState()
+                }
             } else {
                 Text(L10n.t("content_unavailable"))
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.secondary)
             }
+        }
+    }
+
+    @MainActor
+    private func loadLikeState() async {
+        guard let token = sessionStore.currentAccessToken, !token.isEmpty else { return }
+        guard BackendConfig.isEnabled else { return }
+        do {
+            let stats = try await BackendAPIClient.shared.fetchJourneyLikeStats(
+                token: token,
+                journeyIDs: [journeyID],
+                ownerUserID: friendID
+            )
+            if let item = stats[journeyID] {
+                likeCount = item.likes
+                likedByMe = item.likedByMe
+            }
+        } catch {
+            // Keep page readable if like meta request fails.
+        }
+    }
+
+    @MainActor
+    private func toggleLike() async {
+        guard !likesLoading else { return }
+        guard let token = sessionStore.currentAccessToken, !token.isEmpty else { return }
+        guard BackendConfig.isEnabled else { return }
+        likesLoading = true
+        defer { likesLoading = false }
+
+        do {
+            if likedByMe {
+                let resp = try await BackendAPIClient.shared.unlikeJourney(
+                    token: token,
+                    ownerUserID: friendID,
+                    journeyID: journeyID
+                )
+                likeCount = max(0, resp.likes)
+                likedByMe = resp.likedByMe
+            } else {
+                let resp = try await BackendAPIClient.shared.likeJourney(
+                    token: token,
+                    ownerUserID: friendID,
+                    journeyID: journeyID
+                )
+                likeCount = max(0, resp.likes)
+                likedByMe = resp.likedByMe
+            }
+        } catch {
+            // Ignore one-off action failures to keep interaction smooth.
         }
     }
 }

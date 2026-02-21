@@ -27,7 +27,10 @@ enum JourneyCloudMigrationService {
             throw BackendAPIError.unauthorized
         }
 
-        let shareableJourneys = snapshot.journeys.filter { $0.visibility != .private }
+        let currentLoadout = AvatarLoadoutStore.load()
+        _ = try? await BackendAPIClient.shared.updateLoadout(token: token, loadout: currentLoadout)
+
+        let shareableJourneys = snapshot.journeys.filter { $0.visibility == .public || $0.visibility == .friendsOnly }
         let privateJourneysCount = snapshot.journeys.count - shareableJourneys.count
 
         let payloadResult = try await buildJourneyPayloads(

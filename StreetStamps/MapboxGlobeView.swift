@@ -23,6 +23,7 @@ private final class GlobeMapViewHolder: ObservableObject {
 struct MapboxGlobeView: View {
     @Binding var isPresented: Bool
     let journeys: [JourneyRoute]
+    var visitedCountryISO2Override: [String]? = nil
     var showsCloseButton: Bool = true
 
     @StateObject private var mapHolder = GlobeMapViewHolder()
@@ -53,6 +54,15 @@ struct MapboxGlobeView: View {
     private let citiesLayerId      = "ss-cities-symbol"
     private let cityIconId         = "ss-city-pin"
 
+    private var journeysRefreshToken: String {
+        journeys.map {
+            let end = $0.endTime?.timeIntervalSince1970 ?? 0
+            let iso = ($0.countryISO2 ?? "").uppercased()
+            return "\($0.id)|\(Int(end))|\($0.coordinates.count)|\($0.thumbnailCoordinates.count)|\(iso)|\($0.distance)"
+        }
+        .joined(separator: "||")
+    }
+
     var body: some View {
         ZStack {
             MapboxViewContainer(mapView: mapHolder.mapView)
@@ -64,6 +74,10 @@ struct MapboxGlobeView: View {
                 }
                 .onChange(of: journeys.count) { newCount in
                     print("📍 onChange: journeys.count changed to \(newCount)")
+                    refreshData()
+                    updateCountryGlow()
+                }
+                .onChange(of: journeysRefreshToken) { _ in
                     refreshData()
                     updateCountryGlow()
                 }
@@ -552,62 +566,48 @@ struct MapboxGlobeView: View {
     // MARK: - Country Filter (iso2)
 
     private func updateCountryGlow() {
-        let iso2 = visitedISO2FromJourneys(journeys)
+        let overrideISO2 = (visitedCountryISO2Override ?? [])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
+            .filter { $0.count == 2 }
+        let iso2 = overrideISO2.isEmpty ? visitedISO2FromJourneys(journeys) : overrideISO2
 
         let style = mapView.mapboxMap.style
         guard style.layerExists(withId: countriesLayerId) else { return }
 
-        let disputedFalse = MapboxMaps.Expression(
-            operator: .eq,
-            arguments: [
-                .expression(.init(operator: .get, arguments: [.string("disputed")])),
-                .string("false")
-            ]
-        )
-
-        let worldviewOK = MapboxMaps.Expression(
-            operator: .any,
-            arguments: [
-                .expression(
-                    MapboxMaps.Expression(operator: .eq, arguments: [
-                        .expression(MapboxMaps.Expression(operator: .get, arguments: [.string("worldview")])),
-                        .string("all")
-                    ])
-                ),
-                .expression(
-                    MapboxMaps.Expression(operator: .eq, arguments: [
-                        .expression(MapboxMaps.Expression(operator: .get, arguments: [.string("worldview")])),
-                        .string("CN")
-                    ])
-                )
-            ]
-        )
-
-        let isoGet = MapboxMaps.Expression(operator: .get, arguments: [.string("iso_3166_1")])
-
-        let isoMatch: MapboxMaps.Expression = {
-            guard !iso2.isEmpty else {
-                return MapboxMaps.Expression(operator: .literal, arguments: [.boolean(false)])
-            }
-            var args: [MapboxMaps.Expression.Argument] = [.expression(isoGet)]
-            for code in iso2 {
-                args.append(.string(code))
-                args.append(.boolean(true))
-            }
-            args.append(.boolean(false))
-            return MapboxMaps.Expression(operator: .match, arguments: args)
-        }()
-
-        let filterExpr = MapboxMaps.Expression(
-            operator: .all,
-            arguments: [
-                .expression(disputedFalse),
-                .expression(worldviewOK),
-                .expression(isoMatch)
-            ]
-        )
-
         do {
+            let worldview = resolvedWorldviewCode()
+            let disputedGet = MapboxMaps.Expression(operator: .get, arguments: [.string("disputed")])
+            let worldviewGet = MapboxMaps.Expression(operator: .get, arguments: [.string("worldview")])
+
+            let disputedFalse = MapboxMaps.Expression(
+                operator: .eq,
+                arguments: [.expression(disputedGet), .string("false")]
+            )
+            let worldviewFilter = MapboxMaps.Expression(
+                operator: .any,
+                arguments: [
+                    .expression(MapboxMaps.Expression(operator: .eq, arguments: [.string("all"), .expression(worldviewGet)])),
+                    .expression(MapboxMaps.Expression(operator: .inExpression, arguments: [.string(worldview), .expression(worldviewGet)]))
+                ]
+            )
+
+            var allFilters: [MapboxMaps.Expression.Argument] = [
+                .expression(disputedFalse),
+                .expression(worldviewFilter)
+            ]
+            let isoGet = MapboxMaps.Expression(operator: .get, arguments: [.string("iso_3166_1")])
+            if !iso2.isEmpty {
+                var args: [MapboxMaps.Expression.Argument] = [.expression(isoGet)]
+                for code in iso2 {
+                    args.append(.string(code))
+                    args.append(.boolean(true))
+                }
+                args.append(.boolean(false))
+                let isoMatch = MapboxMaps.Expression(operator: .match, arguments: args)
+                allFilters.append(.expression(isoMatch))
+            }
+            let filterExpr = MapboxMaps.Expression(operator: .all, arguments: allFilters)
+
             try style.updateLayer(withId: countriesLayerId, type: FillLayer.self) { layer in
                 layer.filter = filterExpr
             }
@@ -628,8 +628,37 @@ struct MapboxGlobeView: View {
                iso.count == 2 {
                 set.insert(iso)
             }
+            if let iso = isoFromCityKey(j.startCityKey) {
+                set.insert(iso)
+            }
+            if let iso = isoFromCityKey(j.cityKey) {
+                set.insert(iso)
+            }
+            if let iso = isoFromCityKey(j.endCityKey) {
+                set.insert(iso)
+            }
+        }
+        for city in cityCache.cachedCities where city.isTemporary != true {
+            if let iso = city.countryISO2?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+               iso.count == 2 {
+                set.insert(iso)
+            }
         }
         return Array(set).sorted()
+    }
+
+    private func resolvedWorldviewCode() -> String {
+        let supported: Set<String> = ["AR", "CN", "IN", "JP", "MA", "RS", "RU", "TR", "US"]
+        let region = Locale.current.region?.identifier.uppercased() ?? "US"
+        return supported.contains(region) ? region : "US"
+    }
+
+    private func isoFromCityKey(_ cityKey: String?) -> String? {
+        guard let cityKey else { return nil }
+        let parts = cityKey.split(separator: "|", omittingEmptySubsequences: false)
+        guard let raw = parts.last else { return nil }
+        let iso = String(raw).trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return iso.count == 2 ? iso : nil
     }
 
     // MARK: - Data
@@ -692,38 +721,7 @@ struct MapboxGlobeView: View {
         return Turf.FeatureCollection(features: feats)
     }
 
-    // MARK: - Route helpers (avoid "teleport" lines)
-
-    private func haversineKm(_ a: CLLocationCoordinate2D, _ b: CLLocationCoordinate2D) -> Double {
-        let R = 6371.0
-        let dLat = (b.latitude - a.latitude) * .pi / 180
-        let dLon = (b.longitude - a.longitude) * .pi / 180
-        let lat1 = a.latitude * .pi / 180
-        let lat2 = b.latitude * .pi / 180
-        let x = sin(dLat / 2) * sin(dLat / 2) + cos(lat1) * cos(lat2) * sin(dLon / 2) * sin(dLon / 2)
-        let c = 2 * atan2(sqrt(x), sqrt(1 - x))
-        return R * c
-    }
-
-    private func splitByJumps(_ coords: [CLLocationCoordinate2D], maxStepKm: Double) -> [[CLLocationCoordinate2D]] {
-        guard coords.count >= 2 else { return [] }
-        var parts: [[CLLocationCoordinate2D]] = []
-        var cur: [CLLocationCoordinate2D] = [coords[0]]
-
-        for i in 1..<coords.count {
-            let prev = coords[i - 1]
-            let now = coords[i]
-            if haversineKm(prev, now) > maxStepKm {
-                if cur.count >= 2 { parts.append(cur) }
-                cur = [now]
-            } else {
-                cur.append(now)
-            }
-        }
-
-        if cur.count >= 2 { parts.append(cur) }
-        return parts
-    }
+    // MARK: - Route helpers
 
     private func routeSignature(_ coords: [CLLocationCoordinate2D]) -> String {
         guard let first = coords.first, let last = coords.last else { return UUID().uuidString }
@@ -754,36 +752,6 @@ struct MapboxGlobeView: View {
         let sorted = values.sorted()
         let index = Int((Double(sorted.count - 1) * p).rounded())
         return Double(sorted[max(0, min(sorted.count - 1, index))])
-    }
-
-    
-    private func isLikelyFlightRoute(_ j: JourneyRoute, coords: [CLLocationCoordinate2D]) -> Bool {
-        // If the route has different start/end city keys, treat it as flight.
-        // (Distance can be 0 or noisy depending on how the journey was recorded.)
-        let distKm = max(0, j.distance / 1000.0)
-
-        if let s = j.startCityKey, let e = j.endCityKey,
-           !s.isEmpty, !e.isEmpty, s != e, distKm >= 120 {
-            return true
-        }
-
-        // Heuristics: long distance + sparse points (common for flights)
-        if distKm >= 180, coords.count <= 35 {
-            return true
-        }
-
-        // Heuristics: large step jumps inside points (teleport-like sampling)
-        if coords.count >= 2, distKm >= 300 {
-            var maxStep = 0.0
-            for i in 1..<coords.count {
-                maxStep = max(maxStep, haversineKm(coords[i - 1], coords[i]))
-            }
-            if maxStep >= 120 { // 120km jump between adjacent samples
-                return true
-            }
-        }
-
-        return false
     }
 
     private func greatCircleArc(_ start: CLLocationCoordinate2D, _ end: CLLocationCoordinate2D, points: Int = 32) -> [CLLocationCoordinate2D] {
@@ -835,12 +803,12 @@ struct MapboxGlobeView: View {
 private func makeRoutesFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
         var feats: [Turf.Feature] = []
         var seen = Set<String>()
-        var nonFlightCounts: [String: Int] = [:]
+        var solidCounts: [String: Int] = [:]
 
         struct PendingRouteFeature {
             let line: Turf.LineString
             let journeyId: String
-            let isFlight: Bool
+            let isDashed: Bool
             let distanceKm: Double
             let memoryCount: Double
             let signature: String?
@@ -853,37 +821,41 @@ private func makeRoutesFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
             guard !seen.contains(j.id) else { continue }
             seen.insert(j.id)
 
-            let src = (j.thumbnailCoordinates.isEmpty ? j.coordinates : j.thumbnailCoordinates)
+            let src = (!j.coordinates.isEmpty ? j.coordinates : j.thumbnailCoordinates)
             guard src.count >= 2 else { continue }
 
             let coords = src.map { CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon) }
-            let isFlight = isLikelyFlightRoute(j, coords: coords)
+            let built = RouteRenderingPipeline.buildSegments(
+                .init(
+                    coordsWGS84: coords,
+                    applyGCJForChina: false,
+                    gapDistanceMeters: 2_200,
+                    countryISO2: j.countryISO2,
+                    cityKey: j.startCityKey ?? j.cityKey
+                ),
+                surface: .canvas
+            )
 
-            // ✅ Flight: only start→end, dashed layer will render it.
-            if isFlight, let a = coords.first, let b = coords.last {
+            for seg in built.segments where seg.coords.count >= 2 {
+                let isDashed = seg.style == .dashed
+                let lineCoords: [CLLocationCoordinate2D]
+                if built.isFlightLike, isDashed, let a = seg.coords.first, let b = seg.coords.last {
+                    lineCoords = greatCircleArc(a, b)
+                } else {
+                    lineCoords = seg.coords
+                }
+                guard lineCoords.count >= 2 else { continue }
+
+                let sig: String? = isDashed ? nil : routeSignature(lineCoords)
+                if let sig {
+                    solidCounts[sig, default: 0] += 1
+                }
+
                 pending.append(
                     PendingRouteFeature(
-                        line: Turf.LineString(greatCircleArc(a, b)),
+                        line: Turf.LineString(lineCoords),
                         journeyId: j.id,
-                        isFlight: true,
-                        distanceKm: max(0, j.distance / 1000.0),
-                        memoryCount: Double(j.memories.count),
-                        signature: nil
-                    )
-                )
-                continue
-            }
-
-            // ✅ Non-flight: split away "teleport" jumps so we don't draw weird stray lines.
-            let parts = splitByJumps(coords, maxStepKm: 180) // tweak if needed
-            for p in parts {
-                let sig = routeSignature(p)
-                nonFlightCounts[sig, default: 0] += 1
-                pending.append(
-                    PendingRouteFeature(
-                        line: Turf.LineString(p),
-                        journeyId: j.id,
-                        isFlight: false,
+                        isDashed: isDashed,
                         distanceKm: max(0, j.distance / 1000.0),
                         memoryCount: Double(j.memories.count),
                         signature: sig
@@ -892,19 +864,19 @@ private func makeRoutesFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
             }
         }
 
-        let p95 = max(1.0, quantile(Array(nonFlightCounts.values), p: 0.95))
+        let p95 = max(1.0, quantile(Array(solidCounts.values), p: 0.95))
 
         for item in pending {
             let repeatWeight: Double = {
-                guard let sig = item.signature else { return 0.12 }
-                let n = Double(nonFlightCounts[sig, default: 1])
+                guard let sig = item.signature else { return 0.40 }
+                let n = Double(solidCounts[sig, default: 1])
                 return min(1.0, log(1.0 + n) / log(1.0 + p95))
             }()
 
             var f = Turf.Feature(geometry: .lineString(item.line))
             f.properties = [
                 "journeyId": .string(item.journeyId),
-                "isFlight": .boolean(item.isFlight),
+                "isFlight": .boolean(item.isDashed),
                 "distanceKm": .number(item.distanceKm),
                 "memoryCount": .number(item.memoryCount),
                 "repeatWeight": .number(repeatWeight)
@@ -971,7 +943,7 @@ private func makeRoutesFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
 
         var all: [CLLocationCoordinate2D] = []
         for j in journeys {
-            let src = (j.thumbnailCoordinates.isEmpty ? j.coordinates : j.thumbnailCoordinates)
+            let src = (!j.coordinates.isEmpty ? j.coordinates : j.thumbnailCoordinates)
             all.append(contentsOf: src.map { CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon) })
         }
         guard !all.isEmpty else { return }

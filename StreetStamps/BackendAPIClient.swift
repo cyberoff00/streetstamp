@@ -53,10 +53,44 @@ struct JourneyLikesBatchRequest: Codable {
 struct JourneyLikesBatchItem: Codable {
     var journeyID: String
     var likes: Int
+    var likedByMe: Bool?
 }
 
 struct JourneyLikesBatchResponse: Codable {
     var items: [JourneyLikesBatchItem]
+}
+
+struct JourneyLikeActionResponse: Codable {
+    var ownerUserID: String
+    var journeyID: String
+    var likes: Int
+    var likedByMe: Bool
+}
+
+struct BackendNotificationItem: Codable, Identifiable {
+    var id: String
+    var type: String
+    var fromUserID: String?
+    var fromDisplayName: String?
+    var journeyID: String?
+    var journeyTitle: String?
+    var message: String
+    var createdAt: Date
+    var read: Bool
+}
+
+struct BackendNotificationsResponse: Codable {
+    var items: [BackendNotificationItem]
+}
+
+private struct JourneyLikesBatchRequestV2: Codable {
+    var journeyIDs: [String]
+    var ownerUserID: String?
+}
+
+private struct BackendNotificationReadRequest: Codable {
+    var ids: [String]
+    var all: Bool
 }
 
 struct BackendProfileDTO: Codable {
@@ -234,6 +268,12 @@ final class BackendAPIClient {
         return try decoder.decode(BackendProfileDTO.self, from: data)
     }
 
+    func updateLoadout(token: String, loadout: RobotLoadout) async throws -> BackendProfileDTO {
+        let body = try encoder.encode(["loadout": loadout])
+        let (data, _) = try await request(path: "/v1/profile/loadout", method: "PATCH", token: token, jsonBody: body)
+        return try decoder.decode(BackendProfileDTO.self, from: data)
+    }
+
     func uploadMedia(token: String, data: Data, fileName: String, mimeType: String) async throws -> BackendMediaUploadResponse {
         let boundary = "Boundary-\(UUID().uuidString)"
         var body = Data()
@@ -259,20 +299,59 @@ final class BackendAPIClient {
     }
 
     func fetchJourneyLikeCounts(token: String, journeyIDs: [String]) async throws -> [String: Int] {
+        let stats = try await fetchJourneyLikeStats(token: token, journeyIDs: journeyIDs, ownerUserID: nil)
+        return stats.mapValues { $0.likes }
+    }
+
+    func fetchJourneyLikeStats(
+        token: String,
+        journeyIDs: [String],
+        ownerUserID: String?
+    ) async throws -> [String: (likes: Int, likedByMe: Bool)] {
         let cleaned = journeyIDs
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         guard !cleaned.isEmpty else { return [:] }
 
-        let reqBody = JourneyLikesBatchRequest(journeyIDs: Array(Set(cleaned)))
+        let reqBody = JourneyLikesBatchRequestV2(
+            journeyIDs: Array(Set(cleaned)),
+            ownerUserID: ownerUserID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? ownerUserID : nil
+        )
         let body = try encoder.encode(reqBody)
         let (data, _) = try await request(path: "/v1/journeys/likes/batch", method: "POST", token: token, jsonBody: body)
         let resp = try decoder.decode(JourneyLikesBatchResponse.self, from: data)
-        var out: [String: Int] = [:]
+        var out: [String: (likes: Int, likedByMe: Bool)] = [:]
         for item in resp.items {
-            out[item.journeyID] = max(0, item.likes)
+            out[item.journeyID] = (max(0, item.likes), item.likedByMe ?? false)
         }
         return out
+    }
+
+    func likeJourney(token: String, ownerUserID: String, journeyID: String) async throws -> JourneyLikeActionResponse {
+        let owner = ownerUserID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let journey = journeyID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let (data, _) = try await request(path: "/v1/journeys/\(owner)/\(journey)/like", method: "POST", token: token)
+        return try decoder.decode(JourneyLikeActionResponse.self, from: data)
+    }
+
+    func unlikeJourney(token: String, ownerUserID: String, journeyID: String) async throws -> JourneyLikeActionResponse {
+        let owner = ownerUserID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let journey = journeyID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let (data, _) = try await request(path: "/v1/journeys/\(owner)/\(journey)/like", method: "DELETE", token: token)
+        return try decoder.decode(JourneyLikeActionResponse.self, from: data)
+    }
+
+    func fetchNotifications(token: String, unreadOnly: Bool = true) async throws -> [BackendNotificationItem] {
+        let q = unreadOnly ? "?unreadOnly=1" : ""
+        let (data, _) = try await request(path: "/v1/notifications\(q)", method: "GET", token: token)
+        let resp = try decoder.decode(BackendNotificationsResponse.self, from: data)
+        return resp.items
+    }
+
+    func markNotificationsRead(token: String, ids: [String], markAll: Bool = false) async throws {
+        let req = BackendNotificationReadRequest(ids: ids, all: markAll)
+        let body = try encoder.encode(req)
+        _ = try await request(path: "/v1/notifications/read", method: "POST", token: token, jsonBody: body)
     }
 }
 

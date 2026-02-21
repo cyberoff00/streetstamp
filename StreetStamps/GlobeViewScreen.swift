@@ -21,17 +21,21 @@ struct GlobeViewScreen: View {
 
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var cityCache: CityCache
+    @EnvironmentObject private var lifelogStore: LifelogStore
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
 
     @State private var dummyPresented: Bool = true
     @State private var shareItem: GlobeShareImageItem? = nil
+    @State private var didKickoffLifelogBackfill = false
 
     var body: some View {
-        let journeysForRender = externalJourneys ?? store.journeys
+        let journeysForRender = routesForGlobe()
+        let visitedCountries = visitedCountryISO2()
         ZStack {
             MapboxGlobeView(
                 isPresented: $dummyPresented,
                 journeys: journeysForRender,
+                visitedCountryISO2Override: visitedCountries,
                 showsCloseButton: false
             )
             .ignoresSafeArea()
@@ -47,6 +51,14 @@ struct GlobeViewScreen: View {
         }
         .sheet(item: $shareItem) { item in
             ShareSheet(activityItems: [item.image])
+        }
+        .onAppear {
+            kickOffLifelogBackfillIfNeeded()
+        }
+        .onChange(of: store.hasLoaded) { loaded in
+            if loaded {
+                kickOffLifelogBackfillIfNeeded()
+            }
         }
     }
 
@@ -77,7 +89,7 @@ struct GlobeViewScreen: View {
     }
 
     private var bottomSummaryCard: some View {
-        let journeys = externalJourneys ?? store.journeys
+        let journeys = summaryJourneys()
         let totalJourneys = journeys.count
         let totalMemories = journeys.reduce(0) { $0 + $1.memories.count }
         let totalDistanceMeters = journeys.reduce(0.0) { partial, journey in
@@ -158,6 +170,75 @@ struct GlobeViewScreen: View {
     private func normalizedDisplayName(_ name: String) -> String {
         let value = name.trimmingCharacters(in: .whitespacesAndNewlines)
         return value.isEmpty ? L10n.t("explorer_fallback") : value
+    }
+
+    private func summaryJourneys() -> [JourneyRoute] {
+        externalJourneys ?? store.journeys
+    }
+
+    private func routesForGlobe() -> [JourneyRoute] {
+        if let external = externalJourneys, !external.isEmpty {
+            if external.count == 1, external[0].id == "lifelog.route.synthetic" {
+                let lifelogRoutes = lifelogStore.globeJourneys()
+                if !lifelogRoutes.isEmpty { return lifelogRoutes }
+            }
+            return external
+        }
+
+        let lifelogRoutes = lifelogStore.globeJourneys()
+        if !lifelogRoutes.isEmpty {
+            return lifelogRoutes
+        }
+
+        // Fallback before first backfill completes.
+        return summaryJourneys()
+    }
+
+    private func visitedCountryISO2() -> [String] {
+        let base = routesForGlobe()
+        var set = Set<String>()
+        for j in base {
+            if let iso = j.countryISO2?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+               iso.count == 2 {
+                set.insert(iso)
+            }
+            if let iso = isoFromCityKey(j.startCityKey) {
+                set.insert(iso)
+            }
+            if let iso = isoFromCityKey(j.cityKey) {
+                set.insert(iso)
+            }
+            if let iso = isoFromCityKey(j.endCityKey) {
+                set.insert(iso)
+            }
+        }
+
+        for city in cityCache.cachedCities where city.isTemporary != true {
+            if let iso = city.countryISO2?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+               iso.count == 2 {
+                set.insert(iso)
+            }
+        }
+        return Array(set).sorted()
+    }
+
+    private func isoFromCityKey(_ cityKey: String?) -> String? {
+        guard let cityKey else { return nil }
+        let parts = cityKey.split(separator: "|", omittingEmptySubsequences: false)
+        guard let raw = parts.last else { return nil }
+        let iso = String(raw).trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return iso.count == 2 ? iso : nil
+    }
+
+    private func kickOffLifelogBackfillIfNeeded() {
+        guard !didKickoffLifelogBackfill else { return }
+        guard store.hasLoaded else { return }
+        didKickoffLifelogBackfill = true
+
+        let snapshot = store.journeys
+        Task(priority: .utility) {
+            await lifelogStore.backfillHistoricalJourneysIfNeeded(from: snapshot)
+        }
     }
 
     private func captureCurrentPageImage() -> UIImage? {
