@@ -1,0 +1,253 @@
+"locating" = "Locating…";
+"start" = "Start";
+"resume" = "Resume";
+"back" = "Back";
+"pause" = "Pause";
+"paused" = "Paused";
+"finished" = "Finish";
+"continue_background" = "Continue in Background (Low Power)";
+"journey_paused" = "Journey paused";
+"go_to_library" = "Go to City Library";
+"close" = "Close";
+"share" = "Share";
+"save" = "Save";
+"share_card" = "Share Card";
+"new_city_unlocked" = "New City Unlocked";
+"later" = "Later";
+
+"tab_start" = "Start";
+"tab_cities" = "Cities";
+"tab_memory" = "Memory";
+"tab_lifelog" = "Lifelog";
+"globe_view"="Globe View";
+"profile"="Profile";
+"toast_city_added" = "Created a %@ city card and added it to City Library";
+
+"start_upper" = "START";
+"resume_upper" = "RESUME";
+"explore_city_run" = "City";
+
+"debug_mode_system" = "System";
+"debug_mode_mock" = "Mock";
+"debug_section_mode" = "Mode";
+"debug_location" = "Location";
+"debug_switch_to_system" = "Switch to System Location";
+"debug_section_quick_jump" = "Quick Jump";
+"debug_jump_shanghai" = "Jump to Shanghai";
+"debug_jump_london" = "Jump to London";
+"debug_section_simulation" = "Simulation";
+"debug_simulate_flight" = "Simulate flight: Shanghai → London (linear interpolation)";
+"debug_title" = "Location Debug";
+
+"photo_encode_failed" = "JPEG encoding failed";
+"memory_photo_title" = "Photo";
+"memory_note_title" = "Note";
+"memory_spot_title" = "This Location";
+"memory_photo_cn" = "Photo";
+"memory_note_cn" = "Note";
+"pop_camera_title" = "Camera";
+"tap_to_take_photo" = "Tap to take a photo";
+"pop_note_title" = "Note";
+"add_memory_placeholder" = "Add a memory";
+
+"share_close_title" = "What would you like to do?";
+"share_continue_journey" = "Continue Journey";
+"share_exit_complete" = "Exit and Finish";
+
+"share_saved_to_photos" = "Saved to Photos";
+"share_privacy_exact" = "Exact";
+"share_privacy_hidden" = "Hidden";
+"share_generating" = "Generating…";
+
+"share_title_fallback" = "Journey";
+"share_from_fallback" = "From";
+"share_to_fallback" = "To";
+
+"share_duration_min" = "%d min";
+
+"share_stat_distance" = "Distance";
+"share_stat_time" = "Time";
+"share_stat_memory" = "Memories";
+
+"unlock_new_city" = "New City Unlocked";
+
+"unknown" = "Unknown";
+"memories" = "Memories";
+"preparing_map" = "Preparing map…";
+"loading_map" = "Loading map…";
+"globe" = "Globe";
+
+"first_city_prompt_title" = "Start Exploring Cities";
+"first_city_prompt_desc" = "Generate your first city card based on your current location (with a city map).\nAfter you complete a journey in a new city, a new city card will be added automatically.";
+"first_city_prompt_generate" = "Generate";
+
+"city_deep_journeys_count" = "%d journeys";
+"city_deep_memories_count" = "%d memories";
+"city_deep_memories_distance" = "%d memories · %d m";
+
+"journey_memory" = "Journey Memory";
+"journey_memories" = "Journey Memory";
+"memories_for_city" = "Memories in %@: %d";
+"no_memories_yet" = "No memories yet";
+"no_memories_desc" = "After you finish a journey, your memories will be saved here.";
+
+"unlock_city_title_cn" = "New City Card Unlocked";
+"unlock_city_desc_1" = "You just finished exploring %@.";
+"unlock_city_desc_2" = "This card will appear in City Library, so you can revisit your footprints anytime.";
+"got_it" = "Got it";
+"go_see" = "Take a look";
+
+/* City Library - Header */
+"city_library_header_city" = "Your City Stamps";
+
+/* City Library - Empty state */
+"city_empty_title" = "No city stamps yet";
+"city_empty_subtitle" = "Generate a city card, or finish a journey to unlock your first city.";
+
+/* Card stats */
+"city_stats_line" = "%d explorations · %d memories";
+
+"library_city_title" = "Your City Stamps";
+"library_empty_title" = "No city stamps yet";
+"library_empty_subtitle" = "Generate a city card, or finish a journey to unlock your first city.";
+"city_card_stats" = "%d explorations · %d memories";
+
+"location_failed_title" = "Location Failed";
+"location_failed_desc" = "We couldn’t get your location right now. You can retry, or choose a city manually to generate your first city card.";
+"retry" = "Retry";
+"choose_city_manually" = "Choose City Manually";
+
+"finish_confirm_title" = "Finish journey?";
+"finish_confirm_message" = "If you tapped Finish by mistake, you can continue your journey.";
+"finish_confirm_continue" = "Continue Journey";
+"finish_confirm_finish" = "Confirm Finish";
+"resume_prompt_title" = "Unfinished journey";
+"resume_prompt_message" = "You have an unfinished journey. Would you like to continue it?";
+"resume_prompt_continue" = "Continue";
+"resume_prompt_end" = "End & Share";
+
+
+"tracking_mode_sport" = "Sport";
+"tracking_mode_daily" = "Daily";
+
+/* Lock Screen Tracking Cards */
+"lockscreen_tracking_active" = "TRACKING ACTIVE";
+"lockscreen_sport_mode" = "SPORT MODE";
+"lockscreen_daily_mode" = "DAILY MODE";
+"lockscreen_distance" = "DISTANCE";
+"lockscreen_duration" = "DURATION";
+"lockscreen_kilometers" = "kilometers";
+"lockscreen_elapsed" = "elapsed";
+"lockscreen_add_memory" = "ADD MEMORY";
+
+
+/*too short*/
+"journey_too_short_title" = "Journey Too Short";
+"journey_too_short_desc" = "can't generate your route map!";
+
+"resume_upper" = "RESUME";
+"in_progress_upper" = "IN PROGRESS";
+
+/* Added for full localization - 2026-01-31 */
+"delete_city_alert_title" = "Delete this city card?";
+"delete_city_alert_message" = "“%@” will be removed from your City Library. This can't be undone.";
+"delete" = "Delete";
+"cancel" = "Cancel";
+"profile_tagline_travel_enthusiastic" = "Travel Enthusiastic";
+"profile_no_items_title" = "No items collected yet";
+"profile_no_items_desc" = "Complete journeys to earn equipment and items";
+"recent_journeys_last_30_days" = "LAST 30 DAYS · %d";
+"recent_journeys_empty_title" = "No 10+ min journeys in the last 30 days";
+"recent_journeys_empty_desc" = "Complete a journey to generate a share card here.";
+"save_image" = "Save Image";
+"mem_short" = "%d mem";
+"equipment_collected_count" = "%d / %d COLLECTED";
+"rarity_common" = "COMMON";
+"rarity_rare" = "RARE";
+"equipment_world_map" = "WORLD MAP";
+"equipment_camera" = "CAMERA";
+"equipment_leather_backpack" = "LEATHER BACKPACK";
+"equipment_hiking_boots" = "HIKING BOOTS";
+"coins_count" = "%d COINS";
+"profile_showcase" = "Showcase";
+"profile_my_statistics" = "MY STATISTICS";
+"profile_journeys" = "JOURNEYS";
+"profile_total_distance" = "TOTAL DISTANCE";
+"profile_cities_visited" = "CITIES VISITED";
+"profile_recent_journeys" = "RECENT JOURNEYS";
+"profile_my_items" = "MY ITEMS";
+"memory_empty_desc" = "Start a journey and create\nmemories along the way";
+"entry_count_singular" = "%d ENTRY";
+"entry_count_plural" = "%d ENTRIES";
+"delete_all_notes_title" = "Delete all notes?";
+"delete_all_notes_message" = "All memories in this journey will be deleted. This can’t be undone.";
+"copy_all" = "Copy All";
+"delete_all_notes" = "Delete All Notes";
+"mirror_selfie" = "Mirror selfie";
+"memory_title_optional" = "Title (optional)";
+"memory_notes_placeholder" = "Write your memory here...";
+"edit_memory" = "Edit Memory";
+"empty_memory" = "(Empty memory)";
+"accessibility_you" = "You";
+"accessibility_avatar" = "Avatar";
+"sport_mode_desc" = "High precision tracking with GPS. Best for activities like running, hiking, and cycling.";
+"daily_mode_desc" = "Balanced tracking for everyday exploration. Uses less battery while still recording your journey.";
+"hint_precise" = "● PRECISE";
+"hint_battery" = "○ Battery";
+"hint_precision" = "○ Precision";
+"hint_efficient" = "● EFFICIENT";
+"debug_playback_speed" = "Playback speed: %dx";
+"debug_speed" = "Speed";
+"debug_estimated" = "Estimated: %@";
+"debug_start" = "Start";
+"debug_recommended_mode" = "Recommended mode:";
+"debug_stop_test" = "Stop Test";
+"debug_clear_all_journeys" = "Clear all journeys (debug)";
+"debug_test_geocode_shanghai" = "Test Shanghai Geocode";
+"debug_test_geocode_beijing" = "Test Beijing Geocode";
+"debug_test_geocode_hangzhou" = "Test Hangzhou Geocode";
+"debug_test_geocode_shenzhen" = "Test Shenzhen Geocode";
+"debug_step_1" = "1. Choose a test scenario and tap “Start”";
+"debug_step_2" = "2. The system will switch to Mock mode and simulate GPS input";
+"debug_step_3" = "3. You can also start a Journey on the main screen to observe behavior";
+"debug_step_4" = "4. When finished, tap “Switch to system location”";
+"debug_step_5" = "5. Tip: Use Sport mode for running; use Daily mode for an 8-hour walk";
+
+"add_memory" = "Add Memory";
+"export_long_image" = "Export long image";
+
+// Equipment
+"equipment_title" = "Equipment";
+"equipment_hair" = "Hair";
+"equipment_outfit" = "Outfit";
+"equipment_accessory" = "Accessories";
+"equipment_coming_soon" = "Coming soon";
+"avatar_placeholder_back" = "BACK";
+"equipment_item_boy_hair" = "Boy Hair";
+"equipment_item_boy_suit" = "Boy Suit";
+"equipment_item_headphone" = "Headphones";
+"equipment_item_none" = "None";
+
+"profile_equipment" = "Equipment";
+
+"equipment_expression" = "Expression";
+
+"equipment_item_expression_neutral" = "Neutral";
+
+"equipment_item_expression_smile" = "Smile";
+
+"equipment_item_expression_sad" = "Sad";
+
+"equipment_item_expression_default" = "Expression";
+
+"equipment_item_hair_boy" = "Boy Hair";
+
+"equipment_item_hair_girl" = "Girl Hair";
+
+"equipment_item_outfit_boy_suit" = "Boy Suit";
+
+"equipment_item_outfit_girl_suit" = "Girl Suit";
+
+"equipment_item_acc_headphone" = "Headphones";
+
+"equipment_item_expr_default" = "Default";

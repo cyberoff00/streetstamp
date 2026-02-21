@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<gpx version="1.1" creator="Xcode">
+  <trk>
+    <name>Shanghai to London</name>
+    <trkseg>
+      <trkpt lat="31.2304" lon="121.4737"></trkpt> <!-- Shanghai -->
+      <trkpt lat="31.9042" lon="121.4074"></trkpt> <!-- Beijing -->
+     <trkpt lat="55.7558" lon="37.6173"></trkpt>  <!-- Moscow -->-->
+      <trkpt lat="52.5200" lon="13.4050"></trkpt>  <!-- Berlin -->-->
+      <trkpt lat="51.5074" lon="-0.1278"></trkpt>  <!-- London -->-->
+      
+      
+    </trkseg>
+  </trk>
+</gpx>
