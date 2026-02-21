@@ -1,0 +1,246 @@
+"locating" = "Localisation…";
+"start" = "Démarrer";
+"resume" = "Reprendre";
+"back" = "Retour";
+"pause" = "Pause";
+"paused" = "En pause";
+"finished" = "Terminer";
+"continue_background" = "Continuer en arrière-plan (basse consommation)";
+"journey_paused" = "Parcours en pause";
+"go_to_library" = "Aller à City Library";
+"close" = "Fermer";
+"share" = "Partager";
+"save" = "Enregistrer";
+"share_card" = "Partager la carte";
+"new_city_unlocked" = "Nouvelle ville déverrouillée";
+"later" = "Plus tard";
+
+"tab_start" = "Démarrer";
+"tab_cities" = "Collection de villes";
+"tab_memory" = "Mémoire du parcours";
+"tab_lifelog" = "Lifelog";
+"globe_view"="Vue du globe";
+"profile"="Profil";
+"toast_city_added" = "Carte de %@ créée et ajoutée à City Library";
+
+"start_upper" = "DÉMARRER";
+"resume_upper" = "REPRENDRE";
+"explore_city_run" = "Ville";
+
+"debug_mode_system" = "Système";
+"debug_mode_mock" = "Simulé";
+"debug_section_mode" = "Mode";
+"debug_location" = "Localisation";
+"debug_switch_to_system" = "Passer à la localisation système";
+"debug_section_quick_jump" = "Saut rapide";
+"debug_jump_shanghai" = "Aller à Shanghai";
+"debug_jump_london" = "Aller à Londres";
+"debug_section_simulation" = "Simulation";
+"debug_simulate_flight" = "Simuler un vol : Shanghai → Londres (interpolation linéaire)";
+"debug_title" = "Débogage de localisation";
+
+"photo_encode_failed" = "Échec de l'encodage JPEG";
+"memory_photo_title" = "Photo";
+"memory_note_title" = "Note";
+"memory_spot_title" = "Cet endroit";
+"memory_photo_cn" = "Photo";
+"memory_note_cn" = "Note";
+"pop_camera_title" = "Appareil photo";
+"tap_to_take_photo" = "Touchez pour prendre une photo";
+"pop_note_title" = "Note";
+"add_memory_placeholder" = "Ajouter un souvenir";
+
+"share_close_title" = "Que souhaitez-vous faire ?";
+"share_continue_journey" = "Continuer le parcours";
+"share_exit_complete" = "Quitter et terminer";
+
+"share_saved_to_photos" = "Enregistré dans Photos";
+"share_privacy_exact" = "Précis";
+"share_privacy_hidden" = "Masqué";
+"share_generating" = "Génération…";
+
+"share_title_fallback" = "Parcours";
+"share_from_fallback" = "Départ";
+"share_to_fallback" = "Arrivée";
+
+"share_duration_min" = "%d min";
+
+"share_stat_distance" = "Distance";
+"share_stat_time" = "Temps";
+"share_stat_memory" = "Souvenirs";
+
+"unlock_new_city" = "Nouvelle ville déverrouillée";
+
+"unknown" = "Inconnu";
+"memories" = "Souvenirs";
+"preparing_map" = "Préparation de la carte…";
+"loading_map" = "Chargement de la carte…";
+"globe" = "Globe";
+
+"first_city_prompt_title" = "Commencez à explorer les villes";
+"first_city_prompt_desc" = "Générez votre première carte de ville à partir de votre position actuelle (avec une carte de la ville).\nAprès avoir terminé un parcours dans une nouvelle ville, une nouvelle carte de ville sera ajoutée automatiquement.";
+"first_city_prompt_generate" = "Générer";
+
+"city_deep_journeys_count" = "%d parcours";
+"city_deep_memories_count" = "%d souvenirs";
+"city_deep_memories_distance" = "%d souvenirs · %d m";
+
+"journey_memory" = "Mémoire du parcours";
+"journey_memories" = "Mémoire du parcours";
+"memories_for_city" = "Souvenirs à %@ : %d";
+"no_memories_yet" = "Aucun souvenir pour le moment";
+"no_memories_desc" = "Après avoir terminé un parcours, vos souvenirs seront enregistrés ici.";
+
+"unlock_city_title_cn" = "Nouvelle carte de ville déverrouillée";
+"unlock_city_desc_1" = "Vous venez de terminer l'exploration de %@.";
+"unlock_city_desc_2" = "Cette carte apparaîtra dans City Library afin que vous puissiez revoir vos traces à tout moment.";
+"got_it" = "D'accord";
+"go_see" = "Voir";
+
+/* City Library - Header */
+"city_library_header_city" = "Vos tampons de ville";
+
+/* City Library - Empty state */
+"city_empty_title" = "Aucun tampon de ville";
+"city_empty_subtitle" = "Générez une carte de ville, ou terminez un parcours pour déverrouiller votre première ville.";
+
+/* Card stats */
+"city_stats_line" = "%d explorations · %d souvenirs";
+
+"library_city_title" = "Vos tampons de ville";
+"library_empty_title" = "Aucun tampon de ville";
+"library_empty_subtitle" = "Générez une carte de ville, ou terminez un parcours pour déverrouiller votre première ville.";
+"city_card_stats" = "%d explorations · %d souvenirs";
+
+"location_failed_title" = "Échec de la localisation";
+"location_failed_desc" = "Impossible d'obtenir votre position pour le moment. Vous pouvez réessayer ou choisir une ville manuellement pour générer votre première carte de ville.";
+"retry" = "Réessayer";
+"choose_city_manually" = "Choisir une ville manuellement";
+
+"finish_confirm_title" = "Terminer le trajet ?";
+"finish_confirm_message" = "Si vous avez appuyé sur Terminer par erreur, vous pouvez continuer le trajet.";
+"finish_confirm_continue" = "Continuer";
+"finish_confirm_finish" = "Confirmer";
+"resume_prompt_title" = "Trajet inachevé";
+"resume_prompt_message" = "Vous avez un trajet inachevé. Voulez-vous le continuer ?";
+"resume_prompt_continue" = "Continuer";
+"resume_prompt_end" = "Terminer et partager";
+
+
+"tracking_mode_sport" = "Sport";
+"tracking_mode_daily" = "Quotidien";
+
+/* Lock Screen Tracking Cards - Cartes de suivi sur écran de verrouillage */
+"lockscreen_tracking_active" = "SUIVI ACTIF";
+"lockscreen_sport_mode" = "MODE SPORT";
+"lockscreen_daily_mode" = "MODE QUOTIDIEN";
+"lockscreen_distance" = "DISTANCE";
+"lockscreen_duration" = "DURÉE";
+"lockscreen_kilometers" = "kilomètres";
+"lockscreen_elapsed" = "écoulé";
+"lockscreen_add_memory" = "AJOUTER UN SOUVENIR";
+
+/* Added for full localization - 2026-01-31 */
+"delete_city_alert_title" = "Delete this city card?";
+"delete_city_alert_message" = "“%@” will be removed from your City Library. This can't be undone.";
+"delete" = "Delete";
+"cancel" = "Cancel";
+"profile_tagline_travel_enthusiastic" = "Travel Enthusiastic";
+"profile_no_items_title" = "No items collected yet";
+"profile_no_items_desc" = "Complete journeys to earn equipment and items";
+"recent_journeys_last_30_days" = "LAST 30 DAYS · %d";
+"recent_journeys_empty_title" = "No 10+ min journeys in the last 30 days";
+"recent_journeys_empty_desc" = "Complete a journey to generate a share card here.";
+"save_image" = "Save Image";
+"mem_short" = "%d mem";
+"equipment_collected_count" = "%d / %d COLLECTED";
+"rarity_common" = "COMMON";
+"rarity_rare" = "RARE";
+"equipment_world_map" = "WORLD MAP";
+"equipment_camera" = "CAMERA";
+"equipment_leather_backpack" = "LEATHER BACKPACK";
+"equipment_hiking_boots" = "HIKING BOOTS";
+"coins_count" = "%d COINS";
+"profile_showcase" = "Showcase";
+"profile_my_statistics" = "MY STATISTICS";
+"profile_journeys" = "JOURNEYS";
+"profile_total_distance" = "TOTAL DISTANCE";
+"profile_cities_visited" = "CITIES VISITED";
+"profile_recent_journeys" = "RECENT JOURNEYS";
+"profile_my_items" = "MY ITEMS";
+"memory_empty_desc" = "Start a journey and create\nmemories along the way";
+"entry_count_singular" = "%d ENTRY";
+"entry_count_plural" = "%d ENTRIES";
+"delete_all_notes_title" = "Delete all notes?";
+"delete_all_notes_message" = "All memories in this journey will be deleted. This can’t be undone.";
+"copy_all" = "Copy All";
+"delete_all_notes" = "Delete All Notes";
+"mirror_selfie" = "Mirror selfie";
+"memory_title_optional" = "Title (optional)";
+"memory_notes_placeholder" = "Write your memory here...";
+"edit_memory" = "Edit Memory";
+"empty_memory" = "(Empty memory)";
+"accessibility_you" = "You";
+"accessibility_avatar" = "Avatar";
+"sport_mode_desc" = "High precision tracking with GPS. Best for activities like running, hiking, and cycling.";
+"daily_mode_desc" = "Balanced tracking for everyday exploration. Uses less battery while still recording your journey.";
+"hint_precise" = "● PRECISE";
+"hint_battery" = "○ Battery";
+"hint_precision" = "○ Precision";
+"hint_efficient" = "● EFFICIENT";
+"debug_playback_speed" = "Playback speed: %dx";
+"debug_speed" = "Speed";
+"debug_estimated" = "Estimated: %@";
+"debug_start" = "Start";
+"debug_recommended_mode" = "Recommended mode:";
+"debug_stop_test" = "Stop Test";
+"debug_clear_all_journeys" = "Clear all journeys (debug)";
+"debug_test_geocode_shanghai" = "Test Shanghai Geocode";
+"debug_test_geocode_beijing" = "Test Beijing Geocode";
+"debug_test_geocode_hangzhou" = "Test Hangzhou Geocode";
+"debug_test_geocode_shenzhen" = "Test Shenzhen Geocode";
+"debug_step_1" = "1. Choose a test scenario and tap “Start”";
+"debug_step_2" = "2. The system will switch to Mock mode and simulate GPS input";
+"debug_step_3" = "3. You can also start a Journey on the main screen to observe behavior";
+"debug_step_4" = "4. When finished, tap “Switch to system location”";
+"debug_step_5" = "5. Tip: Use Sport mode for running; use Daily mode for an 8-hour walk";
+
+"add_memory" = "Add Memory";
+
+"export_long_image" = "Exporter une image longue";
+
+// Equipment
+"equipment_title" = "Équipement";
+"equipment_hair" = "Cheveux";
+"equipment_outfit" = "Tenue";
+"equipment_accessory" = "Accessoires";
+"equipment_coming_soon" = "Bientôt";
+"avatar_placeholder_back" = "DOS";
+"equipment_item_boy_hair" = "Cheveux garçon";
+"equipment_item_boy_suit" = "Costume garçon";
+"equipment_item_headphone" = "Casque audio";
+"equipment_item_none" = "Aucun";
+
+"profile_equipment" = "Equipment";
+
+"equipment_expression" = "Expression";
+
+"equipment_item_expression_neutral" = "Neutral";
+
+"equipment_item_expression_smile" = "Smile";
+
+"equipment_item_expression_sad" = "Sad";
+
+"equipment_item_expression_default" = "Expression par défaut";
+
+"equipment_item_hair_boy" = "Boy Hair";
+
+"equipment_item_hair_girl" = "Girl Hair";
+
+"equipment_item_outfit_boy_suit" = "Boy Suit";
+
+"equipment_item_outfit_girl_suit" = "Girl Suit";
+
+"equipment_item_acc_headphone" = "Headphones";
+
+"equipment_item_expr_default" = "Default";

@@ -1,0 +1,247 @@
+"locating" = "正在定位…";
+"start" = "開始";
+"resume" = "繼續";
+"back" = "返回";
+"pause" = "暫停";
+"paused" = "已暫停";
+"finished" = "完成";
+"continue_background" = "背景繼續（低功耗）";
+"journey_paused" = "旅程已暫停";
+"go_to_library" = "前往城市庫";
+"close" = "關閉";
+"share" = "分享";
+"save" = "儲存";
+"share_card" = "分享卡片";
+"new_city_unlocked" = "解鎖新城市";
+"later" = "稍後";
+
+"tab_start" = "開始";
+"tab_cities" = "城市圖鑑";
+"tab_memory" = "旅程記憶";
+"tab_lifelog" = "Lifelog";
+"globe_view"="全球檢視";
+"profile"="個人主頁";
+"toast_city_added" = "已建立 %@ 城市卡並加入 City Library";
+
+"start_upper" = "開始";
+"resume_upper" = "繼續";
+"explore_city_run" = "城市";
+
+"debug_mode_system" = "系統";
+"debug_mode_mock" = "模擬";
+"debug_section_mode" = "模式";
+"debug_location" = "定位";
+"debug_switch_to_system" = "切換到系統定位";
+"debug_section_quick_jump" = "快速跳轉";
+"debug_jump_shanghai" = "跳轉到上海";
+"debug_jump_london" = "跳轉到倫敦";
+"debug_section_simulation" = "模擬";
+"debug_simulate_flight" = "模擬飛行：上海 → 倫敦（線性插值）";
+"debug_title" = "定位除錯";
+
+"photo_encode_failed" = "JPEG 編碼失敗";
+"memory_photo_title" = "照片";
+"memory_note_title" = "筆記";
+"memory_spot_title" = "此位置";
+"memory_photo_cn" = "照片";
+"memory_note_cn" = "筆記";
+"pop_camera_title" = "相機";
+"tap_to_take_photo" = "點擊拍照";
+"pop_note_title" = "筆記";
+"add_memory_placeholder" = "新增記憶";
+
+"share_close_title" = "你想怎麼做？";
+"share_continue_journey" = "繼續旅程";
+"share_exit_complete" = "退出並完成";
+
+"share_saved_to_photos" = "已儲存到相簿";
+"share_privacy_exact" = "精確";
+"share_privacy_hidden" = "隱藏";
+"share_generating" = "生成中…";
+
+"share_title_fallback" = "旅程";
+"share_from_fallback" = "起點";
+"share_to_fallback" = "終點";
+
+"share_duration_min" = "%d 分鐘";
+
+"share_stat_distance" = "距離";
+"share_stat_time" = "時間";
+"share_stat_memory" = "記憶";
+
+"unlock_new_city" = "解鎖新城市";
+
+"unknown" = "未知";
+"memories" = "記憶";
+"preparing_map" = "正在準備地圖…";
+"loading_map" = "正在載入地圖…";
+"globe" = "地球";
+
+"first_city_prompt_title" = "開始你的城市探索";
+"first_city_prompt_desc" = "根據你目前的位置生成第一張城市卡（包含城市地圖）。\n當你在新城市完成一次旅程後，會自動新增一張城市卡。";
+"first_city_prompt_generate" = "生成";
+
+"city_deep_journeys_count" = "%d 次旅程";
+"city_deep_memories_count" = "%d 條記憶";
+"city_deep_memories_distance" = "%d 條記憶 · %d 公尺";
+
+"journey_memory" = "旅程記憶";
+"journey_memories" = "旅程記憶";
+"memories_for_city" = "%@ 的記憶：%d";
+"no_memories_yet" = "暫無記憶";
+"no_memories_desc" = "完成一次旅程後，記憶會儲存在這裡。";
+
+"unlock_city_title_cn" = "解鎖新城市探索卡";
+"unlock_city_desc_1" = "你剛剛完成了在 %@ 的探索。";
+"unlock_city_desc_2" = "這張卡會出現在 City Library 裡，隨時回顧你的足跡。";
+"got_it" = "知道了";
+"go_see" = "去看看";
+
+/* City Library - Header */
+"city_library_header_city" = "你的城市印章";
+
+/* City Library - Empty state */
+"city_empty_title" = "還沒有城市印章";
+"city_empty_subtitle" = "生成一張城市卡，或完成一次旅程來解鎖你的第一座城市。";
+
+/* Card stats */
+"city_stats_line" = "%d 次探索 · %d 條記憶";
+
+/* Existing keys used in this view */
+"preparing_map" = "正在準備地圖…";
+
+"library_city_title" = "你的城市印章";
+"library_empty_title" = "還沒有城市印章";
+"library_empty_subtitle" = "生成一張城市卡，或完成一次旅程來解鎖你的第一座城市。";
+"city_card_stats" = "%d 次探索 · %d 條記憶";
+
+"location_failed_title" = "定位失敗";
+"location_failed_desc" = "暫時無法取得定位。你可以重試，或手動選擇城市來生成第一張城市卡。";
+"retry" = "重試";
+"choose_city_manually" = "手動選擇城市";
+
+"finish_confirm_title" = "結束旅程？";
+"finish_confirm_message" = "如果你是不小心點到結束，可以選擇繼續旅程。";
+"finish_confirm_continue" = "繼續旅程";
+"finish_confirm_finish" = "確認結束";
+"resume_prompt_title" = "未完成的旅程";
+"resume_prompt_message" = "你有一段未完成的旅程，是否繼續？";
+"resume_prompt_continue" = "繼續";
+"resume_prompt_end" = "結束並分享";
+
+"tracking_mode_sport" = "運動";
+"tracking_mode_daily" = "日常";
+
+/* Lock Screen Tracking Cards - 鎖屏追蹤卡片 */
+"lockscreen_tracking_active" = "追蹤中";
+"lockscreen_sport_mode" = "運動模式";
+"lockscreen_daily_mode" = "日常模式";
+"lockscreen_distance" = "距離";
+"lockscreen_duration" = "時長";
+"lockscreen_kilometers" = "公里";
+"lockscreen_elapsed" = "已用時間";
+"lockscreen_add_memory" = "新增記憶";
+
+/* Added for full localization - 2026-01-31 */
+"delete_city_alert_title" = "刪除這張城市卡片？";
+"delete_city_alert_message" = "「%@」將從你的城市圖鑑中移除，無法復原。";
+"delete" = "刪除";
+"cancel" = "取消";
+"profile_tagline_travel_enthusiastic" = "旅行愛好者";
+"profile_no_items_title" = "還沒有收集到任何物品";
+"profile_no_items_desc" = "完成旅程即可獲得裝備和物品";
+"recent_journeys_last_30_days" = "最近30天 · %d";
+"recent_journeys_empty_title" = "最近30天沒有 10 分鐘以上的旅程";
+"recent_journeys_empty_desc" = "完成一次旅程後，這裡會生成可分享的卡片。";
+"save_image" = "儲存圖片";
+"mem_short" = "%d 記";
+"equipment_collected_count" = "%d / %d 已收集";
+"rarity_common" = "普通";
+"rarity_rare" = "稀有";
+"equipment_world_map" = "世界地圖";
+"equipment_camera" = "相機";
+"equipment_leather_backpack" = "皮質背包";
+"equipment_hiking_boots" = "登山靴";
+"coins_count" = "%d 金幣";
+"profile_showcase" = "展示櫃";
+"profile_my_statistics" = "我的數據";
+"profile_journeys" = "旅程次數";
+"profile_total_distance" = "總距離";
+"profile_cities_visited" = "到訪城市";
+"profile_recent_journeys" = "最近旅程";
+"profile_my_items" = "我的物品";
+"memory_empty_desc" = "開始一次旅程，\n沿途記錄你的回憶";
+"entry_count_singular" = "%d 條記錄";
+"entry_count_plural" = "%d 條記錄";
+"delete_all_notes_title" = "刪除所有筆記？";
+"delete_all_notes_message" = "本次旅程的所有回憶都會被刪除，且無法復原。";
+"copy_all" = "全部複製";
+"delete_all_notes" = "刪除所有筆記";
+"mirror_selfie" = "自拍鏡像";
+"memory_title_optional" = "標題（可選）";
+"memory_notes_placeholder" = "在這裡寫下你的回憶…";
+"edit_memory" = "編輯回憶";
+"empty_memory" = "（空回憶）";
+"accessibility_you" = "你";
+"accessibility_avatar" = "頭像";
+"sport_mode_desc" = "GPS 高精度追蹤，適合跑步、健行、騎行等活動。";
+"daily_mode_desc" = "日常探索的平衡模式，更省電，同時仍會記錄你的旅程。";
+"hint_precise" = "● 高精度";
+"hint_battery" = "○ 省電";
+"hint_precision" = "○ 精度";
+"hint_efficient" = "● 高效";
+"debug_playback_speed" = "播放速度：%dx";
+"debug_speed" = "速度";
+"debug_estimated" = "預計：%@";
+"debug_start" = "開始";
+"debug_recommended_mode" = "推薦模式：";
+"debug_stop_test" = "停止測試";
+"debug_clear_all_journeys" = "清除所有 Journey（測試用）";
+"debug_test_geocode_shanghai" = "測試上海 Geocode";
+"debug_test_geocode_beijing" = "測試北京 Geocode";
+"debug_test_geocode_hangzhou" = "測試杭州 Geocode";
+"debug_test_geocode_shenzhen" = "測試深圳 Geocode";
+"debug_step_1" = "1. 選擇測試場景，點擊「開始」";
+"debug_step_2" = "2. 系統會切換到 Mock 模式，模擬 GPS 輸入";
+"debug_step_3" = "3. 也可以同時在主畫面開始 Journey 觀察效果";
+"debug_step_4" = "4. 測試完成後點擊「切回系統定位」";
+"debug_step_5" = "5. 建議：跑步場景用運動模式，8 小時步行用日常模式";
+
+"add_memory" = "新增回憶";
+"export_long_image" = "匯出長圖";
+
+// Equipment
+"equipment_title" = "裝備";
+"equipment_hair" = "髮型";
+"equipment_outfit" = "衣服";
+"equipment_accessory" = "配飾";
+"equipment_coming_soon" = "敬請期待";
+"avatar_placeholder_back" = "背面佔位";
+"equipment_item_boy_hair" = "男孩髮型";
+"equipment_item_boy_suit" = "男孩西裝";
+"equipment_item_headphone" = "耳機";
+"equipment_item_none" = "無";
+
+"profile_equipment" = "Equipment";
+
+"equipment_expression" = "Expression";
+
+"equipment_item_expression_neutral" = "Neutral";
+
+"equipment_item_expression_smile" = "Smile";
+
+"equipment_item_expression_sad" = "Sad";
+
+"equipment_item_expression_default" = "默認表情";
+
+"equipment_item_hair_boy" = "男髮型";
+
+"equipment_item_hair_girl" = "女髮型";
+
+"equipment_item_outfit_boy_suit" = "男西裝";
+
+"equipment_item_outfit_girl_suit" = "女套裝";
+
+"equipment_item_acc_headphone" = "耳機";
+
+"equipment_item_expr_default" = "預設表情";

@@ -1,0 +1,130 @@
+{
+  "version": 1,
+  "base": {
+    "body": {
+      "front": "avatar_body_front",
+      "right": "avatar_body_side",
+      "back": null,
+      "left": "avatar_body_side"
+    },
+    "head": {
+      "front": "avatar_head_front",
+      "right": "avatar_head_side",
+      "back": null,
+      "left": "avatar_head_side"
+    },
+    "baseOutfit": {
+      "front": "avatar_base_top_front",
+      "right": "avatar_base_top_side",
+      "back": null,
+      "left": "avatar_base_top_side"
+    }
+  },
+  "categories": [
+    {
+      "id": "hair",
+      "titleKey": "equipment_hair",
+      "selectionKey": "hairId",
+      "items": [
+        {
+          "id": "hair_boy_default",
+          "nameKey": "equipment_item_hair_boy",
+          "layer": "hair",
+          "images": {
+            "front": "avatar_hair_boy_front",
+            "right": "avatar_hair_boy_side",
+            "back": null,
+            "left": "avatar_hair_boy_side"
+          }
+        },
+        {
+          "id": "hair_girl_default",
+          "nameKey": "equipment_item_hair_girl",
+          "layer": "hair",
+          "images": {
+            "front": "avatar_hair_girl_front",
+            "right": "avatar_hair_girl_side",
+            "back": null,
+            "left": "avatar_hair_girl_side"
+          }
+        }
+      ]
+    },
+    {
+      "id": "outfit",
+      "titleKey": "equipment_outfit",
+      "selectionKey": "outfitId",
+      "items": [
+        {
+          "id": "outfit_boy_suit",
+          "nameKey": "equipment_item_outfit_boy_suit",
+          "layer": "outfit",
+          "images": {
+            "front": "avatar_outfit_boy_suit_front",
+            "right": null,
+            "back": null,
+            "left": null
+          }
+        },
+        {
+          "id": "outfit_girl_suit",
+          "nameKey": "equipment_item_outfit_girl_suit",
+          "layer": "outfit",
+          "images": {
+            "front": "avatar_outfit_girl_suit_front",
+            "right": null,
+            "back": null,
+            "left": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "accessory",
+      "titleKey": "equipment_accessory",
+      "selectionKey": "accessoryId",
+      "items": [
+        {
+          "id": "none",
+          "nameKey": "equipment_item_none",
+          "layer": "accessory",
+          "images": {
+            "front": null,
+            "right": null,
+            "back": null,
+            "left": null
+          }
+        },
+        {
+          "id": "acc_headphone",
+          "nameKey": "equipment_item_acc_headphone",
+          "layer": "accessory",
+          "images": {
+            "front": "avatar_acc_headphone_front",
+            "right": "avatar_acc_headphone_side",
+            "back": null,
+            "left": "avatar_acc_headphone_side"
+          }
+        }
+      ]
+    },
+    {
+      "id": "expression",
+      "titleKey": "equipment_expression",
+      "selectionKey": "expressionId",
+      "items": [
+        {
+          "id": "expr_default",
+          "nameKey": "equipment_item_expr_default",
+          "layer": "expression",
+          "images": {
+            "front": "avatar_expr_default_front",
+            "right": "avatar_expr_default_side",
+            "back": null,
+            "left": "avatar_expr_default_side"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,245 @@
+"locating" = "위치 확인 중…";
+"start" = "시작";
+"resume" = "계속";
+"back" = "뒤로";
+"pause" = "일시정지";
+"paused" = "일시정지됨";
+"finished" = "완료";
+"continue_background" = "백그라운드에서 계속(저전력)";
+"journey_paused" = "여정이 일시정지되었습니다";
+"go_to_library" = "도시 라이브러리로";
+"close" = "닫기";
+"share" = "공유";
+"save" = "저장";
+"share_card" = "카드 공유";
+"new_city_unlocked" = "새 도시 해금";
+"later" = "나중에";
+
+"tab_start" = "시작";
+"tab_cities" = "都市コレクション";
+"tab_memory" = "시외 경로 / 노선";
+"tab_lifelog" = "Lifelog";
+"globe_view"="글로브 보기";
+"profile"="프로필";
+"toast_city_added" = "%@ 도시 카드를 생성하여 City Library에 추가했습니다";
+
+"start_upper" = "시작";
+"resume_upper" = "계속";
+"explore_city_run" = "도시";
+
+"debug_mode_system" = "시스템";
+"debug_mode_mock" = "모의";
+"debug_section_mode" = "모드";
+"debug_location" = "위치";
+"debug_switch_to_system" = "시스템 위치로 전환";
+"debug_section_quick_jump" = "빠른 이동";
+"debug_jump_shanghai" = "상하이로 이동";
+"debug_jump_london" = "런던으로 이동";
+"debug_section_simulation" = "시뮬레이션";
+"debug_simulate_flight" = "비행 시뮬레이션: 상하이 → 런던(선형 보간)";
+"debug_title" = "위치 디버그";
+
+"photo_encode_failed" = "JPEG 인코딩에 실패했습니다";
+"memory_photo_title" = "사진";
+"memory_note_title" = "메모";
+"memory_spot_title" = "이 위치";
+"memory_photo_cn" = "사진";
+"memory_note_cn" = "메모";
+"pop_camera_title" = "카메라";
+"tap_to_take_photo" = "탭하여 사진 촬영";
+"pop_note_title" = "메모";
+"add_memory_placeholder" = "기억 추가";
+
+"share_close_title" = "무엇을 하시겠어요?";
+"share_continue_journey" = "여정 계속";
+"share_exit_complete" = "나가기 및 완료";
+
+"share_saved_to_photos" = "사진에 저장됨";
+"share_privacy_exact" = "정확함";
+"share_privacy_hidden" = "숨김";
+"share_generating" = "생성 중…";
+
+"share_title_fallback" = "여정";
+"share_from_fallback" = "출발";
+"share_to_fallback" = "도착";
+
+"share_duration_min" = "%d분";
+
+"share_stat_distance" = "거리";
+"share_stat_time" = "시간";
+"share_stat_memory" = "기억";
+
+"unlock_new_city" = "새 도시 해금";
+
+"unknown" = "알 수 없음";
+"memories" = "기억";
+"preparing_map" = "지도를 준비 중…";
+"loading_map" = "지도를 불러오는 중…";
+"globe" = "지구본";
+
+"first_city_prompt_title" = "도시 탐험을 시작하세요";
+"first_city_prompt_desc" = "현재 위치를 기반으로 첫 도시 카드(도시 지도 포함)를 생성합니다.\n새 도시에서 여정을 한 번 완료하면 도시 카드가 자동으로 추가됩니다.";
+"first_city_prompt_generate" = "생성";
+
+"city_deep_journeys_count" = "%d회 여정";
+"city_deep_memories_count" = "%d개 기억";
+"city_deep_memories_distance" = "%d개 기억 · %dm";
+
+"journey_memory" = "여정 기록";
+"journey_memories" = "여정 기록";
+"memories_for_city" = "%@의 기억: %d";
+"no_memories_yet" = "아직 기억이 없습니다";
+"no_memories_desc" = "여정을 완료하면 기억이 여기에 저장됩니다.";
+
+"unlock_city_title_cn" = "새 도시 탐험 카드 해금";
+"unlock_city_desc_1" = "%@에서의 탐험을 막 마쳤습니다.";
+"unlock_city_desc_2" = "이 카드는 City Library에 표시되어 언제든 발자취를 다시 볼 수 있습니다.";
+"got_it" = "알겠어요";
+"go_see" = "보러 가기";
+
+/* City Library - Header */
+"city_library_header_city" = "내 도시 스탬프";
+
+/* City Library - Empty state */
+"city_empty_title" = "아직 도시 스탬프가 없습니다";
+"city_empty_subtitle" = "도시 카드를 생성하거나 여정을 완료하여 첫 도시를 해금하세요.";
+
+/* Card stats */
+"city_stats_line" = "%d회 탐험 · %d개 기억";
+
+"library_city_title" = "내 도시 스탬프";
+"library_empty_title" = "아직 도시 스탬프가 없습니다";
+"library_empty_subtitle" = "도시 카드를 생성하거나 여정을 완료하여 첫 도시를 해금하세요.";
+"city_card_stats" = "%d회 탐험 · %d개 기억";
+
+"location_failed_title" = "위치 확인 실패";
+"location_failed_desc" = "현재 위치를 가져올 수 없습니다. 다시 시도하거나, 도시를 수동으로 선택해 첫 도시 카드를 생성할 수 있습니다.";
+"retry" = "재시도";
+"choose_city_manually" = "도시 수동 선택";
+
+"finish_confirm_title" = "여정을 종료할까요?";
+"finish_confirm_message" = "실수로 종료를 눌렀다면 여정을 계속할 수 있어요.";
+"finish_confirm_continue" = "여정 계속";
+"finish_confirm_finish" = "종료 확정";
+"resume_prompt_title" = "미완료 여정";
+"resume_prompt_message" = "완료되지 않은 여정이 있어요. 계속할까요?";
+"resume_prompt_continue" = "계속";
+"resume_prompt_end" = "종료 후 공유";
+
+"tracking_mode_sport" = "운동";
+"tracking_mode_daily" = "일상";
+
+/* Lock Screen Tracking Cards - 잠금화면 추적 카드 */
+"lockscreen_tracking_active" = "추적 중";
+"lockscreen_sport_mode" = "운동 모드";
+"lockscreen_daily_mode" = "일상 모드";
+"lockscreen_distance" = "거리";
+"lockscreen_duration" = "시간";
+"lockscreen_kilometers" = "킬로미터";
+"lockscreen_elapsed" = "경과 시간";
+"lockscreen_add_memory" = "추억 추가";
+
+/* Added for full localization - 2026-01-31 */
+"delete_city_alert_title" = "Delete this city card?";
+"delete_city_alert_message" = "“%@” will be removed from your City Library. This can't be undone.";
+"delete" = "Delete";
+"cancel" = "Cancel";
+"profile_tagline_travel_enthusiastic" = "Travel Enthusiastic";
+"profile_no_items_title" = "No items collected yet";
+"profile_no_items_desc" = "Complete journeys to earn equipment and items";
+"recent_journeys_last_30_days" = "LAST 30 DAYS · %d";
+"recent_journeys_empty_title" = "No 10+ min journeys in the last 30 days";
+"recent_journeys_empty_desc" = "Complete a journey to generate a share card here.";
+"save_image" = "Save Image";
+"mem_short" = "%d mem";
+"equipment_collected_count" = "%d / %d COLLECTED";
+"rarity_common" = "COMMON";
+"rarity_rare" = "RARE";
+"equipment_world_map" = "WORLD MAP";
+"equipment_camera" = "CAMERA";
+"equipment_leather_backpack" = "LEATHER BACKPACK";
+"equipment_hiking_boots" = "HIKING BOOTS";
+"coins_count" = "%d COINS";
+"profile_showcase" = "Showcase";
+"profile_my_statistics" = "MY STATISTICS";
+"profile_journeys" = "JOURNEYS";
+"profile_total_distance" = "TOTAL DISTANCE";
+"profile_cities_visited" = "CITIES VISITED";
+"profile_recent_journeys" = "RECENT JOURNEYS";
+"profile_my_items" = "MY ITEMS";
+"memory_empty_desc" = "Start a journey and create\nmemories along the way";
+"entry_count_singular" = "%d ENTRY";
+"entry_count_plural" = "%d ENTRIES";
+"delete_all_notes_title" = "Delete all notes?";
+"delete_all_notes_message" = "All memories in this journey will be deleted. This can’t be undone.";
+"copy_all" = "Copy All";
+"delete_all_notes" = "Delete All Notes";
+"mirror_selfie" = "Mirror selfie";
+"memory_title_optional" = "Title (optional)";
+"memory_notes_placeholder" = "Write your memory here...";
+"edit_memory" = "Edit Memory";
+"empty_memory" = "(Empty memory)";
+"accessibility_you" = "You";
+"accessibility_avatar" = "Avatar";
+"sport_mode_desc" = "High precision tracking with GPS. Best for activities like running, hiking, and cycling.";
+"daily_mode_desc" = "Balanced tracking for everyday exploration. Uses less battery while still recording your journey.";
+"hint_precise" = "● PRECISE";
+"hint_battery" = "○ Battery";
+"hint_precision" = "○ Precision";
+"hint_efficient" = "● EFFICIENT";
+"debug_playback_speed" = "Playback speed: %dx";
+"debug_speed" = "Speed";
+"debug_estimated" = "Estimated: %@";
+"debug_start" = "Start";
+"debug_recommended_mode" = "Recommended mode:";
+"debug_stop_test" = "Stop Test";
+"debug_clear_all_journeys" = "Clear all journeys (debug)";
+"debug_test_geocode_shanghai" = "Test Shanghai Geocode";
+"debug_test_geocode_beijing" = "Test Beijing Geocode";
+"debug_test_geocode_hangzhou" = "Test Hangzhou Geocode";
+"debug_test_geocode_shenzhen" = "Test Shenzhen Geocode";
+"debug_step_1" = "1. Choose a test scenario and tap “Start”";
+"debug_step_2" = "2. The system will switch to Mock mode and simulate GPS input";
+"debug_step_3" = "3. You can also start a Journey on the main screen to observe behavior";
+"debug_step_4" = "4. When finished, tap “Switch to system location”";
+"debug_step_5" = "5. Tip: Use Sport mode for running; use Daily mode for an 8-hour walk";
+
+"add_memory" = "Add Memory";
+
+"export_long_image" = "긴 이미지 내보내기";
+
+// Equipment
+"equipment_title" = "장비";
+"equipment_hair" = "헤어";
+"equipment_outfit" = "의상";
+"equipment_accessory" = "액세서리";
+"equipment_coming_soon" = "준비중";
+"avatar_placeholder_back" = "뒤";
+"equipment_item_boy_hair" = "남자아이 헤어";
+"equipment_item_boy_suit" = "남자아이 정장";
+"equipment_item_headphone" = "헤드폰";
+"equipment_item_none" = "없음";
+
+"profile_equipment" = "Equipment";
+
+"equipment_expression" = "Expression";
+
+"equipment_item_expression_neutral" = "Neutral";
+
+"equipment_item_expression_smile" = "Smile";
+
+"equipment_item_expression_sad" = "Sad";
+
+"equipment_item_expression_default" = "기본 표정";
+
+"equipment_item_hair_boy" = "Boy Hair";
+
+"equipment_item_hair_girl" = "Girl Hair";
+
+"equipment_item_outfit_boy_suit" = "Boy Suit";
+
+"equipment_item_outfit_girl_suit" = "Girl Suit";
+
+"equipment_item_acc_headphone" = "Headphones";
+
+"equipment_item_expr_default" = "Default";
