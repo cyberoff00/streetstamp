@@ -38,6 +38,7 @@ struct StreetStampsApp: App {
                     VoiceBroadcastService.shared.start()
                     journeyStore.load()
                     lifelogStore.load()
+                    lifelogStore.bind(to: locationHub)
                     let firstPromptKey = "streetstamps.auth_entry_shown.v1"
                     if !sessionStore.isLoggedIn && !UserDefaults.standard.bool(forKey: firstPromptKey) {
                         UserDefaults.standard.set(true, forKey: firstPromptKey)

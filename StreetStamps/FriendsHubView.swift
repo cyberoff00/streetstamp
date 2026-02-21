@@ -203,11 +203,7 @@ struct FriendsHubView: View {
             Button {
                 dismiss()
             } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "chevron.left")
-                    Text("BACK")
-                        .font(.system(size: 12, weight: .semibold))
-                }
+                Image(systemName: "chevron.left")
                 .foregroundColor(.black)
             }
             .buttonStyle(.plain)
@@ -682,11 +678,8 @@ private struct FriendProfileScreen: View {
                 Button {
                     dismiss()
                 } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "chevron.left")
-                        Text("BACK")
-                            .font(.system(size: 12, weight: .semibold))
-                    }
+                    Image(systemName: "chevron.left")
+                        .foregroundColor(.black)
                 }
                 .buttonStyle(.plain)
                 Spacer()
