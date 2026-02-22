@@ -1,21 +1,14 @@
 import SwiftUI
-import AuthenticationServices
 
 struct AccountCenterView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var journeyStore: JourneyStore
     @EnvironmentObject private var cityCache: CityCache
-    @EnvironmentObject private var lifelogStore: LifelogStore
     @EnvironmentObject private var socialStore: SocialGraphStore
 
     @State private var backendBaseURL = BackendConfig.baseURLString
     @State private var googleClientID = BackendConfig.googleIOSClientID
-
-    @State private var email = ""
-    @State private var password = ""
-
-    @State private var myProfile: BackendProfileDTO?
     @State private var displayNameDraft = ""
     @State private var handleDraft = ""
     @State private var profileVisibility: ProfileVisibility = ProfileSharingSettings.visibility
@@ -159,7 +152,6 @@ struct AccountCenterView: View {
 
                 capsuleAction("退出登录", filled: false) {
                     sessionStore.logoutToGuest()
-                    myProfile = nil
                     toast("已切回游客模式")
                 }
             } else {
@@ -321,282 +313,10 @@ struct AccountCenterView: View {
         .cardStyle()
     }
 
-    private var authCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("登录 / 注册")
-                .font(.system(size: 13, weight: .bold))
-
-            TextField("邮箱", text: $email)
-                .textInputAutocapitalization(.never)
-                .keyboardType(.emailAddress)
-                .autocorrectionDisabled(true)
-                .textFieldStyle(.roundedBorder)
-
-            SecureField("密码（至少 8 位）", text: $password)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled(true)
-                .textFieldStyle(.roundedBorder)
-
-            HStack(spacing: 10) {
-                Button(isLoading ? "处理中..." : "邮箱登录") {
-                    Task { await loginWithEmail() }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(isLoading)
-
-                Button(isLoading ? "处理中..." : "邮箱注册") {
-                    Task { await registerWithEmail() }
-                }
-                .buttonStyle(.bordered)
-                .disabled(isLoading)
-            }
-
-            HStack(spacing: 10) {
-                Button(isLoading ? "处理中..." : "Google 登录") {
-                    Task { await loginWithGoogle() }
-                }
-                .buttonStyle(.bordered)
-                .disabled(isLoading)
-
-                Button(isLoading ? "处理中..." : "Apple 登录") {
-                    Task { await loginWithApple() }
-                }
-                .buttonStyle(.bordered)
-                .disabled(isLoading)
-            }
-        }
-        .cardStyle()
-    }
-
-    private var accountCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("账号状态")
-                .font(.system(size: 13, weight: .bold))
-
-            Text("登录方式：\(sessionStore.currentProvider)")
-                .font(.system(size: 12, weight: .semibold))
-            Text("用户 ID：\(sessionStore.accountUserID ?? "guest")")
-                .font(.system(size: 12, weight: .semibold))
-                .textSelection(.enabled)
-
-            if sessionStore.isLoggedIn {
-                TextField("展示名称（可重复）", text: $displayNameDraft)
-                    .textFieldStyle(.roundedBorder)
-                TextField("Handle（唯一）", text: $handleDraft)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled(true)
-                    .textFieldStyle(.roundedBorder)
-
-                Picker("主页可见性", selection: $profileVisibility) {
-                    ForEach(ProfileVisibility.allCases) { v in
-                        Text(v.titleCN).tag(v)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                HStack(spacing: 10) {
-                    Button("刷新资料") {
-                        Task { await refreshMeIfPossible() }
-                    }
-                    .buttonStyle(.bordered)
-
-                    Button("保存展示名称") {
-                        Task { await updateDisplayName() }
-                    }
-                    .buttonStyle(.bordered)
-
-                    Button("保存 Handle") {
-                        Task { await updateHandle() }
-                    }
-                    .buttonStyle(.bordered)
-
-                    Button("保存可见性") {
-                        Task { await updateVisibility() }
-                    }
-                    .buttonStyle(.bordered)
-                }
-
-                Button("切回游客模式") {
-                    sessionStore.logoutToGuest()
-                    myProfile = nil
-                    toast("已切回游客模式")
-                }
-                .buttonStyle(.bordered)
-            }
-
-            Text("说明：默认仅本地；公开/好友可见内容会进入云端同步。")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(.secondary)
-        }
-        .cardStyle()
-        .onChange(of: profileVisibility) { _, newValue in
-            ProfileSharingSettings.visibility = newValue
-        }
-    }
-
-    private var migrationCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("迁移与同步")
-                .font(.system(size: 13, weight: .bold))
-
-            Button(isLoading ? "迁移中..." : "迁移本地旅程与记忆到云端") {
-                Task { await migrateAll() }
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(isLoading || !sessionStore.isLoggedIn)
-
-            Text("迁移规则：private 保留本地；friendsOnly/public 上传云端。Lifelog 不上传云端，仅支持本机/手动恢复。")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(.secondary)
-
-            if !MigrationStatusStore.lastMessage().isEmpty {
-                Text(MigrationStatusStore.lastMessage())
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.black.opacity(0.7))
-            }
-        }
-        .cardStyle()
-    }
-
-    private var recoveryCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("游客数据恢复")
-                .font(.system(size: 13, weight: .bold))
-
-            Text("用于找回旧 guest 目录里的旅程、笔记和照片。")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(.secondary)
-
-            Text("当前用户：\(sessionStore.currentUserID)")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.secondary)
-                .textSelection(.enabled)
-
-            HStack(spacing: 10) {
-                Button(isLoading ? "扫描中..." : "扫描旧 guest") {
-                    scanRecoveryCandidates()
-                }
-                .buttonStyle(.bordered)
-                .disabled(isLoading)
-
-                Button(isLoading ? "重跑中..." : "强制重跑迁移") {
-                    Task { await forceReplayMigration() }
-                }
-                .buttonStyle(.bordered)
-                .disabled(isLoading)
-            }
-
-            if recoveryCandidates.isEmpty {
-                Text("未发现可恢复的旧 guest 数据。")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.secondary)
-            } else {
-                ForEach(recoveryCandidates) { item in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(item.userID)
-                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                            .textSelection(.enabled)
-
-                        Text("旅程 \(item.journeyCount) · 笔记 \(item.memoryCount) · 照片 \(item.photoCount) · Lifelog点 \(item.lifelogPointCount)")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.secondary)
-
-                        if !item.topCities.isEmpty {
-                            Text("城市预览：\(item.topCities.joined(separator: "、"))")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.secondary)
-                        }
-
-                        if let dt = item.lastModified {
-                            Text("最近更新时间：\(dt.formatted(date: .abbreviated, time: .shortened))")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.secondary)
-                        }
-
-                        Button(isLoading ? "恢复中..." : "恢复这个 guest 到当前用户") {
-                            Task { await recoverGuestData(sourceUserID: item.userID) }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(isLoading)
-                    }
-                    .padding(10)
-                    .background(Color.black.opacity(0.03))
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                }
-            }
-        }
-        .cardStyle()
-    }
-
-    private func registerWithEmail() async {
-        guard BackendConfig.isEnabled else { return toast("请先配置后端地址") }
-        guard !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, password.count >= 8 else {
-            return toast("请输入有效邮箱和至少 8 位密码")
-        }
-        isLoading = true
-        defer { isLoading = false }
-
-        do {
-            try await sessionStore.registerWithEmail(email: email.trimmingCharacters(in: .whitespacesAndNewlines), password: password)
-            toast("注册并登录成功")
-            await refreshMeIfPossible()
-        } catch {
-            toast("注册失败：\(error.localizedDescription)")
-        }
-    }
-
-    private func loginWithEmail() async {
-        guard BackendConfig.isEnabled else { return toast("请先配置后端地址") }
-        guard !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, password.count >= 8 else {
-            return toast("请输入有效邮箱和至少 8 位密码")
-        }
-        isLoading = true
-        defer { isLoading = false }
-
-        do {
-            try await sessionStore.loginWithEmail(email: email.trimmingCharacters(in: .whitespacesAndNewlines), password: password)
-            toast("登录成功")
-            await refreshMeIfPossible()
-        } catch {
-            toast("登录失败：\(error.localizedDescription)")
-        }
-    }
-
-    private func loginWithGoogle() async {
-        guard BackendConfig.isEnabled else { return toast("请先配置后端地址") }
-        isLoading = true
-        defer { isLoading = false }
-
-        do {
-            let token = try await GoogleSignInService.signIn()
-            try await sessionStore.loginWithOAuth(provider: "google", idToken: token)
-            toast("Google 登录成功")
-            await refreshMeIfPossible()
-        } catch {
-            toast("Google 登录失败：\(error.localizedDescription)")
-        }
-    }
-
-    private func loginWithApple() async {
-        guard BackendConfig.isEnabled else { return toast("请先配置后端地址") }
-        isLoading = true
-        defer { isLoading = false }
-
-        do {
-            let token = try await AppleSignInService.signIn()
-            try await sessionStore.loginWithOAuth(provider: "apple", idToken: token)
-            toast("Apple 登录成功")
-            await refreshMeIfPossible()
-        } catch {
-            toast("Apple 登录失败：\(error.localizedDescription)")
-        }
-    }
-
     private func refreshMeIfPossible() async {
         guard let token = sessionStore.currentAccessToken, !token.isEmpty else { return }
         do {
             let me = try await BackendAPIClient.shared.fetchMyProfile(token: token)
-            myProfile = me
             displayNameDraft = me.displayName
             handleDraft = me.handle ?? ""
             if let pv = me.profileVisibility {
@@ -665,47 +385,6 @@ struct AccountCenterView: View {
 
     private func scanRecoveryCandidates() {
         recoveryCandidates = GuestDataRecoveryService.discoverCandidates(currentUserID: sessionStore.currentUserID)
-    }
-
-    private func recoverGuestData(sourceUserID: String) async {
-        isLoading = true
-        defer { isLoading = false }
-
-        do {
-            let result = try GuestDataRecoveryService.recover(
-                from: sourceUserID,
-                to: sessionStore.currentUserID
-            )
-
-            journeyStore.load()
-            cityCache.loadFromDisk()
-            cityCache.rebuildFromJourneyStore()
-            lifelogStore.load()
-
-            scanRecoveryCandidates()
-
-            let msg = "恢复完成：新增旅程 \(result.mergedJourneyCount) 条，拷贝旅程文件 \(result.copiedJourneyFiles) 个，照片 \(result.copiedPhotos) 个，缩略图 \(result.copiedThumbnails) 个\(result.replacedLifelog ? "，并替换了 Lifelog" : "")"
-            toast(msg)
-        } catch {
-            toast("恢复失败：\(error.localizedDescription)")
-        }
-    }
-
-    private func forceReplayMigration() async {
-        isLoading = true
-        defer { isLoading = false }
-
-        let report = sessionStore.forceReplayLegacyMigration()
-        journeyStore.load()
-        cityCache.loadFromDisk()
-        cityCache.rebuildFromJourneyStore()
-        lifelogStore.load()
-        scanRecoveryCandidates()
-
-        let ids = report.discoveredLegacyUserIDs.isEmpty
-            ? "无"
-            : report.discoveredLegacyUserIDs.joined(separator: ", ")
-        toast("已强制重跑。移除 marker \(report.removedMarkers) 个；扫描到 legacy ID: \(ids)")
     }
 
     private func updateVisibility() async {

@@ -135,9 +135,12 @@ function normalizeVisibility(v) {
 }
 
 function normalizeDisplayName(raw) {
-  const trimmed = String(raw || "").trim().replace(/\s+/g, " ");
+  const trimmed = String(raw || "").trim();
   if (!trimmed) return "";
-  return trimmed.slice(0, 24);
+  if (trimmed.length > 24) return "";
+  if (/\s/u.test(trimmed)) return "";
+  if (/[^\p{L}\p{N}_.-]/u.test(trimmed)) return "";
+  return trimmed;
 }
 
 function normalizeISOTime(raw) {
@@ -273,7 +276,7 @@ function parseBearer(req) {
 }
 
 function emptyDB() {
-  return { users: {}, emailIndex: {}, inviteIndex: {}, oauthIndex: {}, handleIndex: {} };
+  return { users: {}, emailIndex: {}, inviteIndex: {}, oauthIndex: {}, handleIndex: {}, likesIndex: {} };
 }
 
 async function ensureDirForFile(filePath) {
@@ -290,7 +293,8 @@ async function loadDB() {
       emailIndex: parsed.emailIndex || {},
       inviteIndex: parsed.inviteIndex || {},
       oauthIndex: parsed.oauthIndex || {},
-      handleIndex: parsed.handleIndex || {}
+      handleIndex: parsed.handleIndex || {},
+      likesIndex: parsed.likesIndex || {}
     };
   } catch (e) {
     if (e && e.code === "ENOENT") return emptyDB();
@@ -318,6 +322,74 @@ function filterJourneys(journeys, isSelf, isFriend) {
     if (v === visibilityFriendsOnly && isFriend) out.push(j);
   }
   return out;
+}
+
+function canViewJourney(viewer, owner, journey) {
+  const isSelf = viewer && owner && viewer.id === owner.id;
+  if (isSelf) return true;
+  const isFriend = viewer && owner ? isFriendOf(viewer, owner.id) : false;
+  const v = normalizeVisibility(journey?.visibility);
+  if (v === visibilityPublic) return true;
+  if (v === visibilityFriendsOnly && isFriend) return true;
+  return false;
+}
+
+function journeyLikeKey(ownerUserID, journeyID) {
+  return `${ownerUserID}:${journeyID}`;
+}
+
+function ensureLikeRecord(ownerUserID, journeyID) {
+  const key = journeyLikeKey(ownerUserID, journeyID);
+  if (!db.likesIndex[key]) {
+    db.likesIndex[key] = {
+      ownerUserID,
+      journeyID,
+      likerIDs: [],
+      updatedAt: new Date().toISOString()
+    };
+  }
+  if (!Array.isArray(db.likesIndex[key].likerIDs)) db.likesIndex[key].likerIDs = [];
+  return db.likesIndex[key];
+}
+
+function ensureUserNotifications(user) {
+  if (!Array.isArray(user.notifications)) user.notifications = [];
+}
+
+function pushJourneyLikeNotification(owner, fromUser, journey) {
+  ensureUserNotifications(owner);
+  owner.notifications.unshift({
+    id: `n_${randHex(10)}`,
+    type: "journey_like",
+    fromUserID: fromUser.id,
+    fromDisplayName: fromUser.displayName,
+    journeyID: journey.id,
+    journeyTitle: journey.title,
+    message: `${fromUser.displayName} liked your journey "${journey.title}"`,
+    createdAt: new Date().toISOString(),
+    read: false
+  });
+  if (owner.notifications.length > 400) {
+    owner.notifications = owner.notifications.slice(0, 400);
+  }
+}
+
+function pushProfileStompNotification(owner, fromUser) {
+  ensureUserNotifications(owner);
+  owner.notifications.unshift({
+    id: `n_${randHex(10)}`,
+    type: "profile_stomp",
+    fromUserID: fromUser.id,
+    fromDisplayName: fromUser.displayName,
+    journeyID: null,
+    journeyTitle: null,
+    message: `${fromUser.displayName} 踩了踩你的主页`,
+    createdAt: new Date().toISOString(),
+    read: false
+  });
+  if (owner.notifications.length > 400) {
+    owner.notifications = owner.notifications.slice(0, 400);
+  }
 }
 
 function isFriendOf(viewer, targetID) {
@@ -369,9 +441,13 @@ function r2PublicURL(objectKey) {
 async function main() {
   db = await loadDB();
   db.handleIndex = {};
+  if (!db.likesIndex || typeof db.likesIndex !== "object") {
+    db.likesIndex = {};
+  }
   for (const [uid, user] of Object.entries(db.users || {})) {
     setUserHandle(uid, user.handle || user.displayName || uid, { strict: false });
     if (!user.profileVisibility) user.profileVisibility = visibilityFriendsOnly;
+    ensureUserNotifications(user);
   }
   await fsp.mkdir(MEDIA_DIR, { recursive: true });
 
@@ -405,6 +481,7 @@ async function main() {
         journeys: [],
         cityCards: [],
         friendIDs: [],
+        notifications: [],
         createdAt: nowUnix()
       };
       db.users[uid] = user;
@@ -456,6 +533,7 @@ async function main() {
           journeys: [],
           cityCards: [],
           friendIDs: [],
+          notifications: [],
           createdAt: nowUnix()
         };
         setUserHandle(uid, uid, { strict: false });
@@ -571,12 +649,182 @@ async function main() {
     }
   });
 
+  app.post("/v1/journeys/likes/batch", (req, res) => {
+    try {
+      const viewerID = parseBearer(req);
+      const viewer = db.users[viewerID];
+      if (!viewer) return res.status(404).json({ message: "user not found" });
+
+      const ownerUserIDRaw = String(req.body?.ownerUserID || "").trim();
+      const ownerUserID = ownerUserIDRaw || viewerID;
+      const owner = db.users[ownerUserID];
+      if (!owner) return res.status(404).json({ message: "user not found" });
+
+      const ids = Array.isArray(req.body?.journeyIDs)
+        ? req.body.journeyIDs.map((x) => String(x || "").trim()).filter(Boolean)
+        : [];
+      const uniqIDs = [...new Set(ids)];
+
+      const ownerJourneyByID = new Map((owner.journeys || []).map((j) => [String(j.id), j]));
+      const items = [];
+      for (const journeyID of uniqIDs) {
+        const journey = ownerJourneyByID.get(journeyID);
+        if (!journey) {
+          items.push({ journeyID, likes: 0, likedByMe: false });
+          continue;
+        }
+        if (!canViewJourney(viewer, owner, journey)) {
+          items.push({ journeyID, likes: 0, likedByMe: false });
+          continue;
+        }
+        const record = ensureLikeRecord(ownerUserID, journeyID);
+        const likerIDs = Array.isArray(record.likerIDs) ? record.likerIDs : [];
+        items.push({
+          journeyID,
+          likes: likerIDs.length,
+          likedByMe: likerIDs.includes(viewerID)
+        });
+      }
+      return res.status(200).json({ items });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.post("/v1/journeys/:ownerUserID/:journeyID/like", async (req, res) => {
+    try {
+      const viewerID = parseBearer(req);
+      const ownerUserID = String(req.params.ownerUserID || "").trim();
+      const journeyID = String(req.params.journeyID || "").trim();
+      if (!ownerUserID || !journeyID) return res.status(400).json({ message: "ownerUserID and journeyID required" });
+
+      const viewer = db.users[viewerID];
+      const owner = db.users[ownerUserID];
+      if (!viewer || !owner) return res.status(404).json({ message: "user not found" });
+      const journey = (owner.journeys || []).find((x) => String(x.id) === journeyID);
+      if (!journey) return res.status(404).json({ message: "journey not found" });
+      if (!canViewJourney(viewer, owner, journey)) return res.status(403).json({ message: "forbidden" });
+
+      const record = ensureLikeRecord(ownerUserID, journeyID);
+      if (!record.likerIDs.includes(viewerID)) {
+        record.likerIDs.push(viewerID);
+        record.updatedAt = new Date().toISOString();
+        if (viewerID !== ownerUserID) {
+          pushJourneyLikeNotification(owner, viewer, journey);
+        }
+        await saveDB();
+      }
+
+      return res.status(200).json({
+        ownerUserID,
+        journeyID,
+        likes: record.likerIDs.length,
+        likedByMe: true
+      });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.delete("/v1/journeys/:ownerUserID/:journeyID/like", async (req, res) => {
+    try {
+      const viewerID = parseBearer(req);
+      const ownerUserID = String(req.params.ownerUserID || "").trim();
+      const journeyID = String(req.params.journeyID || "").trim();
+      if (!ownerUserID || !journeyID) return res.status(400).json({ message: "ownerUserID and journeyID required" });
+
+      const owner = db.users[ownerUserID];
+      if (!owner) return res.status(404).json({ message: "user not found" });
+      const record = ensureLikeRecord(ownerUserID, journeyID);
+      const next = (record.likerIDs || []).filter((x) => x !== viewerID);
+      if (next.length !== (record.likerIDs || []).length) {
+        record.likerIDs = next;
+        record.updatedAt = new Date().toISOString();
+        await saveDB();
+      }
+      return res.status(200).json({
+        ownerUserID,
+        journeyID,
+        likes: (record.likerIDs || []).length,
+        likedByMe: false
+      });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.get("/v1/notifications", (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = db.users[uid];
+      if (!me) return res.status(404).json({ message: "user not found" });
+      ensureUserNotifications(me);
+      const unreadOnlyRaw = String(req.query.unreadOnly || "1").trim().toLowerCase();
+      const unreadOnly = !(unreadOnlyRaw === "0" || unreadOnlyRaw === "false" || unreadOnlyRaw === "no");
+      const source = me.notifications || [];
+      const items = unreadOnly ? source.filter((x) => !x.read) : source;
+      return res.status(200).json({ items });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.post("/v1/notifications/read", async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = db.users[uid];
+      if (!me) return res.status(404).json({ message: "user not found" });
+      ensureUserNotifications(me);
+
+      const markAll = Boolean(req.body?.all);
+      const ids = Array.isArray(req.body?.ids)
+        ? req.body.ids.map((x) => String(x || "").trim()).filter(Boolean)
+        : [];
+      const idSet = new Set(ids);
+
+      let changed = false;
+      me.notifications = (me.notifications || []).map((item) => {
+        const shouldRead = markAll || idSet.has(String(item.id));
+        if (shouldRead && !item.read) {
+          changed = true;
+          return { ...item, read: true };
+        }
+        return item;
+      });
+
+      if (changed) await saveDB();
+      return res.status(200).json({ ok: true });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
   app.get("/v1/profile/me", (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
       if (!me) return res.status(404).json({ message: "user not found" });
       return res.status(200).json(profileDTOForViewer(me, true, true));
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.post("/v1/profile/:userID/stomp", async (req, res) => {
+    try {
+      const viewerID = parseBearer(req);
+      const targetID = String(req.params.userID || "").trim();
+      if (!targetID) return res.status(400).json({ message: "target user id required" });
+
+      const viewer = db.users[viewerID];
+      const target = db.users[targetID];
+      if (!viewer || !target) return res.status(404).json({ message: "user not found" });
+      if (viewerID === targetID) return res.status(400).json({ message: "cannot stomp yourself" });
+      if (!isFriendOf(viewer, targetID)) return res.status(403).json({ message: "friends only" });
+
+      pushProfileStompNotification(target, viewer);
+      await saveDB();
+      return res.status(200).json({ ok: true, message: `已踩一踩 ${target.displayName} 的主页` });
     } catch {
       return res.status(401).json({ message: "unauthorized" });
     }
@@ -647,6 +895,32 @@ async function main() {
 
       const bio = String(req.body?.bio || "").slice(0, 200);
       me.bio = bio;
+      await saveDB();
+      return res.status(200).json(profileDTOForViewer(me, true, true));
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.patch("/v1/profile/loadout", async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = db.users[uid];
+      if (!me) return res.status(404).json({ message: "user not found" });
+
+      const incoming = req.body?.loadout;
+      if (!incoming || typeof incoming !== "object" || Array.isArray(incoming)) {
+        return res.status(400).json({ message: "invalid loadout" });
+      }
+
+      me.loadout = {
+        bodyId: String(incoming.bodyId || me.loadout?.bodyId || "body"),
+        headId: String(incoming.headId || me.loadout?.headId || "head"),
+        hairId: String(incoming.hairId || me.loadout?.hairId || "hair_boy_default"),
+        outfitId: String(incoming.outfitId || me.loadout?.outfitId || "outfit_boy_suit"),
+        accessoryId: incoming.accessoryId == null ? null : String(incoming.accessoryId),
+        expressionId: String(incoming.expressionId || me.loadout?.expressionId || "expr_default")
+      };
       await saveDB();
       return res.status(200).json(profileDTOForViewer(me, true, true));
     } catch {

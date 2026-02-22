@@ -20,6 +20,7 @@ import CoreLocation
 struct JourneyMemoryMainView: View {
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var sessionStore: UserSessionStore
+    @Environment(\.dismiss) private var dismiss
     @State private var expandedCities: Set<String> = []
     @State private var showFilterPopover = false
     @State private var monthCursor = Date()
@@ -29,9 +30,17 @@ struct JourneyMemoryMainView: View {
     @State private var localizedCityNameByKey: [String: String] = [:]
     
     @Binding var showSidebar: Bool
+    private let usesSidebarHeader: Bool
+    private let readOnly: Bool
     
-    init(showSidebar: Binding<Bool>) {
+    init(
+        showSidebar: Binding<Bool>,
+        usesSidebarHeader: Bool = true,
+        readOnly: Bool = false
+    ) {
         self._showSidebar = showSidebar
+        self.usesSidebarHeader = usesSidebarHeader
+        self.readOnly = readOnly
     }
 
     private var allMemoryJourneys: [JourneyRoute] {
@@ -81,6 +90,7 @@ struct JourneyMemoryMainView: View {
                             CitySection(
                                 city: city,
                                 isExpanded: expandedCities.contains(city.cityKey),
+                                readOnly: readOnly,
                                 onToggle: {
                                     withAnimation(.easeInOut(duration: 0.25)) {
                                         if expandedCities.contains(city.cityKey) {
@@ -158,7 +168,19 @@ struct JourneyMemoryMainView: View {
     private var headerView: some View {
         VStack(spacing: 2) {
             HStack(spacing: 12) {
-                SidebarHamburgerButton(showSidebar: $showSidebar, size: 42, iconSize: 20)
+                if usesSidebarHeader {
+                    SidebarHamburgerButton(showSidebar: $showSidebar, size: 42, iconSize: 20)
+                } else {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(.black)
+                            .frame(width: 42, height: 42)
+                    }
+                    .buttonStyle(.plain)
+                }
 
                 Spacer(minLength: 0)
 
@@ -571,6 +593,7 @@ struct CityGroupData: Identifiable {
 private struct CitySection: View {
     let city: CityGroupData
     let isExpanded: Bool
+    let readOnly: Bool
     let onToggle: () -> Void
     
     @EnvironmentObject private var store: JourneyStore
@@ -620,7 +643,8 @@ private struct CitySection: View {
                                 journey: journey,
                                 memories: memories,
                                 cityName: city.cityName,
-                                countryName: city.countryName
+                                countryName: city.countryName,
+                                readOnly: readOnly
                             )
                             .environmentObject(store)
                             .environmentObject(sessionStore)
@@ -751,6 +775,7 @@ struct JourneyMemoryDetailView: View {
     let memories: [JourneyMemory]
     let cityName: String
     let countryName: String
+    let readOnly: Bool
     
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var sessionStore: UserSessionStore
@@ -780,6 +805,20 @@ struct JourneyMemoryDetailView: View {
     @State private var showPhotoLibrary: Bool = false
     @State private var activeMemoryIndex: Int? = nil
     @State private var mirrorSelfie: Bool = false
+
+    init(
+        journey: JourneyRoute,
+        memories: [JourneyMemory],
+        cityName: String,
+        countryName: String,
+        readOnly: Bool = false
+    ) {
+        self.journey = journey
+        self.memories = memories
+        self.cityName = cityName
+        self.countryName = countryName
+        self.readOnly = readOnly
+    }
     
     
     
@@ -891,6 +930,15 @@ struct JourneyMemoryDetailView: View {
         .background(SwipeBackEnabler())
         .onAppear {
             let uid = sessionStore.currentUserID
+            if readOnly {
+                draftMemories = sortedMemories
+                snapshotBeforeEdit = sortedMemories
+                draftOverallMemory = journey.overallMemory ?? ""
+                snapshotOverallMemoryBeforeEdit = draftOverallMemory
+                isEditing = false
+                focusedMemoryID = nil
+                return
+            }
             // 1) Restore a saved editing session (tab switch / swipe away / relaunch)
             if JourneyMemoryDetailResumeStore.shouldResume(userID: uid, journeyID: journey.id),
                let saved = JourneyMemoryDetailDraftStore.load(userID: uid, journeyID: journey.id) {
@@ -911,10 +959,12 @@ struct JourneyMemoryDetailView: View {
         }
         .onDisappear {
             // ✅ If user leaves while editing (e.g. switches to another tab), keep editing state.
-            persistDetailDraftIfNeeded()
+            if !readOnly {
+                persistDetailDraftIfNeeded()
+            }
         }
         .onChange(of: scenePhase) { phase in
-            if phase != .active {
+            if !readOnly, phase != .active {
                 // ✅ App going to background / may be killed: persist current draft.
                 persistDetailDraftIfNeeded(force: true)
             }
@@ -1007,65 +1057,69 @@ struct JourneyMemoryDetailView: View {
                 Spacer()
 
                 // Right-side actions
-                HStack(spacing: 6) {
-                    if isEditing {
-                        Button {
-                            cancelEditing()
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.black)
-                                .frame(width: 36, height: 36)
-                        }
-                        .buttonStyle(.plain)
-
-                        Button {
-                            saveEditing()
-                        } label: {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.black)
-                                .frame(width: 36, height: 36)
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        Button {
-                            beginEditing()
-                        } label: {
-                            Image(systemName: "square.and.pencil")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.black)
-                                .frame(width: 36, height: 36)
-                        }
-                        .buttonStyle(.plain)
-
-                        Menu {
+                if !readOnly {
+                    HStack(spacing: 6) {
+                        if isEditing {
                             Button {
-                                UIPasteboard.general.string = fullText
+                                cancelEditing()
                             } label: {
-                                Label(L10n.t("copy_all"), systemImage: "doc.on.doc")
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.black)
+                                    .frame(width: 36, height: 36)
                             }
+                            .buttonStyle(.plain)
 
                             Button {
-                                exportLongImage()
+                                saveEditing()
                             } label: {
-                                Label(L10n.t("export_long_image"), systemImage: "square.and.arrow.up")
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.black)
+                                    .frame(width: 36, height: 36)
                             }
-Divider()
+                            .buttonStyle(.plain)
+                        } else {
+                            Button {
+                                beginEditing()
+                            } label: {
+                                Image(systemName: "square.and.pencil")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.black)
+                                    .frame(width: 36, height: 36)
+                            }
+                            .buttonStyle(.plain)
 
-                            Button(role: .destructive) {
-                                showDeleteAllConfirm = true
+                            Menu {
+                                Button {
+                                    UIPasteboard.general.string = fullText
+                                } label: {
+                                    Label(L10n.t("copy_all"), systemImage: "doc.on.doc")
+                                }
+
+                                Button {
+                                    exportLongImage()
+                                } label: {
+                                    Label(L10n.t("export_long_image"), systemImage: "square.and.arrow.up")
+                                }
+                                Divider()
+
+                                Button(role: .destructive) {
+                                    showDeleteAllConfirm = true
+                                } label: {
+                                    Label(L10n.t("delete_all_notes"), systemImage: "trash")
+                                }
                             } label: {
-                                Label(L10n.t("delete_all_notes"), systemImage: "trash")
+                                Image(systemName: "ellipsis")
+                                    .font(.system(size: 18, weight: .medium))
+                                    .foregroundColor(.black)
+                                    .frame(width: 36, height: 36)
                             }
-                        } label: {
-                            Image(systemName: "ellipsis")
-                                .font(.system(size: 18, weight: .medium))
-                                .foregroundColor(.black)
-                                .frame(width: 36, height: 36)
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
+                } else {
+                    Color.clear.frame(width: 72, height: 36)
                 }
                 
                 

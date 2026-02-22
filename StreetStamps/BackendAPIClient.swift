@@ -83,6 +83,11 @@ struct BackendNotificationsResponse: Codable {
     var items: [BackendNotificationItem]
 }
 
+struct ProfileStompResponse: Codable {
+    var ok: Bool?
+    var message: String?
+}
+
 private struct JourneyLikesBatchRequestV2: Codable {
     var journeyIDs: [String]
     var ownerUserID: String?
@@ -133,6 +138,46 @@ final class BackendAPIClient {
         guard let base = BackendConfig.baseURL else { throw BackendAPIError.notConfigured }
         let normalizedPath = path.hasPrefix("/") ? String(path.dropFirst()) : path
         return base.appendingPathComponent(normalizedPath)
+    }
+
+    private func encodePathSegment(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return trimmed }
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "/")
+        return trimmed.addingPercentEncoding(withAllowedCharacters: allowed) ?? trimmed
+    }
+
+    private func normalizeServerMessage(raw: String, statusCode: Int) -> String {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return "HTTP \(statusCode)" }
+
+        if let endpoint = extractMissingEndpoint(from: text) {
+            if endpoint.contains("/stomp") || endpoint.contains("/like") || endpoint.contains("/likes/") {
+                return "当前后端未部署点赞/踩一踩接口（\(endpoint)），请升级后端后重试"
+            }
+            return "当前后端不支持接口（\(endpoint)），请检查后端版本"
+        }
+
+        if text.localizedCaseInsensitiveContains("<!doctype html") || text.localizedCaseInsensitiveContains("<html") {
+            return "后端返回 HTML 错误页（HTTP \(statusCode)），请检查 API_BASE_URL 与后端版本"
+        }
+
+        if text.count > 220 {
+            return "\(text.prefix(220))..."
+        }
+        return text
+    }
+
+    private func extractMissingEndpoint(from text: String) -> String? {
+        let pattern = #"Cannot\s+(GET|POST|PUT|PATCH|DELETE)\s+([^<\s]+)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(text.startIndex..., in: text)
+        guard let match = regex.firstMatch(in: text, range: range),
+              match.numberOfRanges >= 3,
+              let methodRange = Range(match.range(at: 1), in: text),
+              let pathRange = Range(match.range(at: 2), in: text) else { return nil }
+        return "\(text[methodRange]) \(text[pathRange])"
     }
 
     private var decoder: JSONDecoder {
@@ -186,7 +231,8 @@ final class BackendAPIClient {
                !msg.isEmpty {
                 throw BackendAPIError.server(msg)
             }
-            let msg = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
+            let rawMsg = String(data: data, encoding: .utf8) ?? ""
+            let msg = normalizeServerMessage(raw: rawMsg, statusCode: http.statusCode)
             throw BackendAPIError.server(msg)
         }
         return (data, http)
@@ -328,17 +374,23 @@ final class BackendAPIClient {
     }
 
     func likeJourney(token: String, ownerUserID: String, journeyID: String) async throws -> JourneyLikeActionResponse {
-        let owner = ownerUserID.trimmingCharacters(in: .whitespacesAndNewlines)
-        let journey = journeyID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let owner = encodePathSegment(ownerUserID)
+        let journey = encodePathSegment(journeyID)
         let (data, _) = try await request(path: "/v1/journeys/\(owner)/\(journey)/like", method: "POST", token: token)
         return try decoder.decode(JourneyLikeActionResponse.self, from: data)
     }
 
     func unlikeJourney(token: String, ownerUserID: String, journeyID: String) async throws -> JourneyLikeActionResponse {
-        let owner = ownerUserID.trimmingCharacters(in: .whitespacesAndNewlines)
-        let journey = journeyID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let owner = encodePathSegment(ownerUserID)
+        let journey = encodePathSegment(journeyID)
         let (data, _) = try await request(path: "/v1/journeys/\(owner)/\(journey)/like", method: "DELETE", token: token)
         return try decoder.decode(JourneyLikeActionResponse.self, from: data)
+    }
+
+    func stompProfile(token: String, targetUserID: String) async throws -> ProfileStompResponse {
+        let target = encodePathSegment(targetUserID)
+        let (data, _) = try await request(path: "/v1/profile/\(target)/stomp", method: "POST", token: token)
+        return try decoder.decode(ProfileStompResponse.self, from: data)
     }
 
     func fetchNotifications(token: String, unreadOnly: Bool = true) async throws -> [BackendNotificationItem] {

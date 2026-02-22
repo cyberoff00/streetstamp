@@ -1,4 +1,5 @@
 import SwiftUI
+import AuthenticationServices
 
 enum AuthEntryMode: String {
     case signIn
@@ -420,7 +421,7 @@ struct AuthEntryView: View {
             try await sessionStore.loginWithOAuth(provider: providerRaw, idToken: token)
             onAuthenticated?()
         } catch {
-            messageText = error.localizedDescription
+            messageText = localizedOAuthErrorMessage(error, provider: provider)
             showMessage = true
         }
     }
@@ -428,5 +429,25 @@ struct AuthEntryView: View {
     private func normalizedDisplayName(_ raw: String) -> String {
         let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return value.isEmpty ? "" : value.uppercased()
+    }
+
+    private func localizedOAuthErrorMessage(_ error: Error, provider: OAuthProvider) -> String {
+        if provider == .apple, let authError = error as? ASAuthorizationError {
+            switch authError.code {
+            case .canceled:
+                return "Apple 登录已取消"
+            case .failed:
+                return "Apple 登录失败，请稍后重试"
+            case .invalidResponse:
+                return "Apple 登录返回无效响应"
+            case .notHandled:
+                return "Apple 登录请求未被系统处理"
+            case .unknown:
+                return "Apple 登录失败（错误码 1000）。请检查 Sign in with Apple capability、证书签名和设备 Apple ID 登录状态。"
+            @unknown default:
+                return "Apple 登录失败：\(authError.localizedDescription)"
+            }
+        }
+        return error.localizedDescription
     }
 }

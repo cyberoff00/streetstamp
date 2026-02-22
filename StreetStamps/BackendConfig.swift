@@ -32,8 +32,20 @@ enum BackendConfig {
 
     static var isEnabled: Bool { baseURL != nil }
 
+    static var defaultGoogleIOSClientID: String {
+        if let fromPlist = Bundle.main.object(forInfoDictionaryKey: "GOOGLE_IOS_CLIENT_ID") as? String,
+           !fromPlist.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return fromPlist
+        }
+        return ""
+    }
+
     static var googleIOSClientID: String {
-        get { UserDefaults.standard.string(forKey: googleIOSClientIDKey)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
+        get {
+            let v = UserDefaults.standard.string(forKey: googleIOSClientIDKey)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !v.isEmpty { return v }
+            return defaultGoogleIOSClientID
+        }
         set { UserDefaults.standard.set(newValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: googleIOSClientIDKey) }
     }
 }

@@ -50,12 +50,6 @@ final class CityLibraryVM: ObservableObject {
         }
 
         self.cities = out
-
-        // Prefetch localized display names (city cards)
-        Task.detached { [weak self] in
-            guard let self else { return }
-            await self.prefetchDisplayNamesDetached()
-        }
     }
 
     func upsertCity(cityKey: String, journeyStore: JourneyStore, cityCache: CityCache) {
@@ -67,17 +61,11 @@ final class CityLibraryVM: ObservableObject {
 
         var next = makeCity(from: cached, journeysById: byId)
         if let idx = cities.firstIndex(where: { $0.id == cityKey }) {
-            next.displayName = cities[idx].displayName
             cities[idx] = next
         } else {
             cities.append(next)
         }
         sortCities()
-
-        Task.detached { [weak self] in
-            guard let self else { return }
-            await self.prefetchDisplayNameDetached(cityID: cityKey)
-        }
     }
 
     func removeCity(cityKey: String) {

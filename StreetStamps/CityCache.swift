@@ -731,14 +731,56 @@ final class CityCache: ObservableObject {
 
     /// 完成旅程：TEMP -> canonical + route thumb
     ///
-    /// ✅ canonicalKey is derived from FIXED-locale reverse-geocode using journey START coordinate
-    /// ✅ All journeys belong to their starting city (intercity concept removed)
-    /// ✅ if geocode fails, fallback to Journey fields
+    /// Key policy:
+    /// - Prefer journey's own card key (`startCityKey` / `cityKey`) as the single city concept.
+    /// - Only fall back to reverse geocode when no usable key exists.
+    /// - Unlock is tied to card creation, not level reassignment.
+    private func normalizedCardKey(_ raw: String?) -> String? {
+        let trimmed = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != "Unknown|" else { return nil }
+        return trimmed
+    }
+
+    private func splitCityKey(_ cityKey: String) -> (name: String, iso: String) {
+        let parts = cityKey.split(separator: "|", omittingEmptySubsequences: false)
+        let name = parts.first.map(String.init)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let iso = parts.dropFirst().first.map(String.init)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased() ?? ""
+        return (name, iso)
+    }
+
+    private func resolveCardIdentity(for journey: JourneyRoute) -> (key: String, name: String, iso: String)? {
+        guard let key = normalizedCardKey(journey.startCityKey) ?? normalizedCardKey(journey.cityKey) else {
+            return nil
+        }
+        let split = splitCityKey(key)
+        let fallbackName = journey.canonicalCity.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalName = split.name.isEmpty ? (fallbackName.isEmpty ? journey.displayCityName : fallbackName) : split.name
+        let fallbackISO = (journey.countryISO2 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let finalISO = split.iso.isEmpty ? fallbackISO : split.iso
+        return (key, finalName, finalISO)
+    }
+
     @discardableResult
     func onJourneyCompleted(_ journey: JourneyRoute) -> CityEvent? {
         guard journey.isCompleted else { return nil }
 
-        // Use START coordinate to determine city card (all journeys belong to starting city)
+        // Primary path: trust the journey's own card key to keep city identity stable.
+        if let identity = resolveCardIdentity(for: journey) {
+            return finishCompleteWithCanonical(
+                journey: journey,
+                canonicalKey: identity.key,
+                canonicalName: identity.name,
+                iso: identity.iso,
+                reserveLevel: nil,
+                reserveParentRegionKey: nil,
+                reserveAvailableLevels: nil,
+                reserveAnchor: journey.startCoordinate
+            )
+        }
+
+        // Fallback path: derive from START coordinate when key is unavailable.
         if let start = journey.allCLCoords.first {
             let startLoc = CLLocation(latitude: start.latitude, longitude: start.longitude)
 
@@ -759,8 +801,9 @@ final class CityCache: ObservableObject {
                     return
                 }
 
-                // fallback (rare) - use startCityKey if available
-                let fallbackKey = journey.startCityKey ?? journey.canonicalCityKeyFallback
+                // Final fallback - if no reliable key exists, skip card creation.
+                let fallbackKey = self.normalizedCardKey(journey.canonicalCityKeyFallback)
+                guard let fallbackKey else { return }
                 let fallbackName = journey.displayCityName
                 let fallbackIso = (journey.countryISO2 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
 
@@ -781,7 +824,9 @@ final class CityCache: ObservableObject {
         }
 
         // no coords fallback
-        let fallbackKey = journey.startCityKey ?? journey.canonicalCityKeyFallback
+        guard let fallbackKey = normalizedCardKey(journey.canonicalCityKeyFallback) else {
+            return nil
+        }
         let fallbackName = journey.displayCityName
         let fallbackIso = (journey.countryISO2 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         return finishCompleteWithCanonical(
@@ -831,32 +876,34 @@ final class CityCache: ObservableObject {
         reserveAvailableLevels: [CityPlacemarkResolver.CardLevel: String]?,
         reserveAnchor: CLLocationCoordinate2D?
     ) -> CityEvent? {
+        let key = canonicalKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty, key != "Unknown|" else { return nil }
 
         let tmpKey = temporaryCityKey(for: journey.id)
-        let existedBefore = cachedCities.contains(where: { $0.id == canonicalKey && !($0.isTemporary ?? false) })
+        let existedBefore = cachedCities.contains(where: { $0.id == key && !($0.isTemporary ?? false) })
 
         mergeTemporaryCityIfNeeded(
             tmpKey: tmpKey,
-            canonicalKey: canonicalKey,
+            canonicalKey: key,
             canonicalName: canonicalName,
             iso: iso
         )
 
-        refreshCityFromStore(cityKey: canonicalKey)
+        refreshCityFromStore(cityKey: key)
         updateCityLevelReserveProfile(
-            cityKey: canonicalKey,
+            cityKey: key,
             level: reserveLevel,
             parentRegionKey: reserveParentRegionKey,
             availableLevels: reserveAvailableLevels,
             anchor: reserveAnchor,
             force: false
         )
-        generateRouteThumbnail(cityKey: canonicalKey)
-        setPendingUnlockIfNeeded(cityKey: canonicalKey)
+        generateRouteThumbnail(cityKey: key)
+        setPendingUnlockIfNeeded(cityKey: key, existedBefore: existedBefore)
 
         let event: CityEvent = existedBefore
-            ? .updatedCity(cityKey: canonicalKey)
-            : .addedNewCity(cityKey: canonicalKey, name: canonicalName)
+            ? .updatedCity(cityKey: key)
+            : .addedNewCity(cityKey: key, name: canonicalName)
 
         lastEvent = event
         return event
@@ -1173,7 +1220,8 @@ final class CityCache: ObservableObject {
     // MARK: - Unlock logic
     // ===================================================
 
-    private func setPendingUnlockIfNeeded(cityKey: String) {
+    private func setPendingUnlockIfNeeded(cityKey: String, existedBefore: Bool) {
+        guard !existedBefore else { return }
         guard let c = cachedCities.first(where: { $0.id == cityKey && !($0.isTemporary ?? false) }) else { return }
         guard c.explorations == 1 else { return }
 

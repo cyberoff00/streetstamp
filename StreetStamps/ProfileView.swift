@@ -12,12 +12,24 @@ import UIKit
 struct ProfileView: View {
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var cityCache: CityCache
+    @EnvironmentObject private var sessionStore: UserSessionStore
+    @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
     
     @Binding var showSidebar: Bool
     @State private var faceIndex: Int = 0
     @State private var dragAccum: CGFloat = 0
 
     @State private var loadout: RobotLoadout
+    @State private var showNameEditor = false
+    @State private var nameDraft = ""
+    @State private var nameError = ""
+    @State private var isSavingName = false
+    @State private var toastText = ""
+    @State private var showToast = false
+    @State private var socialNotifications: [BackendNotificationItem] = []
+    @State private var unreadSocialCount = 0
+    @State private var showNotificationsSheet = false
+    @State private var notificationsLoading = false
 
     init(showSidebar: Binding<Bool>) {
         self._showSidebar = showSidebar
@@ -53,6 +65,19 @@ struct ProfileView: View {
         max(0, Int((totalDistance * 100.0).rounded()))
     }
 
+    private var displayName: String {
+        let value = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? L10n.t("explorer_fallback") : value
+    }
+
+    private var likeNotificationCount: Int {
+        socialNotifications.filter { $0.type == "journey_like" }.count
+    }
+
+    private var stompNotificationCount: Int {
+        socialNotifications.filter { $0.type == "profile_stomp" }.count
+    }
+
     var body: some View {
         NavigationStack {
             ZStack(alignment: .top) {
@@ -64,7 +89,6 @@ struct ProfileView: View {
                     ScrollView(showsIndicators: false) {
                         VStack(spacing: 24) {
                             avatarHeaderCard
-                            bottomStatsRow
                             topActionRow
                         }
                         .frame(maxWidth: 430)
@@ -76,9 +100,37 @@ struct ProfileView: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
+            .overlay(alignment: .top) {
+                if showToast {
+                    Text(toastText)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.black.opacity(0.85))
+                        .clipShape(Capsule())
+                        .padding(.top, 8)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
         }
         .onChange(of: loadout) { _, newValue in
             AvatarLoadoutStore.save(newValue)
+        }
+        .sheet(isPresented: $showNameEditor) {
+            profileNameEditorSheet
+        }
+        .sheet(isPresented: $showNotificationsSheet) {
+            socialNotificationsSheet
+        }
+        .task {
+            await refreshDisplayNameIfNeeded()
+            await refreshSocialNotifications(showToastForLatestUnread: true)
+        }
+        .onChange(of: sessionStore.currentAccessToken) { _, _ in
+            Task {
+                await refreshSocialNotifications(showToastForLatestUnread: false)
+            }
         }
     }
     
@@ -158,21 +210,23 @@ struct ProfileView: View {
             }
             .padding(.top, 32)
 
-            HStack(spacing: 6) {
-                Text(L10n.t("profile_display_name_placeholder"))
-                    .font(.system(size: 20, weight: .black))
-                    .tracking(-0.4)
-                Image(systemName: "pencil")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.black.opacity(0.45))
+            Button {
+                nameDraft = displayName == L10n.t("explorer_fallback") ? "" : displayName
+                nameError = ""
+                showNameEditor = true
+            } label: {
+                HStack(spacing: 6) {
+                    Text(displayName)
+                        .font(.system(size: 20, weight: .black))
+                        .tracking(-0.4)
+                        .foregroundColor(.black)
+                    Image(systemName: "pencil")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.black.opacity(0.45))
+                }
             }
+            .buttonStyle(.plain)
             .padding(.top, 24)
-
-            Text(L10n.t("explorer_fallback"))
-                .font(.system(size: 13, weight: .regular))
-                .tracking(0.2)
-                .foregroundColor(FigmaTheme.subtext)
-                .padding(.top, 6)
 
             HStack(spacing: 8) {
                 Text(String(format: L10n.t("level_format"), levelValue))
@@ -186,45 +240,67 @@ struct ProfileView: View {
                     .foregroundColor(.black.opacity(0.72))
             }
             .padding(.top, 6)
-            .padding(.bottom, 26)
+
+            Rectangle()
+                .fill(FigmaTheme.border)
+                .frame(height: 1)
+                .padding(.top, 22)
+
+            HStack(spacing: 0) {
+                embeddedStatItem(icon: "mappin.and.ellipse", value: "\(totalJourneys)", label: "TRIPS")
+                Rectangle()
+                    .fill(FigmaTheme.border)
+                    .frame(width: 1, height: 52)
+                embeddedStatItem(icon: "heart", value: "\(totalMemories)", label: "MEMORIES")
+                Rectangle()
+                    .fill(FigmaTheme.border)
+                    .frame(width: 1, height: 52)
+                embeddedStatItem(icon: "paperplane", value: "\(citiesVisited)", label: "CITIES")
+            }
+            .padding(.horizontal, 22)
+            .padding(.vertical, 16)
         }
         .frame(maxWidth: .infinity)
         .figmaAvatarCardStyle()
     }
 
     private var topActionRow: some View {
-        HStack(spacing: 14) {
-            NavigationLink {
-                EquipmentView(loadout: $loadout)
+        VStack(spacing: 14) {
+            HStack(spacing: 14) {
+                NavigationLink {
+                    EquipmentView(loadout: $loadout)
+                } label: {
+                    profileMenuTile(
+                        icon: "tshirt",
+                        iconColor: FigmaTheme.primary,
+                        iconBg: FigmaTheme.primary.opacity(0.14),
+                        title: L10n.t("equipment_title_upper")
+                    )
+                }
+                .buttonStyle(.plain)
+
+                NavigationLink {
+                    MyJourneysView()
+                } label: {
+                    profileMenuTile(
+                        icon: "map",
+                        iconColor: Color(red: 184 / 255, green: 148 / 255, blue: 125 / 255),
+                        iconBg: Color(red: 184 / 255, green: 148 / 255, blue: 125 / 255).opacity(0.14),
+                        title: L10n.t("my_journey_title_upper")
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+
+            Button {
+                showNotificationsSheet = true
+                Task {
+                    await markSocialNotificationsReadIfNeeded()
+                }
             } label: {
-                profileMenuTile(
-                    icon: "tshirt",
-                    iconColor: FigmaTheme.primary,
-                    iconBg: FigmaTheme.primary.opacity(0.14),
-                    title: L10n.t("equipment_title_upper")
-                )
+                socialNotificationTile
             }
             .buttonStyle(.plain)
-
-            NavigationLink {
-                MyJourneysView()
-            } label: {
-                profileMenuTile(
-                    icon: "map",
-                    iconColor: Color(red: 184 / 255, green: 148 / 255, blue: 125 / 255),
-                    iconBg: Color(red: 184 / 255, green: 148 / 255, blue: 125 / 255).opacity(0.14),
-                    title: L10n.t("my_journey_title_upper")
-                )
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private var bottomStatsRow: some View {
-        HStack(spacing: 14) {
-            profileStatTile(icon: "mappin.and.ellipse", value: "\(totalJourneys)", label: "TRIPS")
-            profileStatTile(icon: "sparkles", value: "\(totalMemories)", label: "MEMORIES")
-            profileStatTile(icon: "paperplane", value: "\(citiesVisited)", label: "CITIES")
         }
     }
 
@@ -255,28 +331,165 @@ struct ProfileView: View {
         .profileFeatureCardStyle()
     }
 
-    private func profileStatTile(icon: String, value: String, label: String) -> some View {
-        VStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 18, weight: .medium))
-                .foregroundColor(FigmaTheme.subtext)
-                .padding(.top, 2)
+    private func embeddedStatItem(icon: String, value: String, label: String) -> some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(FigmaTheme.subtext)
 
-            Text(value)
-                .font(.system(size: 18, weight: .black))
-                .tracking(0.1)
-                .foregroundColor(.black)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
+                Text(value)
+                    .font(.system(size: 18, weight: .black))
+                    .tracking(0.1)
+                    .foregroundColor(.black)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
 
             Text(label)
-                .font(.system(size: 9, weight: .semibold))
+                .font(.system(size: 10, weight: .semibold))
                 .tracking(0.6)
                 .foregroundColor(FigmaTheme.subtext)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 115)
-        .profileStatCardStyle()
+    }
+
+    private var socialNotificationTile: some View {
+        HStack(spacing: 14) {
+            ZStack(alignment: .topTrailing) {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Color(red: 0.93, green: 0.96, blue: 1.0))
+                    .frame(width: 56, height: 56)
+
+                Image(systemName: "bell.badge.fill")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundColor(Color(red: 0.22, green: 0.45, blue: 0.89))
+
+                if unreadSocialCount > 0 {
+                    Text("\(min(unreadSocialCount, 99))")
+                        .font(.system(size: 10, weight: .black))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.red)
+                        .clipShape(Capsule())
+                        .offset(x: 11, y: -9)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("互动通知")
+                    .font(.system(size: 15, weight: .black))
+                    .foregroundColor(.black)
+                Text("收到赞 \(likeNotificationCount) · 被踩 \(stompNotificationCount)")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(FigmaTheme.subtext)
+                if unreadSocialCount > 0 {
+                    Text("未读 \(unreadSocialCount) 条")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(Color(red: 0.22, green: 0.45, blue: 0.89))
+                }
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(FigmaTheme.subtext)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity)
+        .profileFeatureCardStyle()
+    }
+
+    @ViewBuilder
+    private var socialNotificationsSheet: some View {
+        NavigationStack {
+            Group {
+                if notificationsLoading && socialNotifications.isEmpty {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text("加载通知中...")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(FigmaTheme.subtext)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if socialNotifications.isEmpty {
+                    Text("暂时还没有互动通知")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(FigmaTheme.subtext)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView(showsIndicators: false) {
+                        VStack(spacing: 10) {
+                            ForEach(socialNotifications) { item in
+                                socialNotificationRow(item)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+                        .padding(.bottom, 28)
+                    }
+                }
+            }
+            .background(FigmaTheme.background.ignoresSafeArea())
+            .navigationTitle("互动通知")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("关闭") {
+                        showNotificationsSheet = false
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("刷新") {
+                        Task {
+                            await refreshSocialNotifications(showToastForLatestUnread: false)
+                        }
+                    }
+                }
+            }
+            .task {
+                await refreshSocialNotifications(showToastForLatestUnread: false)
+            }
+        }
+    }
+
+    private func socialNotificationRow(_ item: BackendNotificationItem) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Circle()
+                .fill(item.read ? Color.clear : Color(red: 0.22, green: 0.45, blue: 0.89))
+                .frame(width: 8, height: 8)
+                .padding(.top, 7)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Text(item.type == "journey_like" ? "收到点赞" : "主页被踩")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(item.type == "journey_like" ? Color.red : Color(red: 0.22, green: 0.45, blue: 0.89))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.black.opacity(0.06))
+                        .clipShape(Capsule())
+
+                    Text(relativeTimeText(item.createdAt))
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(FigmaTheme.subtext)
+                }
+
+                Text(item.message)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.black)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .shadow(color: Color.black.opacity(0.04), radius: 14, x: 0, y: 5)
     }
 
     private func rotateLeft() {
@@ -288,6 +501,188 @@ struct ProfileView: View {
         faceIndex = (faceIndex + 1) % RobotFace.allCases.count
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
+
+    @ViewBuilder
+    private var profileNameEditorSheet: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("可修改昵称（1-24 字符）")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(.black)
+
+                TextField("输入昵称", text: $nameDraft)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 16, weight: .semibold))
+
+                Text("支持多语言字母、数字和 . _ -，不能包含空格")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(FigmaTheme.subtext)
+
+                if !nameError.isEmpty {
+                    Text(nameError)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.red)
+                }
+
+                Spacer()
+            }
+            .padding(16)
+            .navigationTitle("修改昵称")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("取消") {
+                        showNameEditor = false
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(isSavingName ? "保存中..." : "保存") {
+                        Task {
+                            await saveDisplayName()
+                        }
+                    }
+                    .disabled(isSavingName)
+                }
+            }
+        }
+    }
+
+    private func validateDisplayName(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "昵称不能为空" }
+        guard trimmed.count <= 24 else { return "昵称最多 24 个字符" }
+        guard !trimmed.unicodeScalars.contains(where: CharacterSet.whitespacesAndNewlines.contains) else {
+            return "昵称不能包含空格"
+        }
+        let allowed = CharacterSet.letters
+            .union(.decimalDigits)
+            .union(CharacterSet(charactersIn: "._-"))
+        let valid = trimmed.unicodeScalars.allSatisfy { allowed.contains($0) }
+        return valid ? nil : "昵称仅支持字母、数字和 . _ -"
+    }
+
+    @MainActor
+    private func saveDisplayName() async {
+        if let error = validateDisplayName(nameDraft) {
+            nameError = error
+            return
+        }
+        nameError = ""
+        isSavingName = true
+        defer { isSavingName = false }
+
+        let normalized = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        profileName = normalized
+
+        if BackendConfig.isEnabled,
+           let token = sessionStore.currentAccessToken,
+           !token.isEmpty {
+            do {
+                let profile = try await BackendAPIClient.shared.updateDisplayName(
+                    token: token,
+                    displayName: normalized
+                )
+                profileName = profile.displayName
+            } catch {
+                showToastMessage("昵称已本地更新，云端保存失败：\(error.localizedDescription)")
+            }
+        }
+
+        showNameEditor = false
+        showToastMessage("昵称已更新")
+    }
+
+    @MainActor
+    private func refreshDisplayNameIfNeeded() async {
+        guard BackendConfig.isEnabled,
+              let token = sessionStore.currentAccessToken,
+              !token.isEmpty else { return }
+        do {
+            let me = try await BackendAPIClient.shared.fetchMyProfile(token: token)
+            if !me.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                profileName = me.displayName
+            }
+        } catch {
+            // Keep profile editable even if backend request fails.
+        }
+    }
+
+    @MainActor
+    private func refreshSocialNotifications(showToastForLatestUnread: Bool) async {
+        guard BackendConfig.isEnabled,
+              let token = sessionStore.currentAccessToken,
+              !token.isEmpty else {
+            socialNotifications = []
+            unreadSocialCount = 0
+            return
+        }
+        notificationsLoading = true
+        defer { notificationsLoading = false }
+
+        do {
+            let all = try await BackendAPIClient.shared.fetchNotifications(token: token, unreadOnly: false)
+            let supportedTypes: Set<String> = ["journey_like", "profile_stomp"]
+            let socialItems = all
+                .filter { supportedTypes.contains($0.type) }
+                .sorted(by: { $0.createdAt > $1.createdAt })
+            socialNotifications = socialItems
+
+            let unread = socialItems.filter { !$0.read }
+            unreadSocialCount = unread.count
+
+            if showToastForLatestUnread,
+               let latest = unread.first {
+                showToastMessage(latest.message)
+            }
+        } catch {
+            // Keep profile view responsive even if notification poll fails.
+        }
+    }
+
+    @MainActor
+    private func markSocialNotificationsReadIfNeeded() async {
+        guard BackendConfig.isEnabled,
+              let token = sessionStore.currentAccessToken,
+              !token.isEmpty else { return }
+        let unreadIDs = socialNotifications
+            .filter { !$0.read }
+            .map(\.id)
+        guard !unreadIDs.isEmpty else { return }
+
+        do {
+            try await BackendAPIClient.shared.markNotificationsRead(token: token, ids: unreadIDs)
+            socialNotifications = socialNotifications.map { item in
+                guard unreadIDs.contains(item.id) else { return item }
+                var copy = item
+                copy.read = true
+                return copy
+            }
+            unreadSocialCount = 0
+        } catch {
+            // Keep sheet usable even if mark-read fails.
+        }
+    }
+
+    private func relativeTimeText(_ date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+
+    @MainActor
+    private func showToastMessage(_ text: String) {
+        toastText = text
+        withAnimation(.easeInOut(duration: 0.2)) {
+            showToast = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                showToast = false
+            }
+        }
+    }
 }
 
 private extension View {
@@ -296,13 +691,6 @@ private extension View {
             .background(Color.white)
             .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
             .shadow(color: Color.black.opacity(0.04), radius: 20, x: 0, y: 8)
-    }
-
-    func profileStatCardStyle() -> some View {
-        self
-            .background(Color.white)
-            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-            .shadow(color: Color.black.opacity(0.04), radius: 16, x: 0, y: 4)
     }
 
     func profileFeatureCardStyle() -> some View {

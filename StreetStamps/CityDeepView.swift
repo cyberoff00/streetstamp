@@ -359,29 +359,16 @@ struct CityDeepView: View {
             }
         }
         .onAppear {
-            Task {
-                if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: activeCityKey),
-                   !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    await MainActor.run { self.displayTitle = cached }
-                    return
-                }
-
-                if let coord = effectiveAnchor ?? currentJourneys.flatMap(\.allCLCoords).first {
-                    let loc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
-                    if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: activeCityKey),
-                       !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        await MainActor.run { self.displayTitle = title }
-                    }
-                }
-            }
             loadReservedLevelSelection()
             initializeReservedLevelProfileIfNeeded(showPickerWhenReady: false)
+            refreshDisplayTitleFromCardKey()
         }
         .onChange(of: activeCityKey) { _ in
             fetchedBoundaryPolygon = nil
             refreshRegionAndBoundary()
             loadReservedLevelSelection()
             initializeReservedLevelProfileIfNeeded(showPickerWhenReady: false)
+            refreshDisplayTitleFromCardKey()
         }
         .onChange(of: currentJourneys.count) { _ in
             refreshRegionAndBoundary()
@@ -643,21 +630,8 @@ struct CityDeepView: View {
                 cityLevelLoading = false
             }
 
-            let anchorLoc = CLLocation(latitude: anchor.latitude, longitude: anchor.longitude)
-            if let display = await ReverseGeocodeService.shared.displayTitle(for: anchorLoc, cityKey: targetKey),
-               !display.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                await MainActor.run {
-                    displayTitle = display
-                }
-            } else if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: targetKey),
-                      !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                await MainActor.run {
-                    displayTitle = cached
-                }
-            } else {
-                await MainActor.run {
-                    displayTitle = selectedName
-                }
+            await MainActor.run {
+                refreshDisplayTitleFromCardKey()
             }
         }
     }
@@ -750,6 +724,7 @@ struct CityDeepView: View {
                 cityLevelOptionLabels = canonical.availableLevels
                 cityLevelOptions = options
                 cityLevelCurrentSelection = resolveCurrentLevel(canonical: canonical, options: options)
+                refreshDisplayTitleFromCardKey()
                 cache.updateCityLevelReserveProfile(
                     cityKey: activeCityKey,
                     level: baseLevel,
@@ -812,6 +787,43 @@ struct CityDeepView: View {
             return fallback
         }
         return options.first
+    }
+
+    private func isoFromCityKey(_ cityKey: String) -> String {
+        let parts = cityKey.components(separatedBy: "|")
+        guard parts.count > 1 else { return "" }
+        return parts[1].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
+
+    private func headerBaseCityName() -> String {
+        if let selected = cityLevelCurrentSelection,
+           let selectedName = cityLevelOptionLabels[selected]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !selectedName.isEmpty {
+            return selectedName
+        }
+        let fromKey = cityName(from: activeCityKey).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !fromKey.isEmpty { return fromKey }
+        let cached = effectiveCityName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return cached.isEmpty ? city.name : cached
+    }
+
+    private func formatHeaderTitle(baseName: String) -> String {
+        let base = baseName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !base.isEmpty else { return city.name }
+
+        let iso = (effectiveCountryISO2 ?? isoFromCityKey(activeCityKey)).trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if iso == "US",
+           let admin = cityLevelOptionLabels[.admin]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !admin.isEmpty {
+            if admin.normalizedCityNameForMatching() != base.normalizedCityNameForMatching() {
+                return "\(base), \(admin)"
+            }
+        }
+        return base
+    }
+
+    private func refreshDisplayTitleFromCardKey() {
+        displayTitle = formatHeaderTitle(baseName: headerBaseCityName())
     }
 
     private func cityName(from cityKey: String) -> String {

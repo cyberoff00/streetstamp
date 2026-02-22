@@ -11,6 +11,16 @@ struct MyJourneysView: View {
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var sessionStore: UserSessionStore
     @AppStorage(MapAppearanceSettings.storageKey) private var mapAppearanceRaw = MapAppearanceSettings.current.rawValue
+    let routeDetailReadOnly: Bool
+    let routeDetailHeaderTitle: String?
+
+    init(
+        routeDetailReadOnly: Bool = false,
+        routeDetailHeaderTitle: String? = nil
+    ) {
+        self.routeDetailReadOnly = routeDetailReadOnly
+        self.routeDetailHeaderTitle = routeDetailHeaderTitle
+    }
 
     @State private var showFilterPopover = false
     @State private var monthCursor = Date()
@@ -162,7 +172,11 @@ struct MyJourneysView: View {
             LazyVStack(spacing: 14) {
                 ForEach(filteredJourneys, id: \.id) { j in
                     NavigationLink {
-                        JourneyRouteDetailView(journeyID: j.id)
+                        JourneyRouteDetailView(
+                            journeyID: j.id,
+                            isReadOnly: routeDetailReadOnly,
+                            headerTitle: routeDetailHeaderTitle
+                        )
                     } label: {
                         JourneyCardRow(
                             journey: j,
@@ -877,6 +891,8 @@ private actor JourneySnapshotDiskCache {
 
 struct JourneyRouteDetailView: View {
     let journeyID: String
+    let isReadOnly: Bool
+    let headerTitle: String?
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: JourneyStore
@@ -887,6 +903,16 @@ struct JourneyRouteDetailView: View {
     @State private var showDeleteConfirm = false
     @State private var fittedRegion: MKCoordinateRegion? = nil
     @State private var editingMemory: JourneyMemory? = nil
+
+    init(
+        journeyID: String,
+        isReadOnly: Bool = false,
+        headerTitle: String? = nil
+    ) {
+        self.journeyID = journeyID
+        self.isReadOnly = isReadOnly
+        self.headerTitle = headerTitle
+    }
 
     private var journey: JourneyRoute? {
         store.journeys.first(where: { $0.id == journeyID })
@@ -972,6 +998,7 @@ struct JourneyRouteDetailView: View {
                 memoryGroups: memoryGroups,
                 initialRegion: fittedRegion,
                 onTapMemory: { memory in
+                    guard !isReadOnly else { return }
                     editingMemory = memory
                 }
             )
@@ -1016,7 +1043,7 @@ struct JourneyRouteDetailView: View {
             }
         }
         .overlay {
-            if let tappedMemory = editingMemory {
+            if !isReadOnly, let tappedMemory = editingMemory {
                 MemoryEditorSheet(
                     isPresented: Binding(
                         get: { editingMemory != nil },
@@ -1079,32 +1106,36 @@ struct JourneyRouteDetailView: View {
 
             Spacer()
 
-            Text(L10n.t("journey_route_title"))
+            Text(headerTitle ?? L10n.t("journey_route_title"))
                 .font(.system(size: 22, weight: .bold))
                 .foregroundColor(.black)
 
             Spacer()
 
-            HStack(spacing: 10) {
-                Button {
-                    shareCurrent()
-                } label: {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 18, weight: .regular))
-                        .foregroundColor(.black)
-                        .frame(width: 34, height: 34)
-                }
-                .buttonStyle(.plain)
+            if !isReadOnly {
+                HStack(spacing: 10) {
+                    Button {
+                        shareCurrent()
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 18, weight: .regular))
+                            .foregroundColor(.black)
+                            .frame(width: 34, height: 34)
+                    }
+                    .buttonStyle(.plain)
 
-                Button {
-                    showDeleteConfirm = true
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 18, weight: .regular))
-                        .foregroundColor(.black)
-                        .frame(width: 34, height: 34)
+                    Button {
+                        showDeleteConfirm = true
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 18, weight: .regular))
+                            .foregroundColor(.black)
+                            .frame(width: 34, height: 34)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
+            } else {
+                Color.clear.frame(width: 68, height: 34)
             }
         }
         .padding(.horizontal, 18)

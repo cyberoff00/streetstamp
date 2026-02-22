@@ -44,11 +44,24 @@ struct CityStampLibraryView: View {
     // ✅ Delete confirmations
     @State private var cityToDelete: City? = nil
     @State private var showDeleteCityAlert = false
+    @State private var showPublicDetailUnavailableAlert = false
 
+    @Environment(\.dismiss) private var dismiss
     @Binding var showSidebar: Bool
+    private let autoRebuildFromJourneyStore: Bool
+    private let usesSidebarHeader: Bool
+    private let allowCityDetailNavigation: Bool
 
-    init(showSidebar: Binding<Bool>) {
+    init(
+        showSidebar: Binding<Bool>,
+        autoRebuildFromJourneyStore: Bool = true,
+        usesSidebarHeader: Bool = true,
+        allowCityDetailNavigation: Bool = true
+    ) {
         self._showSidebar = showSidebar
+        self.autoRebuildFromJourneyStore = autoRebuildFromJourneyStore
+        self.usesSidebarHeader = usesSidebarHeader
+        self.allowCityDetailNavigation = allowCityDetailNavigation
     }
 
     var body: some View {
@@ -77,14 +90,18 @@ struct CityStampLibraryView: View {
         .navigationBarBackButtonHidden(true)
         .onAppear {
             if store.hasLoaded {
-                cache.rebuildFromJourneyStore()
+                if autoRebuildFromJourneyStore {
+                    cache.rebuildFromJourneyStore()
+                }
                 vm.load(journeyStore: store, cityCache: cache)
                 digestByCityID = makeDigestMap(from: cache.cachedCities)
             }
         }
         .onChange(of: store.hasLoaded) { loaded in
             if loaded {
-                cache.rebuildFromJourneyStore()
+                if autoRebuildFromJourneyStore {
+                    cache.rebuildFromJourneyStore()
+                }
                 vm.load(journeyStore: store, cityCache: cache)
                 digestByCityID = makeDigestMap(from: cache.cachedCities)
             }
@@ -123,6 +140,11 @@ struct CityStampLibraryView: View {
         } message: { city in
             Text(String(format: L10n.t("delete_city_alert_message"), locale: Locale.current, (city.displayName ?? city.name)))
         }
+        .alert("暂时不可以公开细节", isPresented: $showPublicDetailUnavailableAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("该好友的城市卡目前仅支持公开缩略图浏览。")
+        }
     }
 
     private func makeDigestMap(from cities: [CachedCity]) -> [String: CityDigest] {
@@ -134,7 +156,40 @@ struct CityStampLibraryView: View {
     }
 
     private var headerBar: some View {
-        AppTopHeader(title: "CITIES", showSidebar: $showSidebar)
+        Group {
+            if usesSidebarHeader {
+                AppTopHeader(title: "CITIES", showSidebar: $showSidebar)
+            } else {
+                HStack(spacing: 10) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(.black)
+                            .frame(width: 42, height: 42)
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+
+                    Text("CITIES")
+                        .appHeaderStyle()
+
+                    Spacer()
+
+                    Color.clear.frame(width: 42, height: 42)
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 8)
+                .padding(.bottom, 12)
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(FigmaTheme.border)
+                        .frame(height: 1)
+                }
+            }
+        }
     }
 
     private func cityGrid(cardW: CGFloat, colGap: CGFloat, rowGap: CGFloat) -> some View {
@@ -147,17 +202,26 @@ struct CityStampLibraryView: View {
                 spacing: rowGap
             ) {
                 ForEach(vm.cities) { city in
-                    NavigationLink(destination: CityDeepView(city: city)) {
-                        CityStampCard(city: city, cardWidth: cardW)
-                    }
-                    .buttonStyle(.plain)
-                    .contextMenu {
-                        Button(role: .destructive) {
-                            cityToDelete = city
-                            showDeleteCityAlert = true
-                        } label: {
-                            Label(L10n.t("delete"), systemImage: "trash")
+                    if allowCityDetailNavigation {
+                        NavigationLink(destination: CityDeepView(city: city)) {
+                            CityStampCard(city: city, cardWidth: cardW)
                         }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                cityToDelete = city
+                                showDeleteCityAlert = true
+                            } label: {
+                                Label(L10n.t("delete"), systemImage: "trash")
+                            }
+                        }
+                    } else {
+                        Button {
+                            showPublicDetailUnavailableAlert = true
+                        } label: {
+                            CityStampCard(city: city, cardWidth: cardW)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }

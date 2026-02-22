@@ -3,11 +3,26 @@
 <plist version="1.0">
 <dict>
 	<key>MBXAccessToken</key>
-	<string>__MAPBOX_ACCESS_TOKEN__</string>
+	<string>pk.eyJ1IjoiY3liZXJra2siLCJhIjoiY21rYXgybmR5MHBiMTNmc2Via2N4cXJwZyJ9.2cDXOLDImevZU6b_nRNt4A</string>
 	<key>MAPBOX_ACCESS_TOKEN</key>
-	<string>__MAPBOX_ACCESS_TOKEN__</string>
+	<string>pk.eyJ1IjoiY3liZXJra2siLCJhIjoiY21rYXgybmR5MHBiMTNmc2Via2N4cXJwZyJ9.2cDXOLDImevZU6b_nRNt4A</string>
 	<key>API_BASE_URL</key>
-	<string></string>
+	<string>https://api.streetstamps.cyberkkk.cn</string>
+	<key>GOOGLE_IOS_CLIENT_ID</key>
+	<string>731829514501-t0hm8gg4rj83b8slf5cgodfb1adiohjq.apps.googleusercontent.com</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>google-signin</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.731829514501-t0hm8gg4rj83b8slf5cgodfb1adiohjq</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>我们需要保存旅程照片到您的相册</string>
 	<key>NSPhotoLibraryUsageDescription</key>

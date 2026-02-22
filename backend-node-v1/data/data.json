@@ -1,0 +1,535 @@
+{
+  "users": {
+    "u_e872904bd056bc8ff430e619": {
+      "id": "u_e872904bd056bc8ff430e619",
+      "provider": "google",
+      "inviteCode": "43E5299E",
+      "handle": "u_e872904bd056bc8ff430e6",
+      "profileVisibility": "friendsOnly",
+      "displayName": "Explorer",
+      "bio": "Travel Enthusiastic",
+      "loadout": {
+        "bodyId": "body",
+        "headId": "head",
+        "skinId": "skin_default",
+        "hairId": "hair_boy_default",
+        "outfitId": "outfit_boy_suit",
+        "accessoryIds": [
+          "acc_headphone"
+        ],
+        "expressionId": "expr_default"
+      },
+      "journeys": [
+        {
+          "id": "j_public",
+          "title": "Public Trip",
+          "activityTag": "walk",
+          "overallMemory": "pub",
+          "distance": 1000,
+          "startTime": "2026-02-22T12:58:21.000Z",
+          "endTime": "2026-02-22T12:58:21.000Z",
+          "visibility": "public",
+          "routeCoordinates": [],
+          "memories": [
+            {
+              "id": "m1",
+              "title": "p",
+              "notes": "n",
+              "timestamp": "2026-02-22T12:58:21.000Z",
+              "imageURLs": []
+            }
+          ]
+        },
+        {
+          "id": "j_friends",
+          "title": "Friends Trip",
+          "activityTag": "walk",
+          "overallMemory": "fr",
+          "distance": 1000,
+          "startTime": "2026-02-22T12:58:21.000Z",
+          "endTime": "2026-02-22T12:58:21.000Z",
+          "visibility": "friendsOnly",
+          "routeCoordinates": [],
+          "memories": [
+            {
+              "id": "m2",
+              "title": "f",
+              "notes": "n",
+              "timestamp": "2026-02-22T12:58:21.000Z",
+              "imageURLs": []
+            }
+          ]
+        },
+        {
+          "id": "j_private",
+          "title": "Private Trip",
+          "activityTag": "walk",
+          "overallMemory": "pr",
+          "distance": 1000,
+          "startTime": "2026-02-22T12:58:21.000Z",
+          "endTime": "2026-02-22T12:58:21.000Z",
+          "visibility": "private",
+          "routeCoordinates": [],
+          "memories": [
+            {
+              "id": "m3",
+              "title": "x",
+              "notes": "n",
+              "timestamp": "2026-02-22T12:58:21.000Z",
+              "imageURLs": []
+            }
+          ]
+        }
+      ],
+      "cityCards": [
+        {
+          "id": "Shanghai|CN",
+          "name": "Shanghai",
+          "countryISO2": "CN"
+        }
+      ],
+      "friendIDs": [],
+      "notifications": [],
+      "createdAt": 1771765101
+    },
+    "u_aaf3aaea3f91190f71bec985": {
+      "id": "u_aaf3aaea3f91190f71bec985",
+      "provider": "email",
+      "email": "u1_177176510130892@example.com",
+      "passwordHash": "1e1de31430b559d340dacc47902ce5725d70ee7053429857d7c181244f815f3e",
+      "inviteCode": "29F6D858",
+      "handle": "u1_177176510130892",
+      "profileVisibility": "friendsOnly",
+      "displayName": "Explorer",
+      "bio": "Travel Enthusiastic",
+      "loadout": {
+        "bodyId": "body",
+        "headId": "head",
+        "skinId": "skin_default",
+        "hairId": "hair_boy_default",
+        "outfitId": "outfit_boy_suit",
+        "accessoryIds": [
+          "acc_headphone"
+        ],
+        "expressionId": "expr_default"
+      },
+      "journeys": [
+        {
+          "id": "j_public",
+          "title": "Public Trip",
+          "activityTag": "walk",
+          "overallMemory": "pub",
+          "distance": 1000,
+          "startTime": "2026-02-22T12:58:21.000Z",
+          "endTime": "2026-02-22T12:58:21.000Z",
+          "visibility": "public",
+          "routeCoordinates": [],
+          "memories": [
+            {
+              "id": "m1",
+              "title": "p",
+              "notes": "n",
+              "timestamp": "2026-02-22T12:58:21.000Z",
+              "imageURLs": []
+            }
+          ]
+        },
+        {
+          "id": "j_friends",
+          "title": "Friends Trip",
+          "activityTag": "walk",
+          "overallMemory": "fr",
+          "distance": 1000,
+          "startTime": "2026-02-22T12:58:21.000Z",
+          "endTime": "2026-02-22T12:58:21.000Z",
+          "visibility": "friendsOnly",
+          "routeCoordinates": [],
+          "memories": [
+            {
+              "id": "m2",
+              "title": "f",
+              "notes": "n",
+              "timestamp": "2026-02-22T12:58:21.000Z",
+              "imageURLs": []
+            }
+          ]
+        },
+        {
+          "id": "j_private",
+          "title": "Private Trip",
+          "activityTag": "walk",
+          "overallMemory": "pr",
+          "distance": 1000,
+          "startTime": "2026-02-22T12:58:21.000Z",
+          "endTime": "2026-02-22T12:58:21.000Z",
+          "visibility": "private",
+          "routeCoordinates": [],
+          "memories": [
+            {
+              "id": "m3",
+              "title": "x",
+              "notes": "n",
+              "timestamp": "2026-02-22T12:58:21.000Z",
+              "imageURLs": []
+            }
+          ]
+        }
+      ],
+      "cityCards": [
+        {
+          "id": "Shanghai|CN",
+          "name": "Shanghai",
+          "countryISO2": "CN"
+        }
+      ],
+      "friendIDs": [],
+      "notifications": [],
+      "createdAt": 1771765101
+    },
+    "u_3ecf75fbc43035c357cdba5d": {
+      "id": "u_3ecf75fbc43035c357cdba5d",
+      "provider": "email",
+      "email": "u2_177176510130892@example.com",
+      "passwordHash": "1e1de31430b559d340dacc47902ce5725d70ee7053429857d7c181244f815f3e",
+      "inviteCode": "1C1C37E4",
+      "handle": "u2_177176510130892",
+      "profileVisibility": "friendsOnly",
+      "displayName": "Explorer",
+      "bio": "Travel Enthusiastic",
+      "loadout": {
+        "bodyId": "body",
+        "headId": "head",
+        "skinId": "skin_default",
+        "hairId": "hair_boy_default",
+        "outfitId": "outfit_boy_suit",
+        "accessoryIds": [
+          "acc_headphone"
+        ],
+        "expressionId": "expr_default"
+      },
+      "journeys": [],
+      "cityCards": [],
+      "friendIDs": [],
+      "notifications": [],
+      "createdAt": 1771765101
+    },
+    "u_51474f24e5ad708a08c2ad87": {
+      "id": "u_51474f24e5ad708a08c2ad87",
+      "provider": "google",
+      "inviteCode": "36A41D4C",
+      "handle": "u_51474f24e5ad708a08c2ad",
+      "profileVisibility": "friendsOnly",
+      "displayName": "Explorer",
+      "bio": "Travel Enthusiastic",
+      "loadout": {
+        "bodyId": "body",
+        "headId": "head",
+        "skinId": "skin_default",
+        "hairId": "hair_boy_default",
+        "outfitId": "outfit_boy_suit",
+        "accessoryIds": [
+          "acc_headphone"
+        ],
+        "expressionId": "expr_default"
+      },
+      "journeys": [
+        {
+          "id": "j_public",
+          "title": "Public Trip",
+          "activityTag": "walk",
+          "overallMemory": "pub",
+          "distance": 1000,
+          "startTime": "2026-02-22T13:00:37.000Z",
+          "endTime": "2026-02-22T13:00:37.000Z",
+          "visibility": "public",
+          "routeCoordinates": [],
+          "memories": []
+        },
+        {
+          "id": "j_guest_new",
+          "title": "Guest New",
+          "activityTag": "walk",
+          "overallMemory": "new",
+          "distance": 500,
+          "startTime": "2026-02-22T13:00:37.000Z",
+          "endTime": "2026-02-22T13:00:37.000Z",
+          "visibility": "private",
+          "routeCoordinates": [],
+          "memories": []
+        }
+      ],
+      "cityCards": [
+        {
+          "id": "Shanghai|CN",
+          "name": "Shanghai",
+          "countryISO2": "CN"
+        }
+      ],
+      "friendIDs": [],
+      "notifications": [],
+      "createdAt": 1771765237
+    },
+    "u_06b419f275fa8f8277a9e878": {
+      "id": "u_06b419f275fa8f8277a9e878",
+      "provider": "email",
+      "email": "u1_17717652378107@example.com",
+      "passwordHash": "1e1de31430b559d340dacc47902ce5725d70ee7053429857d7c181244f815f3e",
+      "inviteCode": "9A15EAB8",
+      "handle": "u1_17717652378107",
+      "profileVisibility": "friendsOnly",
+      "displayName": "Explorer",
+      "bio": "Travel Enthusiastic",
+      "loadout": {
+        "bodyId": "body",
+        "headId": "head",
+        "skinId": "skin_default",
+        "hairId": "hair_boy_default",
+        "outfitId": "outfit_boy_suit",
+        "accessoryIds": [
+          "acc_headphone"
+        ],
+        "expressionId": "expr_default"
+      },
+      "journeys": [
+        {
+          "id": "j_public",
+          "title": "Public Trip",
+          "activityTag": "walk",
+          "overallMemory": "pub",
+          "distance": 1000,
+          "startTime": "2026-02-22T13:00:37.000Z",
+          "endTime": "2026-02-22T13:00:37.000Z",
+          "visibility": "public",
+          "routeCoordinates": [],
+          "memories": [
+            {
+              "id": "m1",
+              "title": "p",
+              "notes": "n",
+              "timestamp": "2026-02-22T13:00:37.000Z",
+              "imageURLs": []
+            }
+          ]
+        },
+        {
+          "id": "j_friends",
+          "title": "Friends Trip",
+          "activityTag": "walk",
+          "overallMemory": "fr",
+          "distance": 1000,
+          "startTime": "2026-02-22T13:00:37.000Z",
+          "endTime": "2026-02-22T13:00:37.000Z",
+          "visibility": "friendsOnly",
+          "routeCoordinates": [],
+          "memories": [
+            {
+              "id": "m2",
+              "title": "f",
+              "notes": "n",
+              "timestamp": "2026-02-22T13:00:37.000Z",
+              "imageURLs": []
+            }
+          ]
+        },
+        {
+          "id": "j_private",
+          "title": "Private Trip",
+          "activityTag": "walk",
+          "overallMemory": "pr",
+          "distance": 1000,
+          "startTime": "2026-02-22T13:00:37.000Z",
+          "endTime": "2026-02-22T13:00:37.000Z",
+          "visibility": "private",
+          "routeCoordinates": [],
+          "memories": [
+            {
+              "id": "m3",
+              "title": "x",
+              "notes": "n",
+              "timestamp": "2026-02-22T13:00:37.000Z",
+              "imageURLs": []
+            }
+          ]
+        }
+      ],
+      "cityCards": [
+        {
+          "id": "Shanghai|CN",
+          "name": "Shanghai",
+          "countryISO2": "CN"
+        }
+      ],
+      "friendIDs": [],
+      "notifications": [],
+      "createdAt": 1771765237
+    },
+    "u_e88dcc5846a3d18d012d1998": {
+      "id": "u_e88dcc5846a3d18d012d1998",
+      "provider": "email",
+      "email": "u2_17717652378107@example.com",
+      "passwordHash": "1e1de31430b559d340dacc47902ce5725d70ee7053429857d7c181244f815f3e",
+      "inviteCode": "8A31BE89",
+      "handle": "u2_17717652378107",
+      "profileVisibility": "friendsOnly",
+      "displayName": "Explorer",
+      "bio": "Travel Enthusiastic",
+      "loadout": {
+        "bodyId": "body",
+        "headId": "head",
+        "skinId": "skin_default",
+        "hairId": "hair_boy_default",
+        "outfitId": "outfit_boy_suit",
+        "accessoryIds": [
+          "acc_headphone"
+        ],
+        "expressionId": "expr_default"
+      },
+      "journeys": [],
+      "cityCards": [],
+      "friendIDs": [],
+      "notifications": [],
+      "createdAt": 1771765237
+    },
+    "u_fe984b0f6a326f35ef769128": {
+      "id": "u_fe984b0f6a326f35ef769128",
+      "provider": "email",
+      "email": "u1_177176527325036@ex.com",
+      "passwordHash": "1e1de31430b559d340dacc47902ce5725d70ee7053429857d7c181244f815f3e",
+      "inviteCode": "27E51A6D",
+      "handle": "u1_177176527325036",
+      "profileVisibility": "friendsOnly",
+      "displayName": "Explorer",
+      "bio": "Travel Enthusiastic",
+      "loadout": {
+        "bodyId": "body",
+        "headId": "head",
+        "skinId": "skin_default",
+        "hairId": "hair_boy_default",
+        "outfitId": "outfit_boy_suit",
+        "accessoryIds": [
+          "acc_headphone"
+        ],
+        "expressionId": "expr_default"
+      },
+      "journeys": [
+        {
+          "id": "j_public",
+          "title": "Public Trip",
+          "activityTag": null,
+          "overallMemory": null,
+          "distance": 1000,
+          "startTime": "2026-02-22T13:01:14.000Z",
+          "endTime": "2026-02-22T13:01:14.000Z",
+          "visibility": "public",
+          "routeCoordinates": [
+            {
+              "lat": 1,
+              "lon": 1
+            }
+          ],
+          "memories": []
+        }
+      ],
+      "cityCards": [],
+      "friendIDs": [
+        "u_b05234ec650eeea13cce034f"
+      ],
+      "notifications": [
+        {
+          "id": "n_beb8cb16a0a20da93109",
+          "type": "profile_stomp",
+          "fromUserID": "u_b05234ec650eeea13cce034f",
+          "fromDisplayName": "Explorer",
+          "journeyID": null,
+          "journeyTitle": null,
+          "message": "Explorer 踩了踩你的主页",
+          "createdAt": "2026-02-22T13:01:14.394Z",
+          "read": false
+        },
+        {
+          "id": "n_664c6112f35f32c238d1",
+          "type": "journey_like",
+          "fromUserID": "u_b05234ec650eeea13cce034f",
+          "fromDisplayName": "Explorer",
+          "journeyID": "j_public",
+          "journeyTitle": "Public Trip",
+          "message": "Explorer liked your journey \"Public Trip\"",
+          "createdAt": "2026-02-22T13:01:14.282Z",
+          "read": false
+        }
+      ],
+      "createdAt": 1771765273
+    },
+    "u_b05234ec650eeea13cce034f": {
+      "id": "u_b05234ec650eeea13cce034f",
+      "provider": "email",
+      "email": "u2_177176527325036@ex.com",
+      "passwordHash": "1e1de31430b559d340dacc47902ce5725d70ee7053429857d7c181244f815f3e",
+      "inviteCode": "B0A749FA",
+      "handle": "u2_177176527325036",
+      "profileVisibility": "friendsOnly",
+      "displayName": "Explorer",
+      "bio": "Travel Enthusiastic",
+      "loadout": {
+        "bodyId": "body",
+        "headId": "head",
+        "skinId": "skin_default",
+        "hairId": "hair_boy_default",
+        "outfitId": "outfit_boy_suit",
+        "accessoryIds": [
+          "acc_headphone"
+        ],
+        "expressionId": "expr_default"
+      },
+      "journeys": [],
+      "cityCards": [],
+      "friendIDs": [
+        "u_fe984b0f6a326f35ef769128"
+      ],
+      "notifications": [],
+      "createdAt": 1771765274
+    }
+  },
+  "emailIndex": {
+    "u1_177176510130892@example.com": "u_aaf3aaea3f91190f71bec985",
+    "u2_177176510130892@example.com": "u_3ecf75fbc43035c357cdba5d",
+    "u1_17717652378107@example.com": "u_06b419f275fa8f8277a9e878",
+    "u2_17717652378107@example.com": "u_e88dcc5846a3d18d012d1998",
+    "u1_177176527325036@ex.com": "u_fe984b0f6a326f35ef769128",
+    "u2_177176527325036@ex.com": "u_b05234ec650eeea13cce034f"
+  },
+  "inviteIndex": {
+    "43E5299E": "u_e872904bd056bc8ff430e619",
+    "29F6D858": "u_aaf3aaea3f91190f71bec985",
+    "1C1C37E4": "u_3ecf75fbc43035c357cdba5d",
+    "36A41D4C": "u_51474f24e5ad708a08c2ad87",
+    "9A15EAB8": "u_06b419f275fa8f8277a9e878",
+    "8A31BE89": "u_e88dcc5846a3d18d012d1998",
+    "27E51A6D": "u_fe984b0f6a326f35ef769128",
+    "B0A749FA": "u_b05234ec650eeea13cce034f"
+  },
+  "oauthIndex": {
+    "google:3b28c9d1e7ec4a22eb291514e4f512f1942895e3714a059556ab0d4798d8f9ab": "u_e872904bd056bc8ff430e619",
+    "google:724d0a232e353bf496ed275615fa846bff494c7fea8ee35cfcb973acbebdd605": "u_51474f24e5ad708a08c2ad87"
+  },
+  "handleIndex": {
+    "u_e872904bd056bc8ff430e6": "u_e872904bd056bc8ff430e619",
+    "u1_177176510130892": "u_aaf3aaea3f91190f71bec985",
+    "u2_177176510130892": "u_3ecf75fbc43035c357cdba5d",
+    "u_51474f24e5ad708a08c2ad": "u_51474f24e5ad708a08c2ad87",
+    "u1_17717652378107": "u_06b419f275fa8f8277a9e878",
+    "u2_17717652378107": "u_e88dcc5846a3d18d012d1998",
+    "u1_177176527325036": "u_fe984b0f6a326f35ef769128",
+    "u2_177176527325036": "u_b05234ec650eeea13cce034f"
+  },
+  "likesIndex": {
+    "u_fe984b0f6a326f35ef769128:j_public": {
+      "ownerUserID": "u_fe984b0f6a326f35ef769128",
+      "journeyID": "j_public",
+      "likerIDs": [
+        "u_b05234ec650eeea13cce034f"
+      ],
+      "updatedAt": "2026-02-22T13:01:14.282Z"
+    }
+  }
+}

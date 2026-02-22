@@ -39,7 +39,17 @@ enum AppleSignInService {
 
         func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
             let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-            return scenes.flatMap { $0.windows }.first(where: { $0.isKeyWindow }) ?? ASPresentationAnchor()
+            let activeScenes = scenes.filter { $0.activationState == .foregroundActive }
+            if let keyWindow = activeScenes.flatMap(\.windows).first(where: { $0.isKeyWindow }) {
+                return keyWindow
+            }
+            if let anyActiveWindow = activeScenes.flatMap(\.windows).first {
+                return anyActiveWindow
+            }
+            if let fallbackWindow = scenes.flatMap(\.windows).first(where: { $0.isKeyWindow }) ?? scenes.flatMap(\.windows).first {
+                return fallbackWindow
+            }
+            return ASPresentationAnchor()
         }
 
         func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {

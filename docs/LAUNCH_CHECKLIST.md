@@ -3,6 +3,11 @@
 ## P0 - Must Before Release
 - [x] Account center productized flow (login/config/migration/visibility).
 - [x] Migration rule: upload `public/friendsOnly`, keep `private` local.
+- [x] Lifelog is local-only and is not part of cloud migration.
+- [x] Cloud data scope finalized:
+  - Avatar/loadout and user profile stats are stored in cloud profile payload.
+  - Journey route coordinates and memories are uploaded only for `public/friendsOnly`.
+  - `private` journeys and lifelog require manual migration when switching devices.
 - [x] Guest-to-account migration marker and merge source support.
 - [x] Friend identity model: `handle`, `inviteCode`, profile stats, visibility.
 - [x] Backend profile payload extended (`handle`, `inviteCode`, `profileVisibility`, `stats`).
