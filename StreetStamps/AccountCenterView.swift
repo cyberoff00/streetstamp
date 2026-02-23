@@ -10,7 +10,9 @@ struct AccountCenterView: View {
     @State private var backendBaseURL = BackendConfig.baseURLString
     @State private var googleClientID = BackendConfig.googleIOSClientID
     @State private var displayNameDraft = ""
-    @State private var handleDraft = ""
+    @State private var exclusiveIDDraft = ""
+    @State private var accountEmail = ""
+    @State private var canChangeExclusiveID = true
     @State private var profileVisibility: ProfileVisibility = ProfileSharingSettings.visibility
 
     @State private var isLoading = false
@@ -28,6 +30,9 @@ struct AccountCenterView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     sectionTitle("ACCOUNT")
                     accountPanel
+
+                    sectionTitle("PROFILE VISIBILITY")
+                    visibilityPanel
 
                     sectionTitle("DATA")
                     dataPanel
@@ -79,17 +84,17 @@ struct AccountCenterView: View {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 18, weight: .medium))
                     Text("BACK")
-                        .font(.system(size: 14, weight: .black))
+                        .font(.system(size: 14, weight: .semibold))
                 }
-                .foregroundColor(.black)
+                .foregroundColor(FigmaTheme.text)
             }
             .buttonStyle(.plain)
 
             Spacer()
 
             Text("Account Center")
-                .font(.system(size: 24, weight: .black))
-                .foregroundColor(.black)
+                .font(.system(size: 24, weight: .bold))
+                .foregroundColor(FigmaTheme.text)
 
             Spacer()
 
@@ -115,7 +120,7 @@ struct AccountCenterView: View {
 
     private func sectionTitle(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 33 * 0.48, weight: .black))
+            .font(.system(size: 33 * 0.48, weight: .bold))
             .foregroundColor(FigmaTheme.subtext)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -124,30 +129,36 @@ struct AccountCenterView: View {
         VStack(alignment: .leading, spacing: 12) {
             if sessionStore.isLoggedIn {
                 Text(displayNameDraft.isEmpty ? "Explorer" : displayNameDraft)
-                    .font(.system(size: 32 * 0.58, weight: .black))
-                    .foregroundColor(.black)
+                    .font(.system(size: 32 * 0.58, weight: .bold))
+                    .foregroundColor(FigmaTheme.text)
 
-                Group {
-                    TextField("昵称（可重复）", text: $displayNameDraft)
-                        .textFieldStyle(.roundedBorder)
-                    TextField("handle（唯一）", text: $handleDraft)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled(true)
-                        .textFieldStyle(.roundedBorder)
-                }
-                .font(.system(size: 14, weight: .semibold))
+                accountInfoRow(label: "昵称", value: displayNameDraft.isEmpty ? "Explorer" : displayNameDraft)
+                accountInfoRow(label: "专属ID", value: exclusiveIDDraft.isEmpty ? "--" : exclusiveIDDraft)
+                accountInfoRow(label: "邮箱", value: accountEmail.isEmpty ? "未绑定" : accountEmail)
 
-                Picker("主页可见性", selection: $profileVisibility) {
-                    ForEach(ProfileVisibility.allCases) { v in
-                        Text(v.titleCN).tag(v)
-                    }
-                }
-                .pickerStyle(.segmented)
+                Divider().overlay(Color.black.opacity(0.08))
+
+                TextField("昵称（可重复）", text: $displayNameDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 14, weight: .semibold))
+
+                TextField("专属ID（字母/数字/下划线）", text: $exclusiveIDDraft)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 14, weight: .semibold))
+                    .disabled(!canChangeExclusiveID)
+
+                Text(canChangeExclusiveID ? "专属ID仅可修改一次，请谨慎设置" : "专属ID已完成一次修改，无法再次更改")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(FigmaTheme.subtext)
 
                 HStack(spacing: 8) {
                     capsuleAction("保存昵称", filled: true) { Task { await updateDisplayName() } }
-                    capsuleAction("保存 Handle", filled: false) { Task { await updateHandle() } }
-                    capsuleAction("可见性", filled: false) { Task { await updateVisibility() } }
+                    capsuleAction(canChangeExclusiveID ? "保存专属ID" : "专属ID已锁定", filled: false) {
+                        Task { await updateExclusiveID() }
+                    }
+                    .disabled(!canChangeExclusiveID)
                 }
 
                 capsuleAction("退出登录", filled: false) {
@@ -156,8 +167,8 @@ struct AccountCenterView: View {
                 }
             } else {
                 Text("Guest Mode")
-                    .font(.system(size: 32 * 0.58, weight: .black))
-                    .foregroundColor(.black)
+                    .font(.system(size: 32 * 0.58, weight: .bold))
+                    .foregroundColor(FigmaTheme.text)
 
                 Divider().overlay(Color.black.opacity(0.08))
 
@@ -174,6 +185,38 @@ struct AccountCenterView: View {
                     showAuthSheet = true
                 }
             }
+        }
+        .cardStyle()
+    }
+
+    private func accountInfoRow(label: String, value: String) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(FigmaTheme.subtext)
+            Spacer(minLength: 8)
+            Text(value)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(FigmaTheme.text)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var visibilityPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Picker("主页可见性", selection: $profileVisibility) {
+                ForEach(ProfileVisibility.frontendCases) { v in
+                    Text(v.titleCN).tag(v)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            capsuleAction("保存可见性", filled: false) {
+                Task { await updateVisibility() }
+            }
+            .disabled(!sessionStore.isLoggedIn)
         }
         .cardStyle()
         .onChange(of: profileVisibility) { _, newValue in
@@ -241,8 +284,8 @@ struct AccountCenterView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)
-                        .font(.system(size: 16, weight: .black))
-                        .foregroundColor(.black)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(FigmaTheme.text)
                     Text(subtitle)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(FigmaTheme.subtext)
@@ -261,7 +304,7 @@ struct AccountCenterView: View {
     private func capsuleAction(_ title: String, filled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 14, weight: .black))
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(filled ? .white : .black)
                 .frame(maxWidth: .infinity)
                 .frame(height: 48)
@@ -280,7 +323,7 @@ struct AccountCenterView: View {
     private var backendCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("后端配置")
-                .font(.system(size: 13, weight: .bold))
+                .font(.system(size: 13, weight: .semibold))
 
             TextField("API_BASE_URL（例如 https://api.xxx.com）", text: $backendBaseURL)
                 .textInputAutocapitalization(.never)
@@ -318,7 +361,9 @@ struct AccountCenterView: View {
         do {
             let me = try await BackendAPIClient.shared.fetchMyProfile(token: token)
             displayNameDraft = me.displayName
-            handleDraft = me.handle ?? ""
+            exclusiveIDDraft = me.resolvedExclusiveID ?? ""
+            accountEmail = me.email ?? sessionStore.currentEmail ?? ""
+            canChangeExclusiveID = me.canChangeExclusiveID
             if let pv = me.profileVisibility {
                 profileVisibility = pv
                 ProfileSharingSettings.visibility = pv
@@ -331,31 +376,39 @@ struct AccountCenterView: View {
     private func updateDisplayName() async {
         guard let token = sessionStore.currentAccessToken, !token.isEmpty else { return }
         guard !displayNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return toast("展示名称不能为空")
+            return toast("昵称不能为空")
         }
         isLoading = true
         defer { isLoading = false }
 
         do {
             _ = try await BackendAPIClient.shared.updateDisplayName(token: token, displayName: displayNameDraft)
-            toast("展示名称已更新")
+            toast("昵称已更新")
             await refreshMeIfPossible()
         } catch {
             toast("更新失败：\(error.localizedDescription)")
         }
     }
 
-    private func updateHandle() async {
+    private func updateExclusiveID() async {
         guard let token = sessionStore.currentAccessToken, !token.isEmpty else { return }
-        let h = handleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !h.isEmpty else { return toast("Handle 不能为空") }
+        guard canChangeExclusiveID else { return toast("专属ID已完成一次修改，无法再次更改") }
+
+        let value = exclusiveIDDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return toast("专属ID不能为空") }
+        guard value.range(of: #"^[A-Za-z0-9_]{1,24}$"#, options: .regularExpression) != nil else {
+            return toast("专属ID仅支持字母、数字、下划线")
+        }
+
         isLoading = true
         defer { isLoading = false }
 
         do {
-            _ = try await BackendAPIClient.shared.updateHandle(token: token, handle: h)
-            toast("Handle 已更新")
-            await refreshMeIfPossible()
+            let updated = try await BackendAPIClient.shared.updateExclusiveID(token: token, exclusiveID: value)
+            exclusiveIDDraft = updated.resolvedExclusiveID ?? value
+            canChangeExclusiveID = updated.canChangeExclusiveID
+            accountEmail = updated.email ?? sessionStore.currentEmail ?? accountEmail
+            toast("专属ID已更新")
         } catch {
             toast("更新失败：\(error.localizedDescription)")
         }

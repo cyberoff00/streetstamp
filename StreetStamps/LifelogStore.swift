@@ -9,6 +9,7 @@ final class LifelogStore: ObservableObject {
     @Published private(set) var currentLocation: CLLocation?
     @Published private(set) var isEnabled: Bool = true
     @Published private(set) var availableDays: [Date] = []
+    @Published private(set) var countryISO2: String? = nil
 
     private struct PersistedPayload: Codable {
         var points: [LifelogTrackPoint]?
@@ -103,6 +104,7 @@ final class LifelogStore: ObservableObject {
         moodByDay = [:]
         hasBackfilledHistoricalJourneys = false
         availableDays = []
+        countryISO2 = nil
     }
 
     func load() {
@@ -128,6 +130,7 @@ final class LifelogStore: ObservableObject {
             moodByDay = [:]
             hasBackfilledHistoricalJourneys = false
             availableDays = []
+            countryISO2 = nil
             return
         }
 
@@ -166,10 +169,19 @@ final class LifelogStore: ObservableObject {
 
     func bind(to hub: LocationHub) {
         bag.removeAll()
+        countryISO2 = Self.normalizedISO2(hub.countryISO2)
+
         hub.locationStream
             .receive(on: DispatchQueue.main)
             .sink { [weak self] loc in
                 self?.ingest(loc)
+            }
+            .store(in: &bag)
+
+        hub.$countryISO2
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] iso in
+                self?.countryISO2 = Self.normalizedISO2(iso)
             }
             .store(in: &bag)
     }
@@ -190,6 +202,7 @@ final class LifelogStore: ObservableObject {
         route.currentCity = "Lifelog"
         route.canonicalCity = "Lifelog"
         route.cityKey = "Lifelog|"
+        route.countryISO2 = countryISO2
         let polyline = globePolyline(maxPoints: syntheticMaxPoints)
         route.coordinates = polyline
         route.thumbnailCoordinates = polyline
@@ -588,6 +601,7 @@ final class LifelogStore: ObservableObject {
             route.currentCity = "Lifelog"
             route.canonicalCity = "Lifelog"
             route.cityKey = "Lifelog|"
+            route.countryISO2 = countryISO2
             route.coordinates = sampled
             route.thumbnailCoordinates = sampled
             route.distance = totalDistanceMeters(coords: sampled)
@@ -789,5 +803,11 @@ final class LifelogStore: ObservableObject {
         let lo = min(top, bottom)
         let hi = max(top, bottom)
         return lo...hi
+    }
+
+    private static func normalizedISO2(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let iso = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return iso.count == 2 ? iso : nil
     }
 }

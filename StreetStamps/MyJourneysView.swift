@@ -10,16 +10,20 @@ struct MyJourneysView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var sessionStore: UserSessionStore
+    @EnvironmentObject private var cityCache: CityCache
     @AppStorage(MapAppearanceSettings.storageKey) private var mapAppearanceRaw = MapAppearanceSettings.current.rawValue
     let routeDetailReadOnly: Bool
     let routeDetailHeaderTitle: String?
+    let showHeader: Bool
 
     init(
         routeDetailReadOnly: Bool = false,
-        routeDetailHeaderTitle: String? = nil
+        routeDetailHeaderTitle: String? = nil,
+        showHeader: Bool = true
     ) {
         self.routeDetailReadOnly = routeDetailReadOnly
         self.routeDetailHeaderTitle = routeDetailHeaderTitle
+        self.showHeader = showHeader
     }
 
     @State private var showFilterPopover = false
@@ -27,6 +31,7 @@ struct MyJourneysView: View {
     @State private var selectedStartDate: Date? = nil
     @State private var selectedEndDate: Date? = nil
     @State private var likesByJourney: [String: Int] = [:]
+    @State private var visibilityUpdatingIDs: Set<String> = []
 
     private var allJourneys: [JourneyRoute] {
         store.journeys
@@ -69,7 +74,9 @@ struct MyJourneysView: View {
             FigmaTheme.background.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                header
+                if showHeader {
+                    header
+                }
                 listSection
             }
         }
@@ -180,7 +187,11 @@ struct MyJourneysView: View {
                     } label: {
                         JourneyCardRow(
                             journey: j,
-                            likeCount: likesByJourney[j.id] ?? 0
+                            likeCount: likesByJourney[j.id] ?? 0,
+                            isVisibilityUpdating: visibilityUpdatingIDs.contains(j.id),
+                            onVisibilityToggle: {
+                                toggleJourneyVisibility(journey: j)
+                            }
                         )
                     }
                     .buttonStyle(.plain)
@@ -208,11 +219,16 @@ struct MyJourneysView: View {
 
         Task {
             do {
-                let remote = try await BackendAPIClient.shared.fetchJourneyLikeCounts(token: token, journeyIDs: ids)
+                let ownerUserID = sessionStore.accountUserID
+                let remote = try await BackendAPIClient.shared.fetchJourneyLikeStats(
+                    token: token,
+                    journeyIDs: ids,
+                    ownerUserID: ownerUserID
+                )
                 await MainActor.run {
                     var merged = Dictionary(uniqueKeysWithValues: ids.map { ($0, 0) })
-                    for (id, count) in remote {
-                        merged[id] = max(0, count)
+                    for (id, value) in remote {
+                        merged[id] = max(0, value.likes)
                     }
                     likesByJourney = merged
                 }
@@ -220,6 +236,39 @@ struct MyJourneysView: View {
                 await MainActor.run {
                     likesByJourney = Dictionary(uniqueKeysWithValues: ids.map { ($0, 0) })
                 }
+            }
+        }
+    }
+
+    @MainActor
+    private func toggleJourneyVisibility(journey: JourneyRoute) {
+        guard !visibilityUpdatingIDs.contains(journey.id) else { return }
+        guard journey.visibility != .public else { return }
+
+        let target: JourneyVisibility = (journey.visibility == .private) ? .friendsOnly : .private
+        var updated = journey
+        updated.visibility = target
+
+        visibilityUpdatingIDs.insert(journey.id)
+        store.applyBulkCompletedUpdates([updated])
+
+        Task {
+            defer { visibilityUpdatingIDs.remove(journey.id) }
+
+            guard target == .friendsOnly else { return }
+            guard BackendConfig.isEnabled,
+                  let token = sessionStore.currentAccessToken,
+                  !token.isEmpty else { return }
+
+            do {
+                _ = try await JourneyCloudMigrationService.migrateAll(
+                    sessionStore: sessionStore,
+                    journeyStore: store,
+                    cityCache: cityCache
+                )
+                refreshJourneyLikes()
+            } catch {
+                print("❌ visibility cloud sync failed:", error.localizedDescription)
             }
         }
     }
@@ -441,6 +490,8 @@ private struct JourneyCalendarRangePopover: View {
 private struct JourneyCardRow: View {
     let journey: JourneyRoute
     let likeCount: Int
+    let isVisibilityUpdating: Bool
+    let onVisibilityToggle: () -> Void
 
     @AppStorage(MapAppearanceSettings.storageKey) private var mapAppearanceRaw = MapAppearanceSettings.current.rawValue
 
@@ -516,17 +567,33 @@ private struct JourneyCardRow: View {
 
                     Spacer(minLength: 0)
 
-                    HStack(spacing: 6) {
-                        Image(systemName: "heart")
-                            .font(.system(size: 14, weight: .medium))
-                        Text("\(likeCount)")
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                    Button(action: onVisibilityToggle) {
+                        HStack(spacing: 6) {
+                            if isVisibilityUpdating {
+                                ProgressView()
+                                    .progressViewStyle(.circular)
+                                    .tint(Color.black.opacity(0.58))
+                                    .scaleEffect(0.8)
+                            } else if journey.visibility == .private {
+                                Image(systemName: "lock")
+                                    .font(.system(size: 13, weight: .semibold))
+                                Text(JourneyVisibility.private.titleCN)
+                                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                            } else {
+                                Image(systemName: "heart")
+                                    .font(.system(size: 14, weight: .medium))
+                                Text("\(likeCount)")
+                                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                            }
+                        }
+                        .foregroundColor(visibilityTextColor)
+                        .padding(.horizontal, 12)
+                        .frame(height: 34)
+                        .background(visibilityBackgroundColor)
+                        .clipShape(Capsule())
                     }
-                    .foregroundColor(Color(red: 76.0 / 255.0, green: 175.0 / 255.0, blue: 124.0 / 255.0))
-                    .padding(.horizontal, 12)
-                    .frame(height: 34)
-                    .background(Color(red: 230.0 / 255.0, green: 241.0 / 255.0, blue: 233.0 / 255.0))
-                    .clipShape(Capsule())
+                    .buttonStyle(.borderless)
+                    .disabled(isVisibilityUpdating || journey.visibility == .public)
                 }
             }
             .padding(.horizontal, 16)
@@ -560,6 +627,20 @@ private struct JourneyCardRow: View {
         Rectangle()
             .fill(Color.black.opacity(0.12))
             .frame(width: 1, height: 18)
+    }
+
+    private var visibilityTextColor: Color {
+        if journey.visibility == .private || isVisibilityUpdating {
+            return Color.black.opacity(0.68)
+        }
+        return Color(red: 76.0 / 255.0, green: 175.0 / 255.0, blue: 124.0 / 255.0)
+    }
+
+    private var visibilityBackgroundColor: Color {
+        if journey.visibility == .private || isVisibilityUpdating {
+            return Color.black.opacity(0.08)
+        }
+        return Color(red: 230.0 / 255.0, green: 241.0 / 255.0, blue: 233.0 / 255.0)
     }
 }
 
@@ -897,12 +978,14 @@ struct JourneyRouteDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var sessionStore: UserSessionStore
+    @EnvironmentObject private var flow: AppFlowCoordinator
 
     @State private var shareImage: UIImage? = nil
     @State private var showShareSheet = false
     @State private var showDeleteConfirm = false
     @State private var fittedRegion: MKCoordinateRegion? = nil
     @State private var editingMemory: JourneyMemory? = nil
+    @State private var sidebarHideToken = UUID().uuidString
 
     init(
         journeyID: String,
@@ -1076,6 +1159,12 @@ struct JourneyRouteDetailView: View {
                 )
                 .environmentObject(sessionStore)
             }
+        }
+        .onAppear {
+            flow.pushSidebarButtonHidden(token: sidebarHideToken)
+        }
+        .onDisappear {
+            flow.popSidebarButtonHidden(token: sidebarHideToken)
         }
         .navigationBarBackButtonHidden(true)
         .confirmationDialog(L10n.t("delete_journey_confirm_title"), isPresented: $showDeleteConfirm) {
@@ -1282,9 +1371,16 @@ private struct JourneyDetailMap: UIViewRepresentable {
 
             view.annotation = ann
             view.canShowCallout = false
-            view.bounds = CGRect(x: 0, y: 0, width: 56, height: 56)
+            view.bounds = CGRect(
+                x: 0,
+                y: 0,
+                width: MemoryPin.annotationWidth,
+                height: MemoryPin.annotationHeight
+            )
             view.backgroundColor = .clear
+            view.centerOffset = MemoryPin.annotationCenterOffset
             view.displayPriority = .required
+            view.collisionMode = .circle
             if #available(iOS 14.0, *) {
                 view.zPriority = .max
             }

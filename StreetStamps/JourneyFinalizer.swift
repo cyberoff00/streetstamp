@@ -33,6 +33,7 @@ enum JourneyFinalizer {
         _ = source
 
         var r = route
+        r.distance = JourneyPostCorrection.correctedDistance(for: r)
 
         func persistAndReturn(_ updated: JourneyRoute, notify: (() -> Void)?) {
             Task { @MainActor in
@@ -46,8 +47,8 @@ enum JourneyFinalizer {
         let coordCount = r.coordinates.count
         // 如果坐标点太少，标记为无效旅程，不入城市库
         guard coordCount >= minimumPointsForCityUnlock,
-              let startWgs = r.coordinates.first?.cl,
-              let endWgs = r.coordinates.last?.cl
+              r.coordinates.first?.cl != nil,
+              r.coordinates.last?.cl != nil
         else {
             // ✅ 标记旅程为 "太短/无效"
             r.isTooShort = true  // 需要在 JourneyRoute 中添加此属性

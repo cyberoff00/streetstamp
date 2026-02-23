@@ -60,6 +60,13 @@ final class WatchJourneyRecorder: NSObject, ObservableObject {
 
     private let minMoveMeters: Double = 5
     private let minSecondsBetweenSamples: TimeInterval = 4
+    private let firstFixMaxAccuracyMeters: Double = 65
+    private let stationarySpeedThreshold: Double = 0.45
+    private let weakAccuracyThresholdMeters: Double = 55
+    private let weakAccuracyMinSpeed: Double = 0.9
+    private let weakAccuracyMinDistance: Double = 18
+    private let maxPlausibleSpeedMetersPerSecond: Double = 12
+    private let maxJumpDistanceMeters: Double = 140
     private let progressBatchSize: Int = 8
     private let progressFlushSeconds: TimeInterval = 10
     private let endedChunkPointSize: Int = 120
@@ -421,18 +428,43 @@ final class WatchJourneyRecorder: NSObject, ObservableObject {
 
     private func accept(_ location: CLLocation) {
         guard state == .recording else { return }
-        guard location.horizontalAccuracy >= 0, location.horizontalAccuracy <= 120 else { return }
+        let accuracy = location.horizontalAccuracy
+        guard accuracy >= 0, accuracy <= 120 else { return }
 
         if let last = lastAcceptedLocation {
             let deltaDistance = location.distance(from: last)
-            let deltaTime = location.timestamp.timeIntervalSince(last.timestamp)
+            let deltaTime = max(0.001, location.timestamp.timeIntervalSince(last.timestamp))
+            let impliedSpeed = deltaDistance / deltaTime
+            let speedUsed: Double = {
+                if location.speed >= 0 { return location.speed }
+                return impliedSpeed
+            }()
+
             if deltaDistance < minMoveMeters && deltaTime < minSecondsBetweenSamples {
+                return
+            }
+
+            let dynamicMinMove = max(minMoveMeters, 0.85 * max(0, accuracy))
+            let stationaryCandidate = deltaDistance < dynamicMinMove && speedUsed < stationarySpeedThreshold
+            if stationaryCandidate {
+                return
+            }
+
+            let weakAccuracy = accuracy >= weakAccuracyThresholdMeters
+            if weakAccuracy && speedUsed < weakAccuracyMinSpeed && deltaDistance < weakAccuracyMinDistance {
+                return
+            }
+
+            if deltaDistance > maxJumpDistanceMeters && impliedSpeed > maxPlausibleSpeedMetersPerSecond {
                 return
             }
 
             if deltaDistance.isFinite, deltaDistance >= 0 {
                 distanceMeters += deltaDistance
             }
+        } else {
+            // Require a reasonably good first fix so the initial anchor is not a noisy point.
+            guard accuracy <= firstFixMaxAccuracyMeters else { return }
         }
 
         let point = WatchJourneyPoint(

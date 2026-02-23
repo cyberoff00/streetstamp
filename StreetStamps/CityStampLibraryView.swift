@@ -50,17 +50,20 @@ struct CityStampLibraryView: View {
     @Binding var showSidebar: Bool
     private let autoRebuildFromJourneyStore: Bool
     private let usesSidebarHeader: Bool
+    private let showHeader: Bool
     private let allowCityDetailNavigation: Bool
 
     init(
         showSidebar: Binding<Bool>,
         autoRebuildFromJourneyStore: Bool = true,
         usesSidebarHeader: Bool = true,
+        showHeader: Bool = true,
         allowCityDetailNavigation: Bool = true
     ) {
         self._showSidebar = showSidebar
         self.autoRebuildFromJourneyStore = autoRebuildFromJourneyStore
         self.usesSidebarHeader = usesSidebarHeader
+        self.showHeader = showHeader
         self.allowCityDetailNavigation = allowCityDetailNavigation
     }
 
@@ -69,8 +72,10 @@ struct CityStampLibraryView: View {
             UITheme.bg.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                headerBar
-                Color.clear.frame(height: 6)
+                if showHeader {
+                    headerBar
+                    Color.clear.frame(height: 6)
+                }
 
                 GeometryReader { geo in
                     ScrollView {

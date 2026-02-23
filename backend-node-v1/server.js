@@ -74,13 +74,12 @@ function normalizeHandle(raw) {
     .trim()
     .toLowerCase()
     .replace(/^@+/, "")
-    .replace(/[^a-z0-9_.]/g, "");
+    .replace(/[^a-z0-9_]/g, "");
   return cleaned.slice(0, 24);
 }
 
-function genHandle(source) {
-  const n = normalizeHandle(source);
-  return n || `mora_${randHex(3)}`;
+function genAutoNumericHandle() {
+  return String(Math.floor(Math.random() * 100000000)).padStart(8, "0");
 }
 
 function canUseHandle(handle, uid) {
@@ -93,17 +92,11 @@ function allocateSystemHandle(uid, preferred) {
   const preferredNormalized = normalizeHandle(preferred);
   if (preferredNormalized && canUseHandle(preferredNormalized, owner)) return preferredNormalized;
 
-  const idSeed = owner.replace(/[^a-z0-9]/gi, "").toLowerCase().slice(-8);
-  if (idSeed) {
-    const fromID = normalizeHandle(`mora_${idSeed}`);
-    if (fromID && canUseHandle(fromID, owner)) return fromID;
+  for (let i = 0; i < 500; i += 1) {
+    const numeric = genAutoNumericHandle();
+    if (canUseHandle(numeric, owner)) return numeric;
   }
-
-  for (let i = 0; i < 64; i += 1) {
-    const randomHandle = normalizeHandle(`mora_${randHex(3)}`);
-    if (randomHandle && canUseHandle(randomHandle, owner)) return randomHandle;
-  }
-  return `mora_${randHex(4)}`;
+  return `${nowUnix()}${Math.floor(Math.random() * 10)}`.slice(-8);
 }
 
 function setUserHandle(uid, rawHandle, options = { strict: false }) {
@@ -275,8 +268,16 @@ function parseBearer(req) {
   return payload.uid;
 }
 
+function parseRefreshToken(rawToken) {
+  const tok = String(rawToken || "").trim();
+  if (!tok) throw new Error("missing refresh token");
+  const payload = jwt.verify(tok, JWT_SECRET);
+  if (!payload || payload.typ !== "refresh") throw new Error("invalid refresh token");
+  return payload;
+}
+
 function emptyDB() {
-  return { users: {}, emailIndex: {}, inviteIndex: {}, oauthIndex: {}, handleIndex: {}, likesIndex: {} };
+  return { users: {}, emailIndex: {}, inviteIndex: {}, oauthIndex: {}, handleIndex: {}, likesIndex: {}, friendRequestsIndex: {} };
 }
 
 async function ensureDirForFile(filePath) {
@@ -294,7 +295,8 @@ async function loadDB() {
       inviteIndex: parsed.inviteIndex || {},
       oauthIndex: parsed.oauthIndex || {},
       handleIndex: parsed.handleIndex || {},
-      likesIndex: parsed.likesIndex || {}
+      likesIndex: parsed.likesIndex || {},
+      friendRequestsIndex: parsed.friendRequestsIndex || {}
     };
   } catch (e) {
     if (e && e.code === "ENOENT") return emptyDB();
@@ -392,8 +394,98 @@ function pushProfileStompNotification(owner, fromUser) {
   }
 }
 
+function pushFriendRequestNotification(owner, fromUser) {
+  ensureUserNotifications(owner);
+  owner.notifications.unshift({
+    id: `n_${randHex(10)}`,
+    type: "friend_request",
+    fromUserID: fromUser.id,
+    fromDisplayName: fromUser.displayName,
+    journeyID: null,
+    journeyTitle: null,
+    message: `${fromUser.displayName} 向你发送了好友申请`,
+    createdAt: new Date().toISOString(),
+    read: false
+  });
+  if (owner.notifications.length > 400) {
+    owner.notifications = owner.notifications.slice(0, 400);
+  }
+}
+
+function pushFriendRequestAcceptedNotification(owner, fromUser) {
+  ensureUserNotifications(owner);
+  owner.notifications.unshift({
+    id: `n_${randHex(10)}`,
+    type: "friend_request_accepted",
+    fromUserID: fromUser.id,
+    fromDisplayName: fromUser.displayName,
+    journeyID: null,
+    journeyTitle: null,
+    message: `${fromUser.displayName} 通过了你的好友申请`,
+    createdAt: new Date().toISOString(),
+    read: false
+  });
+  if (owner.notifications.length > 400) {
+    owner.notifications = owner.notifications.slice(0, 400);
+  }
+}
+
 function isFriendOf(viewer, targetID) {
   return (viewer.friendIDs || []).includes(targetID);
+}
+
+function friendRequestUserDTO(user) {
+  return {
+    id: user.id,
+    displayName: user.displayName,
+    handle: user.handle || null,
+    exclusiveID: user.handle || null,
+    loadout: user.loadout || defaultLoadout()
+  };
+}
+
+function friendRequestDTO(request) {
+  const from = db.users[request.fromUserID];
+  const to = db.users[request.toUserID];
+  if (!from || !to) return null;
+  return {
+    id: request.id,
+    fromUserID: request.fromUserID,
+    toUserID: request.toUserID,
+    fromUser: friendRequestUserDTO(from),
+    toUser: friendRequestUserDTO(to),
+    note: request.note || "",
+    createdAt: request.createdAt
+  };
+}
+
+function allFriendRequests() {
+  return Object.values(db.friendRequestsIndex || {}).filter((x) => x && x.id && x.fromUserID && x.toUserID);
+}
+
+function sortByCreatedDesc(requests) {
+  return requests.sort((a, b) => Date.parse(b.createdAt || "") - Date.parse(a.createdAt || ""));
+}
+
+function findPendingFriendRequest(fromUserID, toUserID) {
+  return allFriendRequests().find((item) => item.fromUserID === fromUserID && item.toUserID === toUserID) || null;
+}
+
+function removeFriendRequestByID(requestID) {
+  if (!requestID) return;
+  if (db.friendRequestsIndex && db.friendRequestsIndex[requestID]) {
+    delete db.friendRequestsIndex[requestID];
+  }
+}
+
+function removeFriendRequestsBetween(userA, userB) {
+  for (const req of allFriendRequests()) {
+    const sameDirection = req.fromUserID === userA && req.toUserID === userB;
+    const reverseDirection = req.fromUserID === userB && req.toUserID === userA;
+    if (sameDirection || reverseDirection) {
+      delete db.friendRequestsIndex[req.id];
+    }
+  }
 }
 
 function profileDTOForViewer(target, isSelf, isFriend) {
@@ -404,12 +496,16 @@ function profileDTOForViewer(target, isSelf, isFriend) {
 
   return {
     id: target.id,
-    handle: target.handle ? `@${target.handle}` : null,
+    handle: target.handle || null,
+    exclusiveID: target.handle || null,
     inviteCode: target.inviteCode,
     profileVisibility: visibility,
     displayName: target.displayName,
+    email: isSelf ? (target.email || null) : null,
     bio: target.bio,
     loadout: target.loadout,
+    handleChangeUsed: Boolean(target.handleChangeUsed),
+    canUpdateHandleOneTime: !target.handleChangeUsed,
     stats: profileStatsFrom(target),
     journeys,
     unlockedCityCards: cards
@@ -444,10 +540,23 @@ async function main() {
   if (!db.likesIndex || typeof db.likesIndex !== "object") {
     db.likesIndex = {};
   }
+  if (!db.friendRequestsIndex || typeof db.friendRequestsIndex !== "object") {
+    db.friendRequestsIndex = {};
+  }
   for (const [uid, user] of Object.entries(db.users || {})) {
     setUserHandle(uid, user.handle || user.displayName || uid, { strict: false });
     if (!user.profileVisibility) user.profileVisibility = visibilityFriendsOnly;
+    if (typeof user.handleChangeUsed !== "boolean") {
+      user.handleChangeUsed = false;
+    }
     ensureUserNotifications(user);
+  }
+  for (const req of allFriendRequests()) {
+    const from = db.users[req.fromUserID];
+    const to = db.users[req.toUserID];
+    if (!from || !to || from.id === to.id || isFriendOf(from, to.id)) {
+      delete db.friendRequestsIndex[req.id];
+    }
   }
   await fsp.mkdir(MEDIA_DIR, { recursive: true });
 
@@ -474,6 +583,7 @@ async function main() {
         passwordHash: hashPassword(password),
         inviteCode: invite,
         handle: null,
+        handleChangeUsed: false,
         profileVisibility: visibilityFriendsOnly,
         displayName: "Explorer",
         bio: "Travel Enthusiastic",
@@ -485,7 +595,7 @@ async function main() {
         createdAt: nowUnix()
       };
       db.users[uid] = user;
-      setUserHandle(uid, email.split("@")[0], { strict: false });
+      setUserHandle(uid, null, { strict: false });
       db.emailIndex[email] = uid;
       db.inviteIndex[invite] = uid;
       await saveDB();
@@ -526,6 +636,7 @@ async function main() {
           provider,
           inviteCode: invite,
           handle: null,
+          handleChangeUsed: false,
           profileVisibility: visibilityFriendsOnly,
           displayName: "Explorer",
           bio: "Travel Enthusiastic",
@@ -536,7 +647,7 @@ async function main() {
           notifications: [],
           createdAt: nowUnix()
         };
-        setUserHandle(uid, uid, { strict: false });
+        setUserHandle(uid, null, { strict: false });
         db.oauthIndex[key] = uid;
         db.inviteIndex[invite] = uid;
         await saveDB();
@@ -545,6 +656,27 @@ async function main() {
       return res.status(200).json({ userId: uid, provider: u.provider, email: u.email || null, accessToken: makeAccessToken(uid, u.provider), refreshToken: makeRefreshToken(uid, u.provider) });
     } catch {
       return res.status(500).json({ message: "internal error" });
+    }
+  });
+
+  app.post("/v1/auth/refresh", (req, res) => {
+    try {
+      const payload = parseRefreshToken(req.body?.refreshToken);
+      const uid = String(payload?.uid || "").trim();
+      if (!uid) return res.status(401).json({ message: "unauthorized" });
+
+      const u = db.users[uid];
+      if (!u) return res.status(401).json({ message: "unauthorized" });
+
+      return res.status(200).json({
+        userId: uid,
+        provider: u.provider,
+        email: u.email || null,
+        accessToken: makeAccessToken(uid, u.provider),
+        refreshToken: makeRefreshToken(uid, u.provider)
+      });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
     }
   });
 
@@ -567,13 +699,43 @@ async function main() {
   app.post("/v1/friends", async (req, res) => {
     try {
       const uid = parseBearer(req);
+      if (!db.users[uid]) return res.status(404).json({ message: "user not found" });
+      return res.status(409).json({ message: "direct add disabled, use /v1/friends/requests" });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.get("/v1/friends/requests", (req, res) => {
+    try {
+      const uid = parseBearer(req);
       const me = db.users[uid];
       if (!me) return res.status(404).json({ message: "user not found" });
+
+      const incoming = sortByCreatedDesc(
+        allFriendRequests().filter((item) => item.toUserID === uid).map(friendRequestDTO).filter(Boolean)
+      );
+      const outgoing = sortByCreatedDesc(
+        allFriendRequests().filter((item) => item.fromUserID === uid).map(friendRequestDTO).filter(Boolean)
+      );
+      return res.status(200).json({ incoming, outgoing });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.post("/v1/friends/requests", async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = db.users[uid];
+      if (!me) return res.status(404).json({ message: "user not found" });
+
       const displayName = String(req.body?.displayName || "").trim();
-      const handleRaw = String(req.body?.handle || "").trim();
+      const handleRaw = String(req.body?.handle || req.body?.exclusiveID || "").trim();
       const inviteCodeRaw = req.body?.inviteCode == null ? "" : String(req.body.inviteCode).trim();
+      const note = String(req.body?.note || displayName || "").trim().slice(0, 120);
       if (!displayName && !inviteCodeRaw && !handleRaw) {
-        return res.status(400).json({ message: "displayName or inviteCode or handle required" });
+        return res.status(400).json({ message: "displayName or inviteCode or exclusiveID required" });
       }
 
       let target = null;
@@ -593,9 +755,9 @@ async function main() {
           return res.status(404).json({ message: "invite code not found" });
         }
         if (requestedHandle) {
-          return res.status(404).json({ message: "handle not found" });
+          return res.status(404).json({ message: "exclusive id not found" });
         }
-        return res.status(400).json({ message: "use inviteCode or handle to add friend" });
+        return res.status(400).json({ message: "use inviteCode or exclusiveID to add friend" });
       }
 
       if (target.id === me.id) {
@@ -603,13 +765,91 @@ async function main() {
       }
 
       if ((me.friendIDs || []).includes(target.id)) {
-        return res.status(200).json(friendDTOForViewer(target, true));
+        return res.status(409).json({ message: "already friends" });
       }
 
-      appendUnique(me.friendIDs, target.id);
-      appendUnique(target.friendIDs, me.id);
+      const existing = findPendingFriendRequest(uid, target.id);
+      if (existing) {
+        const dto = friendRequestDTO(existing);
+        return res.status(200).json({ ok: true, request: dto, message: "好友申请已发送，等待对方通过" });
+      }
+
+      const reverse = findPendingFriendRequest(target.id, uid);
+      if (reverse) {
+        return res.status(409).json({ message: "对方已向你发送申请，请在申请列表中通过" });
+      }
+
+      const reqID = `fr_${randHex(10)}`;
+      const createdAt = new Date().toISOString();
+      db.friendRequestsIndex[reqID] = {
+        id: reqID,
+        fromUserID: uid,
+        toUserID: target.id,
+        note,
+        createdAt,
+        updatedAt: createdAt
+      };
+      pushFriendRequestNotification(target, me);
       await saveDB();
-      return res.status(200).json(friendDTOForViewer(target, true));
+      return res.status(200).json({
+        ok: true,
+        request: friendRequestDTO(db.friendRequestsIndex[reqID]),
+        message: "好友申请已发送，等待对方通过"
+      });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.post("/v1/friends/requests/:requestID/accept", async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = db.users[uid];
+      if (!me) return res.status(404).json({ message: "user not found" });
+      const requestID = String(req.params.requestID || "").trim();
+      if (!requestID) return res.status(400).json({ message: "request id required" });
+
+      const pending = db.friendRequestsIndex[requestID];
+      if (!pending) return res.status(404).json({ message: "request not found" });
+      if (pending.toUserID !== uid) return res.status(403).json({ message: "forbidden" });
+
+      const fromUser = db.users[pending.fromUserID];
+      if (!fromUser) {
+        removeFriendRequestByID(requestID);
+        await saveDB();
+        return res.status(404).json({ message: "request sender not found" });
+      }
+
+      appendUnique(me.friendIDs, fromUser.id);
+      appendUnique(fromUser.friendIDs, me.id);
+      removeFriendRequestsBetween(me.id, fromUser.id);
+      pushFriendRequestAcceptedNotification(fromUser, me);
+      await saveDB();
+      return res.status(200).json({
+        ok: true,
+        friend: friendDTOForViewer(fromUser, true),
+        message: "已通过好友申请"
+      });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.post("/v1/friends/requests/:requestID/reject", async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = db.users[uid];
+      if (!me) return res.status(404).json({ message: "user not found" });
+      const requestID = String(req.params.requestID || "").trim();
+      if (!requestID) return res.status(400).json({ message: "request id required" });
+
+      const pending = db.friendRequestsIndex[requestID];
+      if (!pending) return res.status(404).json({ message: "request not found" });
+      if (pending.toUserID !== uid) return res.status(403).json({ message: "forbidden" });
+
+      removeFriendRequestByID(requestID);
+      await saveDB();
+      return res.status(200).json({ ok: true, message: "已拒绝好友申请" });
     } catch {
       return res.status(401).json({ message: "unauthorized" });
     }
@@ -626,6 +866,7 @@ async function main() {
       me.friendIDs = removeID(me.friendIDs || [], fid);
       const f = db.users[fid];
       if (f) f.friendIDs = removeID(f.friendIDs || [], uid);
+      removeFriendRequestsBetween(uid, fid);
       await saveDB();
       return res.status(200).json({});
     } catch {
@@ -830,30 +1071,46 @@ async function main() {
     }
   });
 
-  app.patch("/v1/profile/handle", async (req, res) => {
+  const updateExclusiveID = async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
       if (!me) return res.status(404).json({ message: "user not found" });
 
-      const incoming = String(req.body?.handle || "").trim();
+      const incoming = String(req.body?.exclusiveID || req.body?.handle || "").trim();
+      const current = normalizeHandle(me.handle);
+      const next = normalizeHandle(incoming);
+      if (!next) {
+        return res.status(400).json({ message: "invalid exclusive id" });
+      }
+      if (next === current) {
+        return res.status(200).json(profileDTOForViewer(me, true, true));
+      }
+      if (me.handleChangeUsed) {
+        return res.status(403).json({ message: "exclusive id can only be changed once" });
+      }
+
       const updated = setUserHandle(uid, incoming, { strict: true });
       if (!updated.ok) {
         if (updated.code === "invalid_handle") {
-          return res.status(400).json({ message: "invalid handle" });
+          return res.status(400).json({ message: "invalid exclusive id" });
         }
         if (updated.code === "handle_taken") {
-          return res.status(409).json({ message: "handle already taken" });
+          return res.status(409).json({ message: "exclusive id already taken" });
         }
-        return res.status(400).json({ message: "handle update failed" });
+        return res.status(400).json({ message: "exclusive id update failed" });
       }
 
+      me.handleChangeUsed = true;
       await saveDB();
       return res.status(200).json(profileDTOForViewer(me, true, true));
     } catch {
       return res.status(401).json({ message: "unauthorized" });
     }
-  });
+  };
+
+  app.patch("/v1/profile/exclusive-id", updateExclusiveID);
+  app.patch("/v1/profile/handle", updateExclusiveID);
 
   app.patch("/v1/profile/display-name", async (req, res) => {
     try {

@@ -18,16 +18,16 @@ private enum FriendsTopTab: String, CaseIterable, Identifiable {
 
 private enum AddFriendMethod: String, CaseIterable, Identifiable {
     case inviteCode
-    case handle
+    case exclusiveID
     case qrToken
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .inviteCode: return L10n.t("friends_add_method_invite")
-        case .handle: return L10n.t("friends_add_method_handle")
-        case .qrToken: return L10n.t("friends_add_method_qr")
+        case .inviteCode: return "邀请码"
+        case .exclusiveID: return "专属ID"
+        case .qrToken: return "二维码"
         }
     }
 }
@@ -76,7 +76,6 @@ private struct FriendFeedEvent: Identifiable {
 }
 
 struct FriendsHubView: View {
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var socialStore: SocialGraphStore
     @EnvironmentObject private var sessionStore: UserSessionStore
@@ -94,6 +93,9 @@ struct FriendsHubView: View {
     @State private var showSocialNotificationsSheet = false
     @State private var notificationsLoading = false
     @State private var lastPromptNotificationID: String?
+    @State private var incomingFriendRequests: [BackendFriendRequestDTO] = []
+    @State private var outgoingFriendRequests: [BackendFriendRequestDTO] = []
+    @State private var requestActionLoadingIDs: Set<String> = []
 
     private var sortedFriends: [FriendProfileSnapshot] {
         socialStore.friends.sorted { lhs, rhs in
@@ -158,9 +160,26 @@ struct FriendsHubView: View {
                             }
                         }
                     } else {
+                        if !incomingFriendRequests.isEmpty {
+                            friendRequestSectionTitle("待你通过")
+                            ForEach(incomingFriendRequests) { req in
+                                friendRequestCard(request: req, isIncoming: true)
+                            }
+                        }
+
+                        if !outgoingFriendRequests.isEmpty {
+                            friendRequestSectionTitle("已发送申请")
+                            ForEach(outgoingFriendRequests) { req in
+                                friendRequestCard(request: req, isIncoming: false)
+                            }
+                        }
+
                         if sortedFriends.isEmpty {
-                            emptyState(L10n.t("friends_empty_all"))
+                            if incomingFriendRequests.isEmpty && outgoingFriendRequests.isEmpty {
+                                emptyState(L10n.t("friends_empty_all"))
+                            }
                         } else {
+                            friendRequestSectionTitle("我的好友")
                             ForEach(sortedFriends) { friend in
                                 Button {
                                     activeRoute = .profile(friend.id)
@@ -174,7 +193,7 @@ struct FriendsHubView: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.top, 12)
-                .padding(.bottom, 30)
+                .padding(.bottom, 54)
             }
             .refreshable {
                 await refreshRemoteFriends()
@@ -200,7 +219,7 @@ struct FriendsHubView: View {
         .overlay(alignment: .top) {
             if showToast {
                 Text(toastText)
-                    .font(.system(size: 12, weight: .bold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
@@ -226,6 +245,7 @@ struct FriendsHubView: View {
         .onChange(of: sessionStore.currentAccessToken) { _, _ in
             Task {
                 await refreshSocialNotifications(showToastForLatestUnread: false)
+                await refreshFriendRequests()
             }
         }
         .task(id: feedLikeSignature) {
@@ -252,38 +272,16 @@ struct FriendsHubView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
-            Button {
-                dismiss()
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 18, weight: .medium))
-                    Text("BACK")
-                        .font(.system(size: 14, weight: .black))
-                        .tracking(0.3)
-                }
-                .foregroundColor(.black)
-            }
-            .buttonStyle(.plain)
-
-            Spacer()
-
-            Text(L10n.t("friends_title"))
-                .font(.system(size: 32, weight: .black))
-                .tracking(-0.4)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-
-            Spacer()
-
+        UnifiedTabPageHeader(title: L10n.t("friends_title"), horizontalPadding: 16, topPadding: 14, bottomPadding: 12) {
+            Color.clear
+        } trailing: {
             if tab == .allFriends {
                 Button {
                     showAddFriendSheet = true
                 } label: {
                     Image(systemName: "plus.circle.fill")
                         .font(.system(size: 24, weight: .bold))
-                        .foregroundColor(.black)
+                        .foregroundColor(FigmaTheme.text)
                 }
                 .buttonStyle(.plain)
             } else {
@@ -296,11 +294,11 @@ struct FriendsHubView: View {
                     ZStack(alignment: .topTrailing) {
                         Image(systemName: "bell.badge.fill")
                             .font(.system(size: 22, weight: .bold))
-                            .foregroundColor(.black)
+                            .foregroundColor(FigmaTheme.text)
 
                         if unreadSocialCount > 0 {
                             Text("\(min(unreadSocialCount, 99))")
-                                .font(.system(size: 9, weight: .black))
+                                .font(.system(size: 9, weight: .semibold))
                                 .foregroundColor(.white)
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 2)
@@ -313,44 +311,78 @@ struct FriendsHubView: View {
                 }
                 .buttonStyle(.plain)
             }
-
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 12)
-        .background(Color.white.opacity(0.92))
     }
 
     private var tabSwitcher: some View {
-        HStack(spacing: 10) {
-            ForEach(FriendsTopTab.allCases) { item in
-                Button {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
-                        tab = item
-                    }
-                } label: {
-                    Text(item.title)
-                        .font(.system(size: 14, weight: .black))
-                        .foregroundColor(tab == item ? .white : FigmaTheme.subtext)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 44)
-                        .background(
-                            Capsule()
-                                .fill(tab == item ? FigmaTheme.primary : Color.clear)
-                                .shadow(
-                                    color: tab == item ? FigmaTheme.primary.opacity(0.22) : .clear,
-                                    radius: 10,
-                                    x: 0,
-                                    y: 6
-                                )
-                        )
+        HStack {
+            Picker("Friends", selection: $tab) {
+                ForEach(FriendsTopTab.allCases) { item in
+                    Text(item.title).tag(item)
                 }
-                .buttonStyle(.plain)
             }
+            .pickerStyle(.segmented)
         }
         .padding(.horizontal, 16)
-        .padding(.bottom, 12)
-        .background(Color.white.opacity(0.92))
+        .padding(.top, 10)
+        .padding(.bottom, 8)
+    }
+
+    private func friendRequestSectionTitle(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 12, weight: .bold))
+            .foregroundColor(FigmaTheme.subtext)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 4)
+    }
+
+    private func friendRequestCard(request: BackendFriendRequestDTO, isIncoming: Bool) -> some View {
+        let profile = isIncoming ? request.fromUser : request.toUser
+        let loading = requestActionLoadingIDs.contains(request.id)
+
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                RobotRendererView(size: 36, face: .front, loadout: profile.loadout ?? .defaultBoy)
+                    .frame(width: 56, height: 56)
+                    .background(Color(red: 227.0 / 255.0, green: 239.0 / 255.0, blue: 235.0 / 255.0))
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(profile.displayName)
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundColor(FigmaTheme.text)
+                    Text("专属ID：\(profile.handle ?? "unknown_id")")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(FigmaTheme.subtext)
+                    Text(shortAgoText(from: request.createdAt))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(FigmaTheme.subtext.opacity(0.8))
+                }
+                Spacer(minLength: 8)
+            }
+
+            if isIncoming {
+                HStack(spacing: 10) {
+                    Button(loading ? "处理中..." : "通过") {
+                        Task { await acceptFriendRequest(request.id) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(loading)
+
+                    Button("忽略") {
+                        Task { await rejectFriendRequest(request.id) }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(loading)
+                }
+            } else {
+                Text("等待对方通过")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(FigmaTheme.subtext)
+            }
+        }
+        .padding(16)
+        .figmaSurfaceCard(radius: 24)
     }
 
     private func emptyState(_ text: String) -> some View {
@@ -580,6 +612,7 @@ struct FriendsHubView: View {
         defer { loadingRemote = false }
         await socialStore.reloadFromBackendIfPossible(accessToken: sessionStore.currentAccessToken)
         await refreshSocialNotifications(showToastForLatestUnread: true)
+        await refreshFriendRequests()
     }
 
     @MainActor
@@ -613,6 +646,67 @@ struct FriendsHubView: View {
             }
         } catch {
             // Keep social feed resilient even if reminder endpoint fails.
+        }
+    }
+
+    @MainActor
+    private func refreshFriendRequests() async {
+        guard BackendConfig.isEnabled,
+              let token = sessionStore.currentAccessToken,
+              !token.isEmpty else {
+            incomingFriendRequests = []
+            outgoingFriendRequests = []
+            return
+        }
+
+        do {
+            let resp = try await BackendAPIClient.shared.fetchFriendRequests(token: token)
+            incomingFriendRequests = resp.incoming
+            outgoingFriendRequests = resp.outgoing
+        } catch {
+            // Keep friends page available even if request endpoint fails.
+        }
+    }
+
+    @MainActor
+    private func acceptFriendRequest(_ requestID: String) async {
+        guard BackendConfig.isEnabled,
+              let token = sessionStore.currentAccessToken,
+              !token.isEmpty else {
+            showFeedToast("请先登录账号", duration: 2.0)
+            return
+        }
+        guard !requestActionLoadingIDs.contains(requestID) else { return }
+        requestActionLoadingIDs.insert(requestID)
+        defer { requestActionLoadingIDs.remove(requestID) }
+
+        do {
+            let resp = try await BackendAPIClient.shared.acceptFriendRequest(token: token, requestID: requestID)
+            await refreshRemoteFriends()
+            showFeedToast(resp.message ?? "已通过好友申请")
+        } catch {
+            showFeedToast("通过失败：\(error.localizedDescription)")
+        }
+    }
+
+    @MainActor
+    private func rejectFriendRequest(_ requestID: String) async {
+        guard BackendConfig.isEnabled,
+              let token = sessionStore.currentAccessToken,
+              !token.isEmpty else {
+            showFeedToast("请先登录账号", duration: 2.0)
+            return
+        }
+        guard !requestActionLoadingIDs.contains(requestID) else { return }
+        requestActionLoadingIDs.insert(requestID)
+        defer { requestActionLoadingIDs.remove(requestID) }
+
+        do {
+            let resp = try await BackendAPIClient.shared.rejectFriendRequest(token: token, requestID: requestID)
+            await refreshFriendRequests()
+            showFeedToast(resp.message ?? "已拒绝好友申请")
+        } catch {
+            showFeedToast("拒绝失败：\(error.localizedDescription)")
         }
     }
 
@@ -701,7 +795,7 @@ struct FriendsHubView: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     Text(item.type == "journey_like" ? "收到点赞" : "主页被踩")
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(item.type == "journey_like" ? Color.red : Color(red: 0.22, green: 0.45, blue: 0.89))
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
@@ -715,7 +809,7 @@ struct FriendsHubView: View {
 
                 Text(item.message)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.black)
+                    .foregroundColor(FigmaTheme.text)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -807,7 +901,7 @@ private struct FriendActivityCard: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .firstTextBaseline) {
                         Text(friend.displayName)
-                            .font(.system(size: 15, weight: .black))
+                            .font(.system(size: 15, weight: .bold))
                         Spacer(minLength: 4)
                         Text(agoText)
                             .font(.system(size: 12, weight: .semibold))
@@ -834,7 +928,7 @@ private struct FriendActivityCard: View {
 
             HStack(spacing: 10) {
                 Text(badgeLabel)
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(badgeTextColor)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 7)
@@ -854,10 +948,10 @@ private struct FriendActivityCard: View {
                     Button(action: onToggleLike) {
                         HStack(spacing: 5) {
                             Image(systemName: likedByMe ? "heart.fill" : "heart")
-                                .font(.system(size: 12, weight: .bold))
+                                .font(.system(size: 12, weight: .semibold))
                                 .foregroundColor(likedByMe ? .red : FigmaTheme.subtext)
                             Text("\(max(0, likeCount))")
-                                .font(.system(size: 11, weight: .bold))
+                                .font(.system(size: 11, weight: .semibold))
                                 .foregroundColor(FigmaTheme.subtext)
                         }
                         .padding(.horizontal, 10)
@@ -897,8 +991,8 @@ private struct AllFriendsCard: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(friend.displayName)
-                    .font(.system(size: 15, weight: .black))
-                    .foregroundColor(.black)
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(FigmaTheme.text)
                 Text(activeText)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(FigmaTheme.subtext)
@@ -908,8 +1002,8 @@ private struct AllFriendsCard: View {
 
             VStack(alignment: .trailing, spacing: 3) {
                 Text(distanceLabel)
-                    .font(.system(size: 16, weight: .black))
-                    .foregroundColor(.black)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(FigmaTheme.text)
                 Text(cityLabel)
                     .font(.system(size: 12, weight: .semibold))
                     .tracking(0.6)
@@ -928,7 +1022,7 @@ private struct AddFriendSheet: View {
 
     let onAdded: () async -> Void
 
-    @State private var method: AddFriendMethod = .handle
+    @State private var method: AddFriendMethod = .exclusiveID
     @State private var friendCode = ""
     @State private var friendNote = ""
     @State private var submitting = false
@@ -953,7 +1047,7 @@ private struct AddFriendSheet: View {
                 TextField(L10n.t("friends_add_note_optional"), text: $friendNote)
                     .textFieldStyle(.roundedBorder)
 
-                Button(submitting ? L10n.t("friends_add_submitting") : L10n.t("friends_add_submit")) {
+                Button(submitting ? "发送中..." : "发送好友申请") {
                     Task {
                         await submit()
                     }
@@ -982,7 +1076,7 @@ private struct AddFriendSheet: View {
     private var inputPlaceholder: String {
         switch method {
         case .inviteCode: return "输入邀请码（A1B2C3D4）"
-        case .handle: return "输入好友 handle（支持带或不带 @）"
+        case .exclusiveID: return "输入好友专属ID（支持带或不带 @）"
         case .qrToken: return "粘贴二维码 token 或链接"
         }
     }
@@ -990,7 +1084,7 @@ private struct AddFriendSheet: View {
     private var canSubmit: Bool {
         if submitting { return false }
         switch method {
-        case .handle:
+        case .exclusiveID:
             return !normalizedHandleInput().isEmpty
         case .inviteCode, .qrToken:
             return normalizedInviteCode() != nil
@@ -1003,7 +1097,7 @@ private struct AddFriendSheet: View {
         switch method {
         case .inviteCode:
             return raw.uppercased()
-        case .handle:
+        case .exclusiveID:
             return nil
         case .qrToken:
             if raw.contains("code="), let parts = URLComponents(string: raw) {
@@ -1016,8 +1110,8 @@ private struct AddFriendSheet: View {
     private func normalizedHandleInput() -> String {
         let raw = friendCode.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return "" }
-        if raw.hasPrefix("@") { return raw }
-        return "@\(raw)"
+        if raw.hasPrefix("@") { return String(raw.dropFirst()) }
+        return raw
     }
 
     private func resolvedDisplayName() -> String {
@@ -1034,7 +1128,7 @@ private struct AddFriendSheet: View {
             try await socialStore.addFriendSmart(
                 displayName: resolvedDisplayName(),
                 inviteCode: normalizedInviteCode(),
-                handle: method == .handle ? normalizedHandleInput() : nil,
+                handle: method == .exclusiveID ? normalizedHandleInput() : nil,
                 accessToken: sessionStore.currentAccessToken
             )
             await onAdded()
@@ -1065,7 +1159,7 @@ private struct FriendProfileScreen: View {
     private var fallbackFriend: FriendProfileSnapshot {
         FriendProfileSnapshot(
             id: friendID,
-            handle: "@unknown",
+            handle: "unknown_id",
             inviteCode: "",
             profileVisibility: .private,
             displayName: "Unknown",
@@ -1086,15 +1180,8 @@ private struct FriendProfileScreen: View {
 
             VStack(spacing: 0) {
                 HStack {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundColor(.black)
-                            .frame(width: 42, height: 42)
-                    }
-                    .buttonStyle(.plain)
+                    Color.clear
+                        .frame(width: 42, height: 42)
 
                     Spacer()
 
@@ -1149,16 +1236,11 @@ private struct FriendProfileScreen: View {
                             }
                             .padding(.top, 32)
 
-                            Text(f.displayName)
-                                .font(.system(size: 20, weight: .black))
-                                .tracking(-0.4)
-                                .padding(.top, 24)
-
-                            Text(f.handle)
+                            Text("专属ID：\(f.handle)")
                                 .font(.system(size: 13, weight: .regular))
                                 .tracking(0.2)
                                 .foregroundColor(FigmaTheme.subtext)
-                                .padding(.top, 6)
+                                .padding(.top, 24)
 
                             if canStomp {
                                 Button {
@@ -1168,9 +1250,9 @@ private struct FriendProfileScreen: View {
                                 } label: {
                                     HStack(spacing: 6) {
                                         Image(systemName: "shoeprints.fill")
-                                            .font(.system(size: 13, weight: .bold))
+                                            .font(.system(size: 13, weight: .semibold))
                                         Text(isSendingStomp ? "发送中..." : "踩一踩主页")
-                                            .font(.system(size: 12, weight: .bold))
+                                            .font(.system(size: 12, weight: .semibold))
                                     }
                                     .foregroundColor(.white)
                                     .padding(.horizontal, 14)
@@ -1186,7 +1268,7 @@ private struct FriendProfileScreen: View {
                             if !f.bio.isEmpty {
                                 Text(f.bio)
                                     .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.black.opacity(0.72))
+                                    .foregroundColor(FigmaTheme.text.opacity(0.72))
                                     .multilineTextAlignment(.center)
                                     .padding(.horizontal, 22)
                                     .padding(.top, 8)
@@ -1195,13 +1277,13 @@ private struct FriendProfileScreen: View {
                             HStack(spacing: 8) {
                                 Text(String(format: "%.1f km", max(0, f.stats.totalDistance / 1000.0)))
                                     .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.black.opacity(0.62))
+                                    .foregroundColor(FigmaTheme.text.opacity(0.62))
                                 Text("·")
                                     .font(.system(size: 11, weight: .semibold))
-                                    .foregroundColor(.black.opacity(0.42))
+                                    .foregroundColor(FigmaTheme.text.opacity(0.42))
                                 Text(String(format: "Joined %@", dateText(f.createdAt)))
                                     .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.black.opacity(0.72))
+                                    .foregroundColor(FigmaTheme.text.opacity(0.72))
                             }
                             .padding(.top, 6)
 
@@ -1286,7 +1368,7 @@ private struct FriendProfileScreen: View {
                                 }
                             } label: {
                                 Text(L10n.t("friends_delete"))
-                                    .font(.system(size: 13, weight: .bold))
+                                    .font(.system(size: 13, weight: .semibold))
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 12)
                             }
@@ -1305,7 +1387,7 @@ private struct FriendProfileScreen: View {
         .overlay(alignment: .top) {
             if showStompToast {
                 Text(stompToastText)
-                    .font(.system(size: 12, weight: .bold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
@@ -1338,9 +1420,9 @@ private struct FriendProfileScreen: View {
                         .foregroundColor(iconColor)
                 }
                 Text(title)
-                    .font(.system(size: 14, weight: .black))
+                    .font(.system(size: 14, weight: .semibold))
                     .tracking(-0.3)
-                    .foregroundColor(.black)
+                    .foregroundColor(FigmaTheme.text)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
             }
@@ -1360,9 +1442,9 @@ private struct FriendProfileScreen: View {
                     .foregroundColor(FigmaTheme.subtext)
 
                 Text(value)
-                    .font(.system(size: 18, weight: .black))
+                    .font(.system(size: 18, weight: .bold))
                     .tracking(0.1)
-                    .foregroundColor(.black)
+                    .foregroundColor(FigmaTheme.text)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             }
@@ -1724,12 +1806,12 @@ private struct FriendEquipmentRow: View {
     var body: some View {
         HStack {
             Text(title)
-                .font(.system(size: 12, weight: .bold))
-                .foregroundColor(.black.opacity(0.7))
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(FigmaTheme.text.opacity(0.7))
             Spacer()
             Text(value)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.black)
+                .foregroundColor(FigmaTheme.text)
         }
         .padding(.vertical, 4)
     }

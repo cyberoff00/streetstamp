@@ -14,8 +14,7 @@ struct ProfileView: View {
     @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var sessionStore: UserSessionStore
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
-    
-    @Binding var showSidebar: Bool
+
     @State private var faceIndex: Int = 0
     @State private var dragAccum: CGFloat = 0
 
@@ -31,8 +30,7 @@ struct ProfileView: View {
     @State private var showNotificationsSheet = false
     @State private var notificationsLoading = false
 
-    init(showSidebar: Binding<Bool>) {
-        self._showSidebar = showSidebar
+    init() {
         self._loadout = State(initialValue: AvatarLoadoutStore.load())
     }
 
@@ -95,7 +93,7 @@ struct ProfileView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.horizontal, 24)
                         .padding(.top, 24)
-                        .padding(.bottom, 32)
+                        .padding(.bottom, 56)
                     }
                 }
             }
@@ -103,7 +101,7 @@ struct ProfileView: View {
             .overlay(alignment: .top) {
                 if showToast {
                     Text(toastText)
-                        .font(.system(size: 12, weight: .bold))
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(.white)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
@@ -140,7 +138,8 @@ struct ProfileView: View {
 
     private var headerView: some View {
         HStack {
-            SidebarHamburgerButton(showSidebar: $showSidebar, size: 42, iconSize: 20, iconWeight: .semibold, foreground: .black)
+            Color.clear
+                .frame(width: 42, height: 42)
 
             Spacer()
 
@@ -152,8 +151,16 @@ struct ProfileView: View {
 
             Spacer()
 
-            Color.clear
-                .frame(width: 42, height: 42)
+            NavigationLink {
+                SettingsView()
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(FigmaTheme.text)
+                    .frame(width: 42, height: 42)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 18)
         .padding(.top, 8)
@@ -207,6 +214,21 @@ struct ProfileView: View {
                         dragAccum = 0
                     }
                 )
+                .overlay(alignment: .topTrailing) {
+                    NavigationLink {
+                        EquipmentView(loadout: $loadout)
+                    } label: {
+                        Image(systemName: "tshirt")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(FigmaTheme.primary)
+                            .frame(width: 30, height: 30)
+                            .background(Color.white.opacity(0.95))
+                            .clipShape(Circle())
+                            .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
+                    }
+                    .buttonStyle(.plain)
+                    .offset(x: 8, y: -8)
+                }
             }
             .padding(.top, 32)
 
@@ -217,12 +239,12 @@ struct ProfileView: View {
             } label: {
                 HStack(spacing: 6) {
                     Text(displayName)
-                        .font(.system(size: 20, weight: .black))
+                        .font(.system(size: 20, weight: .bold))
                         .tracking(-0.4)
-                        .foregroundColor(.black)
+                        .foregroundColor(FigmaTheme.text)
                     Image(systemName: "pencil")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.black.opacity(0.45))
+                        .foregroundColor(FigmaTheme.text.opacity(0.45))
                 }
             }
             .buttonStyle(.plain)
@@ -231,13 +253,13 @@ struct ProfileView: View {
             HStack(spacing: 8) {
                 Text(String(format: L10n.t("level_format"), levelValue))
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.black.opacity(0.62))
+                    .foregroundColor(FigmaTheme.text.opacity(0.62))
                 Text("·")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.black.opacity(0.42))
+                    .foregroundColor(FigmaTheme.text.opacity(0.42))
                 Text(String(format: L10n.t("ep_format"), epValue.formatted()))
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.black.opacity(0.72))
+                    .foregroundColor(FigmaTheme.text.opacity(0.72))
             }
             .padding(.top, 6)
 
@@ -266,32 +288,6 @@ struct ProfileView: View {
 
     private var topActionRow: some View {
         VStack(spacing: 14) {
-            HStack(spacing: 14) {
-                NavigationLink {
-                    EquipmentView(loadout: $loadout)
-                } label: {
-                    profileMenuTile(
-                        icon: "tshirt",
-                        iconColor: FigmaTheme.primary,
-                        iconBg: FigmaTheme.primary.opacity(0.14),
-                        title: L10n.t("equipment_title_upper")
-                    )
-                }
-                .buttonStyle(.plain)
-
-                NavigationLink {
-                    MyJourneysView()
-                } label: {
-                    profileMenuTile(
-                        icon: "map",
-                        iconColor: Color(red: 184 / 255, green: 148 / 255, blue: 125 / 255),
-                        iconBg: Color(red: 184 / 255, green: 148 / 255, blue: 125 / 255).opacity(0.14),
-                        title: L10n.t("my_journey_title_upper")
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-
             Button {
                 showNotificationsSheet = true
                 Task {
@@ -317,9 +313,9 @@ struct ProfileView: View {
                         .foregroundColor(iconColor)
                 }
                 Text(title)
-                    .font(.system(size: 14, weight: .black))
+                    .font(.system(size: 14, weight: .semibold))
                     .tracking(-0.3)
-                    .foregroundColor(.black)
+                    .foregroundColor(FigmaTheme.text)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
             }
@@ -339,9 +335,9 @@ struct ProfileView: View {
                     .foregroundColor(FigmaTheme.subtext)
 
                 Text(value)
-                    .font(.system(size: 18, weight: .black))
+                    .font(.system(size: 18, weight: .bold))
                     .tracking(0.1)
-                    .foregroundColor(.black)
+                    .foregroundColor(FigmaTheme.text)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             }
@@ -367,7 +363,7 @@ struct ProfileView: View {
 
                 if unreadSocialCount > 0 {
                     Text("\(min(unreadSocialCount, 99))")
-                        .font(.system(size: 10, weight: .black))
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(.white)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
@@ -379,14 +375,14 @@ struct ProfileView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("互动通知")
-                    .font(.system(size: 15, weight: .black))
-                    .foregroundColor(.black)
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(FigmaTheme.text)
                 Text("收到赞 \(likeNotificationCount) · 被踩 \(stompNotificationCount)")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(FigmaTheme.subtext)
                 if unreadSocialCount > 0 {
                     Text("未读 \(unreadSocialCount) 条")
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(Color(red: 0.22, green: 0.45, blue: 0.89))
                 }
             }
@@ -466,7 +462,7 @@ struct ProfileView: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     Text(item.type == "journey_like" ? "收到点赞" : "主页被踩")
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(item.type == "journey_like" ? Color.red : Color(red: 0.22, green: 0.45, blue: 0.89))
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
@@ -480,7 +476,7 @@ struct ProfileView: View {
 
                 Text(item.message)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.black)
+                    .foregroundColor(FigmaTheme.text)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -508,7 +504,7 @@ struct ProfileView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("可修改昵称（1-24 字符）")
                     .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(.black)
+                    .foregroundColor(FigmaTheme.text)
 
                 TextField("输入昵称", text: $nameDraft)
                     .textInputAutocapitalization(.never)
@@ -745,15 +741,15 @@ struct ExpandableSection<Content: View>: View {
             } label: {
                 HStack {
                     Text(title)
-                        .font(.system(size: 13, weight: .bold))
+                        .font(.system(size: 13, weight: .semibold))
                         .tracking(0.5)
-                        .foregroundColor(.black)
+                        .foregroundColor(FigmaTheme.text)
                     
                     Spacer()
                     
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.black.opacity(0.4))
+                        .foregroundColor(FigmaTheme.text.opacity(0.4))
                 }
                 .padding(.horizontal, 14)
                 .frame(minHeight: 44)
@@ -779,9 +775,9 @@ struct SectionLinkRow: View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 13, weight: .bold))
+                    .font(.system(size: 13, weight: .semibold))
                     .tracking(0.5)
-                    .foregroundColor(.black)
+                    .foregroundColor(FigmaTheme.text)
 
             }
 
@@ -789,11 +785,11 @@ struct SectionLinkRow: View {
 
 //            Text(value)
 //                .font(.system(size: 16, weight: .bold))
-//                .foregroundColor(.black)
+//                .foregroundColor(FigmaTheme.text)
 
             Image(systemName: "chevron.right")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.black.opacity(0.35))
+                .foregroundColor(FigmaTheme.text.opacity(0.35))
                 .padding(.leading, 2)
         }
         .padding(.horizontal, 14)
@@ -819,13 +815,13 @@ struct StatRow: View {
             Text(label)
                 .font(.system(size: 12, weight: .medium))
                 .tracking(0.5)
-                .foregroundColor(.black.opacity(0.5))
+                .foregroundColor(FigmaTheme.text.opacity(0.5))
             
             Spacer()
             
             Text(value)
                 .font(.system(size: 18, weight: .bold))
-                .foregroundColor(.black)
+                .foregroundColor(FigmaTheme.text)
         }
     }
 }
@@ -847,19 +843,19 @@ struct StatNavRow: View {
             Text(label)
                 .font(.system(size: 12, weight: .medium))
                 .tracking(0.5)
-                .foregroundColor(.black.opacity(0.5))
+                .foregroundColor(FigmaTheme.text.opacity(0.5))
 
             Spacer()
 
             if !value.isEmpty {
                 Text(value)
                     .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(.black)
+                    .foregroundColor(FigmaTheme.text)
             }
 
             Image(systemName: "chevron.right")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.black.opacity(0.35))
+                .foregroundColor(FigmaTheme.text.opacity(0.35))
                 .padding(.leading, 4)
         }
         .contentShape(Rectangle())
@@ -924,7 +920,7 @@ struct RecentJourneysView: View {
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.black.opacity(0.6))
+                        .foregroundColor(FigmaTheme.text.opacity(0.6))
                 }
 
                 Spacer()
@@ -935,12 +931,12 @@ struct RecentJourneysView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(L10n.t("recent_journeys_title"))
                     .appHeaderStyle()
-                    .foregroundColor(.black)
+                    .foregroundColor(FigmaTheme.text)
 
                 Text(String(format: L10n.t("recent_journeys_last_30_days"), locale: Locale.current, recentJourneys.count))
                     .font(.system(size: 11, weight: .medium))
                     .tracking(1)
-                    .foregroundColor(.black.opacity(0.5))
+                    .foregroundColor(FigmaTheme.text.opacity(0.5))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 32)
@@ -953,11 +949,11 @@ struct RecentJourneysView: View {
         VStack(spacing: 10) {
             Text(L10n.key("recent_journeys_empty_title"))
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(.black.opacity(0.6))
+                .foregroundColor(FigmaTheme.text.opacity(0.6))
 
             Text(L10n.key("recent_journeys_empty_desc"))
                 .font(.system(size: 12))
-                .foregroundColor(.black.opacity(0.45))
+                .foregroundColor(FigmaTheme.text.opacity(0.45))
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
@@ -1034,7 +1030,7 @@ struct RecentJourneyCard: View {
                                 ProgressView()
                                 Text(L10n.key("share_generating"))
                                     .font(.system(size: 12))
-                                    .foregroundColor(.black.opacity(0.45))
+                                    .foregroundColor(FigmaTheme.text.opacity(0.45))
                             }
                         )
                 }
@@ -1045,7 +1041,7 @@ struct RecentJourneyCard: View {
                     Text(saveToastText)
                         .font(.system(size: 11, weight: .semibold))
                         .tracking(0.6)
-                        .foregroundColor(.black.opacity(0.75))
+                        .foregroundColor(FigmaTheme.text.opacity(0.75))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
                         .background(Color.white.opacity(0.92))
@@ -1057,11 +1053,11 @@ struct RecentJourneyCard: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(journey.displayCityName)
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(.black)
+                    .foregroundColor(FigmaTheme.text)
 
                 Text(dateText)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.black.opacity(0.5))
+                    .foregroundColor(FigmaTheme.text.opacity(0.5))
 
                 HStack(spacing: 10) {
                     Text(String(format: "%.2f km", max(0, journey.distance / 1000.0)))
@@ -1071,7 +1067,7 @@ struct RecentJourneyCard: View {
                     Text(String(format: L10n.t("mem_short"), locale: Locale.current, journey.memories.count))
                 }
                 .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.black.opacity(0.45))
+                .foregroundColor(FigmaTheme.text.opacity(0.45))
             }
             .padding(.horizontal, 2)
 
@@ -1096,7 +1092,7 @@ struct RecentJourneyCard: View {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 11, weight: .semibold))
                 }
-                .foregroundColor(.black.opacity(0.78))
+                .foregroundColor(FigmaTheme.text.opacity(0.78))
                 .padding(.horizontal, 10)
                 .frame(height: 34)
                 .background(Color.black.opacity(0.05))
@@ -1201,9 +1197,9 @@ struct EquipmentLibraryView: View {
                 // Header
                 ZStack {
                     Text(L10n.t("equipment_title_upper"))
-                        .font(.system(size: 26, weight: .black))
+                        .font(.system(size: 26, weight: .bold))
                         .tracking(1)
-                        .foregroundColor(.black)
+                        .foregroundColor(FigmaTheme.text)
 
                     HStack {
                         Button {
@@ -1211,7 +1207,7 @@ struct EquipmentLibraryView: View {
                         } label: {
                             Image(systemName: "chevron.left")
                                 .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.black.opacity(0.6))
+                                .foregroundColor(FigmaTheme.text.opacity(0.6))
                         }
 
                         Spacer()
@@ -1223,7 +1219,7 @@ struct EquipmentLibraryView: View {
                 Text(String(format: L10n.t("equipment_collected_count"), locale: Locale.current, collectedCount, equipmentItems.count))
                     .font(.system(size: 11, weight: .medium))
                     .tracking(1)
-                    .foregroundColor(.black.opacity(0.5))
+                    .foregroundColor(FigmaTheme.text.opacity(0.5))
                     .padding(.top, 10)
                     .padding(.bottom, 16)
                 
@@ -1293,11 +1289,11 @@ struct EquipmentCard: View {
                 if item.isCollected {
                     Image(systemName: item.icon)
                         .font(.system(size: 24, weight: .medium))
-                        .foregroundColor(.black.opacity(0.7))
+                        .foregroundColor(FigmaTheme.text.opacity(0.7))
                 } else {
                     Image(systemName: "lock.fill")
                         .font(.system(size: 18, weight: .medium))
-                        .foregroundColor(.black.opacity(0.3))
+                        .foregroundColor(FigmaTheme.text.opacity(0.3))
                 }
             }
             .overlay(
@@ -1308,7 +1304,7 @@ struct EquipmentCard: View {
             // Name and rarity
             VStack(spacing: 4) {
                 Text(item.name)
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(size: 10, weight: .semibold))
                     .tracking(0.3)
                     .foregroundColor(item.isCollected ? .black : .black.opacity(0.4))
                     .lineLimit(1)

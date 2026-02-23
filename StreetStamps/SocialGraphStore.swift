@@ -161,7 +161,7 @@ struct FriendProfileSnapshot: Identifiable, Codable, Hashable {
         unlockedCityCards = (try? c.decode([FriendCityCard].self, forKey: .unlockedCityCards)) ?? []
         createdAt = (try? c.decode(Date.self, forKey: .createdAt)) ?? Date()
         inviteCode = (try? c.decode(String.self, forKey: .inviteCode)) ?? Self.fallbackInviteCode(source: id)
-        handle = (try? c.decode(String.self, forKey: .handle)) ?? "@\(ProfileSharingSettings.normalizeHandle(displayName))"
+        handle = (try? c.decode(String.self, forKey: .handle)) ?? Self.fallbackHandle(source: displayName)
         profileVisibility = (try? c.decode(ProfileVisibility.self, forKey: .profileVisibility)) ?? .friendsOnly
         stats = (try? c.decode(ProfileStatsSnapshot.self, forKey: .stats)) ?? ProfileStatsSnapshot(
             totalJourneys: journeys.count,
@@ -174,6 +174,12 @@ struct FriendProfileSnapshot: Identifiable, Codable, Hashable {
     private static func fallbackInviteCode(source: String) -> String {
         let cleaned = source.replacingOccurrences(of: "-", with: "").uppercased()
         return String(cleaned.prefix(8))
+    }
+
+    fileprivate static func fallbackHandle(source: String) -> String {
+        let cleaned = ProfileSharingSettings.normalizeHandle(source)
+        if !cleaned.isEmpty { return cleaned }
+        return "00000000"
     }
 }
 
@@ -237,14 +243,13 @@ final class SocialGraphStore: ObservableObject {
             throw BackendAPIError.server("后端未连接，已禁止本地伪造好友。请先配置后端地址并登录账号。")
         }
 
-        let dto = try await BackendAPIClient.shared.addFriend(
+        _ = try await BackendAPIClient.shared.sendFriendRequest(
             token: token,
             displayName: finalName,
             inviteCode: normalizedCode,
-            handle: finalHandle
+            handle: finalHandle,
+            note: finalName
         )
-        let mapped = Self.friendSnapshot(from: dto)
-        importFriendSnapshot(mapped)
     }
 
     func importFriendSnapshot(_ snapshot: FriendProfileSnapshot) {
@@ -339,7 +344,7 @@ final class SocialGraphStore: ObservableObject {
     private static func friendSnapshot(from dto: BackendFriendDTO) -> FriendProfileSnapshot {
         FriendProfileSnapshot(
             id: dto.id,
-            handle: dto.handle ?? "@\(ProfileSharingSettings.normalizeHandle(dto.displayName))",
+            handle: dto.resolvedExclusiveID ?? FriendProfileSnapshot.fallbackHandle(source: dto.displayName),
             inviteCode: dto.inviteCode ?? generateInviteCode(source: dto.id),
             profileVisibility: dto.profileVisibility ?? .friendsOnly,
             displayName: dto.displayName,

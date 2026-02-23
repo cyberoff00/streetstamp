@@ -34,6 +34,7 @@ struct StreetStampsApp: App {
                 .environmentObject(socialStore)
                 .environmentObject(flow)
                 .task {
+                    BackendAPIClient.shared.bindSessionStore(sessionStore)
                     sessionStore.bootstrapFileSystem()
                     VoiceBroadcastService.shared.start()
                     journeyStore.load()

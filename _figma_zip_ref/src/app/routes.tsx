@@ -1,5 +1,7 @@
 import { createBrowserRouter } from "react-router";
 import { Home } from "./pages/Home";
+import { Friends } from "./pages/Friends";
+import { Lifelog } from "./pages/Lifelog";
 import { Tracking } from "./pages/Tracking";
 import { Memories } from "./pages/Memories";
 import { Cities } from "./pages/Cities";
@@ -17,6 +19,14 @@ export const router = createBrowserRouter([
   {
     path: "/tracking",
     Component: Tracking,
+  },
+  {
+    path: "/friends",
+    Component: Friends,
+  },
+  {
+    path: "/lifelog",
+    Component: Lifelog,
   },
   {
     path: "/memories",

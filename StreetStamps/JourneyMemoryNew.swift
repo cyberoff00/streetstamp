@@ -31,15 +31,18 @@ struct JourneyMemoryMainView: View {
     
     @Binding var showSidebar: Bool
     private let usesSidebarHeader: Bool
+    private let hideLeadingControl: Bool
     private let readOnly: Bool
     
     init(
         showSidebar: Binding<Bool>,
         usesSidebarHeader: Bool = true,
+        hideLeadingControl: Bool = false,
         readOnly: Bool = false
     ) {
         self._showSidebar = showSidebar
         self.usesSidebarHeader = usesSidebarHeader
+        self.hideLeadingControl = hideLeadingControl
         self.readOnly = readOnly
     }
 
@@ -62,19 +65,6 @@ struct JourneyMemoryMainView: View {
         }
     }
 
-    private var filterChipTitle: String {
-        let cal = Calendar.current
-        guard let start = selectedStartDate else { return L10n.t("all_time") }
-        let end = selectedEndDate ?? start
-        let df = DateFormatter()
-        df.locale = Locale.current
-        df.dateFormat = "MMM d"
-        if cal.isDate(start, inSameDayAs: end) {
-            return df.string(from: start)
-        }
-        return "\(df.string(from: start)) - \(df.string(from: end))"
-    }
-    
     var body: some View {
         ZStack(alignment: .top) {
             FigmaTheme.background.ignoresSafeArea()
@@ -166,79 +156,50 @@ struct JourneyMemoryMainView: View {
     // MARK: - Header
     
     private var headerView: some View {
-        VStack(spacing: 2) {
-            HStack(spacing: 12) {
-                if usesSidebarHeader {
-                    SidebarHamburgerButton(showSidebar: $showSidebar, size: 42, iconSize: 20)
-                } else {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundColor(.black)
-                            .frame(width: 42, height: 42)
-                    }
-                    .buttonStyle(.plain)
+        UnifiedTabPageHeader(title: L10n.t("memories_title"), horizontalPadding: 20, topPadding: 14, bottomPadding: 12) {
+            if hideLeadingControl {
+                Color.clear
+            } else if usesSidebarHeader {
+                SidebarHamburgerButton(showSidebar: $showSidebar, size: 42, iconSize: 20)
+            } else {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(.black)
                 }
-
-                Spacer(minLength: 0)
-
-                Text(L10n.t("memories_title"))
-                    .appHeaderStyle()
-                    .multilineTextAlignment(.center)
-                    .allowsTightening(true)
-
-                Spacer(minLength: 0)
-
-                VStack(spacing: 2) {
-                    Button {
-                        showFilterPopover.toggle()
-                    } label: {
-                        Image(systemName: selectedStartDate == nil ? "calendar" : "calendar.badge.clock")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundColor(.black)
-                            .frame(width: 42, height: 42)
-                    }
-                    .buttonStyle(.plain)
-                    .popover(isPresented: $showFilterPopover, attachmentAnchor: .point(.bottom), arrowEdge: .top) {
-                        JourneyMemoryCalendarRangePopover(
-                            monthCursor: $monthCursor,
-                            selectedStartDate: $selectedStartDate,
-                            selectedEndDate: $selectedEndDate,
-                            journeys: allMemoryJourneys,
-                            onRangeCompleted: {
-                                showFilterPopover = false
-                            },
-                            onApply: {
-                                showFilterPopover = false
-                            },
-                            onClear: {
-                                selectedStartDate = nil
-                                selectedEndDate = nil
-                                showFilterPopover = false
-                            }
-                        )
-                        .presentationCompactAdaptation(.popover)
-                    }
-
-                    if selectedStartDate != nil {
-                        Text(filterChipTitle)
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.black.opacity(0.58))
-                            .lineLimit(1)
-                    }
-                }
+                .buttonStyle(.plain)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 14)
-            .padding(.bottom, 12)
-        }
-        .background(FigmaTheme.card.opacity(0.9))
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(FigmaTheme.border)
-                .frame(height: 1)
+        } trailing: {
+            Button {
+                showFilterPopover.toggle()
+            } label: {
+                Image(systemName: selectedStartDate == nil ? "calendar" : "calendar.badge.clock")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.black)
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showFilterPopover, attachmentAnchor: .point(.bottom), arrowEdge: .top) {
+                JourneyMemoryCalendarRangePopover(
+                    monthCursor: $monthCursor,
+                    selectedStartDate: $selectedStartDate,
+                    selectedEndDate: $selectedEndDate,
+                    journeys: allMemoryJourneys,
+                    onRangeCompleted: {
+                        showFilterPopover = false
+                    },
+                    onApply: {
+                        showFilterPopover = false
+                    },
+                    onClear: {
+                        selectedStartDate = nil
+                        selectedEndDate = nil
+                        showFilterPopover = false
+                    }
+                )
+                .presentationCompactAdaptation(.popover)
+            }
         }
     }
     
@@ -779,6 +740,7 @@ struct JourneyMemoryDetailView: View {
     
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var sessionStore: UserSessionStore
+    @EnvironmentObject private var flow: AppFlowCoordinator
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     
@@ -805,6 +767,7 @@ struct JourneyMemoryDetailView: View {
     @State private var showPhotoLibrary: Bool = false
     @State private var activeMemoryIndex: Int? = nil
     @State private var mirrorSelfie: Bool = false
+    @State private var sidebarHideToken = UUID().uuidString
 
     init(
         journey: JourneyRoute,
@@ -929,6 +892,7 @@ struct JourneyMemoryDetailView: View {
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
         .onAppear {
+            flow.pushSidebarButtonHidden(token: sidebarHideToken)
             let uid = sessionStore.currentUserID
             if readOnly {
                 draftMemories = sortedMemories
@@ -958,6 +922,7 @@ struct JourneyMemoryDetailView: View {
             }
         }
         .onDisappear {
+            flow.popSidebarButtonHidden(token: sidebarHideToken)
             // ✅ If user leaves while editing (e.g. switches to another tab), keep editing state.
             if !readOnly {
                 persistDetailDraftIfNeeded()
@@ -1308,10 +1273,7 @@ struct JourneyMemoryDetailView: View {
     }
 
     private func endEditing() {
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
-                                        to: nil,
-                                        from: nil,
-                                        for: nil)
+        endEditingGlobal()
     }
     
     @MainActor

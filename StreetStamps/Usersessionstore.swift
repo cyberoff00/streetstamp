@@ -91,6 +91,13 @@ final class UserSessionStore: ObservableObject {
         }
     }
 
+    var currentRefreshToken: String? {
+        switch session {
+        case .guest: return nil
+        case .account(_, _, _, _, let refreshToken, _): return refreshToken
+        }
+    }
+
     var accountUserID: String? {
         switch session {
         case .guest: return nil
@@ -200,6 +207,27 @@ final class UserSessionStore: ObservableObject {
             UserDefaults.standard.set(previousGuestUserID, forKey: Self.pendingGuestMigrationKey)
             bindGuestToAccount(guestID: guestID, accountUserID: auth.userId)
         }
+    }
+
+    @discardableResult
+    func applyRefreshedAuth(_ auth: BackendAuthResponse, expectedUserID: String) -> Bool {
+        guard case .account(let currentUserID, let provider, let email, _, _, let guestID) = session else {
+            return false
+        }
+        guard currentUserID == expectedUserID, auth.userId == expectedUserID else {
+            return false
+        }
+
+        session = .account(
+            userID: expectedUserID,
+            provider: auth.provider.isEmpty ? provider : auth.provider,
+            email: auth.email ?? email,
+            accessToken: auth.accessToken,
+            refreshToken: auth.refreshToken,
+            guestID: guestID
+        )
+        persistSession()
+        return true
     }
 
     func logoutToGuest() {

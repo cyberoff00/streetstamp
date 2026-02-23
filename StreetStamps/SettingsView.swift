@@ -4,7 +4,6 @@ import CoreLocation
 import UniformTypeIdentifiers
 
 struct SettingsView: View {
-    @Binding var showSidebar: Bool
     @EnvironmentObject private var journeyStore: JourneyStore
     @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var lifelogStore: LifelogStore
@@ -20,7 +19,11 @@ struct SettingsView: View {
     @State private var showGPXImporter = false
     @State private var gpxImportError: String?
     @State private var gpxImportPreview: GPXImportPreview?
+    @State private var selectedGPXFileName: String?
     @State private var selectedImportCityKey: String = ""
+    @State private var gpxImportProgress: Double = 0
+    @State private var gpxImportProgressText: String = L10n.t("gpx_import_progress_idle")
+    @State private var isParsingGPX = false
     @State private var isImportingGPX = false
 
     private var appearance: MapAppearanceStyle {
@@ -56,36 +59,19 @@ struct SettingsView: View {
             } message: {
                 Text(String(format: L10n.t("coming_soon_message"), comingSoonTitle))
             }
-            .alert("Import Failed", isPresented: Binding(
-                get: { gpxImportError != nil },
-                set: { if !$0 { gpxImportError = nil } }
-            )) {
-                Button(L10n.t("ok"), role: .cancel) {}
-            } message: {
-                Text(gpxImportError ?? "")
-            }
-            .fileImporter(
-                isPresented: $showGPXImporter,
-                allowedContentTypes: [UTType(filenameExtension: "gpx") ?? .xml, .xml],
-                allowsMultipleSelection: false
-            ) { result in
-                handleGPXFileSelection(result)
-            }
-            .sheet(item: $gpxImportPreview) { preview in
-                gpxImportSheet(preview)
-            }
         }
     }
 
     private var settingsHeader: some View {
         HStack {
-            SidebarHamburgerButton(showSidebar: $showSidebar, size: 42, iconSize: 20, iconWeight: .semibold, foreground: .black)
+            Color.clear
+                .frame(width: 42, height: 42)
 
             Spacer()
 
             Text(L10n.t("settings_title"))
                 .appHeaderStyle()
-                .foregroundColor(.black)
+                .foregroundColor(FigmaTheme.text)
 
             Spacer()
 
@@ -145,8 +131,8 @@ struct SettingsView: View {
                 HStack(alignment: .top, spacing: 10) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(L10n.t("settings_voice_broadcast_title"))
-                            .font(.system(size: 30 / 2, weight: .black))
-                            .foregroundColor(.black)
+                            .font(.system(size: 30 / 2, weight: .bold))
+                            .foregroundColor(FigmaTheme.text)
 
                         Text(L10n.t("settings_voice_broadcast_desc"))
                             .font(.system(size: 14, weight: .regular))
@@ -181,8 +167,8 @@ struct SettingsView: View {
                 HStack(alignment: .top, spacing: 10) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(L10n.t("settings_stationary_reminder_title"))
-                            .font(.system(size: 15, weight: .black))
-                            .foregroundColor(.black)
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(FigmaTheme.text)
 
                         Text(L10n.t("settings_stationary_reminder_desc"))
                             .font(.system(size: 14, weight: .regular))
@@ -203,8 +189,8 @@ struct SettingsView: View {
                 HStack(alignment: .top, spacing: 10) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(L10n.t("settings_avatar_headlight_title"))
-                            .font(.system(size: 15, weight: .black))
-                            .foregroundColor(.black)
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(FigmaTheme.text)
 
                         Text(L10n.t("settings_avatar_headlight_desc"))
                             .font(.system(size: 14, weight: .regular))
@@ -228,9 +214,12 @@ struct SettingsView: View {
             sectionTitle("GENERAL")
 
             VStack(spacing: 10) {
-                settingsRow(title: "IMPORT GPX", icon: "map", iconColor: FigmaTheme.primary) {
-                    showGPXImporter = true
+                NavigationLink {
+                    gpxImportEntryView
+                } label: {
+                    settingsRowLabel(title: "IMPORT GPX", icon: "map", iconColor: FigmaTheme.primary)
                 }
+                .buttonStyle(.plain)
 
                 settingsRow(title: "NOTIFICATIONS", icon: "bell", iconColor: FigmaTheme.secondary) {
                     showPlaceholder("Notifications")
@@ -299,6 +288,100 @@ struct SettingsView: View {
         }
     }
 
+    private var gpxImportEntryView: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(L10n.t("gpx_import_entry_title"))
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundColor(FigmaTheme.text)
+
+                    Text(L10n.t("gpx_import_entry_desc"))
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundColor(FigmaTheme.subtext)
+                }
+                .padding(.bottom, 4)
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(L10n.t("gpx_import_upload_block_title"))
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(FigmaTheme.text.opacity(0.76))
+
+                    if let selectedGPXFileName {
+                        Text(String(format: L10n.t("gpx_import_selected_file"), selectedGPXFileName))
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundColor(FigmaTheme.subtext)
+                            .lineLimit(2)
+                    }
+
+                    Button {
+                        showGPXImporter = true
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 13, weight: .semibold))
+                            Text(L10n.t("gpx_import_select_file"))
+                                .font(.system(size: 15, weight: .semibold))
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 46)
+                        .background(FigmaTheme.primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(16)
+                .figmaSurfaceCard(radius: 22)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(L10n.t("gpx_import_conversion_progress"))
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(FigmaTheme.text.opacity(0.76))
+
+                    Text(gpxImportProgressText)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundColor(FigmaTheme.subtext)
+                        .lineLimit(2)
+
+                    ProgressView(value: gpxImportProgress, total: 1)
+                        .tint(FigmaTheme.primary)
+
+                    Text("\(Int((gpxImportProgress * 100).rounded()))%")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(FigmaTheme.text.opacity(0.5))
+                }
+                .padding(16)
+                .figmaSurfaceCard(radius: 22)
+                .opacity(isParsingGPX || gpxImportProgress > 0 ? 1 : 0.72)
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 16)
+            .padding(.bottom, 28)
+        }
+        .background(FigmaTheme.mutedBackground.ignoresSafeArea())
+        .navigationTitle(L10n.t("import_gpx_title"))
+        .navigationBarTitleDisplayMode(.inline)
+        .alert("Import Failed", isPresented: Binding(
+            get: { gpxImportError != nil },
+            set: { if !$0 { gpxImportError = nil } }
+        )) {
+            Button(L10n.t("ok"), role: .cancel) {}
+        } message: {
+            Text(gpxImportError ?? "")
+        }
+        .fileImporter(
+            isPresented: $showGPXImporter,
+            allowedContentTypes: [UTType(filenameExtension: "gpx") ?? .xml, .xml],
+            allowsMultipleSelection: false
+        ) { result in
+            handleGPXFileSelection(result)
+        }
+        .sheet(item: $gpxImportPreview) { preview in
+            gpxImportSheet(preview)
+        }
+    }
+
     @ViewBuilder
     private func segmentedContainer<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         HStack(spacing: 6) {
@@ -315,8 +398,8 @@ struct SettingsView: View {
     private func segmentButton(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 14, weight: .black))
-                .foregroundColor(.black)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(FigmaTheme.text)
                 .frame(maxWidth: .infinity)
                 .frame(height: 44)
                 .background(
@@ -351,9 +434,9 @@ struct SettingsView: View {
 
     private func sectionTitle(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 12, weight: .bold))
+            .font(.system(size: 12, weight: .semibold))
             .tracking(0.6)
-            .foregroundColor(.black.opacity(0.42))
+            .foregroundColor(FigmaTheme.text.opacity(0.42))
             .padding(.horizontal, 4)
     }
 
@@ -391,8 +474,8 @@ struct SettingsView: View {
                 .frame(width: 20)
 
             Text(title)
-                .font(.system(size: 14, weight: .black))
-                .foregroundColor(.black)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(FigmaTheme.text)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
 
@@ -400,9 +483,9 @@ struct SettingsView: View {
 
             if let badgeText {
                 Text(badgeText)
-                    .font(.system(size: 10, weight: .black))
+                    .font(.system(size: 10, weight: .semibold))
                     .tracking(0.6)
-                    .foregroundColor(.black)
+                    .foregroundColor(FigmaTheme.text)
                     .padding(.horizontal, 12)
                     .frame(height: 28)
                     .background(
@@ -413,7 +496,7 @@ struct SettingsView: View {
 
             Image(systemName: "chevron.right")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.black.opacity(0.46))
+                .foregroundColor(FigmaTheme.text.opacity(0.46))
         }
         .padding(.horizontal, 20)
         .frame(minHeight: rowHeight)
@@ -428,6 +511,10 @@ struct SettingsView: View {
     private func handleGPXFileSelection(_ result: Result<[URL], Error>) {
         switch result {
         case .failure(let error):
+            let nsError = error as NSError
+            if nsError.domain == NSCocoaErrorDomain, nsError.code == NSUserCancelledError {
+                return
+            }
             gpxImportError = error.localizedDescription
         case .success(let urls):
             guard let url = urls.first else { return }
@@ -439,6 +526,13 @@ struct SettingsView: View {
 
     @MainActor
     private func parseSelectedGPXFile(_ url: URL) async {
+        selectedGPXFileName = url.lastPathComponent
+        gpxImportPreview = nil
+        selectedImportCityKey = ""
+        isParsingGPX = true
+        gpxImportProgress = 0.02
+        gpxImportProgressText = L10n.t("gpx_import_progress_reading")
+
         var didAccess = false
         if url.startAccessingSecurityScopedResource() {
             didAccess = true
@@ -447,14 +541,26 @@ struct SettingsView: View {
             if didAccess {
                 url.stopAccessingSecurityScopedResource()
             }
+            isParsingGPX = false
         }
 
         do {
             let data = try Data(contentsOf: url)
-            let preview = try await GPXImportService.buildPreview(data: data, fileName: url.deletingPathExtension().lastPathComponent)
+            gpxImportProgress = 0.1
+            let preview = try await GPXImportService.buildPreview(
+                data: data,
+                fileName: url.deletingPathExtension().lastPathComponent
+            ) { progress, text in
+                gpxImportProgress = progress
+                gpxImportProgressText = text
+            }
             gpxImportPreview = preview
             selectedImportCityKey = preview.defaultCityKey ?? preview.detectedCityCandidates.first?.cityKey ?? ""
+            gpxImportProgress = 1
+            gpxImportProgressText = L10n.t("gpx_import_progress_done")
         } catch {
+            gpxImportProgress = 0
+            gpxImportProgressText = L10n.t("gpx_import_progress_idle")
             gpxImportError = error.localizedDescription
         }
     }
@@ -464,60 +570,49 @@ struct SettingsView: View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 14) {
                 Text(preview.fileName)
-                    .font(.system(size: 18, weight: .black))
-                    .foregroundColor(.black)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(FigmaTheme.text)
 
                 Text(String(format: L10n.t("gpx_import_points_distance"), preview.points.count, preview.distanceText))
                     .font(.system(size: 13, weight: .regular))
                     .foregroundColor(FigmaTheme.subtext)
 
-                if !preview.detectedCityCandidates.isEmpty {
-                    Text(L10n.t("gpx_import_detected_cities"))
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.black.opacity(0.72))
+                Text(L10n.t("gpx_import_choose_detected_city"))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(FigmaTheme.text.opacity(0.72))
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(preview.detectedCityCandidates) { city in
-                            Text("• \(city.name)")
-                                .font(.system(size: 13, weight: .regular))
-                                .foregroundColor(.black.opacity(0.7))
-                        }
-                    }
-                }
-
-                Text(L10n.t("gpx_import_choose_city_card"))
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(.black.opacity(0.72))
-
-                List {
-                    ForEach(cityOptions(preview: preview), id: \.cityKey) { option in
-                        Button {
-                            selectedImportCityKey = option.cityKey
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(option.name)
-                                        .font(.system(size: 15, weight: .semibold))
-                                        .foregroundColor(.black)
-                                    if option.isExisting {
-                                        Text(L10n.t("gpx_import_existing_city_card"))
-                                            .font(.system(size: 12, weight: .regular))
-                                            .foregroundColor(FigmaTheme.subtext)
-                                    } else {
-                                        Text(L10n.t("gpx_import_create_city_card"))
-                                            .font(.system(size: 12, weight: .regular))
-                                            .foregroundColor(FigmaTheme.subtext)
+                if preview.detectedCityCandidates.isEmpty {
+                    Text(L10n.t("gpx_import_no_detected_city"))
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundColor(FigmaTheme.subtext)
+                        .padding(.vertical, 4)
+                } else {
+                    List {
+                        ForEach(preview.detectedCityCandidates, id: \.cityKey) { option in
+                            Button {
+                                selectedImportCityKey = option.cityKey
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(option.name)
+                                            .font(.system(size: 15, weight: .semibold))
+                                            .foregroundColor(FigmaTheme.text)
+                                        if let iso2 = option.iso2, !iso2.isEmpty {
+                                            Text(iso2.uppercased())
+                                                .font(.system(size: 12, weight: .regular))
+                                                .foregroundColor(FigmaTheme.subtext)
+                                        }
                                     }
+                                    Spacer()
+                                    Image(systemName: selectedImportCityKey == option.cityKey ? "checkmark.circle.fill" : "circle")
+                                        .foregroundColor(selectedImportCityKey == option.cityKey ? FigmaTheme.primary : .black.opacity(0.3))
                                 }
-                                Spacer()
-                                Image(systemName: selectedImportCityKey == option.cityKey ? "checkmark.circle.fill" : "circle")
-                                    .foregroundColor(selectedImportCityKey == option.cityKey ? FigmaTheme.primary : .black.opacity(0.3))
                             }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
+                    .listStyle(.plain)
                 }
-                .listStyle(.plain)
 
                 Button {
                     Task {
@@ -531,7 +626,7 @@ struct SettingsView: View {
                                 .tint(.white)
                         } else {
                             Text(L10n.t("import"))
-                                .font(.system(size: 15, weight: .black))
+                                .font(.system(size: 15, weight: .bold))
                         }
                         Spacer()
                     }
@@ -557,26 +652,11 @@ struct SettingsView: View {
         }
     }
 
-    private func cityOptions(preview: GPXImportPreview) -> [GPXImportCityCandidate] {
-        let existing = cityCache.cachedCities
-            .filter { !($0.isTemporary ?? false) }
-            .map { GPXImportCityCandidate(cityKey: $0.id, name: $0.name, iso2: $0.countryISO2, isExisting: true) }
-
-        var out: [GPXImportCityCandidate] = []
-        var seen = Set<String>()
-        for item in existing + preview.detectedCityCandidates {
-            if seen.contains(item.cityKey) { continue }
-            seen.insert(item.cityKey)
-            out.append(item)
-        }
-        return out
-    }
-
     @MainActor
     private func confirmImportGPX(_ preview: GPXImportPreview) async {
         guard !selectedImportCityKey.isEmpty else { return }
         guard !isImportingGPX else { return }
-        guard let selected = cityOptions(preview: preview).first(where: { $0.cityKey == selectedImportCityKey }) else { return }
+        guard let selected = preview.detectedCityCandidates.first(where: { $0.cityKey == selectedImportCityKey }) else { return }
 
         isImportingGPX = true
         defer { isImportingGPX = false }
@@ -616,7 +696,6 @@ private struct GPXImportCityCandidate: Identifiable {
     let cityKey: String
     let name: String
     let iso2: String?
-    let isExisting: Bool
 }
 
 private struct GPXImportPreview: Identifiable {
@@ -637,18 +716,31 @@ private struct GPXImportPreview: Identifiable {
 }
 
 private enum GPXImportService {
-    static func buildPreview(data: Data, fileName: String) async throws -> GPXImportPreview {
+    static func buildPreview(
+        data: Data,
+        fileName: String,
+        progress: (@MainActor @Sendable (_ progress: Double, _ status: String) -> Void)? = nil
+    ) async throws -> GPXImportPreview {
+        await progress?(0.2, L10n.t("gpx_import_progress_parsing"))
         let parsed = try GPXXMLParser.parse(data: data)
         guard parsed.count >= 2 else {
             throw NSError(domain: "GPXImport", code: 1, userInfo: [NSLocalizedDescriptionKey: "GPX 轨迹点不足（至少需要 2 个点）。"])
         }
 
+        await progress?(0.45, L10n.t("gpx_import_progress_building"))
         let coords = parsed.map(\.coordinate)
         let points = parsed.map { GPXImportPoint(coordinate: $0.coordinate, timestamp: $0.timestamp) }
         let distance = totalDistanceMeters(coords: coords)
         let start = parsed.first?.timestamp ?? Date()
         let end = parsed.last?.timestamp ?? start
-        let cityCandidates = await detectCities(from: parsed)
+        await progress?(0.55, L10n.t("gpx_import_progress_detecting"))
+        let cityCandidates = await detectCities(from: parsed) { done, total in
+            guard total > 0 else { return }
+            let fraction = Double(done) / Double(total)
+            let currentProgress = min(0.95, 0.55 + fraction * 0.4)
+            let text = String(format: L10n.t("gpx_import_progress_detecting_format"), done, total)
+            await progress?(currentProgress, text)
+        }
         let preferredCity = cityCandidates.first
 
         var route = JourneyRoute()
@@ -674,6 +766,8 @@ private enum GPXImportService {
             route.countryISO2 = preferredCity.iso2
         }
 
+        await progress?(1, L10n.t("gpx_import_progress_done"))
+
         return GPXImportPreview(
             fileName: fileName,
             points: points,
@@ -694,26 +788,35 @@ private enum GPXImportService {
         return startValue.addingTimeInterval(span * t)
     }
 
-    private static func detectCities(from points: [GPXRawPoint]) async -> [GPXImportCityCandidate] {
+    private static func detectCities(
+        from points: [GPXRawPoint],
+        progress: (@Sendable (_ done: Int, _ total: Int) async -> Void)? = nil
+    ) async -> [GPXImportCityCandidate] {
         let sample = sampledPoints(points, maxSamples: 5)
         var out: [GPXImportCityCandidate] = []
         var seen = Set<String>()
 
-        for point in sample {
+        if sample.isEmpty {
+            await progress?(0, 0)
+            return out
+        }
+
+        for (idx, point) in sample.enumerated() {
             let location = CLLocation(latitude: point.coordinate.lat, longitude: point.coordinate.lon)
             let result = await canonicalResultWithRetry(for: location, retryCount: 1)
-            guard let result else { continue }
-            guard !seen.contains(result.cityKey) else { continue }
-            seen.insert(result.cityKey)
-            out.append(
-                GPXImportCityCandidate(
-                    cityKey: result.cityKey,
-                    name: result.cityName,
-                    iso2: result.iso2,
-                    isExisting: false
+            if let result, !seen.contains(result.cityKey) {
+                seen.insert(result.cityKey)
+                out.append(
+                    GPXImportCityCandidate(
+                        cityKey: result.cityKey,
+                        name: result.cityName,
+                        iso2: result.iso2
+                    )
                 )
-            )
+            }
+            await progress?(idx + 1, sample.count)
         }
+        await progress?(sample.count, sample.count)
         return out
     }
 

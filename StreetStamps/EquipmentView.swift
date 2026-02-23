@@ -30,8 +30,27 @@ struct EquipmentView: View {
     @State private var showPurchaseConfirmAlert = false
     @State private var pendingPurchase: PendingPurchase?
     @State private var feedbackMessage: String?
+    @State private var isSkinToneExpanded = false
+    @State private var isHairColorExpanded = false
 
     private let itemPrice = 200
+    private let hairColorOptions = [
+        // Classic tones
+        "#2B2A28", // natural black (default)
+        "#3A2A1F", // dark brown
+        "#5C3C2A", // chestnut
+        "#8B5E3C", // light brown
+        "#C8945B", // honey brown
+        "#E3BE8A", // golden blonde
+        // Trend tones
+        "#A8ADB7", // ash gray
+        "#C8D0DB", // silver blonde
+        "#B28DFF", // lavender
+        "#5AA2FF", // denim blue
+        "#F17BAA", // rose pink
+        "#C04747"  // wine red
+    ]
+    private let bodyColorOptions = ["#F6D7BF", "#EDC39F", "#E0AE87", "#CF956F", "#B87B57", "#915B3E"]
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -39,23 +58,37 @@ struct EquipmentView: View {
 
             VStack(spacing: 0) {
                 header
-                VStack(spacing: 20) {
-                    segmentRow
-                    avatarPreviewCard
-                    categoryRow
-                    itemGrid
+                segmentRow
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+                    .padding(.bottom, 10)
+                ScrollView(.vertical, showsIndicators: true) {
+                    VStack(spacing: 18) {
+                        avatarPreviewCard
+                        categoryIconRow
+
+                        if selectedCategoryId == "expression" {
+                            skinToneCard
+                        }
+
+                        if selectedCategoryId == "hair" {
+                            hairColorCard
+                        }
+
+                        itemGrid
+                    }
+                    .frame(maxWidth: 430)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 18)
+                    .padding(.bottom, 24)
                 }
-                .frame(maxWidth: 430)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 24)
-                .padding(.top, 24)
-                .padding(.bottom, 20)
             }
 
             if let feedbackMessage {
                 VStack {
                     Text(feedbackMessage)
-                        .font(.system(size: AppTypography.captionSize, weight: .black))
+                        .font(.system(size: AppTypography.captionSize, weight: .medium))
                         .foregroundColor(.white)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
@@ -108,9 +141,28 @@ struct EquipmentView: View {
         }
     }
 
+    private var selectedHairColorHex: String {
+        normalizedHex(loadout.hairColorHex, fallback: RobotLoadout.defaultHairColorHex)
+    }
+
+    private var selectedBodyColorHex: String {
+        normalizedHex(loadout.bodyColorHex, fallback: RobotLoadout.defaultBodyColorHex)
+    }
+
+    private func normalizedHex(_ raw: String, fallback: String) -> String {
+        var normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if !normalized.hasPrefix("#") {
+            normalized = "#\(normalized)"
+        }
+        if normalized.count == 7 {
+            return normalized
+        }
+        return fallback.uppercased()
+    }
+
     private var header: some View {
         ZStack {
-            Text(L10n.t("equipment_title").uppercased())
+            Text(L10n.t("equipment_title"))
                 .appHeaderStyle()
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
@@ -122,8 +174,8 @@ struct EquipmentView: View {
                 } label: {
                     Image(systemName: "arrow.left")
                         .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(.black)
-                        .frame(width: 28, height: 28)
+                        .foregroundColor(FigmaTheme.text)
+                        .frame(width: 42, height: 42)
                 }
                 .buttonStyle(.plain)
 
@@ -131,48 +183,56 @@ struct EquipmentView: View {
 
                 HStack(spacing: 6) {
                     Image(systemName: "bitcoinsign.circle.fill")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: AppTypography.captionSize, weight: .semibold))
                         .foregroundColor(FigmaTheme.primary)
 
                     Text("\(economy.coins)")
-                        .font(.system(size: AppTypography.captionSize, weight: .black))
-                        .foregroundColor(.black)
+                        .font(.system(size: AppTypography.captionSize, weight: .semibold))
+                        .foregroundColor(FigmaTheme.text)
 
                     Button {
                         showCoinPurchaseDialog = true
                     } label: {
                         Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 16, weight: .bold))
+                            .font(.system(size: AppTypography.bodySize, weight: .bold))
                             .foregroundColor(FigmaTheme.primary)
                     }
                     .buttonStyle(.plain)
                 }
-                .padding(.horizontal, 10)
-                .frame(height: 30)
+                .padding(.horizontal, 12)
+                .frame(height: 32)
                 .background(Color.white)
                 .clipShape(Capsule())
                 .overlay(
                     Capsule()
-                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                        .stroke(FigmaTheme.border, lineWidth: 1)
                 )
             }
         }
-        .padding(.horizontal, 24)
-        .padding(.top, 14)
+        .padding(.horizontal, 20)
+        .padding(.top, 10)
         .padding(.bottom, 12)
-        .background(Color.white.opacity(0.9))
+        .background(FigmaTheme.card.opacity(0.92))
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(Color.black.opacity(0.35))
+                .fill(FigmaTheme.border)
                 .frame(height: 1)
         }
+        .zIndex(2)
     }
 
     private var segmentRow: some View {
-        HStack(spacing: 16) {
-            segmentButton(title: L10n.t("equipment_title").uppercased(), segment: .myGear)
-            segmentButton(title: "SHOP GEAR", segment: .shopGear)
+        HStack(spacing: 6) {
+            segmentButton(title: L10n.t("equipment_title"), segment: .myGear)
+            segmentButton(title: L10n.t("equipment_shop_gear"), segment: .shopGear)
         }
+        .padding(4)
+        .background(Color.white.opacity(0.88))
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(FigmaTheme.border, lineWidth: 1)
+        )
     }
 
     private func segmentButton(title: String, segment: EquipmentSegment) -> some View {
@@ -182,15 +242,17 @@ struct EquipmentView: View {
             activeSegment = segment
         } label: {
             Text(title)
-                .font(.system(size: AppTypography.bodySize, weight: .black))
-                .tracking(-0.2)
-                .foregroundColor(isActive ? .white : Color(red: 139.0 / 255.0, green: 139.0 / 255.0, blue: 139.0 / 255.0))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(isActive ? FigmaTheme.text : FigmaTheme.subtext)
                 .frame(maxWidth: .infinity)
-                .frame(height: 52)
+                .frame(height: 34)
                 .background(
-                    RoundedRectangle(cornerRadius: 28, style: .continuous)
-                        .fill(isActive ? Color.black : Color.clear)
-                        .shadow(color: isActive ? Color.black.opacity(0.15) : .clear, radius: 12, x: 0, y: 6)
+                    Capsule()
+                        .fill(isActive ? FigmaTheme.primary.opacity(0.18) : Color.clear)
+                )
+                .overlay(
+                    Capsule()
+                        .stroke(isActive ? FigmaTheme.primary.opacity(0.5) : Color.clear, lineWidth: 1)
                 )
         }
         .buttonStyle(.plain)
@@ -206,35 +268,178 @@ struct EquipmentView: View {
             .shadow(color: Color.black.opacity(0.06), radius: 24, x: 0, y: 6)
     }
 
-    private var categoryRow: some View {
+    private var skinToneCard: some View {
+        colorPickerCard(
+            title: "Skin Tone",
+            symbol: "paintpalette",
+            selectedHex: selectedBodyColorHex,
+            isExpanded: isSkinToneExpanded,
+            colors: bodyColorOptions
+        ) { hex in
+            loadout.bodyColorHex = hex.uppercased()
+        } onToggle: {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isSkinToneExpanded.toggle()
+            }
+        }
+    }
+
+    private var hairColorCard: some View {
+        colorPickerCard(
+            title: "Hair Color",
+            symbol: "paintpalette",
+            selectedHex: selectedHairColorHex,
+            isExpanded: isHairColorExpanded,
+            colors: hairColorOptions
+        ) { hex in
+            loadout.hairColorHex = hex.uppercased()
+        } onToggle: {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isHairColorExpanded.toggle()
+            }
+        }
+    }
+
+    private var orderedCategories: [GearCategory] {
+        let map = Dictionary(uniqueKeysWithValues: store.catalog.categories.map { ($0.id, $0) })
+        let preferred = ["expression", "hair", "outfit", "accessory"]
+        let preferredItems = preferred.compactMap { map[$0] }
+        let rest = store.catalog.categories.filter { !preferred.contains($0.id) }
+        return preferredItems + rest
+    }
+
+    private var categoryIconRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                ForEach(store.catalog.categories) { cat in
+            HStack(spacing: 10) {
+                ForEach(orderedCategories) { cat in
                     let selected = selectedCategoryId == cat.id
                     Button {
                         selectedCategoryId = cat.id
                     } label: {
-                        Text(L10n.t(cat.titleKey).uppercased())
-                            .font(.system(size: AppTypography.captionSize, weight: .black))
-                            .tracking(-0.2)
-                            .foregroundColor(selected ? .white : Color(red: 139.0 / 255.0, green: 139.0 / 255.0, blue: 139.0 / 255.0))
-                            .padding(.horizontal, 16)
-                            .frame(height: 36)
+                        Image(systemName: categorySymbol(for: cat.id))
+                            .font(.system(size: 19, weight: .semibold))
+                            .foregroundColor(selected ? FigmaTheme.primary : FigmaTheme.subtext)
+                            .frame(width: 44, height: 36)
                             .background(
-                                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                    .fill(selected ? FigmaTheme.primary : .white)
-                                    .shadow(
-                                        color: selected ? FigmaTheme.primary.opacity(0.25) : Color.black.opacity(0.04),
-                                        radius: selected ? 10 : 8,
-                                        x: 0,
-                                        y: 3
-                                    )
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(selected ? FigmaTheme.primary.opacity(0.16) : Color.clear)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(selected ? FigmaTheme.primary.opacity(0.5) : Color.clear, lineWidth: 1)
                             )
                     }
                     .buttonStyle(.plain)
                 }
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.95))
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(FigmaTheme.border, lineWidth: 1)
+        )
+    }
+
+    private func colorPickerCard(
+        title: String,
+        symbol: String,
+        selectedHex: String,
+        isExpanded: Bool,
+        colors: [String],
+        onSelect: @escaping (String) -> Void,
+        onToggle: @escaping () -> Void
+    ) -> some View {
+        VStack(spacing: 12) {
+            Button(action: onToggle) {
+                HStack(spacing: 10) {
+                    Image(systemName: symbol)
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(FigmaTheme.primary)
+
+                    Text(title)
+                        .font(.system(size: 16, weight: .semibold))
+                        .minimumScaleFactor(0.6)
+                        .lineLimit(1)
+                        .foregroundColor(FigmaTheme.text)
+
+                    Spacer(minLength: 12)
+
+                    Circle()
+                        .fill(Color(hexRGB: selectedHex, fallback: .white))
+                        .frame(width: 32, height: 32)
+                        .overlay(
+                            Circle()
+                                .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                        )
+                        .shadow(color: Color.black.opacity(0.08), radius: 3, x: 0, y: 1)
+
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(FigmaTheme.subtext)
+                }
+                .frame(minHeight: 44)
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 34), spacing: 10)],
+                    alignment: .leading,
+                    spacing: 10
+                ) {
+                    ForEach(colors, id: \.self) { hex in
+                        colorSwatch(
+                            hex: hex,
+                            isSelected: selectedHex == hex.uppercased()
+                        ) {
+                            onSelect(hex)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color.white.opacity(0.95))
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(FigmaTheme.border, lineWidth: 1)
+        )
+    }
+
+    private func categorySymbol(for categoryId: String) -> String {
+        switch categoryId {
+        case "expression":
+            return "face.smiling"
+        case "hair":
+            return "person.crop.circle"
+        case "outfit":
+            return "tshirt"
+        case "accessory":
+            return "eyeglasses"
+        default:
+            return "circle.grid.2x2"
+        }
+    }
+
+    private func colorSwatch(hex: String, isSelected: Bool, onTap: @escaping () -> Void) -> some View {
+        Button(action: onTap) {
+            Circle()
+                .fill(Color(hexRGB: hex, fallback: .white))
+                .frame(width: 28, height: 28)
+                .overlay(
+                    Circle()
+                        .stroke(isSelected ? Color.black : Color.black.opacity(0.12), lineWidth: isSelected ? 2.2 : 1)
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -253,28 +458,24 @@ struct EquipmentView: View {
                 return true
             }
 
-            ScrollView(showsIndicators: true) {
-                LazyVGrid(columns: columns, spacing: 10) {
-                    ForEach(visibleItems) { item in
-                        let ownership = ownershipState(category: category, item: item)
+            LazyVGrid(columns: columns, spacing: 10) {
+                ForEach(visibleItems) { item in
+                    let ownership = ownershipState(category: category, item: item)
 
-                        Button {
-                            handleTap(category: category, item: item, ownership: ownership)
-                        } label: {
-                            GearCard(
-                                title: L10n.t(item.nameKey).uppercased(),
-                                imageName: store.imageName(item.images, face: .front),
-                                ownership: ownership,
-                                mode: activeSegment,
-                                price: itemPrice
-                            )
-                        }
-                        .buttonStyle(.plain)
+                    Button {
+                        handleTap(category: category, item: item, ownership: ownership)
+                    } label: {
+                        GearCard(
+                            imageName: store.imageName(item.images, face: .front),
+                            isEquipped: ownership == .equipped,
+                            isLocked: ownership == .locked,
+                            price: itemPrice
+                        )
                     }
+                    .buttonStyle(.plain)
                 }
-                .padding(.bottom, 8)
             }
-            .frame(height: 290)
+            .padding(.bottom, 8)
         } else {
             EmptyView()
         }
@@ -320,7 +521,7 @@ struct EquipmentView: View {
                 pendingPurchase = PendingPurchase(
                     categoryId: category.id,
                     itemId: item.id,
-                    itemName: L10n.t(item.nameKey).uppercased()
+                    itemName: L10n.t(item.nameKey)
                 )
                 showPurchaseConfirmAlert = true
             }
@@ -417,108 +618,74 @@ private enum GearOwnership {
 }
 
 private struct GearCard: View {
-    let title: String
     let imageName: String?
-    let ownership: GearOwnership
-    let mode: EquipmentSegment
+    let isEquipped: Bool
+    let isLocked: Bool
     let price: Int
 
     var body: some View {
         VStack(spacing: 0) {
-            ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: 32, style: .continuous)
-                    .fill(Color(red: 216.0 / 255.0, green: 240.0 / 255.0, blue: 227.0 / 255.0))
+            ZStack {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color(red: 231.0 / 255.0, green: 245.0 / 255.0, blue: 236.0 / 255.0))
 
                 if let imageName {
                     Image(imageName)
                         .resizable()
                         .interpolation(.none)
                         .scaledToFit()
-                        .padding(16)
-                        .opacity(ownership == .locked ? 0.55 : 1)
+                        .frame(width: 82, height: 82, alignment: .center)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                        .opacity(isLocked ? 0.45 : 1)
                 } else {
                     Image(systemName: "minus")
                         .font(.system(size: 16, weight: .bold))
                         .foregroundColor(FigmaTheme.subtext)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-
-                if ownership == .locked {
-                    pill(text: "LOCKED", fill: Color.black.opacity(0.7), textColor: .white)
-                        .padding(.top, 10)
-                        .padding(.leading, 10)
+            }
+            .frame(height: 98)
+            .overlay(alignment: .topLeading) {
+                if isLocked {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 18, height: 18)
+                        .background(Color.black.opacity(0.8))
+                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                        .padding(8)
                 }
             }
-            .frame(height: 104)
-
-            VStack(alignment: .leading, spacing: 7) {
-                Text(title)
-                    .font(.system(size: 10, weight: .black))
-                    .tracking(-0.2)
-                    .foregroundColor(.black)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-
-                actionPill
+            .overlay(alignment: .topTrailing) {
+                if isEquipped {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 18, height: 18)
+                        .background(FigmaTheme.primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                        .padding(8)
+                }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 10)
-            .background(.white)
+
+            HStack(spacing: 4) {
+                Image(systemName: "bitcoinsign.circle.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(FigmaTheme.primary)
+
+                Text("\(price)")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(FigmaTheme.text)
+            }
+            .frame(maxWidth: .infinity, minHeight: 30)
+            .background(Color.white)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .shadow(color: Color.black.opacity(0.06), radius: 12, x: 0, y: 3)
-    }
-
-    @ViewBuilder
-    private var actionPill: some View {
-        switch mode {
-        case .myGear:
-            switch ownership {
-            case .equipped:
-                pill(
-                    text: "EQUIPPED",
-                    fill: Color(red: 232.0 / 255.0, green: 232.0 / 255.0, blue: 232.0 / 255.0),
-                    textColor: FigmaTheme.subtext
-                )
-            case .owned:
-                pill(
-                    text: "OWNED",
-                    fill: Color(red: 243.0 / 255.0, green: 243.0 / 255.0, blue: 243.0 / 255.0),
-                    textColor: FigmaTheme.subtext
-                )
-            case .locked:
-                pill(
-                    text: "UNLOCK IN SHOP",
-                    fill: Color.black.opacity(0.82),
-                    textColor: .white
-                )
-            }
-
-        case .shopGear:
-            switch ownership {
-            case .equipped:
-                pill(text: "EQUIPPED", fill: FigmaTheme.primary, textColor: .white)
-            case .owned:
-                pill(
-                    text: "EQUIP",
-                    fill: Color(red: 232.0 / 255.0, green: 232.0 / 255.0, blue: 232.0 / 255.0),
-                    textColor: FigmaTheme.subtext
-                )
-            case .locked:
-                pill(text: "BUY \(price)", fill: Color.black, textColor: .white)
-            }
-        }
-    }
-
-    private func pill(text: String, fill: Color, textColor: Color) -> some View {
-        Text(text)
-            .font(.system(size: 7.5, weight: .black))
-            .tracking(0.4)
-            .foregroundColor(textColor)
-            .padding(.horizontal, 8)
-            .frame(height: 26)
-            .background(Capsule().fill(fill))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 2)
     }
 }
 

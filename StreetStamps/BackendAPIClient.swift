@@ -88,6 +88,35 @@ struct ProfileStompResponse: Codable {
     var message: String?
 }
 
+struct BackendFriendRequestUserLite: Codable {
+    var id: String
+    var displayName: String
+    var handle: String?
+    var loadout: RobotLoadout?
+}
+
+struct BackendFriendRequestDTO: Codable, Identifiable {
+    var id: String
+    var fromUserID: String
+    var toUserID: String
+    var fromUser: BackendFriendRequestUserLite
+    var toUser: BackendFriendRequestUserLite
+    var note: String?
+    var createdAt: Date
+}
+
+struct BackendFriendRequestsResponse: Codable {
+    var incoming: [BackendFriendRequestDTO]
+    var outgoing: [BackendFriendRequestDTO]
+}
+
+struct BackendFriendRequestActionResponse: Codable {
+    var ok: Bool?
+    var message: String?
+    var request: BackendFriendRequestDTO?
+    var friend: BackendFriendDTO?
+}
+
 private struct JourneyLikesBatchRequestV2: Codable {
     var journeyIDs: [String]
     var ownerUserID: String?
@@ -98,17 +127,56 @@ private struct BackendNotificationReadRequest: Codable {
     var all: Bool
 }
 
+private struct BackendRefreshRequest: Codable {
+    var refreshToken: String
+}
+
+private actor BackendTokenRefreshGate {
+    private var inFlight: Task<String?, Never>?
+
+    func refresh(client: BackendAPIClient, failedAccessToken: String) async -> String? {
+        if let task = inFlight {
+            return await task.value
+        }
+        let task = Task {
+            await client.performTokenRefresh(failedAccessToken: failedAccessToken)
+        }
+        inFlight = task
+        let token = await task.value
+        inFlight = nil
+        return token
+    }
+}
+
 struct BackendProfileDTO: Codable {
     var id: String
     var handle: String?
+    var exclusiveID: String?
     var inviteCode: String?
     var profileVisibility: ProfileVisibility?
     var displayName: String
+    var email: String?
     var bio: String
     var loadout: RobotLoadout?
+    var handleChangeUsed: Bool?
+    var canUpdateHandleOneTime: Bool?
     var stats: ProfileStatsSnapshot?
     var journeys: [FriendSharedJourney]
     var unlockedCityCards: [FriendCityCard]
+
+    var resolvedExclusiveID: String? {
+        if let exclusiveID, !exclusiveID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return exclusiveID
+        }
+        return handle
+    }
+
+    var canChangeExclusiveID: Bool {
+        if let canUpdateHandleOneTime {
+            return canUpdateHandleOneTime
+        }
+        return !(handleChangeUsed ?? false)
+    }
 }
 
 typealias BackendFriendDTO = BackendProfileDTO
@@ -131,8 +199,18 @@ enum BackendAPIError: LocalizedError {
 
 final class BackendAPIClient {
     static let shared = BackendAPIClient()
+    private let refreshPath = "/v1/auth/refresh"
+    private let tokenRefreshGate = BackendTokenRefreshGate()
+
+    @MainActor
+    private weak var sessionStore: UserSessionStore?
 
     private init() {}
+
+    @MainActor
+    func bindSessionStore(_ sessionStore: UserSessionStore) {
+        self.sessionStore = sessionStore
+    }
 
     private func makeURL(path: String) throws -> URL {
         guard let base = BackendConfig.baseURL else { throw BackendAPIError.notConfigured }
@@ -224,6 +302,29 @@ final class BackendAPIClient {
         guard let http = resp as? HTTPURLResponse else {
             throw BackendAPIError.invalidResponse
         }
+
+        if http.statusCode == 401,
+           let token,
+           !token.isEmpty,
+           !shouldSkipAutoRefresh(path: path),
+           let refreshedToken = await tokenRefreshGate.refresh(client: self, failedAccessToken: token) {
+            var retriedReq = req
+            retriedReq.setValue("Bearer \(refreshedToken)", forHTTPHeaderField: "Authorization")
+            let (retryData, retryResp) = try await URLSession.shared.data(for: retriedReq)
+            guard let retryHTTP = retryResp as? HTTPURLResponse else {
+                throw BackendAPIError.invalidResponse
+            }
+            return try validateResponse(data: retryData, http: retryHTTP)
+        }
+
+        return try validateResponse(data: data, http: http)
+    }
+
+    private func shouldSkipAutoRefresh(path: String) -> Bool {
+        path.hasPrefix("/v1/auth/")
+    }
+
+    private func validateResponse(data: Data, http: HTTPURLResponse) throws -> (Data, HTTPURLResponse) {
         if http.statusCode == 401 { throw BackendAPIError.unauthorized }
         guard (200..<300).contains(http.statusCode) else {
             if let m = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -236,6 +337,40 @@ final class BackendAPIClient {
             throw BackendAPIError.server(msg)
         }
         return (data, http)
+    }
+
+    private func currentSessionSnapshot() async -> (userID: String, accessToken: String, refreshToken: String)? {
+        await MainActor.run {
+            guard let store = sessionStore,
+                  let userID = store.accountUserID, !userID.isEmpty,
+                  let accessToken = store.currentAccessToken, !accessToken.isEmpty,
+                  let refreshToken = store.currentRefreshToken, !refreshToken.isEmpty else {
+                return nil
+            }
+            return (userID, accessToken, refreshToken)
+        }
+    }
+
+    fileprivate func performTokenRefresh(failedAccessToken: String) async -> String? {
+        guard let snapshot = await currentSessionSnapshot() else { return nil }
+
+        if snapshot.accessToken != failedAccessToken {
+            return snapshot.accessToken
+        }
+
+        do {
+            let body = try encoder.encode(BackendRefreshRequest(refreshToken: snapshot.refreshToken))
+            let (data, _) = try await request(path: refreshPath, method: "POST", jsonBody: body)
+            let refreshed = try decoder.decode(BackendAuthResponse.self, from: data)
+            guard refreshed.userId == snapshot.userID else { return nil }
+
+            let applied = await MainActor.run {
+                sessionStore?.applyRefreshedAuth(refreshed, expectedUserID: snapshot.userID) ?? false
+            }
+            return applied ? refreshed.accessToken : nil
+        } catch {
+            return nil
+        }
     }
 
     func emailRegister(email: String, password: String) async throws -> BackendAuthResponse {
@@ -261,6 +396,49 @@ final class BackendAPIClient {
         return try decoder.decode([BackendFriendDTO].self, from: data)
     }
 
+    func fetchFriendRequests(token: String) async throws -> BackendFriendRequestsResponse {
+        let (data, _) = try await request(path: "/v1/friends/requests", method: "GET", token: token)
+        return try decoder.decode(BackendFriendRequestsResponse.self, from: data)
+    }
+
+    func sendFriendRequest(
+        token: String,
+        displayName: String?,
+        inviteCode: String?,
+        handle: String? = nil,
+        note: String? = nil
+    ) async throws -> BackendFriendRequestActionResponse {
+        var bodyDict: [String: String] = [:]
+        if let displayName, !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            bodyDict["displayName"] = displayName
+        }
+        if let inviteCode, !inviteCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            bodyDict["inviteCode"] = inviteCode
+        }
+        if let handle, !handle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            bodyDict["handle"] = handle
+            bodyDict["exclusiveID"] = handle
+        }
+        if let note, !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            bodyDict["note"] = note
+        }
+        let body = try encoder.encode(bodyDict)
+        let (data, _) = try await request(path: "/v1/friends/requests", method: "POST", token: token, jsonBody: body)
+        return try decoder.decode(BackendFriendRequestActionResponse.self, from: data)
+    }
+
+    func acceptFriendRequest(token: String, requestID: String) async throws -> BackendFriendRequestActionResponse {
+        let rid = encodePathSegment(requestID)
+        let (data, _) = try await request(path: "/v1/friends/requests/\(rid)/accept", method: "POST", token: token)
+        return try decoder.decode(BackendFriendRequestActionResponse.self, from: data)
+    }
+
+    func rejectFriendRequest(token: String, requestID: String) async throws -> BackendFriendRequestActionResponse {
+        let rid = encodePathSegment(requestID)
+        let (data, _) = try await request(path: "/v1/friends/requests/\(rid)/reject", method: "POST", token: token)
+        return try decoder.decode(BackendFriendRequestActionResponse.self, from: data)
+    }
+
     func addFriend(token: String, displayName: String?, inviteCode: String?, handle: String? = nil) async throws -> BackendFriendDTO {
         var bodyDict: [String: String] = [:]
         if let displayName, !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -271,6 +449,7 @@ final class BackendAPIClient {
         }
         if let handle, !handle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             bodyDict["handle"] = handle
+            bodyDict["exclusiveID"] = handle
         }
         let body = try encoder.encode(bodyDict)
         let (data, _) = try await request(path: "/v1/friends", method: "POST", token: token, jsonBody: body)
@@ -302,10 +481,14 @@ final class BackendAPIClient {
         return try decoder.decode(BackendProfileDTO.self, from: data)
     }
 
-    func updateHandle(token: String, handle: String) async throws -> BackendProfileDTO {
-        let body = try encoder.encode(["handle": handle])
-        let (data, _) = try await request(path: "/v1/profile/handle", method: "PATCH", token: token, jsonBody: body)
+    func updateExclusiveID(token: String, exclusiveID: String) async throws -> BackendProfileDTO {
+        let body = try encoder.encode(["exclusiveID": exclusiveID, "handle": exclusiveID])
+        let (data, _) = try await request(path: "/v1/profile/exclusive-id", method: "PATCH", token: token, jsonBody: body)
         return try decoder.decode(BackendProfileDTO.self, from: data)
+    }
+
+    func updateHandle(token: String, handle: String) async throws -> BackendProfileDTO {
+        try await updateExclusiveID(token: token, exclusiveID: handle)
     }
 
     func updateProfileVisibility(token: String, visibility: ProfileVisibility) async throws -> BackendProfileDTO {

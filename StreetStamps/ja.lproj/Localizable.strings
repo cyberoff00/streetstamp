@@ -211,6 +211,10 @@
 
 // Equipment
 "equipment_title" = "装備";
+"equipment_shop_gear" = "ショップ装備";
+"equipment_status_equipped" = "装備中";
+"equipment_status_owned" = "所持済み";
+"equipment_buy_short" = "購入 %d";
 "equipment_hair" = "髪";
 "equipment_outfit" = "服";
 "equipment_accessory" = "アクセ";
@@ -386,3 +390,18 @@
 "confirm_purchase" = "Confirm purchase";
 "need_coins_to_unlock" = "You need %d coins to unlock this item.";
 "not_enough_coins" = "Not enough coins";
+"gpx_import_entry_title" = "Import Your GPX Track";
+"gpx_import_entry_desc" = "Upload a GPX file first, then choose one of the detected city candidates before importing.";
+"gpx_import_upload_block_title" = "Upload File";
+"gpx_import_select_file" = "Select GPX File";
+"gpx_import_selected_file" = "Selected: %@";
+"gpx_import_conversion_progress" = "Track Conversion Progress";
+"gpx_import_progress_idle" = "Waiting for file upload";
+"gpx_import_progress_reading" = "Reading GPX file";
+"gpx_import_progress_parsing" = "Parsing track points";
+"gpx_import_progress_building" = "Building route preview";
+"gpx_import_progress_detecting" = "Detecting city candidates";
+"gpx_import_progress_detecting_format" = "Detecting cities (%d/%d)";
+"gpx_import_progress_done" = "Conversion finished, ready to choose city";
+"gpx_import_choose_detected_city" = "Choose one detected city:";
+"gpx_import_no_detected_city" = "No city was detected from this GPX track.";

@@ -825,9 +825,9 @@ struct MapView: View {
     private var topTrackingHeader: some View {
         ZStack {
             Text(journeyRoute.displayCityName.uppercased())
-                .font(.system(size: 20, weight: .black))
+                .font(.system(size: 20, weight: .bold))
                 .tracking(-0.9)
-                .foregroundColor(.black)
+                .foregroundColor(FigmaTheme.text)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
                 .padding(.horizontal, 64)
@@ -852,7 +852,7 @@ struct MapView: View {
                 } label: {
                     Image(systemName: "arrow.left")
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.black)
+                        .foregroundColor(FigmaTheme.text)
                         .frame(width: 32, alignment: .leading)
                 }
                 .buttonStyle(.plain)
@@ -871,9 +871,9 @@ struct MapView: View {
 
     private var distanceTimeChip: some View {
         Text("\(distanceText) · \(elapsedText)")
-            .font(.system(size: 14, weight: .black))
+            .font(.system(size: 14, weight: .semibold))
             .tracking(-0.5)
-            .foregroundColor(.black)
+            .foregroundColor(FigmaTheme.text)
             .padding(.horizontal, 20)
             .frame(height: 36)
             .background(Color.white.opacity(0.78))
@@ -884,12 +884,12 @@ struct MapView: View {
     private var gpsStatusChip: some View {
         HStack(spacing: 8) {
             Image(systemName: "bolt.fill")
-                .font(.system(size: 14, weight: .black))
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(gpsStatusColor)
             Text(gpsStatusLabel)
-                .font(.system(size: 12, weight: .black))
+                .font(.system(size: 12, weight: .semibold))
                 .tracking(-0.3)
-                .foregroundColor(.black.opacity(0.72))
+                .foregroundColor(FigmaTheme.text.opacity(0.72))
         }
         .padding(.leading, 14)
         .padding(.trailing, 16)
@@ -910,9 +910,9 @@ struct MapView: View {
                 else { tracking.pauseJourney() }
             } label: {
                 Text(tracking.isPaused ? "RESUME" : "PAUSE")
-                    .font(.system(size: 34 / 2, weight: .black))
+                    .font(.system(size: 34 / 2, weight: .bold))
                     .tracking(-0.85)
-                    .foregroundColor(.black)
+                    .foregroundColor(FigmaTheme.text)
                     .frame(maxWidth: .infinity)
                     .frame(height: 60)
                     .background(Color.white.opacity(0.95))
@@ -924,9 +924,9 @@ struct MapView: View {
             Button { showFinishConfirm = true } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 18, weight: .black))
+                        .font(.system(size: 18, weight: .bold))
                     Text(L10n.t("finish_upper"))
-                        .font(.system(size: 34 / 2, weight: .black))
+                        .font(.system(size: 34 / 2, weight: .bold))
                         .tracking(-0.85)
                 }
                 .foregroundColor(.white)
@@ -983,7 +983,7 @@ struct MapView: View {
                     .shadow(color: Color.black.opacity(0.20), radius: 12, x: 0, y: 4)
 
                 Text(label)
-                    .font(.system(size: 9, weight: .black))
+                    .font(.system(size: 9, weight: .semibold))
                     .tracking(0.62)
                     .foregroundColor(Color.white.opacity(0.6))
             }
@@ -1395,7 +1395,7 @@ struct MemoryClusterView: View {
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(m.title.isEmpty ? "Memory" : m.title)
                                             .font(.system(size: 14, weight: .semibold))
-                                            .foregroundColor(.black)
+                                            .foregroundColor(FigmaTheme.text)
 
                                         Text(m.timestamp.formatted(date: .abbreviated, time: .shortened))
                                             .font(.system(size: 11))
@@ -1467,13 +1467,13 @@ struct MemoryDetailPage: View {
                         if !memory.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             Text(memory.title)
                                 .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.black)
+                                .foregroundColor(FigmaTheme.text)
                         }
 
                         if !memory.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             Text(memory.notes)
                                 .font(.system(size: 14))
-                                .foregroundColor(.black.opacity(0.85))
+                                .foregroundColor(FigmaTheme.text.opacity(0.85))
                         }
 
                         if !memory.imagePaths.isEmpty {
@@ -1591,8 +1591,7 @@ struct MemoryEditorSheet: View {
     private let maxPhotos = 3
 
     private func hideKeyboard() {
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
-                                        to: nil, from: nil, for: nil)
+        endEditingGlobal()
     }
 
     init(
@@ -1769,14 +1768,14 @@ private var hasUnsavedChanges: Bool {
         HStack(spacing: 10) {
             Text(existing == nil ? L10n.key("add_memory") : L10n.key("edit_memory"))
                 .appHeaderStyle()
-                .foregroundColor(.black)
+                .foregroundColor(FigmaTheme.text)
 
             Spacer()
 
             Button { showExpanded = true } label: {
                 Image(systemName: "arrow.up.left.and.arrow.down.right")
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(.black.opacity(0.85))
+                    .foregroundColor(FigmaTheme.text.opacity(0.85))
                     .frame(width: 32, height: 32)
                     .background(Color.black.opacity(0.04))
                     .clipShape(Circle())
@@ -1786,7 +1785,7 @@ private var hasUnsavedChanges: Bool {
             Button { dismissSmart() } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(.black.opacity(0.85))
+                    .foregroundColor(FigmaTheme.text.opacity(0.85))
                     .frame(width: 32, height: 32)
                     .background(Color.black.opacity(0.04))
                     .clipShape(Circle())
@@ -1835,7 +1834,7 @@ private var hasUnsavedChanges: Bool {
                                     } label: {
                                         Image(systemName: "xmark.circle.fill")
                                             .font(.system(size: 16))
-                                            .foregroundColor(.black.opacity(0.6))
+                                            .foregroundColor(FigmaTheme.text.opacity(0.6))
                                             .background(Color.white.opacity(0.75).clipShape(Circle()))
                                     }
                                     .buttonStyle(.plain)
@@ -1870,7 +1869,7 @@ private var hasUnsavedChanges: Bool {
                 Button { showCamera = true } label: {
                     Image(systemName: "camera")
                         .font(.system(size: 20, weight: .medium))
-                        .foregroundColor(Color.black.opacity(0.82))
+                        .foregroundColor(FigmaTheme.text.opacity(0.82))
                         .frame(width: 32, height: 32)
                 }
                 .buttonStyle(.plain)
@@ -1880,7 +1879,7 @@ private var hasUnsavedChanges: Bool {
                 Button { showPhotoLibrary = true } label: {
                     Image(systemName: "photo")
                         .font(.system(size: 20, weight: .medium))
-                        .foregroundColor(Color.black.opacity(0.82))
+                        .foregroundColor(FigmaTheme.text.opacity(0.82))
                         .frame(width: 32, height: 32)
                 }
                 .buttonStyle(.plain)
@@ -1891,7 +1890,7 @@ private var hasUnsavedChanges: Bool {
 
             Button { saveAndDismiss() } label: {
                 Text(L10n.t("save").uppercased())
-                    .font(.system(size: 14, weight: .black))
+                    .font(.system(size: 14, weight: .semibold))
                     .tracking(-0.3)
                     .foregroundColor(.white)
                     .padding(.horizontal, 30)
@@ -2105,7 +2104,7 @@ struct MemoryEditorPage: View {
                                     } label: {
                                         Image(systemName: "xmark.circle.fill")
                                             .font(.system(size: 16))
-                                            .foregroundColor(.black.opacity(0.6))
+                                            .foregroundColor(FigmaTheme.text.opacity(0.6))
                                             .background(Color.white.opacity(0.75).clipShape(Circle()))
                                     }
                                     .buttonStyle(.plain)
@@ -2140,7 +2139,7 @@ struct MemoryEditorPage: View {
                 Button { showCamera = true } label: {
                     Image(systemName: "camera")
                         .font(.system(size: 20, weight: .medium))
-                        .foregroundColor(Color.black.opacity(0.82))
+                        .foregroundColor(FigmaTheme.text.opacity(0.82))
                         .frame(width: 32, height: 32)
                 }
                 .buttonStyle(.plain)
@@ -2150,7 +2149,7 @@ struct MemoryEditorPage: View {
                 Button { showPhotoLibrary = true } label: {
                     Image(systemName: "photo")
                         .font(.system(size: 20, weight: .medium))
-                        .foregroundColor(Color.black.opacity(0.82))
+                        .foregroundColor(FigmaTheme.text.opacity(0.82))
                         .frame(width: 32, height: 32)
                 }
                 .buttonStyle(.plain)
@@ -2161,7 +2160,7 @@ struct MemoryEditorPage: View {
 
             Button(action: onSave) {
                 Text(L10n.t("save").uppercased())
-                    .font(.system(size: 14, weight: .black))
+                    .font(.system(size: 14, weight: .semibold))
                     .tracking(-0.3)
                     .foregroundColor(.white)
                     .padding(.horizontal, 30)
@@ -2180,14 +2179,14 @@ struct MemoryEditorPage: View {
         HStack(spacing: 10) {
             Text(isNew ? L10n.key("add_memory") : L10n.key("edit_memory"))
                 .appHeaderStyle()
-                .foregroundColor(.black)
+                .foregroundColor(FigmaTheme.text)
 
             Spacer()
 
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(.black.opacity(0.85))
+                    .foregroundColor(FigmaTheme.text.opacity(0.85))
                     .frame(width: 32, height: 32)
                     .background(Color.black.opacity(0.04))
                     .clipShape(Circle())
@@ -2377,13 +2376,13 @@ struct MemoryGroupDetailPage: View {
                                     if !mem.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                         Text(mem.notes)
                                             .font(.system(size: 14))
-                                            .foregroundColor(.black.opacity(0.85))
+                                            .foregroundColor(FigmaTheme.text.opacity(0.85))
                                             .lineLimit(4)
                                             .frame(maxWidth: .infinity, alignment: .leading)
                                     } else if !mem.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                         Text(mem.title)
                                             .font(.system(size: 14, weight: .semibold))
-                                            .foregroundColor(.black)
+                                            .foregroundColor(FigmaTheme.text)
                                             .frame(maxWidth: .infinity, alignment: .leading)
                                     } else {
                                         Text(L10n.key("empty_memory"))
@@ -2925,9 +2924,16 @@ private struct JourneyMKMapView: UIViewRepresentable {
 if let ann = annotation as? MemoryGroupAnnotation {
                 let view = mapView.dequeueReusableAnnotationView(withIdentifier: "memoryGroup", for: ann)
                 view.canShowCallout = false
-                view.bounds = CGRect(x: 0, y: 0, width: 56, height: 56)
+                view.bounds = CGRect(
+                    x: 0,
+                    y: 0,
+                    width: MemoryPin.annotationWidth,
+                    height: MemoryPin.annotationHeight
+                )
                 view.backgroundColor = .clear
+                view.centerOffset = MemoryPin.annotationCenterOffset
                 view.displayPriority = .required
+                view.collisionMode = .circle
                 if #available(iOS 14.0, *) {
                     view.zPriority = .max
                 }

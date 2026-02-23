@@ -1,34 +1,17 @@
 import { motion } from "motion/react";
 import { useNavigate } from "react-router";
-import { Menu, Play, Footprints } from "lucide-react";
-import { useState } from "react";
-import { HamburgerMenu } from "../components/HamburgerMenu";
+import { Play, Footprints } from "lucide-react";
+import { MainTabLayout } from "../components/MainTabLayout";
 
 export function Home() {
   const navigate = useNavigate();
-  const [menuOpen, setMenuOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-[#FBFBF9] overflow-hidden">
-      {/* Header */}
-      <motion.header
-        initial={{ y: -100, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.6, ease: "easeOut" }}
-        className="absolute top-0 left-0 right-0 p-6 flex justify-between items-center z-10"
-      >
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={() => setMenuOpen(true)}
-          className="p-2 rounded-full hover:bg-black/5 transition-all active:shadow-[inset_0_2px_8px_rgba(0,0,0,0.1)]"
-        >
-          <Menu className="w-6 h-6 stroke-[1.5]" />
-        </motion.button>
-      </motion.header>
-
-      {/* Main Content */}
-      <div className="flex flex-col items-center justify-center min-h-screen px-6">
+    <MainTabLayout
+      title="Home"
+      contentClassName="flex min-h-[calc(100vh-12rem)] flex-col items-center justify-center overflow-hidden"
+    >
+      <div className="w-full max-w-xl text-center">
         <motion.div
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
@@ -88,9 +71,6 @@ export function Home() {
           <span className="font-black text-sm tracking-tight uppercase text-[#B8947D]">Daily Mode</span>
         </motion.button>
       </div>
-
-      {/* Hamburger Menu */}
-      <HamburgerMenu isOpen={menuOpen} onClose={() => setMenuOpen(false)} />
-    </div>
+    </MainTabLayout>
   );
 }

@@ -10,6 +10,7 @@ import Combine
 final class AppFlowCoordinator: ObservableObject {
     @Published private(set) var resumeOngoingSignal: Int = 0
     @Published private(set) var endOngoingSignal: Int = 0
+    @Published private(set) var sidebarHiddenTokens: Set<String> = []
 
     func requestResumeOngoing() {
         resumeOngoingSignal += 1
@@ -17,5 +18,19 @@ final class AppFlowCoordinator: ObservableObject {
 
     func requestEndOngoing() {
         endOngoingSignal += 1
+    }
+
+    var shouldShowSidebarButton: Bool {
+        sidebarHiddenTokens.isEmpty
+    }
+
+    func pushSidebarButtonHidden(token: String) {
+        guard !token.isEmpty else { return }
+        sidebarHiddenTokens.insert(token)
+    }
+
+    func popSidebarButtonHidden(token: String) {
+        guard !token.isEmpty else { return }
+        sidebarHiddenTokens.remove(token)
     }
 }

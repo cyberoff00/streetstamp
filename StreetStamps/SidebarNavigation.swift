@@ -109,7 +109,7 @@ struct SidebarMenuView: View {
                         Text(L10n.t("journey_diary_version"))
                             .font(.system(size: 10, weight: .semibold))
                             .tracking(0.6)
-                            .foregroundColor(.black.opacity(0.5))
+                            .foregroundColor(FigmaTheme.text.opacity(0.5))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 18)
                     }
@@ -139,7 +139,7 @@ struct SidebarMenuView: View {
             HStack(spacing: 8) {
                 Text(L10n.t("explore"))
                     .appHeaderStyle()
-                    .foregroundColor(.black)
+                    .foregroundColor(FigmaTheme.text)
                 Spacer(minLength: 0)
                 Button {
                     withAnimation(.easeOut(duration: 0.25)) {
@@ -148,7 +148,7 @@ struct SidebarMenuView: View {
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 22, weight: .regular))
-                        .foregroundColor(.black)
+                        .foregroundColor(FigmaTheme.text)
                         .frame(width: 40, height: 40)
                 }
                 .buttonStyle(.plain)
@@ -174,8 +174,8 @@ struct SidebarMenuView: View {
 
                 VStack(alignment: .leading, spacing: 0) {
                     Text(displayName)
-                        .font(.system(size: 14, weight: .black))
-                        .foregroundColor(.black)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(FigmaTheme.text)
                         .lineLimit(1)
 
                     Text(L10n.t("explorer_fallback"))
@@ -231,7 +231,7 @@ struct SidebarMenuItem: View {
                     .frame(width: 30)
 
                 Text(tab.sidebarTitle)
-                    .font(.system(size: 14, weight: .black))
+                    .font(.system(size: 14, weight: .semibold))
                     .tracking(0.3)
                     .foregroundColor(isSelected ? .white : .black)
 
@@ -280,7 +280,7 @@ struct NavigationHeader: View {
                     Text(subtitle.uppercased())
                         .font(.system(size: 11, weight: .medium))
                         .tracking(1.5)
-                        .foregroundColor(.black.opacity(0.5))
+                        .foregroundColor(FigmaTheme.text.opacity(0.5))
                 }
             }
 
@@ -331,7 +331,7 @@ struct TwoLineNavigationHeader: View {
                     Text(subtitle.uppercased())
                         .font(.system(size: 11, weight: .medium))
                         .tracking(1.5)
-                        .foregroundColor(.black.opacity(0.5))
+                        .foregroundColor(FigmaTheme.text.opacity(0.5))
                         .padding(.top, 4)
                 }
             }

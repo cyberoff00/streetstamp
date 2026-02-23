@@ -218,6 +218,10 @@
 
 // Equipment
 "equipment_title" = "装备";
+"equipment_shop_gear" = "商店装备";
+"equipment_status_equipped" = "已装备";
+"equipment_status_owned" = "已拥有";
+"equipment_buy_short" = "购买 %d";
 "equipment_hair" = "发型";
 "equipment_outfit" = "衣服";
 "equipment_accessory" = "配饰";
@@ -395,3 +399,18 @@
 "confirm_purchase" = "确认购买";
 "need_coins_to_unlock" = "解锁该物品需要 %d 金币。";
 "not_enough_coins" = "金币不足";
+"gpx_import_entry_title" = "导入你的 GPX 轨迹";
+"gpx_import_entry_desc" = "先上传 GPX 文件，再从识别出的城市候选中选择一个作为导入目标。";
+"gpx_import_upload_block_title" = "上传文件";
+"gpx_import_select_file" = "选择 GPX 文件";
+"gpx_import_selected_file" = "已选择：%@";
+"gpx_import_conversion_progress" = "轨迹转换进度";
+"gpx_import_progress_idle" = "等待上传文件";
+"gpx_import_progress_reading" = "正在读取 GPX 文件";
+"gpx_import_progress_parsing" = "正在解析轨迹点";
+"gpx_import_progress_building" = "正在构建轨迹预览";
+"gpx_import_progress_detecting" = "正在识别城市候选";
+"gpx_import_progress_detecting_format" = "正在识别城市（%d/%d）";
+"gpx_import_progress_done" = "转换完成，可选择城市";
+"gpx_import_choose_detected_city" = "请选择一个识别出的城市：";
+"gpx_import_no_detected_city" = "未从该 GPX 轨迹识别到城市。";

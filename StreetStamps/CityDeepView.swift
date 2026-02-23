@@ -20,6 +20,7 @@ struct CityDeepView: View {
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var cache: CityCache
+    @EnvironmentObject private var flow: AppFlowCoordinator
 
     init(city: City) {
         self.city = city
@@ -45,6 +46,7 @@ struct CityDeepView: View {
     @State private var blockedCityLevelSelection: CityPlacemarkResolver.CardLevel?
     @State private var cityLevelLoading = false
     @State private var showCityLevelDowngradeBlocked = false
+    @State private var sidebarHideToken = UUID().uuidString
 
     private var activeCachedCity: CachedCity? {
         cache.cachedCities.first(where: { $0.id == activeCityKey && !($0.isTemporary ?? false) })
@@ -362,6 +364,12 @@ struct CityDeepView: View {
             loadReservedLevelSelection()
             initializeReservedLevelProfileIfNeeded(showPickerWhenReady: false)
             refreshDisplayTitleFromCardKey()
+        }
+        .onAppear {
+            flow.pushSidebarButtonHidden(token: sidebarHideToken)
+        }
+        .onDisappear {
+            flow.popSidebarButtonHidden(token: sidebarHideToken)
         }
         .onChange(of: activeCityKey) { _ in
             fetchedBoundaryPolygon = nil
@@ -1062,9 +1070,16 @@ private struct CityDeepMKMap: UIViewRepresentable {
                 ?? MKAnnotationView(annotation: ann, reuseIdentifier: id)
             view.annotation = ann
             view.canShowCallout = false
-            view.bounds = CGRect(x: 0, y: 0, width: 56, height: 56)
+            view.bounds = CGRect(
+                x: 0,
+                y: 0,
+                width: MemoryPin.annotationWidth,
+                height: MemoryPin.annotationHeight
+            )
             view.backgroundColor = .clear
+            view.centerOffset = MemoryPin.annotationCenterOffset
             view.displayPriority = .required
+            view.collisionMode = .circle
             if #available(iOS 14.0, *) {
                 view.zPriority = .max
             }

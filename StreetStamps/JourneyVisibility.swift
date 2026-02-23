@@ -7,6 +7,10 @@ enum JourneyVisibility: String, Codable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    static var frontendCases: [JourneyVisibility] {
+        [.private, .friendsOnly]
+    }
+
     var titleCN: String {
         switch self {
         case .private: return "私密"
@@ -22,6 +26,10 @@ enum ProfileVisibility: String, Codable, CaseIterable, Identifiable {
     case `public`
 
     var id: String { rawValue }
+
+    static var frontendCases: [ProfileVisibility] {
+        [.private, .friendsOnly]
+    }
 
     var titleCN: String {
         switch self {

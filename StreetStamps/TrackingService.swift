@@ -19,9 +19,7 @@ final class TrackingService: ObservableObject {
     @Published var coords: [CLLocationCoordinate2D] = []
 
     @Published var totalDistance: Double = 0
-    /// 3D-euclidean distance (horizontal + altitude delta).
-    /// Note: filtering/outlier detection still uses horizontal distance; only accumulation is 3D.
-    /// This makes distance feel more "real" on hills/stairs without destabilizing jitter logic.
+    /// Total horizontal (2D) distance in meters.
 
     /// Total positive elevation gain (meters) accumulated from accepted points.
     @Published var totalAscent: Double = 0
@@ -492,12 +490,7 @@ final class TrackingService: ObservableObject {
     private func startForegroundHighPowerDaily() {
         if hub.isUsingMock { return }
         hub.requestPermissionIfNeeded()
-        
-        // 日常模式使用稍低的精度
-        if let source = hub as? LocationHub {
-            // 需要在LocationHub中添加startHighPowerDaily方法
-            source.startRealTime()  // 暂时用同样的
-        }
+        hub.startRealTimeDaily()
         
         isInForegroundStationaryPowerMode = false
         stationarySince = nil
@@ -507,6 +500,8 @@ final class TrackingService: ObservableObject {
     func resumeJourney() {
         isTracking = true
         isPaused = false
+        lastLocation = nil
+        lastRecordedLocationForStationary = nil
         stationarySince = nil
         isInForegroundStationaryPowerMode = false
         resetLongStationaryReminderState()
@@ -536,6 +531,8 @@ final class TrackingService: ObservableObject {
         updateLiveActivity(memoriesCount: 0)
         guard isTracking else { return }
         isPaused = true
+        lastLocation = nil
+        lastRecordedLocationForStationary = nil
         resetLongStationaryReminderState()
         wasExplicitlyPaused = true  // ✅ 标记为主动暂停
     }
@@ -546,6 +543,8 @@ final class TrackingService: ObservableObject {
         
         guard isTracking else { return }
         isPaused = false
+        lastLocation = nil
+        lastRecordedLocationForStationary = nil
         resetLongStationaryReminderState()
         requestLongStationaryNotificationPermissionIfNeeded()
         wasExplicitlyPaused = false  // ✅ 恢复后清除标记
@@ -804,11 +803,8 @@ final class TrackingService: ObservableObject {
         }
 
         let d2d = loc.distance(from: last)
-        let dz = elevationDeltaMeters(from: last, to: loc)
-        let d3d = hypot(d2d, dz)
-        let d = d2d
         let dt = max(0.001, loc.timestamp.timeIntervalSince(last.timestamp))
-        let impliedSpeed = d3d / dt
+        let impliedSpeed = d2d / dt
 
         // =========================================================
         // 1.5) Stationary jitter suppression + foreground power saving
@@ -945,10 +941,11 @@ final class TrackingService: ObservableObject {
         }
 
         // =========================================================
-        // 5) Distance accumulation (don't add nonsense on very bad accuracy unless migration)
+        // 5) Distance accumulation (2D horizontal distance)
+        //    don't add nonsense on very bad accuracy unless migration
         // =========================================================
         if !accuracyVeryBad || isMigrationCandidate {
-            totalDistance += d3d
+            totalDistance += d2d
             accumulateElevation(from: last, to: loc)
         }
 

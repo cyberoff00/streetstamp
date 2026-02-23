@@ -98,6 +98,7 @@ struct PopSharingCard: View {
                 if let payload = unlockedCity {
                     UnlockModal(
                         payload: payload,
+                        journey: finalizedJourney(),
                         isPresented: $showUnlock,
                         onGoToLibrary: {
                             showUnlock = false
@@ -357,7 +358,7 @@ struct PopSharingCard: View {
 
             HStack(spacing: 10) {
                 Picker(L10n.t("visibility"), selection: $selectedVisibility) {
-                    ForEach(JourneyVisibility.allCases) { v in
+                    ForEach(JourneyVisibility.frontendCases) { v in
                         Text(v.titleCN).tag(v)
                     }
                 }
@@ -854,6 +855,34 @@ struct ShareCardGenerator {
         }
     }
 
+    /// Generate unlock preview image using the same map+route pipeline as share card,
+    /// but without title/stats overlays and robot marker.
+    static func generateUnlockMapPreview(
+        journey: JourneyRoute,
+        size: CGSize = CGSize(width: 1200, height: 660),
+        completion: @escaping (UIImage) -> Void
+    ) {
+        let raw = journey.coordinates.clCoords
+        let safeCoords = raw.filter { CLLocationCoordinate2DIsValid($0) && abs($0.latitude) <= 90 && abs($0.longitude) <= 180 }
+
+        let center = safeCoords.last
+        let safeCenter: CLLocationCoordinate2D? = {
+            guard let c = center, CLLocationCoordinate2DIsValid(c), abs(c.latitude) <= 90, abs(c.longitude) <= 180 else { return nil }
+            return c
+        }()
+
+        makeMapSnapshotWithRoute(
+            coords: safeCoords,
+            fallbackCenter: safeCenter,
+            privacy: .exact,
+            countryISO2: journey.countryISO2,
+            cityKey: journey.cityKey,
+            snapshotSize: size,
+            drawRobot: false,
+            completion: completion
+        )
+    }
+
     private static func durationText(for journey: JourneyRoute) -> String {
         guard let start = journey.startTime else {
             return String(format: L10n.t("share_duration_min"), 0)
@@ -1054,9 +1083,10 @@ struct ShareCardGenerator {
         privacy: ShareMapPrivacyMode,
         countryISO2: String?,
         cityKey: String?,
+        snapshotSize: CGSize = CGSize(width: 900, height: 1200),
+        drawRobot: Bool = true,
         completion: @escaping (UIImage) -> Void
     ) {
-        let snapshotSize = CGSize(width: 900, height: 1200)
         let scale: CGFloat = 2
 
         let stillSpan: Double = 0.0035
@@ -1101,6 +1131,7 @@ struct ShareCardGenerator {
                     }
 
                     guard drawRoute, drawCoords.count > 1 else {
+                        guard drawRobot else { return }
                         let centerCoord: CLLocationCoordinate2D? = drawCoords.last ?? adaptedFallbackCenter
                         guard let c = centerCoord else { return }
                         let p = snap.point(for: c)
@@ -1118,7 +1149,7 @@ struct ShareCardGenerator {
                         stroke: .init(coreWidth: isFlightLike ? 8 : 7)
                     )
 
-                    if let last = drawCoords.last {
+                    if drawRobot, let last = drawCoords.last {
                         let endPoint = snap.point(for: last)
 
                         let face: RobotFaceSnap = {
@@ -1189,6 +1220,7 @@ struct ShareCardGenerator {
 
 struct UnlockModal: View {
     let payload: UnlockedPayload
+    let journey: JourneyRoute
     @Binding var isPresented: Bool
     var onGoToLibrary: (() -> Void)? = nil
 
@@ -1200,13 +1232,13 @@ struct UnlockModal: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(.gray)
 
-            CityThumbnailView(basePath: payload.baseThumbPath, routePath: payload.routeThumbPath)
+            UnlockRouteMapPreview(journey: journey)
                 .frame(height: 220)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .padding(.horizontal, 16)
 
             VStack(spacing: 6) {
-                Text(payload.title)
+                Text(payload.id)
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundColor(.black)
                     .lineLimit(2)
@@ -1250,6 +1282,43 @@ struct UnlockModal: View {
         }
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
+    }
+}
+
+private struct UnlockRouteMapPreview: View {
+    let journey: JourneyRoute
+    @State private var image: UIImage?
+    @State private var isGenerating = false
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color(UIColor.systemGray6))
+                    .overlay {
+                        VStack(spacing: 8) {
+                            if isGenerating {
+                                ProgressView()
+                            }
+                            Text(L10n.key("loading_map"))
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                        }
+                    }
+            }
+        }
+        .onAppear {
+            guard !isGenerating, image == nil else { return }
+            isGenerating = true
+            ShareCardGenerator.generateUnlockMapPreview(journey: journey) { generated in
+                image = generated
+                isGenerating = false
+            }
+        }
     }
 }
 

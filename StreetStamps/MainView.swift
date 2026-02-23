@@ -20,7 +20,6 @@ struct MainView: View {
     @EnvironmentObject private var flow: AppFlowCoordinator
     
     @Binding var selectedTab: Int
-    @Binding var showSidebar: Bool
     @StateObject private var tracking = TrackingService.shared
     
     @State private var showMapView = false
@@ -55,38 +54,44 @@ struct MainView: View {
                 let topInset = max(12, proxy.safeAreaInsets.top + 6)
                 let circleSize = min(max(220, proxy.size.width * 0.65), 258)
                 let titleTop = compactHeight ? max(120, proxy.size.height * 0.18) : max(156, proxy.size.height * 0.205)
+                let controlLift: CGFloat = compactHeight ? -8 : -12
 
                 VStack(spacing: 0) {
                     Spacer().frame(height: titleTop)
 
-                    Text(L10n.t("journey_title"))
-                        .font(.system(size: min(72, proxy.size.width * 0.183), weight: .black))
-                        .tracking(-3.2)
-                        .foregroundColor(.black)
+                    Text("UNLOCK NEW JOURNEY,\nPIN YOUR MEMORIES")
+                        .font(.system(size: 26, weight: .black))
+                        .tracking(-0.6)
+                        .lineSpacing(9)
+                        .foregroundColor(Color.black.opacity(0.8))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .frame(maxWidth: 360)
+                        .padding(.bottom, 64)
                         .opacity(showTitle ? 1 : 0)
                         .offset(y: showTitle ? 0 : 18)
-
-                    Spacer().frame(height: compactHeight ? 40 : 52)
 
                     startButton(circleSize: circleSize)
                         .opacity(showStartButton ? 1 : 0)
                         .scaleEffect(showStartButton ? 1 : 0.96)
-                        .offset(y: showStartButton ? 0 : 20)
+                        .offset(y: (showStartButton ? 0 : 20) + controlLift)
 
                     Spacer().frame(height: compactHeight ? 26 : 32)
 
                     modeButton
                         .opacity(showModeButtonState ? 1 : 0)
-                        .offset(y: showModeButtonState ? 0 : 12)
+                        .offset(y: (showModeButtonState ? 0 : 12) + controlLift)
 
                     Spacer()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .padding(.horizontal, 24)
+                .padding(.bottom, 24)
 
-                SidebarHamburgerButton(showSidebar: $showSidebar, size: 42, iconSize: 20, iconWeight: .semibold, foreground: .black)
-                .padding(.leading, 24)
-                .padding(.top, topInset)
+                Color.clear
+                    .frame(width: 42, height: 42)
+                    .padding(.leading, 24)
+                    .padding(.top, topInset)
 #if DEBUG
                 .onLongPressGesture(minimumDuration: 0.6) {
                     showDebugPanel = true
@@ -130,7 +135,7 @@ struct MainView: View {
                         sharingJourney = nil
                     },
                     onGoToLibrary: {
-                        selectedTab = 1
+                        selectedTab = NavigationTab.cities.rawValue
                     }
                 )
             } else {
@@ -256,10 +261,10 @@ struct MainView: View {
 
                 VStack(spacing: 10) {
                     Image(systemName: "play.fill")
-                        .font(.system(size: 48, weight: .black))
+                        .font(.system(size: 48, weight: .bold))
                         .foregroundColor(.white)
                     Text(buttonText)
-                        .font(.system(size: 40 / 2, weight: .black))
+                        .font(.system(size: 40 / 2, weight: .bold))
                         .tracking(-0.4)
                         .foregroundColor(.white)
                 }
@@ -276,11 +281,11 @@ struct MainView: View {
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: trackingMode == .sport ? "bolt.fill" : "shoeprints.fill")
-                    .font(.system(size: 13, weight: .black))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(DesignTheme.modeBorder)
 
                 Text(trackingMode == .sport ? L10n.key("lockscreen_sport_mode") : L10n.key("lockscreen_daily_mode"))
-                    .font(.system(size: 32 / 2, weight: .black))
+                    .font(.system(size: 32 / 2, weight: .bold))
                     .tracking(-0.4)
                     .foregroundColor(DesignTheme.modeBorder)
             }
@@ -539,11 +544,11 @@ struct ModeOptionCard: View {
                     Text(mode == .sport ? L10n.key("lockscreen_sport_mode") : L10n.key("lockscreen_daily_mode"))
                         .font(.system(size: 15, weight: .bold))
                         .tracking(0.8)
-                        .foregroundColor(.black)
+                        .foregroundColor(FigmaTheme.text)
                     
                     Text(mode == .sport ? L10n.key("sport_mode_desc") : L10n.key("daily_mode_desc"))
                         .font(.system(size: 12))
-                        .foregroundColor(.black.opacity(0.55))
+                        .foregroundColor(FigmaTheme.text.opacity(0.55))
                         .lineLimit(3)
                         .multilineTextAlignment(.leading)
                     
@@ -551,17 +556,17 @@ struct ModeOptionCard: View {
                     HStack(spacing: 12) {
                         if mode == .sport {
                             Text(L10n.key("hint_precise"))
-                                .font(.system(size: 11, weight: .bold))
+                                .font(.system(size: 11, weight: .semibold))
                                 .foregroundColor(DesignTheme.accent)
                             Text(L10n.key("hint_battery"))
                                 .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.black.opacity(0.35))
+                                .foregroundColor(FigmaTheme.text.opacity(0.35))
                         } else {
                             Text(L10n.key("hint_precision"))
                                 .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.black.opacity(0.35))
+                                .foregroundColor(FigmaTheme.text.opacity(0.35))
                             Text(L10n.key("hint_efficient"))
-                                .font(.system(size: 11, weight: .bold))
+                                .font(.system(size: 11, weight: .semibold))
                                 .foregroundColor(DesignTheme.accent)
                         }
                     }

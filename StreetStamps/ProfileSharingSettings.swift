@@ -18,13 +18,13 @@ enum ProfileSharingSettings {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
             .replacingOccurrences(of: "@", with: "")
-            .replacingOccurrences(of: "[^a-z0-9_.]", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "[^a-z0-9_]", with: "", options: .regularExpression)
         return String(cleaned.prefix(24))
     }
 
     static func handle(for source: String) -> String {
         let normalized = normalizeHandle(source)
-        if normalized.isEmpty { return "mora_user" }
+        if normalized.isEmpty { return "00000000" }
         return normalized
     }
 }

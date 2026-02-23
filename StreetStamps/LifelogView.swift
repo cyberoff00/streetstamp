@@ -8,8 +8,6 @@ private struct LifelogShareImageItem: Identifiable {
 }
 
 struct LifelogView: View {
-    @Binding var showSidebar: Bool
-
     @ObservedObject private var tracking = TrackingService.shared
     @EnvironmentObject private var lifelogStore: LifelogStore
     @EnvironmentObject private var locationHub: LocationHub
@@ -33,6 +31,7 @@ struct LifelogView: View {
     @State private var sheetDragOffset: CGFloat = 0
     @State private var bottomDockHeight: CGFloat = 0
     @State private var visibleRegion: MKCoordinateRegion? = nil
+    @State private var cameraRegion: MKCoordinateRegion? = nil
     @AppStorage(MapAppearanceSettings.storageKey) private var mapAppearanceRaw = MapAppearanceSettings.current.rawValue
 
     private var mapAppearance: MapAppearanceStyle {
@@ -43,22 +42,35 @@ struct LifelogView: View {
     private var panelText: Color { isDarkAppearance ? .white : .black }
 
     private var pathCoords: [CLLocationCoordinate2D] {
-        lifelogStore.mapPolylineViewport(
+        let wgs = lifelogStore.mapPolylineViewport(
             day: selectedDay,
             region: visibleRegion,
             lodLevel: renderLodLevel,
             maxPoints: renderMaxPoints
         )
-    }
-
-    private var fogRevealCoords: [CLLocationCoordinate2D] {
-        sampledPath(from: pathCoords, maxPoints: 70)
+        return mapCoordsForLifelog(wgs)
     }
 
     private var footprintCoords: [CLLocationCoordinate2D] {
-        let sampled = sampledPath(from: pathCoords, maxPoints: 180)
-        guard sampled.count > 3 else { return [] }
-        return Array(sampled.dropLast().suffix(28))
+        let spaced = resampledFootprints(
+            from: pathCoords,
+            targetSpacingMeters: footprintStrideMeters
+        )
+        guard spaced.count > 2 else { return [] }
+        let chain = Array(spaced.dropLast())
+        return decimatedFootprintsForViewport(chain)
+    }
+
+    private var footprintRenderCoords: [CLLocationCoordinate2D] {
+        guard let current = currentDisplayLocation?.coordinate else {
+            return footprintCoords
+        }
+        let me = CLLocation(latitude: current.latitude, longitude: current.longitude)
+        let threshold = avatarFootprintExclusionMeters
+        return footprintCoords.filter { coord in
+            let point = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+            return point.distance(from: me) > threshold
+        }
     }
 
     private var allJourneysForGlobe: [JourneyRoute] {
@@ -66,9 +78,23 @@ struct LifelogView: View {
     }
 
     private var currentDisplayLocation: CLLocation? {
-        if let loc = lifelogStore.currentLocation { return loc }
-        if let loc = locationHub.currentLocation { return loc }
-        return locationHub.lastKnownLocation
+        let source: CLLocation?
+        if let loc = lifelogStore.currentLocation {
+            source = loc
+        } else if let loc = locationHub.currentLocation {
+            source = loc
+        } else {
+            source = locationHub.lastKnownLocation
+        }
+        guard let source else { return nil }
+        let mapped = mapCoordForLifelog(source.coordinate)
+        return CLLocation(
+            coordinate: mapped,
+            altitude: source.altitude,
+            horizontalAccuracy: source.horizontalAccuracy,
+            verticalAccuracy: source.verticalAccuracy,
+            timestamp: source.timestamp
+        )
     }
 
     private var isViewingToday: Bool {
@@ -92,7 +118,7 @@ struct LifelogView: View {
 
                     Spacer()
 
-                    bottomDock(bottomInset: proxy.safeAreaInsets.bottom)
+                    bottomDock
                         .offset(y: bottomSheetOffset())
                         .animation(.spring(response: 0.35, dampingFraction: 0.88), value: isSheetExpanded)
                         .animation(.interactiveSpring(response: 0.26, dampingFraction: 0.84), value: sheetDragOffset)
@@ -118,12 +144,10 @@ struct LifelogView: View {
                                 }
                         )
                 }
-                .ignoresSafeArea(edges: .bottom)
 
-                floatingBottomRightButtons(bottomInset: proxy.safeAreaInsets.bottom)
+                floatingBottomRightButtons(bottomInset: proxy.safeAreaInsets.bottom + 24)
             }
         }
-        .preferredColorScheme(isDarkAppearance ? .dark : .light)
         .fullScreenCover(isPresented: $showGlobe) {
             GlobeViewScreen(showSidebar: .constant(false), externalJourneys: globeJourneysSnapshot)
                 .environmentObject(store)
@@ -187,20 +211,16 @@ struct LifelogView: View {
 
     private var mapLayer: some View {
         Map(position: $position) {
-            ForEach(fogRevealCoords.indices, id: \.self) { idx in
-                MapCircle(center: fogRevealCoords[idx], radius: 220)
-                    .foregroundStyle(Color.white.opacity(isDarkAppearance ? 0.04 : 0.08))
-            }
-
-            if pathCoords.count >= 2 {
-                MapPolyline(coordinates: pathCoords)
-                    .stroke(Color(red: 0.05, green: 0.67, blue: 0.54), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
-            }
-
-            ForEach(footprintCoords.indices, id: \.self) { idx in
-                let alpha = 0.20 + (Double(idx) / Double(max(footprintCoords.count - 1, 1))) * 0.58
-                Annotation("", coordinate: footprintCoords[idx]) {
-                    FootstepMarker(opacity: alpha)
+            ForEach(footprintRenderCoords.indices, id: \.self) { idx in
+                let style = footprintStyle(at: idx, in: footprintRenderCoords)
+                Annotation("", coordinate: footprintRenderCoords[idx]) {
+                    FootstepMarker(
+                        opacity: style.opacity,
+                        scale: style.scale,
+                        angle: style.angle,
+                        isDark: isDarkAppearance
+                    )
+                    .offset(x: style.lateralOffset)
                 }
             }
 
@@ -223,22 +243,19 @@ struct LifelogView: View {
                 }
             }
         }
-        .mapStyle(.standard(elevation: .flat, pointsOfInterest: .excludingAll, showsTraffic: false))
-        .overlay {
-            LinearGradient(
-                colors: [
-                    Color.black.opacity(isDarkAppearance ? 0.24 : 0.08),
-                    Color.clear,
-                    Color.black.opacity(isDarkAppearance ? 0.20 : 0.06)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
+        .mapStyle(
+            .standard(
+                elevation: .flat,
+                emphasis: .automatic,
+                pointsOfInterest: .excludingAll,
+                showsTraffic: false
             )
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
-        }
+        )
+        // Keep lifelog map dark/light switch local to the map surface.
+        .environment(\.colorScheme, isDarkAppearance ? .dark : .light)
         .onMapCameraChange { context in
             let incoming = context.region
+            cameraRegion = incoming
             if shouldUpdateVisibleRegion(incoming) {
                 visibleRegion = incoming
             }
@@ -248,9 +265,8 @@ struct LifelogView: View {
     private var header: some View {
         ZStack {
             HStack {
-                SidebarHamburgerButton(showSidebar: $showSidebar, size: 42, iconSize: 20, iconWeight: .semibold, foreground: .black)
-                    .background(Color.white.opacity(isDarkAppearance ? 0.92 : 0.88))
-                    .clipShape(Circle())
+                Color.clear
+                    .frame(width: 42, height: 42)
 
                 Spacer()
 
@@ -265,6 +281,7 @@ struct LifelogView: View {
                         .background(FigmaTheme.card.opacity(0.92))
                         .clipShape(Circle())
                 }
+                .buttonStyle(.plain)
             }
 
             Text(L10n.t("lifelog_title"))
@@ -297,7 +314,7 @@ struct LifelogView: View {
                 Button(L10n.t("lifelog_permission_action")) {
                     locationHub.requestPermissionIfNeeded()
                 }
-                .font(.system(size: 12, weight: .bold))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(isDarkAppearance ? .black : .white)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
@@ -332,12 +349,12 @@ struct LifelogView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(normalizedDisplayName(profileName))
                     .appBodyStrongStyle()
-                    .foregroundColor(.black)
+                    .foregroundColor(FigmaTheme.text)
                     .lineLimit(1)
 
                 Text(String(format: L10n.t("level_ep_format"), totalEP))
                     .appCaptionStyle()
-                    .foregroundColor(.black.opacity(0.62))
+                    .foregroundColor(FigmaTheme.text.opacity(0.62))
                     .lineLimit(1)
 
                 GeometryReader { proxy in
@@ -354,7 +371,7 @@ struct LifelogView: View {
 
                 Text(String(format: L10n.t("summary_stats_line"), cityCount, totalJourneys, totalMemories, distanceKmDisplay))
                     .appFootnoteStyle()
-                    .foregroundColor(.black.opacity(0.56))
+                    .foregroundColor(FigmaTheme.text.opacity(0.56))
                     .lineLimit(1)
             }
 
@@ -409,7 +426,7 @@ struct LifelogView: View {
         .buttonStyle(.plain)
     }
 
-    private func bottomDock(bottomInset: CGFloat) -> some View {
+    private var bottomDock: some View {
         VStack(spacing: 14) {
             Capsule()
                 .fill(Color.black.opacity(0.12))
@@ -432,7 +449,7 @@ struct LifelogView: View {
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 14)
         .padding(.top, 8)
-        .padding(.bottom, max(20, bottomInset + 12))
+        .padding(.bottom, 20)
         .background(Color.white.opacity(0.94))
         .clipShape(
             UnevenRoundedRectangle(
@@ -475,22 +492,22 @@ struct LifelogView: View {
                         shiftVisibleMonth(by: -1)
                     } label: {
                         Image(systemName: "chevron.left")
-                            .font(.system(size: 15, weight: .black))
-                            .foregroundColor(.black)
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(FigmaTheme.text)
                             .frame(width: 28, height: 28)
                     }
                     .buttonStyle(.plain)
 
                     Text(monthTitle(for: visibleMonthAnchor))
-                        .font(.system(size: 34 / 2, weight: .black))
-                        .foregroundColor(.black)
+                        .font(.system(size: 34 / 2, weight: .bold))
+                        .foregroundColor(FigmaTheme.text)
 
                     Button {
                         shiftVisibleMonth(by: 1)
                     } label: {
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 15, weight: .black))
-                            .foregroundColor(.black)
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(FigmaTheme.text)
                             .frame(width: 28, height: 28)
                     }
                     .buttonStyle(.plain)
@@ -504,7 +521,7 @@ struct LifelogView: View {
                     }
                 } label: {
                     Text(calendarDisplayMode == .day ? "Display by month" : "Display by day")
-                        .font(.system(size: 12, weight: .bold))
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(FigmaTheme.primary)
                 }
                 .buttonStyle(.plain)
@@ -572,6 +589,54 @@ struct LifelogView: View {
         }
     }
 
+    private var footprintMaxMarkers: Int {
+        switch renderLodLevel {
+        case 3: return 140
+        case 2: return 92
+        case 1: return 56
+        default: return 34
+        }
+    }
+
+    private var footprintStrideMeters: CLLocationDistance {
+        switch renderLodLevel {
+        case 3: return 14
+        case 2: return 24
+        case 1: return 38
+        default: return 60
+        }
+    }
+
+    private var footprintGridCellRatio: Double {
+        // Screen-space cell in normalized viewport units.
+        // Larger cell on zoomed-out levels to avoid dense clusters.
+        switch renderLodLevel {
+        case 3: return 0.020
+        case 2: return 0.036
+        case 1: return 0.056
+        default: return 0.090
+        }
+    }
+
+    private var footprintGapBreakMeters: CLLocationDistance {
+        // Break very long jumps so footprints don't form a fake straight "connection".
+        switch renderLodLevel {
+        case 3: return 180
+        case 2: return 260
+        case 1: return 380
+        default: return 520
+        }
+    }
+
+    private var avatarFootprintExclusionMeters: CLLocationDistance {
+        switch renderLodLevel {
+        case 3: return 26
+        case 2: return 34
+        case 1: return 44
+        default: return 56
+        }
+    }
+
     private func shouldUpdateVisibleRegion(_ incoming: MKCoordinateRegion) -> Bool {
         guard let old = visibleRegion else { return true }
         let oldCenter = CLLocation(latitude: old.center.latitude, longitude: old.center.longitude)
@@ -584,15 +649,207 @@ struct LifelogView: View {
         return centerMove > 120 || spanRatio > 0.20
     }
 
-    private func sampledPath(from src: [CLLocationCoordinate2D], maxPoints: Int) -> [CLLocationCoordinate2D] {
-        guard maxPoints >= 2 else { return src }
-        guard src.count > maxPoints else { return src }
-        let n = src.count
+    private func resampledFootprints(
+        from coords: [CLLocationCoordinate2D],
+        targetSpacingMeters: CLLocationDistance
+    ) -> [CLLocationCoordinate2D] {
+        guard coords.count > 2 else { return coords }
+        guard targetSpacingMeters > 0 else { return coords }
+
+        var result: [CLLocationCoordinate2D] = [coords[0]]
+        var distanceFromLastSample: CLLocationDistance = 0
+
+        for i in 1..<coords.count {
+            let segmentStart = coords[i - 1]
+            let segmentEnd = coords[i]
+            let startLoc = CLLocation(latitude: segmentStart.latitude, longitude: segmentStart.longitude)
+            let endLoc = CLLocation(latitude: segmentEnd.latitude, longitude: segmentEnd.longitude)
+            let segmentLength = endLoc.distance(from: startLoc)
+            if segmentLength <= 0.001 { continue }
+            if segmentLength > footprintGapBreakMeters {
+                // Treat large gaps as a discontinuity: keep endpoint, but skip interpolation across the gap.
+                if !sameCoordinate(result.last, segmentEnd) {
+                    result.append(segmentEnd)
+                }
+                distanceFromLastSample = 0
+                continue
+            }
+
+            var consumedOnSegment: CLLocationDistance = 0
+            while distanceFromLastSample + (segmentLength - consumedOnSegment) >= targetSpacingMeters {
+                let needed = targetSpacingMeters - distanceFromLastSample
+                let t = (consumedOnSegment + needed) / segmentLength
+                result.append(interpolateCoordinate(from: segmentStart, to: segmentEnd, t: t))
+                consumedOnSegment += needed
+                distanceFromLastSample = 0
+            }
+
+            distanceFromLastSample += max(0, segmentLength - consumedOnSegment)
+        }
+
+        if let last = coords.last, !sameCoordinate(result.last, last) {
+            result.append(last)
+        }
+        return result
+    }
+
+    private func interpolateCoordinate(
+        from a: CLLocationCoordinate2D,
+        to b: CLLocationCoordinate2D,
+        t: Double
+    ) -> CLLocationCoordinate2D {
+        let clamped = min(max(t, 0), 1)
+        let lat = a.latitude + (b.latitude - a.latitude) * clamped
+        let lon = a.longitude + (b.longitude - a.longitude) * clamped
+        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+    }
+
+    private func sameCoordinate(_ a: CLLocationCoordinate2D?, _ b: CLLocationCoordinate2D) -> Bool {
+        guard let a else { return false }
+        return abs(a.latitude - b.latitude) < 0.000_000_1 && abs(a.longitude - b.longitude) < 0.000_000_1
+    }
+
+    private func decimatedFootprintsForViewport(_ coords: [CLLocationCoordinate2D]) -> [CLLocationCoordinate2D] {
+        guard coords.count > 3 else { return coords }
+        guard let region = cameraRegion ?? visibleRegion else {
+            return uniformSampledCoords(coords, maxPoints: footprintMaxMarkers)
+        }
+        let maxMarkers = max(2, min(footprintMaxMarkers, coords.count))
+        // Full-path uniform anchors (no recent-point compensation).
+        let reserveAnchors = maxMarkers
+        let cell = max(0.010, footprintGridCellRatio)
+
+        var selected = Set<Int>()
+        selected.insert(0)
+        selected.insert(coords.count - 1)
+
+        if reserveAnchors > 1 {
+            for i in 0..<reserveAnchors {
+                let t = Double(i) / Double(max(reserveAnchors - 1, 1))
+                let idx = Int((t * Double(coords.count - 1)).rounded(.toNearestOrAwayFromZero))
+                selected.insert(min(max(idx, 0), coords.count - 1))
+            }
+        }
+
+        func cellKey(for index: Int) -> String? {
+            guard let p = normalizedViewportPoint(coords[index], in: region) else { return nil }
+            guard p.x >= -0.2, p.x <= 1.2, p.y >= -0.2, p.y <= 1.2 else { return nil }
+            let cx = Int(floor(p.x / cell))
+            let cy = Int(floor(p.y / cell))
+            return "\(cx)|\(cy)"
+        }
+
+        var occupied = Set<String>()
+        for idx in selected {
+            if let key = cellKey(for: idx) {
+                occupied.insert(key)
+            }
+        }
+
+        if selected.count < maxMarkers {
+            for idx in 0..<coords.count {
+                if selected.contains(idx) { continue }
+                guard let key = cellKey(for: idx) else { continue }
+                if occupied.contains(key) { continue }
+                selected.insert(idx)
+                occupied.insert(key)
+                if selected.count >= maxMarkers { break }
+            }
+        }
+
+        if selected.count < maxMarkers {
+            for idx in stride(from: coords.count - 1, through: 0, by: -1) {
+                if selected.contains(idx) { continue }
+                guard let key = cellKey(for: idx) else { continue }
+                if occupied.contains(key) { continue }
+                selected.insert(idx)
+                occupied.insert(key)
+                if selected.count >= maxMarkers { break }
+            }
+        }
+
+        if selected.count < maxMarkers {
+            for idx in 0..<coords.count {
+                if selected.contains(idx) { continue }
+                selected.insert(idx)
+                if selected.count >= maxMarkers { break }
+            }
+        }
+
+        return selected
+            .sorted()
+            .map { coords[$0] }
+    }
+
+    private func uniformSampledCoords(_ coords: [CLLocationCoordinate2D], maxPoints: Int) -> [CLLocationCoordinate2D] {
+        guard maxPoints >= 2 else { return coords }
+        guard coords.count > maxPoints else { return coords }
+        let n = coords.count
         return (0..<maxPoints).map { i in
             let t = Double(i) / Double(maxPoints - 1)
             let idx = Int((t * Double(n - 1)).rounded(.toNearestOrAwayFromZero))
-            return src[min(max(idx, 0), n - 1)]
+            return coords[min(max(idx, 0), n - 1)]
         }
+    }
+
+    private func footprintStyle(
+        at index: Int,
+        in coords: [CLLocationCoordinate2D]
+    ) -> (opacity: Double, scale: CGFloat, angle: Double, lateralOffset: CGFloat) {
+        let opacity = 0.80
+        let scale = CGFloat(0.90)
+        let heading = footprintHeadingDegrees(at: index, in: coords)
+
+        return (
+            opacity: opacity,
+            scale: scale,
+            angle: heading,
+            lateralOffset: 0
+        )
+    }
+
+    private func footprintHeadingDegrees(at index: Int, in coords: [CLLocationCoordinate2D]) -> Double {
+        guard coords.count >= 2 else { return -18 }
+        let from: CLLocationCoordinate2D
+        let to: CLLocationCoordinate2D
+        if index <= 0 {
+            from = coords[0]
+            to = coords[1]
+        } else {
+            from = coords[min(index - 1, coords.count - 1)]
+            to = coords[min(index, coords.count - 1)]
+        }
+        return bearingDegrees(from: from, to: to)
+    }
+
+    private func bearingDegrees(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D) -> Double {
+        let lat1 = from.latitude * .pi / 180
+        let lon1 = from.longitude * .pi / 180
+        let lat2 = to.latitude * .pi / 180
+        let lon2 = to.longitude * .pi / 180
+        let dLon = lon2 - lon1
+        let y = sin(dLon) * cos(lat2)
+        let x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon)
+        let raw = atan2(y, x) * 180 / .pi
+        if raw.isFinite {
+            return raw
+        }
+        return -18
+    }
+
+    private func normalizedViewportPoint(
+        _ coord: CLLocationCoordinate2D,
+        in region: MKCoordinateRegion
+    ) -> CGPoint? {
+        let latDelta = max(region.span.latitudeDelta, 0.000_001)
+        let lonDelta = max(region.span.longitudeDelta, 0.000_001)
+        let minLon = region.center.longitude - lonDelta / 2.0
+        let maxLat = region.center.latitude + latDelta / 2.0
+
+        let xRatio = (coord.longitude - minLon) / lonDelta
+        let yRatio = (maxLat - coord.latitude) / latDelta
+        guard xRatio.isFinite, yRatio.isFinite else { return nil }
+        return CGPoint(x: xRatio, y: yRatio)
     }
 
     private var dayModeCalendar: some View {
@@ -605,8 +862,8 @@ struct LifelogView: View {
                     } label: {
                         VStack(spacing: 4) {
                             Text(shortWeekday(day))
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundColor(Color.black.opacity(0.44))
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundColor(FigmaTheme.text.opacity(0.44))
                             ZStack {
                                 Circle()
                                     .fill(dayCellBackground(day: day, forMonthMode: false))
@@ -616,7 +873,7 @@ struct LifelogView: View {
                                         .font(.system(size: 18))
                                 } else {
                                     Text("\(Calendar.current.component(.day, from: day))")
-                                        .font(.system(size: 16, weight: .black))
+                                        .font(.system(size: 16, weight: .bold))
                                         .foregroundColor(isSelectedDay(day) ? .white : .black)
                                 }
                             }
@@ -636,8 +893,8 @@ struct LifelogView: View {
             HStack(spacing: 8) {
                 ForEach(weekLabels, id: \.self) { symbol in
                     Text(symbol)
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(Color.black.opacity(0.44))
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(FigmaTheme.text.opacity(0.44))
                         .frame(maxWidth: .infinity)
                 }
             }
@@ -656,7 +913,7 @@ struct LifelogView: View {
                                         .frame(height: 40)
                                     VStack(spacing: 1) {
                                         Text("\(Calendar.current.component(.day, from: day))")
-                                            .font(.system(size: 12, weight: .black))
+                                            .font(.system(size: 12, weight: .semibold))
                                             .foregroundColor(isSelectedDay(day) ? .white : .black)
                                         if let mood = lifelogStore.mood(for: day) {
                                             Text(mood)
@@ -696,12 +953,15 @@ struct LifelogView: View {
 
     private func currentCoordinateForCentering() -> CLLocationCoordinate2D? {
         if let current = lifelogStore.currentLocation?.coordinate {
-            return current
+            return mapCoordForLifelog(current)
         }
         if let current = locationHub.currentLocation?.coordinate {
-            return current
+            return mapCoordForLifelog(current)
         }
-        return locationHub.lastKnownLocation?.coordinate
+        if let current = locationHub.lastKnownLocation?.coordinate {
+            return mapCoordForLifelog(current)
+        }
+        return nil
     }
 
     private func captureCurrentPageImage() -> UIImage? {
@@ -729,8 +989,20 @@ struct LifelogView: View {
     }
 
     private func centerCoordinate(for day: Date) -> CLLocationCoordinate2D? {
-        let coords = lifelogStore.mapPolyline(day: day, maxPoints: 900)
+        let coords = mapCoordsForLifelog(lifelogStore.mapPolyline(day: day, maxPoints: 900))
         return coords.last ?? currentCoordinateForCentering()
+    }
+
+    private var lifelogCountryISO2: String? {
+        lifelogStore.countryISO2 ?? locationHub.countryISO2
+    }
+
+    private func mapCoordForLifelog(_ coord: CLLocationCoordinate2D) -> CLLocationCoordinate2D {
+        MapCoordAdapter.forMapKit(coord, countryISO2: lifelogCountryISO2)
+    }
+
+    private func mapCoordsForLifelog(_ coords: [CLLocationCoordinate2D]) -> [CLLocationCoordinate2D] {
+        MapCoordAdapter.forMapKit(coords, countryISO2: lifelogCountryISO2)
     }
 
     private func recenter(for day: Date) {
@@ -863,17 +1135,29 @@ struct LifelogView: View {
 
 private struct FootstepMarker: View {
     let opacity: Double
+    let scale: CGFloat
+    let angle: Double
+    let isDark: Bool
 
     var body: some View {
-        HStack(spacing: 1) {
-            Circle()
-                .fill(Color(red: 0.98, green: 0.95, blue: 0.80).opacity(opacity))
-                .frame(width: 4.5, height: 4.5)
-            Circle()
-                .fill(Color(red: 0.98, green: 0.95, blue: 0.80).opacity(opacity * 0.9))
-                .frame(width: 3.8, height: 3.8)
+        Image(systemName: "shoeprints.fill")
+            .font(.system(size: 13, weight: .semibold))
+            .symbolRenderingMode(.monochrome)
+            .foregroundStyle(markerColor)
+            .frame(width: 22, height: 28)
+            .opacity(opacity)
+            .shadow(color: markerColor.opacity(isDark ? 0.30 : 0.20), radius: isDark ? 3.2 : 1.6, x: 0, y: 0)
+            .scaleEffect(scale)
+            .rotationEffect(.degrees(angle))
+            .shadow(color: .black.opacity(isDark ? 0.18 : 0.12), radius: 0.9, y: 0.5)
+    }
+
+    private var markerColor: Color {
+        if isDark {
+            // Night mode: green footprints.
+            return Color(red: 86.0 / 255.0, green: 211.0 / 255.0, blue: 114.0 / 255.0)
         }
-        .rotationEffect(.degrees(-18))
-        .shadow(color: .black.opacity(0.12), radius: 1.2, y: 0.8)
+        // Day mode: orange footprints.
+        return Color(red: 230.0 / 255.0, green: 125.0 / 255.0, blue: 49.0 / 255.0)
     }
 }
