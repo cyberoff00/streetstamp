@@ -351,7 +351,7 @@ struct FriendsHubView: View {
                     Text(profile.displayName)
                         .font(.system(size: 15, weight: .bold))
                         .foregroundColor(FigmaTheme.text)
-                    Text("专属ID：\(profile.handle ?? "unknown_id")")
+                    Text(String(format: L10n.t("friends_exclusive_id_format"), profile.handle ?? L10n.t("unknown_id")))
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(FigmaTheme.subtext)
                     Text(shortAgoText(from: request.createdAt))
@@ -458,7 +458,7 @@ struct FriendsHubView: View {
                 let metaText: String
                 switch kind {
                 case .city:
-                    eventTitle = String(format: L10n.t("friends_event_visited"), cityName.isEmpty ? "Unknown City" : cityName)
+                    eventTitle = String(format: L10n.t("friends_event_visited"), cityName.isEmpty ? L10n.t("unknown_city") : cityName)
                     metaText = ""
                 case .memory:
                     eventTitle = String(format: L10n.t("friends_event_added_memories"), memoryCount)
@@ -1159,10 +1159,10 @@ private struct FriendProfileScreen: View {
     private var fallbackFriend: FriendProfileSnapshot {
         FriendProfileSnapshot(
             id: friendID,
-            handle: "unknown_id",
+            handle: L10n.t("unknown_id"),
             inviteCode: "",
             profileVisibility: .private,
-            displayName: "Unknown",
+            displayName: L10n.t("unknown"),
             bio: "",
             loadout: .defaultBoy,
             stats: .init(totalJourneys: 0, totalDistance: 0, totalMemories: 0, totalUnlockedCities: 0),
@@ -1236,7 +1236,7 @@ private struct FriendProfileScreen: View {
                             }
                             .padding(.top, 32)
 
-                            Text("专属ID：\(f.handle)")
+                            Text(String(format: L10n.t("friends_exclusive_id_format"), f.handle))
                                 .font(.system(size: 13, weight: .regular))
                                 .tracking(0.2)
                                 .foregroundColor(FigmaTheme.subtext)
@@ -1703,7 +1703,7 @@ private struct FriendJourneysScreen: View {
     var body: some View {
         Group {
             if let friend = socialStore.friends.first(where: { $0.id == friendID }) {
-                MyJourneysView(routeDetailReadOnly: true, routeDetailHeaderTitle: "friend's journey")
+                MyJourneysView(routeDetailReadOnly: true, routeDetailHeaderTitle: L10n.t("friends_journey_title"))
                     .environmentObject(mirror.journeyStore)
                     .environmentObject(sessionStore)
                     .task(id: FriendMirrorContext.signature(for: friend)) {
@@ -1865,7 +1865,7 @@ private struct FriendJourneyRouteScreen: View {
     var body: some View {
         Group {
             if let friend = socialStore.friends.first(where: { $0.id == friendID }) {
-                JourneyRouteDetailView(journeyID: journeyID, isReadOnly: true, headerTitle: "friend's journey")
+                JourneyRouteDetailView(journeyID: journeyID, isReadOnly: true, headerTitle: L10n.t("friends_journey_title"))
                     .environmentObject(mirror.journeyStore)
                     .environmentObject(sessionStore)
                     .task(id: FriendMirrorContext.signature(for: friend)) {

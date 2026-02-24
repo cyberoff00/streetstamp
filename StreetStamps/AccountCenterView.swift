@@ -208,7 +208,7 @@ struct AccountCenterView: View {
         VStack(alignment: .leading, spacing: 12) {
             Picker("主页可见性", selection: $profileVisibility) {
                 ForEach(ProfileVisibility.frontendCases) { v in
-                    Text(v.titleCN).tag(v)
+                    Text(v.localizedTitle).tag(v)
                 }
             }
             .pickerStyle(.segmented)

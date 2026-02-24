@@ -174,9 +174,9 @@ struct LifelogView: View {
             titleVisibility: .visible
         ) {
             ForEach(Self.moodOptions, id: \.id) { mood in
-                Button("\(mood.emoji) \(mood.label)") {
+                Button("\(mood.placeholderEmoji) \(mood.label)") {
                     guard let day = moodPickerDay else { return }
-                    lifelogStore.setMood(mood.emoji, for: day)
+                    lifelogStore.setMood(mood.moodValue, for: day)
                 }
             }
             Button(L10n.t("lifelog_clear_mood"), role: .destructive) {
@@ -226,20 +226,44 @@ struct LifelogView: View {
 
             if let loc = currentDisplayLocation {
                 Annotation("", coordinate: loc.coordinate) {
-                    ZStack {
-                        if avatarHeadlightEnabled {
-                            AvatarHeadlightConeView(headingDegrees: currentHeadingDegrees)
-                                .allowsHitTesting(false)
+                    VStack(spacing: 2) {
+                        if shouldShowMoodQuestionMark {
+                            Button {
+                                moodPickerDay = Calendar.current.startOfDay(for: Date())
+                            } label: {
+                                Text("❓")
+                                    .font(.system(size: 21))
+                                    .frame(width: 36, height: 36)
+                                    .background(
+                                        Circle()
+                                            .fill(Color(red: 1.0, green: 249 / 255.0, blue: 221 / 255.0))
+                                    )
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color(red: 1.0, green: 191 / 255.0, blue: 84 / 255.0), lineWidth: 1.5)
+                                    )
+                                    .shadow(color: .black.opacity(0.14), radius: 5, y: 2)
+                            }
+                            .buttonStyle(.plain)
+                            .transition(.scale.combined(with: .opacity))
                         }
 
-                        RobotRendererView(
-                            size: AvatarMapMarkerStyle.visualSize,
-                            face: .front,
-                            loadout: AvatarLoadoutStore.load()
-                        )
+                        ZStack {
+                            if avatarHeadlightEnabled {
+                                AvatarHeadlightConeView(headingDegrees: currentHeadingDegrees)
+                                    .allowsHitTesting(false)
+                            }
+
+                            RobotRendererView(
+                                size: AvatarMapMarkerStyle.visualSize,
+                                face: .front,
+                                loadout: AvatarLoadoutStore.load()
+                            )
+                        }
+                        .frame(width: AvatarMapMarkerStyle.annotationSize, height: AvatarMapMarkerStyle.annotationSize)
+                        .shadow(color: .black.opacity(0.24), radius: 8, y: 2)
                     }
-                    .frame(width: AvatarMapMarkerStyle.annotationSize, height: AvatarMapMarkerStyle.annotationSize)
-                    .shadow(color: .black.opacity(0.24), radius: 8, y: 2)
+                    .animation(.spring(response: 0.28, dampingFraction: 0.82), value: shouldShowMoodQuestionMark)
                 }
             }
         }
@@ -289,6 +313,11 @@ struct LifelogView: View {
         }
     }
 
+    private var shouldShowMoodQuestionMark: Bool {
+        let today = Calendar.current.startOfDay(for: Date())
+        return lifelogStore.mood(for: today) == nil
+    }
+
     private var recenterButton: some View {
         Button {
             centerOnCurrent(force: true)
@@ -335,7 +364,7 @@ struct LifelogView: View {
         let totalDistanceKm = totalDistanceMeters / 1000.0
         let distanceKmDisplay = max(0, Int(totalDistanceKm.rounded(.down)))
         let cityCount = cityCache.cachedCities.filter { !($0.isTemporary ?? false) }.count
-        let totalEP = max(0, Int(totalDistanceKm.rounded(.down)))
+        let levelProgress = UserLevelProgress.from(journeys: store.journeys)
 
         return HStack(spacing: 14) {
             ZStack {
@@ -345,6 +374,10 @@ struct LifelogView: View {
 
                 RobotRendererView(size: 56, face: .front, loadout: AvatarLoadoutStore.load())
             }
+            .overlay(alignment: .topTrailing) {
+                LevelBadgeView(level: levelProgress.level)
+                    .offset(x: 10, y: -10)
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(normalizedDisplayName(profileName))
@@ -352,7 +385,11 @@ struct LifelogView: View {
                     .foregroundColor(FigmaTheme.text)
                     .lineLimit(1)
 
-                Text(String(format: L10n.t("level_ep_format"), totalEP))
+                HStack(spacing: 6) {
+                    Text(String(format: L10n.t("level_format"), levelProgress.level))
+                    Text("·")
+                    Text(String(format: L10n.t("level_remaining_short_format"), levelProgress.journeysRemainingToNextLevel))
+                }
                     .appCaptionStyle()
                     .foregroundColor(FigmaTheme.text.opacity(0.62))
                     .lineLimit(1)
@@ -364,7 +401,7 @@ struct LifelogView: View {
                             .frame(height: 6)
                         Capsule()
                             .fill(UITheme.accent)
-                            .frame(width: max(8, proxy.size.width * 0.45), height: 6)
+                            .frame(width: max(8, proxy.size.width * levelProgress.progress), height: 6)
                     }
                 }
                 .frame(height: 6)
@@ -1114,17 +1151,15 @@ struct LifelogView: View {
 
     private struct MoodOption {
         let id: String
-        let emoji: String
+        let moodValue: String
+        let placeholderEmoji: String
         let label: String
     }
 
     private static let moodOptions: [MoodOption] = [
-        .init(id: "happy", emoji: "😊", label: "Happy"),
-        .init(id: "calm", emoji: "🙂", label: "Calm"),
-        .init(id: "tired", emoji: "😮‍💨", label: "Tired"),
-        .init(id: "sad", emoji: "😢", label: "Sad"),
-        .init(id: "angry", emoji: "😤", label: "Angry"),
-        .init(id: "excited", emoji: "🤩", label: "Excited")
+        .init(id: "sad", moodValue: "😢", placeholderEmoji: "😢", label: "Sad"),
+        .init(id: "normal", moodValue: "😐", placeholderEmoji: "😐", label: "Normal"),
+        .init(id: "happy", moodValue: "😄", placeholderEmoji: "😄", label: "Happy")
     ]
 
     private enum CalendarDisplayMode {

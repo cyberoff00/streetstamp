@@ -32,6 +32,7 @@ struct MyJourneysView: View {
     @State private var selectedEndDate: Date? = nil
     @State private var likesByJourney: [String: Int] = [:]
     @State private var visibilityUpdatingIDs: Set<String> = []
+    @State private var localizedCityNameByKey: [String: String] = [:]
 
     private var allJourneys: [JourneyRoute] {
         store.journeys
@@ -93,6 +94,9 @@ struct MyJourneysView: View {
                 appearanceRaw: mapAppearanceRaw,
                 limit: 8
             )
+        }
+        .task(id: cityLocalizationTaskKey) {
+            await refreshCityLocalizations()
         }
     }
 
@@ -174,6 +178,47 @@ struct MyJourneysView: View {
         return "\(mapAppearanceRaw)|\(ids)"
     }
 
+    private var cityLocalizationTaskKey: String {
+        allJourneys
+            .map { "\($0.id)|\($0.startCityKey ?? $0.cityKey)" }
+            .joined(separator: ",")
+    }
+
+    private func refreshCityLocalizations() async {
+        var coordByKey: [String: CLLocationCoordinate2D] = [:]
+        for journey in allJourneys {
+            let key = (journey.startCityKey ?? journey.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty, key != "Unknown|", coordByKey[key] == nil else { continue }
+            if let start = journey.startCoordinate, start.isValid {
+                coordByKey[key] = start
+            }
+        }
+
+        for (key, coord) in coordByKey {
+            if localizedCityNameByKey[key] != nil { continue }
+
+            if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key),
+               !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                await MainActor.run { localizedCityNameByKey[key] = cached }
+                continue
+            }
+
+            let loc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+            if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key),
+               !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                await MainActor.run { localizedCityNameByKey[key] = title }
+            }
+        }
+    }
+
+    private func resolvedDisplayCityName(for journey: JourneyRoute) -> String {
+        let key = (journey.startCityKey ?? journey.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
+        if let localized = localizedCityNameByKey[key], !localized.isEmpty {
+            return localized
+        }
+        return journey.displayCityName
+    }
+
     private var listSection: some View {
         ScrollView(showsIndicators: false) {
             LazyVStack(spacing: 14) {
@@ -187,6 +232,7 @@ struct MyJourneysView: View {
                     } label: {
                         JourneyCardRow(
                             journey: j,
+                            displayCityName: resolvedDisplayCityName(for: j),
                             likeCount: likesByJourney[j.id] ?? 0,
                             isVisibilityUpdating: visibilityUpdatingIDs.contains(j.id),
                             onVisibilityToggle: {
@@ -489,6 +535,7 @@ private struct JourneyCalendarRangePopover: View {
 
 private struct JourneyCardRow: View {
     let journey: JourneyRoute
+    let displayCityName: String
     let likeCount: Int
     let isVisibilityUpdating: Bool
     let onVisibilityToggle: () -> Void
@@ -496,7 +543,7 @@ private struct JourneyCardRow: View {
     @AppStorage(MapAppearanceSettings.storageKey) private var mapAppearanceRaw = MapAppearanceSettings.current.rawValue
 
     private var mergedTitle: String {
-        journey.displayCityName
+        displayCityName
     }
 
     private var datePillText: String {
@@ -577,7 +624,7 @@ private struct JourneyCardRow: View {
                             } else if journey.visibility == .private {
                                 Image(systemName: "lock")
                                     .font(.system(size: 13, weight: .semibold))
-                                Text(JourneyVisibility.private.titleCN)
+                                Text(JourneyVisibility.private.localizedTitle)
                                     .font(.system(size: 13, weight: .bold, design: .rounded))
                             } else {
                                 Image(systemName: "heart")
@@ -986,6 +1033,7 @@ struct JourneyRouteDetailView: View {
     @State private var fittedRegion: MKCoordinateRegion? = nil
     @State private var editingMemory: JourneyMemory? = nil
     @State private var sidebarHideToken = UUID().uuidString
+    @State private var localizedCityTitle: String? = nil
 
     init(
         journeyID: String,
@@ -1002,7 +1050,10 @@ struct JourneyRouteDetailView: View {
     }
 
     private var cityTitle: String {
-        journey?.displayCityName ?? "Unknown"
+        if let localizedCityTitle, !localizedCityTitle.isEmpty {
+            return localizedCityTitle
+        }
+        return journey?.displayCityName ?? L10n.t("unknown")
     }
 
     private var countryTitle: String {
@@ -1010,7 +1061,7 @@ struct JourneyRouteDetailView: View {
         if iso.count == 2 {
             return Locale.current.localizedString(forRegionCode: iso) ?? iso
         }
-        return "Unknown"
+        return L10n.t("unknown_country")
     }
 
     private var dateText: String {
@@ -1163,6 +1214,9 @@ struct JourneyRouteDetailView: View {
         .onAppear {
             flow.pushSidebarButtonHidden(token: sidebarHideToken)
         }
+        .task(id: journey?.id) {
+            await refreshLocalizedCityTitle()
+        }
         .onDisappear {
             flow.popSidebarButtonHidden(token: sidebarHideToken)
         }
@@ -1252,6 +1306,25 @@ struct JourneyRouteDetailView: View {
             effectiveBoundaryWGS: nil,
             fetchedBoundaryWGS: nil
         )
+    }
+
+    private func refreshLocalizedCityTitle() async {
+        guard let journey else { return }
+        let key = (journey.startCityKey ?? journey.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty, key != "Unknown|" else { return }
+
+        if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key),
+           !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            await MainActor.run { localizedCityTitle = cached }
+            return
+        }
+
+        guard let start = journey.startCoordinate, start.isValid else { return }
+        let loc = CLLocation(latitude: start.latitude, longitude: start.longitude)
+        if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key),
+           !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            await MainActor.run { localizedCityTitle = title }
+        }
     }
 
     private func shareCurrent() {
@@ -1371,16 +1444,9 @@ private struct JourneyDetailMap: UIViewRepresentable {
 
             view.annotation = ann
             view.canShowCallout = false
-            view.bounds = CGRect(
-                x: 0,
-                y: 0,
-                width: MemoryPin.annotationWidth,
-                height: MemoryPin.annotationHeight
-            )
+            view.bounds = CGRect(x: 0, y: 0, width: 56, height: 56)
             view.backgroundColor = .clear
-            view.centerOffset = MemoryPin.annotationCenterOffset
             view.displayPriority = .required
-            view.collisionMode = .circle
             if #available(iOS 14.0, *) {
                 view.zPriority = .max
             }

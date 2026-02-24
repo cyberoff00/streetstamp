@@ -6,6 +6,7 @@ const express = require("express");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
+const { Pool } = require("pg");
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const { OAuth2Client } = require("google-auth-library");
 const { createRemoteJWKSet, jwtVerify } = require("jose");
@@ -15,6 +16,15 @@ const JWT_SECRET = (process.env.JWT_SECRET || "change-me-in-production").trim();
 const DATA_FILE = (process.env.DATA_FILE || "./data/data.json").trim();
 const MEDIA_DIR = (process.env.MEDIA_DIR || "./media").trim();
 const MEDIA_PUBLIC_BASE = (process.env.MEDIA_PUBLIC_BASE || "").trim();
+const DATABASE_URL = (process.env.DATABASE_URL || "").trim();
+const PGHOST = (process.env.PGHOST || "").trim();
+const PGPORT = Number(process.env.PGPORT || 5432);
+const PGUSER = (process.env.PGUSER || "").trim();
+const PGPASSWORD = (process.env.PGPASSWORD || "").trim();
+const PGDATABASE = (process.env.PGDATABASE || "").trim();
+const PGSSL = String(process.env.PGSSL || "").trim().toLowerCase();
+const PG_STATE_KEY = (process.env.PG_STATE_KEY || "global").trim();
+const PG_MAX_CLIENTS = Number(process.env.PG_MAX_CLIENTS || 10);
 
 const R2_ACCOUNT_ID = (process.env.R2_ACCOUNT_ID || "").trim();
 const R2_ACCESS_KEY_ID = (process.env.R2_ACCESS_KEY_ID || "").trim();
@@ -31,6 +41,28 @@ const visibilityFriendsOnly = "friendsOnly";
 const visibilityPublic = "public";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+
+const pgEnabled = Boolean(DATABASE_URL || (PGHOST && PGUSER && PGDATABASE));
+let pgPool = null;
+let pgSchemaReady = false;
+if (pgEnabled) {
+  const poolConfig = {
+    max: Number.isFinite(PG_MAX_CLIENTS) && PG_MAX_CLIENTS > 0 ? PG_MAX_CLIENTS : 10
+  };
+  if (DATABASE_URL) {
+    poolConfig.connectionString = DATABASE_URL;
+  } else {
+    poolConfig.host = PGHOST;
+    poolConfig.port = Number.isFinite(PGPORT) && PGPORT > 0 ? PGPORT : 5432;
+    poolConfig.user = PGUSER;
+    poolConfig.password = PGPASSWORD;
+    poolConfig.database = PGDATABASE;
+  }
+  if (PGSSL === "require" || PGSSL === "true" || PGSSL === "1") {
+    poolConfig.ssl = { rejectUnauthorized: false };
+  }
+  pgPool = new Pool(poolConfig);
+}
 
 let r2Client = null;
 if (R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_BUCKET && R2_ENDPOINT) {
@@ -280,28 +312,81 @@ function emptyDB() {
   return { users: {}, emailIndex: {}, inviteIndex: {}, oauthIndex: {}, handleIndex: {}, likesIndex: {}, friendRequestsIndex: {} };
 }
 
+function normalizeDBShape(parsed) {
+  return {
+    users: parsed?.users || {},
+    emailIndex: parsed?.emailIndex || {},
+    inviteIndex: parsed?.inviteIndex || {},
+    oauthIndex: parsed?.oauthIndex || {},
+    handleIndex: parsed?.handleIndex || {},
+    likesIndex: parsed?.likesIndex || {},
+    friendRequestsIndex: parsed?.friendRequestsIndex || {}
+  };
+}
+
+function hasPersistedData(parsed) {
+  const src = parsed || {};
+  const keys = ["users", "emailIndex", "inviteIndex", "oauthIndex", "handleIndex", "likesIndex", "friendRequestsIndex"];
+  return keys.some((k) => src[k] && Object.keys(src[k]).length > 0);
+}
+
 async function ensureDirForFile(filePath) {
   await fsp.mkdir(path.dirname(filePath), { recursive: true });
 }
 
-async function loadDB() {
+async function loadDBFromFile() {
   try {
     const raw = await fsp.readFile(DATA_FILE, "utf8");
     if (!raw.trim()) return emptyDB();
-    const parsed = JSON.parse(raw);
-    return {
-      users: parsed.users || {},
-      emailIndex: parsed.emailIndex || {},
-      inviteIndex: parsed.inviteIndex || {},
-      oauthIndex: parsed.oauthIndex || {},
-      handleIndex: parsed.handleIndex || {},
-      likesIndex: parsed.likesIndex || {},
-      friendRequestsIndex: parsed.friendRequestsIndex || {}
-    };
+    return normalizeDBShape(JSON.parse(raw));
   } catch (e) {
     if (e && e.code === "ENOENT") return emptyDB();
     throw e;
   }
+}
+
+async function ensurePGSchema() {
+  if (!pgPool || pgSchemaReady) return;
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS app_state (
+      key TEXT PRIMARY KEY,
+      state JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  pgSchemaReady = true;
+}
+
+async function loadDBFromPostgres() {
+  if (!pgPool) return null;
+  await ensurePGSchema();
+  const result = await pgPool.query("SELECT state FROM app_state WHERE key = $1 LIMIT 1", [PG_STATE_KEY]);
+  if (!result.rows.length) return null;
+  return normalizeDBShape(result.rows[0]?.state || {});
+}
+
+async function saveDBToPostgres(nextDB) {
+  if (!pgPool) return;
+  await ensurePGSchema();
+  await pgPool.query(
+    `INSERT INTO app_state (key, state, updated_at)
+     VALUES ($1, $2::jsonb, NOW())
+     ON CONFLICT (key)
+     DO UPDATE SET state = EXCLUDED.state, updated_at = NOW()`,
+    [PG_STATE_KEY, JSON.stringify(nextDB || emptyDB())]
+  );
+}
+
+async function loadDB() {
+  if (!pgPool) return loadDBFromFile();
+  const fromPG = await loadDBFromPostgres();
+  if (fromPG) return fromPG;
+
+  const fromFile = await loadDBFromFile();
+  if (hasPersistedData(fromFile)) {
+    await saveDBToPostgres(fromFile);
+  }
+  return fromFile;
 }
 
 let db = emptyDB();
@@ -309,6 +394,10 @@ let writeChain = Promise.resolve();
 
 function saveDB() {
   writeChain = writeChain.then(async () => {
+    if (pgPool) {
+      await saveDBToPostgres(db);
+      return;
+    }
     await ensureDirForFile(DATA_FILE);
     await fsp.writeFile(DATA_FILE, JSON.stringify(db, null, 2), "utf8");
   });
@@ -536,6 +625,7 @@ function r2PublicURL(objectKey) {
 
 async function main() {
   db = await loadDB();
+  console.log(`[streetstamps-node-v1] storage=${pgPool ? "postgresql" : "file"}`);
   db.handleIndex = {};
   if (!db.likesIndex || typeof db.likesIndex !== "object") {
     db.likesIndex = {};

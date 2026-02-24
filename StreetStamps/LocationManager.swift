@@ -6,7 +6,7 @@ import Combine
 final class CityLocationManager: ObservableObject {
 
     /// ✅ UI 展示用（跟随系统语言）
-    @Published private(set) var displayName: String = "Unknown"
+    @Published private(set) var displayName: String = L10n.t("unknown")
 
     /// ✅ 后端 canonical（英文，稳定）
     @Published private(set) var canonicalCity: String = "Unknown"
@@ -72,7 +72,7 @@ final class CityLocationManager: ObservableObject {
                 } else if let cachedTitle {
                     // Same city, but we might have learned a localized title later.
                     self.displayName = cachedTitle
-                } else if self.displayName == "Unknown" {
+                } else if self.displayName == "Unknown" || self.displayName == L10n.t("unknown") {
                     self.displayName = canon.cityName
                 }
             }

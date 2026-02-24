@@ -15,6 +15,7 @@ private enum CollectionSegment: String, CaseIterable, Identifiable {
 }
 
 struct CollectionTabView: View {
+    @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
     @State private var segment: CollectionSegment = .cities
 
     var body: some View {
@@ -39,6 +40,27 @@ struct CollectionTabView: View {
                 }
             }
         }
+        .overlay(alignment: .bottom) {
+            if onboardingGuide.isCurrent(.openJourneysSegment) {
+                OnboardingCoachCard(
+                    message: OnboardingGuideStore.Step.openJourneysSegment.message,
+                    actionTitle: OnboardingGuideStore.Step.openJourneysSegment.actionTitle,
+                    onAction: {
+                        segment = .journeys
+                        onboardingGuide.advance(.openJourneysSegment)
+                    },
+                    onLater: { onboardingGuide.pauseForLater() },
+                    onSkip: { onboardingGuide.skipAll() }
+                )
+                .padding(.horizontal, 18)
+                .padding(.bottom, 96)
+            }
+        }
+        .onChange(of: segment) { value in
+            if value == .journeys {
+                onboardingGuide.advance(.openJourneysSegment)
+            }
+        }
         .navigationBarBackButtonHidden(true)
     }
 
@@ -58,6 +80,12 @@ struct CollectionTabView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .overlay {
+                if onboardingGuide.isCurrent(.openJourneysSegment) {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.black, lineWidth: 2)
+                }
+            }
         }
         .padding(.horizontal, 18)
         .padding(.top, 10)

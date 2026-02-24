@@ -293,7 +293,7 @@
 "ep_format" = "%@ EP";
 "equipment_title_upper" = "装备";
 "explore" = "探索";
-"explorer_fallback" = "探索者";
+"explorer_fallback" = "用户";
 "finish_upper" = "结束";
 "friends_active_ago" = "活跃于%@";
 "friends_add_failed" = "添加失败：%@";
@@ -334,6 +334,10 @@
 "journeys_title" = "旅程";
 "level_ep_format" = "Lv.1  ·  %d EP";
 "level_format" = "Lv.%d";
+"level_dialog_message_format" = "再开启 %d 次旅程，即可升到 Lv.%d。";
+"level_dialog_title" = "等级进度";
+"level_progress_counter_format" = "%d/%d";
+"level_remaining_short_format" = "还差 %d 次升级";
 "lifelog_clear_mood" = "清除心情";
 "lifelog_confirm_disable" = "确认关闭";
 "lifelog_continue_recording" = "继续记录";
@@ -361,6 +365,11 @@
 "select_mode" = "选择模式";
 "settings_avatar_headlight_desc" = "在地图上显示随手机朝向变化的方向锥。";
 "settings_avatar_headlight_title" = "头像前灯";
+"settings_level_rules_1" = "仅统计已完成旅程。";
+"settings_level_rules_2" = "等级由完成旅程次数决定。";
+"settings_level_rules_3" = "每次升级所需旅程数逐级增加（Lv1→Lv2 需 2 次，Lv2→Lv3 需 3 次）。";
+"settings_level_rules_4" = "Profile、Lifelog、Globe 会显示实时等级与进度。";
+"settings_level_rules_intro" = "当前等级规则";
 "settings_map_appearance_desc" = "应用到所有地图与路线渲染";
 "settings_stationary_reminder_desc" = "当 60 分钟内移动范围小于 100 米时提醒。";
 "settings_stationary_reminder_title" = "久坐提醒";
@@ -414,3 +423,11 @@
 "gpx_import_progress_done" = "转换完成，可选择城市";
 "gpx_import_choose_detected_city" = "请选择一个识别出的城市：";
 "gpx_import_no_detected_city" = "未从该 GPX 轨迹识别到城市。";
+"app_name" = "Worldo";
+"visibility_private" = "私密";
+"visibility_friends_only" = "好友可见";
+"visibility_public" = "公开";
+"unknown_id" = "unknown_id";
+"unknown_city" = "未知城市";
+"friends_exclusive_id_format" = "专属ID：%@";
+"friends_journey_title" = "好友旅程";

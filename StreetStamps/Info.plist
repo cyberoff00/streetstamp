@@ -29,6 +29,8 @@
 	<string>选择照片添加到你的记忆</string>
 	<key>NSCameraUsageDescription</key>
 	<string>我们需要访问您的摄像头来拍摄旅程照片</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>用于在新旧设备之间局域网传输私密旅程数据</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>我们需要您的位置来追踪您的旅程</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

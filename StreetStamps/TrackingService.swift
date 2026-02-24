@@ -742,10 +742,6 @@ final class TrackingService: ObservableObject {
 
         evaluateLongStationaryReminder(with: loc)
 
-        // Mode inference (tuning only)
-        let speed = max(0, loc.speed)
-        updateModeIfNeeded(now: loc.timestamp, speed: speed)
-
         // Foreground/background knobs
         let isActive = UIApplication.shared.applicationState == .active
         let minD = isActive ? foregroundMinDistance : backgroundMinDistance
@@ -805,6 +801,10 @@ final class TrackingService: ObservableObject {
         let d2d = loc.distance(from: last)
         let dt = max(0.001, loc.timestamp.timeIntervalSince(last.timestamp))
         let impliedSpeed = d2d / dt
+        // iOS may report speed = -1 (unknown). Infer from displacement so mode tuning
+        // does not treat unknown speed as stationary.
+        let resolvedSpeed = max(0, (loc.speed >= 0) ? loc.speed : impliedSpeed)
+        updateModeIfNeeded(now: loc.timestamp, speed: resolvedSpeed)
 
         // =========================================================
         // 1.5) Stationary jitter suppression + foreground power saving
@@ -878,8 +878,7 @@ final class TrackingService: ObservableObject {
         // This avoids creating dashed/missing segments when the user simply stayed still.
         let isMigrationCandidate: Bool =
             ((dt >= missingGapSecondsThreshold) && (d2d >= 500)) ||
-            (d2d  >= missingGapDistanceThreshold) ||
-            (d2d  >= hardJumpDistance)
+            (d2d  >= missingGapDistanceThreshold)
 
         let isDriftLike: Bool =
             accuracyVeryBad &&
@@ -931,7 +930,7 @@ final class TrackingService: ObservableObject {
             if accuracyWeak && dt >= 3.0 {
                 // When accuracy is weak we allow an occasional point so moving curvature doesn't flatten,
                 // but ONLY if we are likely moving (otherwise GPS drift creates scribble lines).
-                let speedGate = max(impliedSpeed, speed) // `speed` was computed earlier from loc.speed
+                let speedGate = max(impliedSpeed, resolvedSpeed)
                 let likelyMoving = (speedGate >= weakAccuracyBypassMinSpeed) || (d2d >= weakAccuracyBypassMinDistance)
                 if !likelyMoving { return }
                 // allow pass

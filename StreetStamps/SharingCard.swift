@@ -22,6 +22,7 @@ enum ShareMapPrivacyMode: Hashable {
 struct PopSharingCard: View {
     @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var store: JourneyStore
+    @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
     @Binding var isPresented: Bool
     var journey: JourneyRoute
     var fallbackCenter: CLLocationCoordinate2D?
@@ -140,6 +141,19 @@ struct PopSharingCard: View {
                     .clipShape(Capsule())
                     .padding(.top, 16)
                     .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if onboardingGuide.isCurrent(.saveJourney) {
+                    OnboardingCoachCard(
+                        message: OnboardingGuideStore.Step.saveJourney.message,
+                        actionTitle: OnboardingGuideStore.Step.saveJourney.actionTitle,
+                        onAction: { completeJourneyAndMaybeUnlock() },
+                        onLater: { onboardingGuide.pauseForLater() },
+                        onSkip: { onboardingGuide.skipAll() }
+                    )
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 18)
                 }
             }
             .alert(L10n.t("discard_journey_title"), isPresented: $showDiscardConfirm) {
@@ -359,7 +373,7 @@ struct PopSharingCard: View {
             HStack(spacing: 10) {
                 Picker(L10n.t("visibility"), selection: $selectedVisibility) {
                     ForEach(JourneyVisibility.frontendCases) { v in
-                        Text(v.titleCN).tag(v)
+                        Text(v.localizedTitle).tag(v)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -373,6 +387,12 @@ struct PopSharingCard: View {
                     .background(Color.black)
                     .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                     .shadow(color: Color.black.opacity(0.30), radius: 14, x: 0, y: 4)
+                    .overlay {
+                        if onboardingGuide.isCurrent(.saveJourney) {
+                            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                                .stroke(Color.white, lineWidth: 3)
+                        }
+                    }
             }
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.top, 6)
@@ -384,6 +404,7 @@ struct PopSharingCard: View {
     // MARK: - Behaviors
 
     private func completeJourneyAndMaybeUnlock() {
+        onboardingGuide.advance(.saveJourney)
         if let payload = cityCache.consumePendingUnlock() {
             unlockedCity = payload
             pendingExitAfterUnlock = true
@@ -1219,6 +1240,7 @@ struct ShareCardGenerator {
 // =======================================================
 
 struct UnlockModal: View {
+    @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
     let payload: UnlockedPayload
     let journey: JourneyRoute
     @Binding var isPresented: Bool
@@ -1267,6 +1289,7 @@ struct UnlockModal: View {
                 Button {
                     isPresented = false
                     onGoToLibrary?()
+                    onboardingGuide.advance(.openCityCards)
                 } label: {
                     Text(L10n.t("go_to_library"))
                         .font(.system(size: 13, weight: .semibold))
@@ -1274,6 +1297,12 @@ struct UnlockModal: View {
                         .frame(height: 44)
                         .frame(maxWidth: .infinity)
                         .background(RoundedRectangle(cornerRadius: 10).fill(Color.blue))
+                        .overlay {
+                            if onboardingGuide.isCurrent(.openCityCards) {
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(Color.white, lineWidth: 2)
+                            }
+                        }
                 }
             }
             .padding(.horizontal, 16)
@@ -1282,6 +1311,23 @@ struct UnlockModal: View {
         }
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
+        .overlay(alignment: .bottom) {
+            if onboardingGuide.isCurrent(.openCityCards) {
+                OnboardingCoachCard(
+                    message: OnboardingGuideStore.Step.openCityCards.message,
+                    actionTitle: OnboardingGuideStore.Step.openCityCards.actionTitle,
+                    onAction: {
+                        isPresented = false
+                        onGoToLibrary?()
+                        onboardingGuide.advance(.openCityCards)
+                    },
+                    onLater: { onboardingGuide.pauseForLater() },
+                    onSkip: { onboardingGuide.skipAll() }
+                )
+                .padding(.horizontal, 18)
+                .padding(.bottom, 12)
+            }
+        }
     }
 }
 

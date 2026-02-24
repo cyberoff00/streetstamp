@@ -30,10 +30,18 @@ enum JourneyPostCorrection {
         guard cleaned.count >= 2 else { return max(0, route.distance) }
 
         var total: Double = 0
+        let maxSegment = config.maxSegmentMeters
+        let hardRejectSegment = maxSegment * 10
         for i in 1..<cleaned.count {
             let d = distance(cleaned[i - 1], cleaned[i])
             guard d.isFinite, d >= 0 else { continue }
-            if d > config.maxSegmentMeters { continue }
+            // Keep realistic long segments with a cap instead of dropping them to zero.
+            // Extremely huge segments are still treated as outliers and ignored.
+            if d > hardRejectSegment { continue }
+            if d > maxSegment {
+                total += maxSegment
+                continue
+            }
             total += d
         }
         return max(0, total)

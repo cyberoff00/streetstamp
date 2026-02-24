@@ -291,10 +291,19 @@ struct JourneyRoute: Codable {
     var isCompleted: Bool { endTime != nil && startTime != nil }
 
     var displayCityName: String {
+        let unknownLocalized = L10n.t("unknown")
+        let unknownEN = "Unknown"
         let label = (cityName ?? canonicalCity).trimmingCharacters(in: .whitespacesAndNewlines)
-        if !label.isEmpty && label != "Unknown" { return label }
+        if !label.isEmpty,
+           label.caseInsensitiveCompare(unknownEN) != .orderedSame,
+           label != unknownLocalized {
+            return label
+        }
         let old = currentCity.trimmingCharacters(in: .whitespacesAndNewlines)
-        return old.isEmpty ? "Unknown" : old
+        if old.isEmpty || old.caseInsensitiveCompare(unknownEN) == .orderedSame || old == unknownLocalized {
+            return unknownLocalized
+        }
+        return old
     }
 
     enum CodingKeys: String, CodingKey {
@@ -562,6 +571,7 @@ struct MapView: View {
     @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var lifelogStore: LifelogStore
     @EnvironmentObject private var sessionStore: UserSessionStore
+    @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
     @AppStorage(AppSettings.avatarHeadlightEnabledKey) private var avatarHeadlightEnabled = true
 
     @StateObject private var mapController = JourneyMapController()
@@ -617,6 +627,8 @@ struct MapView: View {
 
     private var displaySegments: [RenderRouteSegment] { tracking.renderUnifiedSegmentsForMap }
     private var liveTail: [CLLocationCoordinate2D] { tracking.renderLiveTailForMap }
+    private var isGuideRecordMemoryStep: Bool { onboardingGuide.isCurrent(.recordMemory) }
+    private var isGuideFinishStep: Bool { onboardingGuide.isCurrent(.finishJourney) }
 
     private func lineWidths(for distance: CLLocationDistance, mode: TravelMode) -> (glow: CGFloat, core: CGFloat) {
         let t = max(0.9, min(2.4, distance / 700.0))
@@ -658,6 +670,32 @@ struct MapView: View {
         .overlay(alignment: .trailing) {
             rightMiddleButtons
         }
+        .overlay(alignment: .bottom) {
+            if isGuideRecordMemoryStep {
+                OnboardingCoachCard(
+                    message: OnboardingGuideStore.Step.recordMemory.message,
+                    actionTitle: OnboardingGuideStore.Step.recordMemory.actionTitle,
+                    onAction: {
+                        editingMemory = nil
+                        showMemoryEditor = true
+                    },
+                    onLater: { onboardingGuide.pauseForLater() },
+                    onSkip: { onboardingGuide.skipAll() }
+                )
+                .padding(.horizontal, 18)
+                .padding(.bottom, 102)
+            } else if isGuideFinishStep {
+                OnboardingCoachCard(
+                    message: OnboardingGuideStore.Step.finishJourney.message,
+                    actionTitle: OnboardingGuideStore.Step.finishJourney.actionTitle,
+                    onAction: { finishJourney() },
+                    onLater: { onboardingGuide.pauseForLater() },
+                    onSkip: { onboardingGuide.skipAll() }
+                )
+                .padding(.horizontal, 18)
+                .padding(.bottom, 102)
+            }
+        }
 
         .navigationBarBackButtonHidden(true)
         .overlay(alignment: .top) { exitToast }
@@ -690,6 +728,7 @@ struct MapView: View {
                             journeyRoute.memories[idx] = m
                             if journeyRoute.endTime == nil { persistSnapshot(.memoryAdded) }
                             editingMemory = m
+                            onboardingGuide.advance(.recordMemory)
                         } else {
                             guard let loc = tracking.userLocation else { return }
                             m.id = UUID().uuidString
@@ -700,6 +739,7 @@ struct MapView: View {
                             journeyRoute.memories.append(m)
                             if journeyRoute.endTime == nil { persistSnapshot(.memoryAdded) }
                             assignCityToMemory(memoryID: mid, coordinate: loc.coordinate)
+                            onboardingGuide.advance(.recordMemory)
                         }
                     }
                 )
@@ -762,7 +802,7 @@ struct MapView: View {
                 if let loc = tracking.userLocation { updateCamera(for: loc) }
             }
 
-            floatingActionButton(icon: "camera", label: "CAPTURE", dark: true) {
+            floatingActionButton(icon: "camera", label: "CAPTURE", dark: true, highlighted: isGuideRecordMemoryStep) {
                 editingMemory = nil
                 showMemoryEditor = true
             }
@@ -935,6 +975,12 @@ struct MapView: View {
                 .background(Color.black)
                 .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                 .shadow(color: Color.black.opacity(0.30), radius: 14, x: 0, y: 4)
+                .overlay {
+                    if isGuideFinishStep {
+                        RoundedRectangle(cornerRadius: 28, style: .continuous)
+                            .stroke(Color.white, lineWidth: 3)
+                    }
+                }
             }
             .buttonStyle(.plain)
         }
@@ -971,7 +1017,7 @@ struct MapView: View {
         return Color.gray
     }
 
-    private func floatingActionButton(icon: String, label: String, dark: Bool, action: @escaping () -> Void) -> some View {
+    private func floatingActionButton(icon: String, label: String, dark: Bool, highlighted: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 8) {
                 Image(systemName: icon)
@@ -981,6 +1027,13 @@ struct MapView: View {
                     .background(dark ? Color.black : Color.white.opacity(0.95))
                     .clipShape(Circle())
                     .shadow(color: Color.black.opacity(0.20), radius: 12, x: 0, y: 4)
+                    .overlay {
+                        if highlighted {
+                            Circle()
+                                .stroke(Color.white, lineWidth: 3)
+                        }
+                    }
+                    .scaleEffect(highlighted ? 1.06 : 1.0)
 
                 Text(label)
                     .font(.system(size: 9, weight: .semibold))
@@ -1224,6 +1277,7 @@ struct MapView: View {
     }
 
     private func finishJourney() {
+        onboardingGuide.advance(.finishJourney)
         journeyRoute.endTime = Date()
         hasOngoingJourney = false
         tracking.stopJourney()
@@ -1268,7 +1322,7 @@ struct MapView: View {
         DispatchQueue.main.async {
             if let idx = journeyRoute.memories.firstIndex(where: { $0.id == memoryID }) {
                 journeyRoute.memories[idx].cityKey = key.isEmpty ? "Unknown|" : key
-                journeyRoute.memories[idx].cityName = name.isEmpty ? "Unknown" : name
+                journeyRoute.memories[idx].cityName = name.isEmpty ? L10n.t("unknown") : name
 
                 if journeyRoute.endTime == nil { persistSnapshot(.memoryAdded) }
                 journeyStore.upsertSnapshotThrottled(journeyRoute, coordCount: journeyRoute.coordinates.count)
@@ -2924,16 +2978,9 @@ private struct JourneyMKMapView: UIViewRepresentable {
 if let ann = annotation as? MemoryGroupAnnotation {
                 let view = mapView.dequeueReusableAnnotationView(withIdentifier: "memoryGroup", for: ann)
                 view.canShowCallout = false
-                view.bounds = CGRect(
-                    x: 0,
-                    y: 0,
-                    width: MemoryPin.annotationWidth,
-                    height: MemoryPin.annotationHeight
-                )
+                view.bounds = CGRect(x: 0, y: 0, width: 56, height: 56)
                 view.backgroundColor = .clear
-                view.centerOffset = MemoryPin.annotationCenterOffset
                 view.displayPriority = .required
-                view.collisionMode = .circle
                 if #available(iOS 14.0, *) {
                     view.zPriority = .max
                 }

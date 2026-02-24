@@ -18,6 +18,7 @@ struct MainTabView: View {
 
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var flow: AppFlowCoordinator
+    @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
 
     @State private var pendingResumeJourney: JourneyRoute? = nil
     @State private var didPromptResumeThisLaunch: Bool = false
@@ -56,6 +57,37 @@ struct MainTabView: View {
                     .padding(.top, 14)
             }
         }
+        .overlay(alignment: .top) {
+            if onboardingGuide.canResume {
+                HStack {
+                    Spacer()
+                    Button("继续引导") {
+                        onboardingGuide.resume()
+                    }
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .frame(height: 36)
+                    .background(Color.black)
+                    .clipShape(Capsule(style: .continuous))
+                    .padding(.top, 12)
+                    .padding(.trailing, 14)
+                }
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if let step = globalGuideStep {
+                OnboardingCoachCard(
+                    message: step.message,
+                    actionTitle: step.actionTitle,
+                    onAction: { runGlobalGuideAction(step) },
+                    onLater: { onboardingGuide.pauseForLater() },
+                    onSkip: { onboardingGuide.skipAll() }
+                )
+                .padding(.horizontal, 18)
+                .padding(.bottom, 90)
+            }
+        }
         .sheet(item: $sidebarDestination) { destination in
             NavigationStack {
                 switch destination {
@@ -73,6 +105,14 @@ struct MainTabView: View {
         .onReceive(store.$hasLoaded) { loaded in
             guard loaded else { return }
             maybePromptResumeIfNeeded()
+        }
+        .onChange(of: selectedTab) { tab in
+            if tab == .cities {
+                onboardingGuide.advance(.openCityCards)
+            }
+            if tab == .memory {
+                onboardingGuide.advance(.openMemory)
+            }
         }
         .alert(L10n.t("resume_prompt_title"), isPresented: Binding(
             get: { pendingResumeJourney != nil },
@@ -149,6 +189,31 @@ struct MainTabView: View {
 
     private var canSwipeSidebar: Bool { true }
 
+    private var globalGuideStep: OnboardingGuideStore.Step? {
+        guard onboardingGuide.isActive, let step = onboardingGuide.currentStep else { return nil }
+        switch step {
+        case .openCityCards:
+            return selectedTab == .cities ? nil : .openCityCards
+        case .openMemory:
+            return selectedTab == .memory ? nil : .openMemory
+        default:
+            return nil
+        }
+    }
+
+    private func runGlobalGuideAction(_ step: OnboardingGuideStore.Step) {
+        switch step {
+        case .openCityCards:
+            selectedTab = .cities
+            onboardingGuide.advance(.openCityCards)
+        case .openMemory:
+            selectedTab = .memory
+            onboardingGuide.advance(.openMemory)
+        default:
+            break
+        }
+    }
+
     private var sidebarLauncherButton: some View {
         SidebarHamburgerButton(
             showSidebar: $showSidebar,
@@ -200,6 +265,7 @@ private struct SidebarEquipmentEntryView: View {
 }
 
 private struct MainSidebarMenuView: View {
+    @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var sessionStore: UserSessionStore
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
 
@@ -216,7 +282,11 @@ private struct MainSidebarMenuView: View {
         let profile = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
         if !profile.isEmpty { return profile.uppercased() }
         if let uid = sessionStore.accountUserID, !uid.isEmpty { return uid.uppercased() }
-        return "EXPLORER"
+        return L10n.t("explorer_fallback")
+    }
+
+    private var levelProgress: UserLevelProgress {
+        UserLevelProgress.from(journeys: store.journeys)
     }
 
     var body: some View {
@@ -321,16 +391,20 @@ private struct MainSidebarMenuView: View {
                         .overlay {
                             RobotRendererView(size: 30, face: .front, loadout: AvatarLoadoutStore.load())
                         }
+                        .overlay(alignment: .topTrailing) {
+                            LevelBadgeView(level: levelProgress.level)
+                                .offset(x: 10, y: -10)
+                        }
                         .shadow(color: .black.opacity(0.08), radius: 3, x: 0, y: 1)
 
-                    VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(displayName)
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(FigmaTheme.text)
                             .lineLimit(1)
 
-                        Text(L10n.t("explorer_fallback"))
-                            .font(.system(size: 12, weight: .regular))
+                        Text(String(format: L10n.t("level_format"), levelProgress.level))
+                            .font(.system(size: 12, weight: .semibold))
                             .tracking(0.3)
                             .foregroundColor(Color(red: 0.42, green: 0.42, blue: 0.42))
                             .lineLimit(1)

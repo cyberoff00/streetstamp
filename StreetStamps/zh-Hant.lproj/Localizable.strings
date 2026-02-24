@@ -408,3 +408,11 @@
 "gpx_import_progress_done" = "Conversion finished, ready to choose city";
 "gpx_import_choose_detected_city" = "Choose one detected city:";
 "gpx_import_no_detected_city" = "No city was detected from this GPX track.";
+"app_name" = "Worldo";
+"visibility_private" = "私密";
+"visibility_friends_only" = "好友可見";
+"visibility_public" = "公開";
+"unknown_id" = "unknown_id";
+"unknown_city" = "未知城市";
+"friends_exclusive_id_format" = "專屬ID：%@";
+"friends_journey_title" = "好友旅程";

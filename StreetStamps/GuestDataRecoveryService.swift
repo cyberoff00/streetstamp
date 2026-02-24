@@ -156,11 +156,11 @@ enum GuestDataRecoveryService {
         ]
         for raw in candidates {
             let value = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            if !value.isEmpty, value.lowercased() != "unknown" {
+            if !value.isEmpty, value.lowercased() != "unknown", value != L10n.t("unknown") {
                 return value
             }
         }
-        return "Unknown"
+        return L10n.t("unknown")
     }
 
     private static func loadJourneyRoute(id: String, journeysDir: URL) -> JourneyRoute? {
@@ -228,21 +228,126 @@ enum GuestDataRecoveryService {
         guard fm.fileExists(atPath: sourceDir.path) else { return 0 }
         try fm.createDirectory(at: targetDir, withIntermediateDirectories: true)
 
-        let sourceFiles = try fm.contentsOfDirectory(at: sourceDir, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
         var copied = 0
+        let sourceIDs = loadJourneyIDs(from: sourceDir)
 
-        for src in sourceFiles {
-            guard (try? src.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) != true else { continue }
-            let name = src.lastPathComponent
-            if name == "index.json" { continue }
+        for id in sourceIDs {
+            let sourceFiles = journeyFileURLs(for: id, in: sourceDir, fileManager: fm)
+            guard !sourceFiles.isEmpty else { continue }
 
-            let dst = targetDir.appendingPathComponent(name)
-            if fm.fileExists(atPath: dst.path) { continue }
-            try fm.copyItem(at: src, to: dst)
-            copied += 1
+            let targetFiles = journeyFileURLs(for: id, in: targetDir, fileManager: fm)
+            if targetFiles.isEmpty {
+                copied += try replaceJourneyFiles(for: id, sourceDir: sourceDir, targetDir: targetDir, fileManager: fm)
+                continue
+            }
+
+            guard shouldPreferSourceJourney(id: id, sourceDir: sourceDir, targetDir: targetDir, sourceFiles: sourceFiles, targetFiles: targetFiles) else {
+                continue
+            }
+
+            copied += try replaceJourneyFiles(for: id, sourceDir: sourceDir, targetDir: targetDir, fileManager: fm)
         }
 
         return copied
+    }
+
+    private static func journeyFileURLs(for id: String, in dir: URL, fileManager fm: FileManager) -> [URL] {
+        let names = [
+            "\(id).json",
+            "\(id).meta.json",
+            "\(id).delta.jsonl"
+        ]
+        return names.compactMap { name in
+            let url = dir.appendingPathComponent(name, isDirectory: false)
+            return fm.fileExists(atPath: url.path) ? url : nil
+        }
+    }
+
+    private static func replaceJourneyFiles(for id: String, sourceDir: URL, targetDir: URL, fileManager fm: FileManager) throws -> Int {
+        let sourceFiles = journeyFileURLs(for: id, in: sourceDir, fileManager: fm)
+        guard !sourceFiles.isEmpty else { return 0 }
+
+        for targetFile in journeyFileURLs(for: id, in: targetDir, fileManager: fm) {
+            try fm.removeItem(at: targetFile)
+        }
+
+        var copied = 0
+        for sourceFile in sourceFiles {
+            let destination = targetDir.appendingPathComponent(sourceFile.lastPathComponent, isDirectory: false)
+            try fm.copyItem(at: sourceFile, to: destination)
+            copied += 1
+        }
+        return copied
+    }
+
+    private static func shouldPreferSourceJourney(
+        id: String,
+        sourceDir: URL,
+        targetDir: URL,
+        sourceFiles: [URL],
+        targetFiles: [URL]
+    ) -> Bool {
+        let sourceRoute = loadJourneyRoute(id: id, journeysDir: sourceDir)
+        let targetRoute = loadJourneyRoute(id: id, journeysDir: targetDir)
+
+        if let sourceRoute, let targetRoute {
+            let sourceFreshness = journeyFreshnessDate(sourceRoute)
+            let targetFreshness = journeyFreshnessDate(targetRoute)
+            if let sourceFreshness, let targetFreshness, sourceFreshness != targetFreshness {
+                return sourceFreshness > targetFreshness
+            }
+            if let richerSource = richerJourneyWins(sourceRoute, targetRoute) {
+                return richerSource
+            }
+        } else if sourceRoute != nil, targetRoute == nil {
+            return true
+        } else if sourceRoute == nil, targetRoute != nil {
+            return false
+        }
+
+        let sourceModified = latestModificationDate(of: sourceFiles)
+        let targetModified = latestModificationDate(of: targetFiles)
+        return sourceModified > targetModified
+    }
+
+    private static func journeyFreshnessDate(_ route: JourneyRoute) -> Date? {
+        let latestMemory = route.memories.map(\.timestamp).max()
+        return [route.endTime, route.startTime, latestMemory].compactMap { $0 }.max()
+    }
+
+    private static func richerJourneyWins(_ source: JourneyRoute, _ target: JourneyRoute) -> Bool? {
+        if source.coordinates.count != target.coordinates.count {
+            return source.coordinates.count > target.coordinates.count
+        }
+        if source.memories.count != target.memories.count {
+            return source.memories.count > target.memories.count
+        }
+
+        let sourceLatestMemory = source.memories.map(\.timestamp).max() ?? .distantPast
+        let targetLatestMemory = target.memories.map(\.timestamp).max() ?? .distantPast
+        if sourceLatestMemory != targetLatestMemory {
+            return sourceLatestMemory > targetLatestMemory
+        }
+
+        if abs(source.distance - target.distance) > 0.000_1 {
+            return source.distance > target.distance
+        }
+        return nil
+    }
+
+    private static func latestModificationDate(of urls: [URL]) -> Date {
+        let fm = FileManager.default
+        var latest: Date = .distantPast
+        for url in urls {
+            guard let attrs = try? fm.attributesOfItem(atPath: url.path),
+                  let modified = attrs[.modificationDate] as? Date else {
+                continue
+            }
+            if modified > latest {
+                latest = modified
+            }
+        }
+        return latest
     }
 
     private static func copyMissingFiles(from sourceDir: URL, to targetDir: URL) throws -> Int {

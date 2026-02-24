@@ -118,7 +118,7 @@ struct MemoryDetailExportView: View {
                 }
             }
 
-            Text("— StreetStamps")
+            Text("— \(L10n.t("app_name"))")
                 .font(.system(size: 11))
                 .foregroundColor(.gray.opacity(0.9))
                 .padding(.top, 8)

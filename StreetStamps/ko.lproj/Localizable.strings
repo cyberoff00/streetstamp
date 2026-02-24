@@ -404,3 +404,11 @@
 "gpx_import_progress_done" = "Conversion finished, ready to choose city";
 "gpx_import_choose_detected_city" = "Choose one detected city:";
 "gpx_import_no_detected_city" = "No city was detected from this GPX track.";
+"app_name" = "Worldo";
+"visibility_private" = "비공개";
+"visibility_friends_only" = "친구에게 공개";
+"visibility_public" = "공개";
+"unknown_id" = "unknown_id";
+"unknown_city" = "알 수 없는 도시";
+"friends_exclusive_id_format" = "전용 ID: %@";
+"friends_journey_title" = "친구의 여정";

@@ -408,7 +408,7 @@
 				DEVELOPMENT_TEAM = XNPB3GQ7SF;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TrackingWidge/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = TrackingWidge;
+				INFOPLIST_KEY_CFBundleDisplayName = Worldo;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -441,7 +441,7 @@
 				DEVELOPMENT_TEAM = XNPB3GQ7SF;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TrackingWidge/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = TrackingWidge;
+				INFOPLIST_KEY_CFBundleDisplayName = Worldo;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -474,7 +474,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = StreetStamps/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Streetstamp;
+				INFOPLIST_KEY_CFBundleDisplayName = Worldo;
 				INFOPLIST_KEY_NSCameraUsageDescription = "我们需要访问您的摄像头来拍摄旅程照片";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "我们需要您的位置来持续追踪您的旅程";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "我们需要您的位置来追踪您的旅程";
@@ -516,7 +516,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = StreetStamps/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Streetstamp;
+				INFOPLIST_KEY_CFBundleDisplayName = Worldo;
 				INFOPLIST_KEY_NSCameraUsageDescription = "我们需要访问您的摄像头来拍摄旅程照片";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "我们需要您的位置来持续追踪您的旅程";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "我们需要您的位置来追踪您的旅程";

@@ -170,7 +170,8 @@ private extension UIResponder {
         _currentFirstResponder = nil
         UIApplication.shared.sendAction(#selector(findFirstResponder), to: nil, from: nil, for: nil)
         guard let responder = _currentFirstResponder else { return nil }
-        return (responder is UITextField || responder is UITextView || responder conforms(to: UITextInput.self)) ? responder : nil
+        let isTextInput = responder is UITextField || responder is UITextView || responder is UITextInput
+        return isTextInput ? responder : nil
     }
 
     @objc func findFirstResponder() {

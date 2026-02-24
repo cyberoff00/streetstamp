@@ -1070,16 +1070,9 @@ private struct CityDeepMKMap: UIViewRepresentable {
                 ?? MKAnnotationView(annotation: ann, reuseIdentifier: id)
             view.annotation = ann
             view.canShowCallout = false
-            view.bounds = CGRect(
-                x: 0,
-                y: 0,
-                width: MemoryPin.annotationWidth,
-                height: MemoryPin.annotationHeight
-            )
+            view.bounds = CGRect(x: 0, y: 0, width: 56, height: 56)
             view.backgroundColor = .clear
-            view.centerOffset = MemoryPin.annotationCenterOffset
             view.displayPriority = .required
-            view.collisionMode = .circle
             if #available(iOS 14.0, *) {
                 view.zPriority = .max
             }

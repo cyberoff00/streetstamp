@@ -99,7 +99,7 @@ struct GlobeViewScreen: View {
         let totalDistanceKm = totalDistanceMeters / 1000.0
         let distanceKmDisplay = max(0, Int(totalDistanceKm.rounded(.down)))
         let cityCount = cityCache.cachedCities.filter { !($0.isTemporary ?? false) }.count
-        let totalEP = max(0, Int(totalDistanceKm.rounded(.down)))
+        let levelProgress = UserLevelProgress.from(journeys: journeys)
 
         return HStack(spacing: 14) {
             ZStack {
@@ -109,6 +109,10 @@ struct GlobeViewScreen: View {
 
                 RobotRendererView(size: 56, face: .front, loadout: AvatarLoadoutStore.load())
             }
+            .overlay(alignment: .topTrailing) {
+                LevelBadgeView(level: levelProgress.level)
+                    .offset(x: 10, y: -10)
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(normalizedDisplayName(profileName))
@@ -116,7 +120,11 @@ struct GlobeViewScreen: View {
                     .foregroundColor(.black)
                     .lineLimit(1)
 
-                Text(String(format: L10n.t("level_ep_format"), totalEP))
+                HStack(spacing: 6) {
+                    Text(String(format: L10n.t("level_format"), levelProgress.level))
+                    Text("·")
+                    Text(String(format: L10n.t("level_remaining_short_format"), levelProgress.journeysRemainingToNextLevel))
+                }
                     .appCaptionStyle()
                     .foregroundColor(.black.opacity(0.62))
                     .lineLimit(1)
@@ -128,7 +136,7 @@ struct GlobeViewScreen: View {
                             .frame(height: 6)
                         Capsule()
                             .fill(UITheme.accent)
-                            .frame(width: max(8, proxy.size.width * 0.45), height: 6)
+                            .frame(width: max(8, proxy.size.width * levelProgress.progress), height: 6)
                     }
                 }
                 .frame(height: 6)

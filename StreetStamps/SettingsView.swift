@@ -2,8 +2,13 @@ import SwiftUI
 import Foundation
 import CoreLocation
 import UniformTypeIdentifiers
+import AVFoundation
+import CoreImage.CIFilterBuiltins
+import Network
+import Darwin
 
 struct SettingsView: View {
+    @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var journeyStore: JourneyStore
     @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var lifelogStore: LifelogStore
@@ -25,6 +30,8 @@ struct SettingsView: View {
     @State private var gpxImportProgressText: String = L10n.t("gpx_import_progress_idle")
     @State private var isParsingGPX = false
     @State private var isImportingGPX = false
+    @StateObject private var privateTransfer = PrivateDataTransferManager()
+    @State private var showTransferScanner = false
 
     private var appearance: MapAppearanceStyle {
         get { MapAppearanceStyle(rawValue: mapAppearanceRaw) ?? .dark }
@@ -43,6 +50,7 @@ struct SettingsView: View {
                     mapAppearanceSection
                     trackingAssistSection
                     generalSection
+                    levelRulesSection
                     accountSection
                     infoSection
                 }
@@ -255,10 +263,52 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
 
+                NavigationLink {
+                    privateTransferView
+                } label: {
+                    settingsRowLabel(title: "PRIVATE DATA TRANSFER", icon: "qrcode.viewfinder", iconColor: FigmaTheme.primary)
+                }
+                .buttonStyle(.plain)
+
                 settingsRow(title: "SUBSCRIPTION", icon: "creditcard", iconColor: FigmaTheme.primary) {
                     showPlaceholder("Subscription")
                 }
             }
+        }
+    }
+
+    private var levelRulesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionTitle("LEVEL RULES")
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text(L10n.t("settings_level_rules_intro"))
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(FigmaTheme.text)
+
+                Text("• \(L10n.t("settings_level_rules_1"))")
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundColor(FigmaTheme.subtext)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("• \(L10n.t("settings_level_rules_2"))")
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundColor(FigmaTheme.subtext)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("• \(L10n.t("settings_level_rules_3"))")
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundColor(FigmaTheme.subtext)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("• \(L10n.t("settings_level_rules_4"))")
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundColor(FigmaTheme.subtext)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 18)
+            .figmaSurfaceCard(radius: 30)
         }
     }
 
@@ -285,6 +335,156 @@ struct SettingsView: View {
                     showPlaceholder("Privacy Policy")
                 }
             }
+        }
+    }
+
+    private var privateTransferView: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("私密数据迁移")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundColor(FigmaTheme.text)
+
+                    Text("公开 Journey 建议登录后从云端恢复；此处仅迁移本地私密 Journey / Memory 图片与 Lifelog。两台设备保持在同一 Wi-Fi。")
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundColor(FigmaTheme.subtext)
+                }
+                .padding(.bottom, 4)
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("旧设备（导出）")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(FigmaTheme.text.opacity(0.76))
+
+                    Text(privateTransfer.hostingHintText)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundColor(FigmaTheme.subtext)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let qr = privateTransfer.hostingQRCode {
+                        HStack {
+                            Spacer()
+                            Image(uiImage: qr)
+                                .interpolation(.none)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 220, height: 220)
+                                .padding(10)
+                                .background(Color.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            Spacer()
+                        }
+                    }
+
+                    if privateTransfer.isHosting {
+                        Button {
+                            privateTransfer.stopHosting()
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "stop.circle")
+                                Text("停止导出")
+                                    .font(.system(size: 15, weight: .semibold))
+                            }
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 46)
+                            .background(Color.red.opacity(0.9))
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Button {
+                            Task {
+                                await privateTransfer.startHosting(currentUserID: sessionStore.currentUserID)
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "qrcode")
+                                Text("生成扫码迁移二维码")
+                                    .font(.system(size: 15, weight: .semibold))
+                            }
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 46)
+                            .background(FigmaTheme.primary)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(privateTransfer.isBusy)
+                        .opacity(privateTransfer.isBusy ? 0.6 : 1)
+                    }
+                }
+                .padding(16)
+                .figmaSurfaceCard(radius: 22)
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("新设备（导入）")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(FigmaTheme.text.opacity(0.76))
+
+                    Text(privateTransfer.importStatusText)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundColor(FigmaTheme.subtext)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Button {
+                        showTransferScanner = true
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "camera.viewfinder")
+                            Text("扫码并导入")
+                                .font(.system(size: 15, weight: .semibold))
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 46)
+                        .background(FigmaTheme.primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(privateTransfer.isBusy || privateTransfer.isImporting)
+                    .opacity((privateTransfer.isBusy || privateTransfer.isImporting) ? 0.6 : 1)
+                }
+                .padding(16)
+                .figmaSurfaceCard(radius: 22)
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 16)
+            .padding(.bottom, 28)
+        }
+        .background(FigmaTheme.mutedBackground.ignoresSafeArea())
+        .navigationTitle("设备迁移")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showTransferScanner) {
+            QRCodeScannerSheet(
+                onFound: { payload in
+                    showTransferScanner = false
+                    Task {
+                        await privateTransfer.importFromQRCodePayload(
+                            payload,
+                            currentUserID: sessionStore.currentUserID,
+                            journeyStore: journeyStore,
+                            cityCache: cityCache,
+                            lifelogStore: lifelogStore
+                        )
+                    }
+                },
+                onCancel: {
+                    showTransferScanner = false
+                }
+            )
+        }
+        .alert("迁移提示", isPresented: Binding(
+            get: { privateTransfer.alertMessage != nil },
+            set: { if !$0 { privateTransfer.alertMessage = nil } }
+        )) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(privateTransfer.alertMessage ?? "")
+        }
+        .onDisappear {
+            privateTransfer.stopHosting()
         }
     }
 
@@ -956,5 +1156,795 @@ private final class GPXXMLParserDelegate: NSObject, XMLParserDelegate {
         let fallback = ISO8601DateFormatter()
         fallback.formatOptions = [.withInternetDateTime]
         return fallback.date(from: raw)
+    }
+}
+
+private struct PrivateTransferQRCodePayload: Codable {
+    let version: Int
+    let host: String
+    let port: Int
+    let token: String
+    let fileName: String
+    let fileSize: Int64
+    let createdAt: String
+}
+
+private struct PrivateTransferArchive: Codable {
+    let version: Int
+    let files: [PrivateTransferArchiveFile]
+}
+
+private struct PrivateTransferArchiveFile: Codable {
+    let relativePath: String
+    let data: Data
+    let modifiedAt: Date?
+}
+
+private enum PrivateTransferError: LocalizedError {
+    case sourceMissing
+    case noPrivateData
+    case packageEncodeFailed
+    case packageDecodeFailed
+    case serverStartFailed
+    case localIPUnavailable
+    case invalidPayload
+    case invalidResponse
+    case importSourceNotFound
+
+    var errorDescription: String? {
+        switch self {
+        case .sourceMissing:
+            return "未找到本地私密数据目录。"
+        case .noPrivateData:
+            return "当前没有可迁移的私密 Journey 或 Lifelog 数据。"
+        case .packageEncodeFailed:
+            return "私密数据打包失败。"
+        case .packageDecodeFailed:
+            return "私密数据包解析失败。"
+        case .serverStartFailed:
+            return "本地迁移服务启动失败。"
+        case .localIPUnavailable:
+            return "无法获取本机局域网地址，请确认已连接 Wi-Fi。"
+        case .invalidPayload:
+            return "二维码内容无效。"
+        case .invalidResponse:
+            return "旧设备返回异常。"
+        case .importSourceNotFound:
+            return "导入包内容不完整。"
+        }
+    }
+}
+
+@MainActor
+private final class PrivateDataTransferManager: ObservableObject {
+    @Published var hostingQRCode: UIImage?
+    @Published var alertMessage: String?
+    @Published var isHosting = false
+    @Published var isImporting = false
+    @Published var isBusy = false
+    @Published private(set) var hostingHintText: String = "点击生成二维码后，保持此页面常亮，等待新设备扫码。"
+    @Published private(set) var importStatusText: String = "点击“扫码并导入”，扫描旧设备上的二维码。"
+
+    private struct HostedSession {
+        let server: PrivateDataTransferHTTPServer
+        let stagingDirectory: URL
+    }
+
+    private struct PrivateExportSummary {
+        let privateJourneyCount: Int
+        let privatePhotoCount: Int
+        let includesLifelog: Bool
+    }
+
+    private var hostedSession: HostedSession?
+
+    func startHosting(currentUserID: String) async {
+        guard !isBusy else { return }
+        isBusy = true
+        defer { isBusy = false }
+
+        stopHosting(clearAlert: true)
+
+        do {
+            let sourceRoot = StoragePath(userID: currentUserID).userRoot
+            guard FileManager.default.fileExists(atPath: sourceRoot.path) else {
+                throw PrivateTransferError.sourceMissing
+            }
+
+            hostingHintText = "正在准备私密数据包…"
+
+            let staged = try await Task.detached(priority: .userInitiated) {
+                try Self.makeHostedArchive(from: sourceRoot)
+            }.value
+
+            let token = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+            let server = PrivateDataTransferHTTPServer(fileURL: staged.packageURL, token: token)
+            let port = try await server.start()
+
+            guard let host = PrivateDataTransferHTTPServer.preferredLocalIPv4Address() else {
+                server.stop()
+                throw PrivateTransferError.localIPUnavailable
+            }
+
+            let attrs = try FileManager.default.attributesOfItem(atPath: staged.packageURL.path)
+            let fileSize = (attrs[.size] as? NSNumber)?.int64Value ?? 0
+            let payload = PrivateTransferQRCodePayload(
+                version: 1,
+                host: host,
+                port: Int(port),
+                token: token,
+                fileName: staged.packageURL.lastPathComponent,
+                fileSize: fileSize,
+                createdAt: ISO8601DateFormatter().string(from: Date())
+            )
+            let payloadData = try JSONEncoder().encode(payload)
+            guard let payloadText = String(data: payloadData, encoding: .utf8),
+                  let qr = Self.generateQRCode(from: payloadText) else {
+                server.stop()
+                throw PrivateTransferError.serverStartFailed
+            }
+
+            hostedSession = HostedSession(server: server, stagingDirectory: staged.stagingDirectory)
+            hostingQRCode = qr
+            isHosting = true
+            let lifelogText = staged.summary.includesLifelog ? "，含 Lifelog" : ""
+            hostingHintText = "二维码已生成（\(Self.prettySize(fileSize))，私密 Journey \(staged.summary.privateJourneyCount) 条，照片 \(staged.summary.privatePhotoCount) 张\(lifelogText)）。请在新设备扫码并保持两台设备处于同一 Wi-Fi。"
+        } catch {
+            stopHosting(clearAlert: true)
+            alertMessage = error.localizedDescription
+        }
+    }
+
+    func stopHosting() {
+        stopHosting(clearAlert: false)
+    }
+
+    func importFromQRCodePayload(
+        _ payloadText: String,
+        currentUserID: String,
+        journeyStore: JourneyStore,
+        cityCache: CityCache,
+        lifelogStore: LifelogStore
+    ) async {
+        guard !isImporting else { return }
+        isImporting = true
+        defer { isImporting = false }
+
+        do {
+            let payload = try Self.parsePayload(payloadText)
+            importStatusText = "正在连接旧设备…"
+
+            var components = URLComponents()
+            components.scheme = "http"
+            components.host = payload.host
+            components.port = payload.port
+            components.path = "/download"
+            components.queryItems = [URLQueryItem(name: "token", value: payload.token)]
+            guard let url = components.url else {
+                throw PrivateTransferError.invalidPayload
+            }
+
+            importStatusText = "正在下载私密数据包…"
+            let (downloadURL, response) = try await URLSession.shared.download(from: url)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                throw PrivateTransferError.invalidResponse
+            }
+
+            importStatusText = "正在导入私密数据包…"
+            let recoverResult = try await Task.detached(priority: .userInitiated) {
+                try Self.importArchive(
+                    downloadURL: downloadURL,
+                    currentUserID: currentUserID
+                )
+            }.value
+
+            importStatusText = "正在刷新本地数据…"
+            journeyStore.load()
+            cityCache.rebuildFromJourneyStore()
+            lifelogStore.load()
+
+            importStatusText = "导入完成。"
+            alertMessage = "导入完成：新增 Journey \(recoverResult.mergedJourneyCount) 条，照片 \(recoverResult.copiedPhotos) 个，Lifelog \(recoverResult.replacedLifelog ? "已替换为更完整版本" : "无需替换")。"
+        } catch {
+            importStatusText = "导入失败。"
+            alertMessage = error.localizedDescription
+        }
+    }
+
+    private func stopHosting(clearAlert: Bool) {
+        hostedSession?.server.stop()
+        if let staging = hostedSession?.stagingDirectory {
+            try? FileManager.default.removeItem(at: staging)
+        }
+        hostedSession = nil
+        hostingQRCode = nil
+        isHosting = false
+        hostingHintText = "点击生成二维码后，保持此页面常亮，等待新设备扫码。"
+        if clearAlert {
+            alertMessage = nil
+        }
+    }
+
+    nonisolated private static func makeHostedArchive(from sourceRoot: URL) throws -> (stagingDirectory: URL, packageURL: URL, summary: PrivateExportSummary) {
+        let fm = FileManager.default
+        let stagingDirectory = fm.temporaryDirectory.appendingPathComponent("ss-private-transfer-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)
+        let packageURL = stagingDirectory.appendingPathComponent("streetstamps-private-backup.sspkg")
+
+        let plan = try buildPrivateExportPlan(from: sourceRoot, fileManager: fm)
+        let files = try collectArchiveFiles(from: sourceRoot, allowedRelativePaths: plan.allowedRelativePaths, fileManager: fm)
+        guard !files.isEmpty else {
+            throw PrivateTransferError.noPrivateData
+        }
+        let archive = PrivateTransferArchive(version: 1, files: files)
+        do {
+            let data = try JSONEncoder().encode(archive)
+            try data.write(to: packageURL, options: .atomic)
+        } catch {
+            throw PrivateTransferError.packageEncodeFailed
+        }
+        return (stagingDirectory, packageURL, plan.summary)
+    }
+
+    nonisolated private static func parsePayload(_ text: String) throws -> PrivateTransferQRCodePayload {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let data = trimmed.data(using: .utf8) else {
+            throw PrivateTransferError.invalidPayload
+        }
+        guard let payload = try? JSONDecoder().decode(PrivateTransferQRCodePayload.self, from: data),
+              payload.version == 1,
+              !payload.host.isEmpty,
+              payload.port > 0,
+              !payload.token.isEmpty else {
+            throw PrivateTransferError.invalidPayload
+        }
+        return payload
+    }
+
+    nonisolated private static func importArchive(downloadURL: URL, currentUserID: String) throws -> GuestRecoveryResult {
+        let fm = FileManager.default
+        let workDir = fm.temporaryDirectory.appendingPathComponent("ss-private-import-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: workDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: workDir) }
+
+        let packageURL = workDir.appendingPathComponent("import.sspkg")
+        if fm.fileExists(atPath: packageURL.path) {
+            try fm.removeItem(at: packageURL)
+        }
+        do {
+            try fm.moveItem(at: downloadURL, to: packageURL)
+        } catch {
+            try fm.copyItem(at: downloadURL, to: packageURL)
+        }
+
+        let archiveData = try Data(contentsOf: packageURL)
+        guard let archive = try? JSONDecoder().decode(PrivateTransferArchive.self, from: archiveData),
+              archive.version == 1 else {
+            throw PrivateTransferError.packageDecodeFailed
+        }
+
+        let importSourceID = "transfer_import_\(UUID().uuidString.lowercased())"
+        let sourcePaths = StoragePath(userID: importSourceID)
+        let targetPaths = StoragePath(userID: currentUserID)
+        try sourcePaths.ensureBaseDirectoriesExist()
+        try targetPaths.ensureBaseDirectoriesExist()
+        defer { try? fm.removeItem(at: sourcePaths.userRoot) }
+
+        let wroteFiles = try writeArchive(archive, to: sourcePaths.userRoot, fileManager: fm)
+        guard wroteFiles > 0 else {
+            throw PrivateTransferError.importSourceNotFound
+        }
+        return try GuestDataRecoveryService.recover(from: importSourceID, to: currentUserID)
+    }
+
+    nonisolated private static func collectArchiveFiles(from root: URL, allowedRelativePaths: [String], fileManager fm: FileManager) throws -> [PrivateTransferArchiveFile] {
+        var files: [PrivateTransferArchiveFile] = []
+        files.reserveCapacity(allowedRelativePaths.count)
+
+        for relativePath in allowedRelativePaths {
+            guard isAllowedRelativePath(relativePath) else { continue }
+            let absoluteURL = root.appendingPathComponent(relativePath, isDirectory: false)
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: absoluteURL.path, isDirectory: &isDir), !isDir.boolValue else { continue }
+            let data = try Data(contentsOf: absoluteURL)
+            let attrs = try? fm.attributesOfItem(atPath: absoluteURL.path)
+            let modifiedAt = attrs?[.modificationDate] as? Date
+            files.append(PrivateTransferArchiveFile(relativePath: relativePath, data: data, modifiedAt: modifiedAt))
+        }
+
+        files.sort { $0.relativePath < $1.relativePath }
+        return files
+    }
+
+    nonisolated private static func buildPrivateExportPlan(from sourceRoot: URL, fileManager fm: FileManager) throws -> (allowedRelativePaths: [String], summary: PrivateExportSummary) {
+        let journeysDir = sourceRoot.appendingPathComponent("Journeys", isDirectory: true)
+        let photosDir = sourceRoot.appendingPathComponent("Photos", isDirectory: true)
+        let lifelogURL = sourceRoot
+            .appendingPathComponent("Caches", isDirectory: true)
+            .appendingPathComponent("lifelog_route.json", isDirectory: false)
+
+        var journeyIDs = Set<String>()
+        var memoryPhotoNames = Set<String>()
+
+        if fm.fileExists(atPath: journeysDir.path),
+           let files = try? fm.contentsOfDirectory(at: journeysDir, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
+            let candidateIDs = files.compactMap { url -> String? in
+                let name = url.lastPathComponent
+                return privateJourneyID(fromFileName: name)
+            }
+
+            for id in Set(candidateIDs) {
+                guard let route = loadJourneyRoute(id: id, journeysDir: journeysDir),
+                      route.visibility == .private else {
+                    continue
+                }
+                journeyIDs.insert(id)
+                for memory in route.memories {
+                    for path in memory.imagePaths {
+                        let cleaned = path.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if cleaned.isEmpty { continue }
+                        memoryPhotoNames.insert(cleaned)
+                    }
+                }
+            }
+        }
+
+        var allowedRelativePaths = Set<String>()
+        for id in journeyIDs {
+            let fileNames = [
+                "\(id).json",
+                "\(id).meta.json",
+                "\(id).delta.jsonl"
+            ]
+            for fileName in fileNames {
+                let url = journeysDir.appendingPathComponent(fileName, isDirectory: false)
+                if fm.fileExists(atPath: url.path) {
+                    allowedRelativePaths.insert("Journeys/\(fileName)")
+                }
+            }
+        }
+
+        var existingPhotos = 0
+        for fileName in memoryPhotoNames {
+            let url = photosDir.appendingPathComponent(fileName, isDirectory: false)
+            if fm.fileExists(atPath: url.path) {
+                allowedRelativePaths.insert("Photos/\(fileName)")
+                existingPhotos += 1
+            }
+        }
+
+        var includesLifelog = false
+        if fm.fileExists(atPath: lifelogURL.path) {
+            allowedRelativePaths.insert("Caches/lifelog_route.json")
+            includesLifelog = true
+        }
+
+        let sortedPaths = allowedRelativePaths
+            .filter { isAllowedRelativePath($0) }
+            .sorted()
+        let summary = PrivateExportSummary(
+            privateJourneyCount: journeyIDs.count,
+            privatePhotoCount: existingPhotos,
+            includesLifelog: includesLifelog
+        )
+        return (sortedPaths, summary)
+    }
+
+    nonisolated private static func privateJourneyID(fromFileName name: String) -> String? {
+        guard name != "index.json" else { return nil }
+        if name.hasSuffix(".meta.json") {
+            let raw = String(name.dropLast(".meta.json".count))
+            return raw.isEmpty ? nil : raw
+        }
+        if name.hasSuffix(".delta.jsonl") {
+            let raw = String(name.dropLast(".delta.jsonl".count))
+            return raw.isEmpty ? nil : raw
+        }
+        if name.hasSuffix(".json") {
+            let raw = String(name.dropLast(".json".count))
+            return raw.isEmpty ? nil : raw
+        }
+        return nil
+    }
+
+    nonisolated private static func loadJourneyRoute(id: String, journeysDir: URL) -> JourneyRoute? {
+        let fm = FileManager.default
+        let full = journeysDir.appendingPathComponent("\(id).json")
+        let meta = journeysDir.appendingPathComponent("\(id).meta.json")
+
+        let candidateURL: URL? = {
+            if fm.fileExists(atPath: full.path) { return full }
+            if fm.fileExists(atPath: meta.path) { return meta }
+            return nil
+        }()
+        guard let candidateURL,
+              let data = try? Data(contentsOf: candidateURL),
+              let route = try? JSONDecoder().decode(JourneyRoute.self, from: data) else {
+            return nil
+        }
+        return route
+    }
+
+    nonisolated private static func writeArchive(_ archive: PrivateTransferArchive, to root: URL, fileManager fm: FileManager) throws -> Int {
+        var wrote = 0
+        for file in archive.files {
+            guard isAllowedRelativePath(file.relativePath) else { continue }
+            let destination = root.appendingPathComponent(file.relativePath, isDirectory: false)
+            try fm.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try file.data.write(to: destination, options: .atomic)
+            if let modifiedAt = file.modifiedAt {
+                try? fm.setAttributes([.modificationDate: modifiedAt], ofItemAtPath: destination.path)
+            }
+            wrote += 1
+        }
+        return wrote
+    }
+
+    nonisolated private static func isAllowedRelativePath(_ path: String) -> Bool {
+        guard !path.isEmpty else { return false }
+        if path.hasPrefix("/") { return false }
+        if path.contains("..") { return false }
+        return true
+    }
+
+    nonisolated private static func generateQRCode(from text: String) -> UIImage? {
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(text.utf8)
+        filter.correctionLevel = "M"
+        guard let output = filter.outputImage else { return nil }
+        let scaled = output.transformed(by: CGAffineTransform(scaleX: 10, y: 10))
+        let context = CIContext()
+        guard let cgImage = context.createCGImage(scaled, from: scaled.extent) else { return nil }
+        return UIImage(cgImage: cgImage)
+    }
+
+    nonisolated private static func prettySize(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB, .useGB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
+    }
+}
+
+private final class PrivateDataTransferHTTPServer {
+    private let fileURL: URL
+    private let token: String
+    private let queue = DispatchQueue(label: "streetstamps.private.transfer.server")
+    private var listener: NWListener?
+
+    init(fileURL: URL, token: String) {
+        self.fileURL = fileURL
+        self.token = token
+    }
+
+    func start() async throws -> UInt16 {
+        let listener = try NWListener(using: .tcp, on: .any)
+        self.listener = listener
+        listener.newConnectionHandler = { [weak self] connection in
+            self?.handle(connection: connection)
+        }
+
+        return try await withCheckedThrowingContinuation { continuation in
+            listener.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    listener.stateUpdateHandler = nil
+                    continuation.resume(returning: listener.port?.rawValue ?? 0)
+                case .failed(let error):
+                    listener.stateUpdateHandler = nil
+                    continuation.resume(throwing: error)
+                default:
+                    break
+                }
+            }
+            listener.start(queue: queue)
+        }
+    }
+
+    func stop() {
+        listener?.cancel()
+        listener = nil
+    }
+
+    private func handle(connection: NWConnection) {
+        connection.start(queue: queue)
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [weak self] data, _, _, error in
+            guard let self else { return }
+            if let error {
+                self.sendError("500 Internal Server Error", on: connection, body: "server error: \(error.localizedDescription)")
+                return
+            }
+            guard let data, let req = String(data: data, encoding: .utf8) else {
+                self.sendError("400 Bad Request", on: connection, body: "bad request")
+                return
+            }
+            self.respond(to: req, on: connection)
+        }
+    }
+
+    private func respond(to request: String, on connection: NWConnection) {
+        let line = request.components(separatedBy: "\r\n").first ?? ""
+        let parts = line.split(separator: " ")
+        guard parts.count >= 2 else {
+            sendError("400 Bad Request", on: connection, body: "bad request")
+            return
+        }
+
+        let method = String(parts[0]).uppercased()
+        let target = String(parts[1])
+        guard method == "GET" else {
+            sendError("405 Method Not Allowed", on: connection, body: "only GET supported")
+            return
+        }
+
+        guard let components = URLComponents(string: "http://local\(target)"),
+              let queryToken = components.queryItems?.first(where: { $0.name == "token" })?.value,
+              queryToken == token else {
+            sendError("401 Unauthorized", on: connection, body: "token mismatch")
+            return
+        }
+
+        guard components.path == "/download" else {
+            sendError("404 Not Found", on: connection, body: "not found")
+            return
+        }
+
+        sendFile(on: connection)
+    }
+
+    private func sendFile(on connection: NWConnection) {
+        let fileSize = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? NSNumber)?.int64Value ?? 0
+        let header =
+            "HTTP/1.1 200 OK\r\n" +
+            "Content-Type: application/octet-stream\r\n" +
+            "Content-Length: \(fileSize)\r\n" +
+            "Connection: close\r\n\r\n"
+
+        connection.send(content: Data(header.utf8), completion: .contentProcessed { [weak self] error in
+            guard let self else { return }
+            if error != nil {
+                connection.cancel()
+                return
+            }
+            guard let handle = try? FileHandle(forReadingFrom: self.fileURL) else {
+                self.sendError("500 Internal Server Error", on: connection, body: "file open failed")
+                return
+            }
+            self.sendFileChunk(handle: handle, on: connection)
+        })
+    }
+
+    private func sendFileChunk(handle: FileHandle, on connection: NWConnection) {
+        do {
+            let chunk = try handle.read(upToCount: 64 * 1024) ?? Data()
+            if chunk.isEmpty {
+                try? handle.close()
+                connection.send(content: nil, completion: .contentProcessed { _ in
+                    connection.cancel()
+                })
+                return
+            }
+            connection.send(content: chunk, completion: .contentProcessed { [weak self] error in
+                guard self != nil else { return }
+                if error != nil {
+                    try? handle.close()
+                    connection.cancel()
+                    return
+                }
+                self?.sendFileChunk(handle: handle, on: connection)
+            })
+        } catch {
+            try? handle.close()
+            sendError("500 Internal Server Error", on: connection, body: "file read failed")
+        }
+    }
+
+    private func sendError(_ status: String, on connection: NWConnection, body: String) {
+        let data = Data(body.utf8)
+        let header =
+            "HTTP/1.1 \(status)\r\n" +
+            "Content-Type: text/plain; charset=utf-8\r\n" +
+            "Content-Length: \(data.count)\r\n" +
+            "Connection: close\r\n\r\n"
+        connection.send(content: Data(header.utf8) + data, completion: .contentProcessed { _ in
+            connection.cancel()
+        })
+    }
+
+    static func preferredLocalIPv4Address() -> String? {
+        var address: String?
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+
+        guard getifaddrs(&ifaddr) == 0 else { return nil }
+        defer { freeifaddrs(ifaddr) }
+
+        var pointer = ifaddr
+        while let interface = pointer?.pointee {
+            let addrFamily = interface.ifa_addr.pointee.sa_family
+            if addrFamily == UInt8(AF_INET) {
+                let name = String(cString: interface.ifa_name)
+                if name == "en0" || name == "bridge100" || name.hasPrefix("en") {
+                    var addr = interface.ifa_addr.pointee
+                    var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                    let len = socklen_t(interface.ifa_addr.pointee.sa_len)
+                    if getnameinfo(&addr, len, &hostname, socklen_t(hostname.count), nil, 0, NI_NUMERICHOST) == 0 {
+                        address = String(cString: hostname)
+                        if let address, !address.isEmpty, address != "127.0.0.1" {
+                            return address
+                        }
+                    }
+                }
+            }
+            pointer = interface.ifa_next
+        }
+        return address
+    }
+}
+
+private struct QRCodeScannerSheet: View {
+    let onFound: (String) -> Void
+    let onCancel: () -> Void
+    @State private var scannerError: String?
+
+    var body: some View {
+        NavigationStack {
+            ZStack(alignment: .bottom) {
+                QRCodeScannerRepresentable(
+                    onFound: onFound,
+                    onFailure: { scannerError = $0 }
+                )
+                .ignoresSafeArea()
+
+                VStack(spacing: 8) {
+                    Text("扫描旧设备显示的迁移二维码")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.white)
+                    Text("请保持两台设备在同一 Wi-Fi 下")
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundColor(.white.opacity(0.9))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(Color.black.opacity(0.55))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.bottom, 32)
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消", action: onCancel)
+                }
+            }
+            .alert("扫码失败", isPresented: Binding(
+                get: { scannerError != nil },
+                set: { if !$0 { scannerError = nil } }
+            )) {
+                Button("好", role: .cancel) {}
+            } message: {
+                Text(scannerError ?? "")
+            }
+        }
+    }
+}
+
+private struct QRCodeScannerRepresentable: UIViewControllerRepresentable {
+    let onFound: (String) -> Void
+    let onFailure: (String) -> Void
+
+    final class Coordinator {
+        var didEmit = false
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIViewController(context: Context) -> QRCodeScannerViewController {
+        let vc = QRCodeScannerViewController()
+        vc.onCode = { code in
+            guard !context.coordinator.didEmit else { return }
+            context.coordinator.didEmit = true
+            onFound(code)
+        }
+        vc.onFailure = { message in
+            guard !context.coordinator.didEmit else { return }
+            onFailure(message)
+        }
+        return vc
+    }
+
+    func updateUIViewController(_ uiViewController: QRCodeScannerViewController, context: Context) {}
+}
+
+private final class QRCodeScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
+    var onCode: ((String) -> Void)?
+    var onFailure: ((String) -> Void)?
+
+    private let session = AVCaptureSession()
+    private var previewLayer: AVCaptureVideoPreviewLayer?
+    private var didSetupSession = false
+    private var didEmit = false
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black
+        requestPermissionAndConfigure()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        previewLayer?.frame = view.bounds
+    }
+
+    private func requestPermissionAndConfigure() {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            configureSessionIfNeeded()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    if granted {
+                        self.configureSessionIfNeeded()
+                    } else {
+                        self.onFailure?("未授予相机权限，无法扫码。")
+                    }
+                }
+            }
+        default:
+            onFailure?("相机权限已关闭，请在系统设置中开启。")
+        }
+    }
+
+    private func configureSessionIfNeeded() {
+        guard !didSetupSession else { return }
+        didSetupSession = true
+
+        guard let device = AVCaptureDevice.default(for: .video),
+              let input = try? AVCaptureDeviceInput(device: device) else {
+            onFailure?("无法访问摄像头。")
+            return
+        }
+
+        session.beginConfiguration()
+        if session.canAddInput(input) {
+            session.addInput(input)
+        } else {
+            session.commitConfiguration()
+            onFailure?("相机输入初始化失败。")
+            return
+        }
+
+        let output = AVCaptureMetadataOutput()
+        if session.canAddOutput(output) {
+            session.addOutput(output)
+            output.setMetadataObjectsDelegate(self, queue: DispatchQueue.main)
+            output.metadataObjectTypes = [.qr]
+        } else {
+            session.commitConfiguration()
+            onFailure?("扫码输出初始化失败。")
+            return
+        }
+        session.commitConfiguration()
+
+        let preview = AVCaptureVideoPreviewLayer(session: session)
+        preview.videoGravity = .resizeAspectFill
+        preview.frame = view.bounds
+        view.layer.addSublayer(preview)
+        previewLayer = preview
+
+        session.startRunning()
+    }
+
+    func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {
+        guard !didEmit else { return }
+        guard let object = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
+              object.type == .qr,
+              let text = object.stringValue,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+        didEmit = true
+        session.stopRunning()
+        onCode?(text)
     }
 }

@@ -11,11 +11,11 @@ enum JourneyVisibility: String, Codable, CaseIterable, Identifiable {
         [.private, .friendsOnly]
     }
 
-    var titleCN: String {
+    var localizedTitle: String {
         switch self {
-        case .private: return "私密"
-        case .friendsOnly: return "好友可见"
-        case .public: return "公开"
+        case .private: return L10n.t("visibility_private")
+        case .friendsOnly: return L10n.t("visibility_friends_only")
+        case .public: return L10n.t("visibility_public")
         }
     }
 }
@@ -31,11 +31,11 @@ enum ProfileVisibility: String, Codable, CaseIterable, Identifiable {
         [.private, .friendsOnly]
     }
 
-    var titleCN: String {
+    var localizedTitle: String {
         switch self {
-        case .private: return "私密"
-        case .friendsOnly: return "好友可见"
-        case .public: return "公开"
+        case .private: return L10n.t("visibility_private")
+        case .friendsOnly: return L10n.t("visibility_friends_only")
+        case .public: return L10n.t("visibility_public")
         }
     }
 }

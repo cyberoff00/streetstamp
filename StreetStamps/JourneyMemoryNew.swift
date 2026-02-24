@@ -20,6 +20,7 @@ import CoreLocation
 struct JourneyMemoryMainView: View {
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var sessionStore: UserSessionStore
+    @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
     @Environment(\.dismiss) private var dismiss
     @State private var expandedCities: Set<String> = []
     @State private var showFilterPopover = false
@@ -106,7 +107,10 @@ struct JourneyMemoryMainView: View {
             }
         }
         .navigationBarBackButtonHidden(true)
-        .onAppear { store.load() }
+        .onAppear {
+            store.load()
+            onboardingGuide.advance(.openMemory)
+        }
         // Keep city names localized to current language (do NOT rely on persisted English titles).
         .task(id: localizationFingerprint) {
             await refreshCityLocalizations()
@@ -265,7 +269,7 @@ struct JourneyMemoryMainView: View {
 
             return CityGroupData(
                 cityKey: key,
-                cityName: nameForKey[key] ?? "Unknown",
+                cityName: nameForKey[key] ?? L10n.t("unknown"),
                 countryName: countryForKey[key] ?? "",
                 journeys: js,
                 memoriesByJourney: memsByJourney

@@ -291,7 +291,7 @@
 "ep_format" = "%@ EP";
 "equipment_title_upper" = "EQUIPMENT";
 "explore" = "EXPLORE";
-"explorer_fallback" = "EXPLORER";
+"explorer_fallback" = "USER";
 "finish_upper" = "FINISH";
 "friends_active_ago" = "Active %@";
 "friends_add_failed" = "Failed to add friend: %@";
@@ -332,6 +332,10 @@
 "journeys_title" = "Journeys";
 "level_ep_format" = "Lv.1  ·  %d EP";
 "level_format" = "Lv.%d";
+"level_dialog_message_format" = "%d more journeys to reach Lv.%d.";
+"level_dialog_title" = "Level Progress";
+"level_progress_counter_format" = "%d/%d";
+"level_remaining_short_format" = "%d journeys to next";
 "lifelog_clear_mood" = "Clear mood";
 "lifelog_confirm_disable" = "Disable";
 "lifelog_continue_recording" = "Keep Recording";
@@ -359,6 +363,11 @@
 "select_mode" = "SELECT MODE";
 "settings_avatar_headlight_desc" = "Show a directional cone that follows the phone facing direction on maps.";
 "settings_avatar_headlight_title" = "Avatar Headlight";
+"settings_level_rules_1" = "Only completed journeys are counted.";
+"settings_level_rules_2" = "Level is based on completed journey count.";
+"settings_level_rules_3" = "Journeys required per level increase gradually (Lv1→Lv2 needs 2, Lv2→Lv3 needs 3).";
+"settings_level_rules_4" = "Profile, Lifelog, and Globe show real-time level progress.";
+"settings_level_rules_intro" = "Current level rules";
 "settings_map_appearance_desc" = "Apply to all maps and route rendering";
 "settings_stationary_reminder_desc" = "Alert when movement stays within 100 m for 60 minutes.";
 "settings_stationary_reminder_title" = "Long Stationary Reminder";
@@ -412,3 +421,11 @@
 "gpx_import_progress_done" = "Conversion finished, ready to choose city";
 "gpx_import_choose_detected_city" = "Choose one detected city:";
 "gpx_import_no_detected_city" = "No city was detected from this GPX track.";
+"app_name" = "Worldo";
+"visibility_private" = "Private";
+"visibility_friends_only" = "Friends";
+"visibility_public" = "Public";
+"unknown_id" = "unknown_id";
+"unknown_city" = "Unknown City";
+"friends_exclusive_id_format" = "Exclusive ID: %@";
+"friends_journey_title" = "Friend's Journey";

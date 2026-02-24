@@ -18,6 +18,7 @@ struct MainView: View {
     @EnvironmentObject private var lifelogStore: LifelogStore
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var flow: AppFlowCoordinator
+    @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
     
     @Binding var selectedTab: Int
     @StateObject private var tracking = TrackingService.shared
@@ -136,6 +137,7 @@ struct MainView: View {
                     },
                     onGoToLibrary: {
                         selectedTab = NavigationTab.cities.rawValue
+                        onboardingGuide.advance(.openCityCards)
                     }
                 )
             } else {
@@ -145,6 +147,19 @@ struct MainView: View {
         .overlay {
             if showModeSelector {
                 modeSelectorOverlay
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if onboardingGuide.isCurrent(.startJourney) {
+                OnboardingCoachCard(
+                    message: OnboardingGuideStore.Step.startJourney.message,
+                    actionTitle: OnboardingGuideStore.Step.startJourney.actionTitle,
+                    onAction: { startOrContinueJourneyAndOpenMap() },
+                    onLater: { onboardingGuide.pauseForLater() },
+                    onSkip: { onboardingGuide.skipAll() }
+                )
+                .padding(.horizontal, 18)
+                .padding(.bottom, 98)
             }
         }
         .animation(.easeInOut(duration: 0.18), value: showSharingCard)
@@ -232,6 +247,10 @@ struct MainView: View {
     }
     
     // MARK: - UI Components
+
+    private var isGuideStartStep: Bool {
+        onboardingGuide.isCurrent(.startJourney)
+    }
     
     private func startButton(circleSize: CGFloat) -> some View {
         Button(action: startOrContinueJourneyAndOpenMap) {
@@ -244,6 +263,13 @@ struct MainView: View {
                     .fill(DesignTheme.accent)
                     .frame(width: circleSize, height: circleSize)
                     .shadow(color: DesignTheme.accent.opacity(0.30), radius: 24, y: 12)
+                    .overlay {
+                        if isGuideStartStep {
+                            Circle()
+                                .stroke(Color.white, lineWidth: 4)
+                                .shadow(color: Color.white.opacity(0.8), radius: 8)
+                        }
+                    }
 
                 Circle()
                     .stroke(DesignTheme.accent.opacity(0.22), lineWidth: 1.5)
@@ -271,6 +297,8 @@ struct MainView: View {
             }
         }
         .buttonStyle(.plain)
+        .scaleEffect(isGuideStartStep ? 1.03 : 1.0)
+        .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: isGuideStartStep)
     }
 
     private var modeButton: some View {
@@ -338,6 +366,8 @@ struct MainView: View {
             // MARK: - Journey Logic
             
             private func startOrContinueJourneyAndOpenMap() {
+                onboardingGuide.advance(.startJourney)
+
                 if !hasOngoingJourney {
                     ongoingJourney = JourneyRoute()
                     ongoingJourney.startTime = Date()

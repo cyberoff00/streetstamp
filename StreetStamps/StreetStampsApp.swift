@@ -9,6 +9,7 @@ struct StreetStampsApp: App {
     @StateObject private var lifelogStore: LifelogStore
     @StateObject private var socialStore: SocialGraphStore
     @StateObject private var flow = AppFlowCoordinator()
+    @StateObject private var onboardingGuide = OnboardingGuideStore()
     @State private var showAuthEntry = false
 
     init() {
@@ -33,6 +34,7 @@ struct StreetStampsApp: App {
                 .environmentObject(lifelogStore)
                 .environmentObject(socialStore)
                 .environmentObject(flow)
+                .environmentObject(onboardingGuide)
                 .task {
                     BackendAPIClient.shared.bindSessionStore(sessionStore)
                     sessionStore.bootstrapFileSystem()
@@ -40,6 +42,7 @@ struct StreetStampsApp: App {
                     journeyStore.load()
                     lifelogStore.load()
                     lifelogStore.bind(to: locationHub)
+                    onboardingGuide.startIfNeeded()
                     let firstPromptKey = "streetstamps.auth_entry_shown.v1"
                     if !sessionStore.isLoggedIn && !UserDefaults.standard.bool(forKey: firstPromptKey) {
                         UserDefaults.standard.set(true, forKey: firstPromptKey)

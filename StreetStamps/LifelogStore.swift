@@ -197,11 +197,12 @@ final class LifelogStore: ObservableObject {
 
     var syntheticJourney: JourneyRoute {
         var route = JourneyRoute()
+        let lifelogName = L10n.t("tab_lifelog")
         route.id = "lifelog.route.synthetic"
-        route.cityName = "Lifelog"
-        route.currentCity = "Lifelog"
-        route.canonicalCity = "Lifelog"
-        route.cityKey = "Lifelog|"
+        route.cityName = lifelogName
+        route.currentCity = lifelogName
+        route.canonicalCity = lifelogName
+        route.cityKey = "\(lifelogName)|"
         route.countryISO2 = countryISO2
         let polyline = globePolyline(maxPoints: syntheticMaxPoints)
         route.coordinates = polyline
@@ -592,15 +593,16 @@ final class LifelogStore: ObservableObject {
             guard sampled.count >= 2 else { continue }
 
             var route = JourneyRoute()
+            let lifelogName = L10n.t("tab_lifelog")
             let startTS = segment.first?.timestamp ?? .distantPast
             let endTS = segment.last?.timestamp ?? startTS
             route.id = "lifelog.globe.segment.\(index).\(Int(startTS.timeIntervalSince1970))"
             route.startTime = startTS
             route.endTime = endTS
-            route.cityName = "Lifelog"
-            route.currentCity = "Lifelog"
-            route.canonicalCity = "Lifelog"
-            route.cityKey = "Lifelog|"
+            route.cityName = lifelogName
+            route.currentCity = lifelogName
+            route.canonicalCity = lifelogName
+            route.cityKey = "\(lifelogName)|"
             route.countryISO2 = countryISO2
             route.coordinates = sampled
             route.thumbnailCoordinates = sampled

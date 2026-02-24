@@ -8,6 +8,7 @@
 import Foundation
 import SwiftUI
 import UIKit
+import CoreLocation
 
 struct ProfileView: View {
     @EnvironmentObject private var store: JourneyStore
@@ -25,6 +26,7 @@ struct ProfileView: View {
     @State private var isSavingName = false
     @State private var toastText = ""
     @State private var showToast = false
+    @State private var showLevelProgressDialog = false
     @State private var socialNotifications: [BackendNotificationItem] = []
     @State private var unreadSocialCount = 0
     @State private var showNotificationsSheet = false
@@ -40,13 +42,6 @@ struct ProfileView: View {
         store.journeys.count
     }
     
-    private var totalDistance: Double {
-        let meters = store.journeys.reduce(into: 0.0) { total, journey in
-            total += journey.distance
-        }
-        return meters / 1000.0 // km
-    }
-    
     private var citiesVisited: Int {
         cityCache.cachedCities.count
     }
@@ -55,12 +50,8 @@ struct ProfileView: View {
         store.journeys.reduce(0) { $0 + $1.memories.count }
     }
 
-    private var levelValue: Int {
-        max(1, Int((totalDistance / 50.0).rounded(.down)) + 1)
-    }
-
-    private var epValue: Int {
-        max(0, Int((totalDistance * 100.0).rounded()))
+    private var levelProgress: UserLevelProgress {
+        UserLevelProgress.from(journeys: store.journeys)
     }
 
     private var displayName: String {
@@ -120,6 +111,15 @@ struct ProfileView: View {
         }
         .sheet(isPresented: $showNotificationsSheet) {
             socialNotificationsSheet
+        }
+        .alert(L10n.t("level_dialog_title"), isPresented: $showLevelProgressDialog) {
+            Button(L10n.t("ok"), role: .cancel) {}
+        } message: {
+            Text(String(
+                format: L10n.t("level_dialog_message_format"),
+                levelProgress.journeysRemainingToNextLevel,
+                levelProgress.level + 1
+            ))
         }
         .task {
             await refreshDisplayNameIfNeeded()
@@ -250,18 +250,44 @@ struct ProfileView: View {
             .buttonStyle(.plain)
             .padding(.top, 24)
 
-            HStack(spacing: 8) {
-                Text(String(format: L10n.t("level_format"), levelValue))
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(FigmaTheme.text.opacity(0.62))
-                Text("·")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(FigmaTheme.text.opacity(0.42))
-                Text(String(format: L10n.t("ep_format"), epValue.formatted()))
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(FigmaTheme.text.opacity(0.72))
+            Button {
+                showLevelProgressDialog = true
+            } label: {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Text(String(format: L10n.t("level_format"), levelProgress.level))
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(FigmaTheme.text.opacity(0.8))
+
+                        Spacer(minLength: 6)
+
+                        Text(String(
+                            format: L10n.t("level_progress_counter_format"),
+                            levelProgress.journeysIntoCurrentLevel,
+                            levelProgress.journeysRequiredThisLevel
+                        ))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(FigmaTheme.text.opacity(0.62))
+                    }
+
+                    GeometryReader { proxy in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(FigmaTheme.border)
+                                .frame(height: 7)
+                            Capsule()
+                                .fill(FigmaTheme.primary)
+                                .frame(
+                                    width: max(10, proxy.size.width * levelProgress.progress),
+                                    height: 7
+                                )
+                        }
+                    }
+                    .frame(height: 7)
+                }
+                .padding(.top, 8)
             }
-            .padding(.top, 6)
+            .buttonStyle(.plain)
 
             Rectangle()
                 .fill(FigmaTheme.border)
@@ -867,6 +893,7 @@ struct StatNavRow: View {
 struct RecentJourneysView: View {
     @EnvironmentObject private var store: JourneyStore
     @Environment(\.dismiss) private var dismiss
+    @State private var localizedCityNameByKey: [String: String] = [:]
 
     private var cutoffDate: Date {
         // "过去一个月"：这里按最近 30 天计算
@@ -899,7 +926,7 @@ struct RecentJourneysView: View {
                             emptyState
                         } else {
                             ForEach(recentJourneys, id: \.id) { j in
-                                RecentJourneyCard(journey: j)
+                                RecentJourneyCard(journey: j, cityName: resolvedDisplayCityName(for: j))
                             }
                         }
                     }
@@ -910,6 +937,50 @@ struct RecentJourneysView: View {
             }
         }
         .navigationBarHidden(true)
+        .task(id: cityLocalizationTaskKey) {
+            await refreshCityLocalizations()
+        }
+    }
+
+    private var cityLocalizationTaskKey: String {
+        recentJourneys
+            .map { "\($0.id)|\($0.startCityKey ?? $0.cityKey)" }
+            .joined(separator: ",")
+    }
+
+    private func refreshCityLocalizations() async {
+        var coordByKey: [String: CLLocationCoordinate2D] = [:]
+        for journey in recentJourneys {
+            let key = (journey.startCityKey ?? journey.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty, key != "Unknown|", coordByKey[key] == nil else { continue }
+            if let start = journey.startCoordinate, start.isValid {
+                coordByKey[key] = start
+            }
+        }
+
+        for (key, coord) in coordByKey {
+            if localizedCityNameByKey[key] != nil { continue }
+
+            if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key),
+               !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                await MainActor.run { localizedCityNameByKey[key] = cached }
+                continue
+            }
+
+            let loc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+            if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key),
+               !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                await MainActor.run { localizedCityNameByKey[key] = title }
+            }
+        }
+    }
+
+    private func resolvedDisplayCityName(for journey: JourneyRoute) -> String {
+        let key = (journey.startCityKey ?? journey.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
+        if let localized = localizedCityNameByKey[key], !localized.isEmpty {
+            return localized
+        }
+        return journey.displayCityName
     }
 
     private var header: some View {
@@ -964,6 +1035,7 @@ struct RecentJourneysView: View {
 
 struct RecentJourneyCard: View {
     var journey: JourneyRoute
+    var cityName: String
 
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var sessionStore: UserSessionStore
@@ -1051,7 +1123,7 @@ struct RecentJourneyCard: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                Text(journey.displayCityName)
+                Text(cityName)
                     .font(.system(size: 16, weight: .bold))
                     .foregroundColor(FigmaTheme.text)
 
@@ -1076,7 +1148,7 @@ struct RecentJourneyCard: View {
                     JourneyMemoryDetailView(
                         journey: journey,
                         memories: journey.memories.sorted(by: { $0.timestamp < $1.timestamp }),
-                        cityName: journey.displayCityName,
+                        cityName: cityName,
                         countryName: localizedCountryName
                     )
                     .environmentObject(store)

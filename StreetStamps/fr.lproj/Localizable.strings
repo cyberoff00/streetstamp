@@ -405,3 +405,11 @@
 "gpx_import_progress_done" = "Conversion finished, ready to choose city";
 "gpx_import_choose_detected_city" = "Choose one detected city:";
 "gpx_import_no_detected_city" = "No city was detected from this GPX track.";
+"app_name" = "Worldo";
+"visibility_private" = "Prive";
+"visibility_friends_only" = "Amis";
+"visibility_public" = "Public";
+"unknown_id" = "unknown_id";
+"unknown_city" = "Ville inconnue";
+"friends_exclusive_id_format" = "ID exclusif : %@";
+"friends_journey_title" = "Voyage d'un ami";
