@@ -809,6 +809,7 @@ private func makeRoutesFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
             let line: Turf.LineString
             let journeyId: String
             let isDashed: Bool
+            let isFlight: Bool
             let distanceKm: Double
             let memoryCount: Double
             let signature: String?
@@ -838,6 +839,9 @@ private func makeRoutesFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
 
             for seg in built.segments where seg.coords.count >= 2 {
                 let isDashed = seg.style == .dashed
+                let isFlight = built.isFlightLike && isDashed
+                // On globe, keep dashed rendering only for intentional flight-like routes.
+                if isDashed && !isFlight { continue }
                 let lineCoords: [CLLocationCoordinate2D]
                 if built.isFlightLike, isDashed, let a = seg.coords.first, let b = seg.coords.last {
                     lineCoords = greatCircleArc(a, b)
@@ -856,6 +860,7 @@ private func makeRoutesFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
                         line: Turf.LineString(lineCoords),
                         journeyId: j.id,
                         isDashed: isDashed,
+                        isFlight: isFlight,
                         distanceKm: max(0, j.distance / 1000.0),
                         memoryCount: Double(j.memories.count),
                         signature: sig
@@ -876,7 +881,7 @@ private func makeRoutesFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
             var f = Turf.Feature(geometry: .lineString(item.line))
             f.properties = [
                 "journeyId": .string(item.journeyId),
-                "isFlight": .boolean(item.isDashed),
+                "isFlight": .boolean(item.isFlight),
                 "distanceKm": .number(item.distanceKm),
                 "memoryCount": .number(item.memoryCount),
                 "repeatWeight": .number(repeatWeight)

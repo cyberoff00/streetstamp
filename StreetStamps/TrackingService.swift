@@ -26,6 +26,13 @@ final class TrackingService: ObservableObject {
     /// Total negative elevation loss (meters) accumulated from accepted points.
     @Published var totalDescent: Double = 0
     @Published var headingDegrees: Double = 0
+    @Published private(set) var elapsedSeconds: Int = 0
+    @Published private(set) var movingSeconds: Int = 0
+    @Published private(set) var pausedSeconds: Int = 0
+    @Published private(set) var droppedByAccuracyCount: Int = 0
+    @Published private(set) var droppedByJumpCount: Int = 0
+    @Published private(set) var droppedByStationaryCount: Int = 0
+    @Published private(set) var missingSegmentCount: Int = 0
 
     @Published private(set) var mode: TravelMode = .unknown
 
@@ -172,6 +179,16 @@ final class TrackingService: ObservableObject {
         .bike: 16, .motorcycle: 14, .drive: 14,
         .flight: 180, .unknown: 16
     ]
+    private let defaultTurnKeepAngleForeground: [TravelMode: Double] = [
+        .walk: 22, .run: 20, .transit: 18,
+        .bike: 18, .motorcycle: 16, .drive: 16,
+        .flight: 180, .unknown: 20
+    ]
+    private let defaultTurnKeepAngleBackground: [TravelMode: Double] = [
+        .walk: 18, .run: 18, .transit: 16,
+        .bike: 16, .motorcycle: 14, .drive: 14,
+        .flight: 180, .unknown: 16
+    ]
 
     // MARK: - Segment switching hysteresis
 
@@ -190,6 +207,9 @@ final class TrackingService: ObservableObject {
 
     private var bag = Set<AnyCancellable>()
     private let hub = LocationHub.shared
+    private var trackingStartedAt: Date?
+    private var accumulatedPausedDuration: TimeInterval = 0
+    private var currentPauseStartedAt: Date?
 
     // MARK: - Long stationary reminder (1h / 100m start-end displacement)
 
@@ -359,9 +379,9 @@ final class TrackingService: ObservableObject {
     // MARK: - Public APIs
 
     func startNewJourney(mode: TrackingMode = .daily) {
-        startLiveActivity()
         // 设置追踪模式
         trackingMode = mode
+        startLiveActivity()
         
         // 根据模式应用配置
         let config = TrackingModeConfig.config(for: mode)
@@ -402,6 +422,14 @@ final class TrackingService: ObservableObject {
 
         needsRefreshAfterBackground = false
         isRealtimeRenderingEnabled = true
+        trackingStartedAt = Date()
+        accumulatedPausedDuration = 0
+        currentPauseStartedAt = nil
+        refreshDurations()
+        droppedByAccuracyCount = 0
+        droppedByJumpCount = 0
+        droppedByStationaryCount = 0
+        missingSegmentCount = 0
 
         resetOneEuro()
         resetLongStationaryReminderState()
@@ -467,6 +495,7 @@ final class TrackingService: ObservableObject {
         
         gapSecondsThreshold = config.gapSecondsThreshold
         gapDistanceThreshold = config.gapDistanceThreshold
+        applyTurnKeepAngles(baseTurnAngle: config.turnKeepAngle)
         
         // OneEuro配置
         if config.enableOneEuroFilter {
@@ -474,6 +503,22 @@ final class TrackingService: ObservableObject {
             oneEuroLat.beta = config.oneEuroBeta
             oneEuroLon.minCutoff = config.oneEuroMinCutoff
             oneEuroLon.beta = config.oneEuroBeta
+        }
+    }
+
+    private func applyTurnKeepAngles(baseTurnAngle: Double) {
+        let fgBaseDefault = max(1, defaultTurnKeepAngleForeground[.unknown] ?? 20)
+        let bgBaseDefault = max(1, defaultTurnKeepAngleBackground[.unknown] ?? 16)
+        let fgScale = max(0.4, min(2.2, baseTurnAngle / fgBaseDefault))
+        let bgScale = max(0.4, min(2.2, max(6, baseTurnAngle - 2) / bgBaseDefault))
+
+        turnKeepAngleForeground = defaultTurnKeepAngleForeground.mapValues { value in
+            guard value < 180 else { return value }
+            return min(170, max(8, value * fgScale))
+        }
+        turnKeepAngleBackground = defaultTurnKeepAngleBackground.mapValues { value in
+            guard value < 180 else { return value }
+            return min(170, max(8, value * bgScale))
         }
     }
     private func startForegroundHighPowerSport() {
@@ -497,7 +542,7 @@ final class TrackingService: ObservableObject {
     }
 
 
-    func resumeJourney() {
+    func resumeJourney(startTime: Date? = nil, restoredPausedDuration: TimeInterval = 0) {
         isTracking = true
         isPaused = false
         lastLocation = nil
@@ -506,6 +551,10 @@ final class TrackingService: ObservableObject {
         isInForegroundStationaryPowerMode = false
         resetLongStationaryReminderState()
         requestLongStationaryNotificationPermissionIfNeeded()
+        trackingStartedAt = startTime ?? trackingStartedAt ?? Date()
+        accumulatedPausedDuration = max(0, restoredPausedDuration)
+        currentPauseStartedAt = nil
+        refreshDurations()
         startForegroundHighPower()
     }
 
@@ -524,23 +573,24 @@ final class TrackingService: ObservableObject {
         resetLongStationaryReminderState()
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [longStationaryNotificationID])
         wasExplicitlyPaused = false  // ✅ 结束时重置
+        refreshDurations()
     }
 
     func pauseJourney() {
-        // ✅ 更新 Live Activity 暂停/继续状态
-        updateLiveActivity(memoriesCount: 0)
         guard isTracking else { return }
         isPaused = true
         lastLocation = nil
         lastRecordedLocationForStationary = nil
         resetLongStationaryReminderState()
         wasExplicitlyPaused = true  // ✅ 标记为主动暂停
+        if currentPauseStartedAt == nil {
+            currentPauseStartedAt = Date()
+        }
+        refreshDurations()
+        updateLiveActivity(memoriesCount: 0)
     }
 
     func resumeFromPause() {
-        // ✅ 更新 Live Activity 暂停/继续状态
-        updateLiveActivity(memoriesCount: 0)
-        
         guard isTracking else { return }
         isPaused = false
         lastLocation = nil
@@ -548,6 +598,12 @@ final class TrackingService: ObservableObject {
         resetLongStationaryReminderState()
         requestLongStationaryNotificationPermissionIfNeeded()
         wasExplicitlyPaused = false  // ✅ 恢复后清除标记
+        if let pauseStart = currentPauseStartedAt {
+            accumulatedPausedDuration += max(0, Date().timeIntervalSince(pauseStart))
+            currentPauseStartedAt = nil
+        }
+        refreshDurations()
+        updateLiveActivity(memoriesCount: 0)
     }
 
     func enterLowPowerBackgroundMode() {
@@ -588,7 +644,7 @@ final class TrackingService: ObservableObject {
     }
 
     func syncFromJourneyIfNeeded(_ journey: JourneyRoute) {
-        let ext = journey.coordinates.clCoords
+        let ext = journey.displayRouteCoordinates.clCoords
         guard !ext.isEmpty else { return }
 
         // ✅ key fix: if TrackingService already has a live route, NEVER overwrite it with stale journeyRoute.
@@ -598,8 +654,12 @@ final class TrackingService: ObservableObject {
             return
         }
 
-        // only sync when memory is empty (cold start / reopen app)
-        if coords.isEmpty { coords = ext }
+        // For historical/ended journeys we want deterministic playback from snapshot.
+        if !isTracking || journey.endTime != nil {
+            coords = ext
+        } else if coords.isEmpty {
+            coords = ext
+        }
         if totalDistance <= 0, journey.distance > 0 { totalDistance = journey.distance }
         if totalAscent <= 0, journey.elevationGain > 0 { totalAscent = journey.elevationGain }
         if totalDescent <= 0, journey.elevationLoss > 0 { totalDescent = journey.elevationLoss }
@@ -760,6 +820,7 @@ final class TrackingService: ObservableObject {
             // If accuracy is terrible, don't progress lock streak
             if acc > maxAcceptableAccuracy {
                 lockStreak = 0
+                droppedByAccuracyCount += 1
                 return
             }
 
@@ -842,6 +903,7 @@ final class TrackingService: ObservableObject {
                 }
 
                 // Don't record a new route point while stationary.
+                droppedByStationaryCount += 1
                 return
             } else if isInForegroundStationaryPowerMode && exitCandidate {
                 // Movement resumed: switch back to high power for responsiveness.
@@ -886,16 +948,25 @@ final class TrackingService: ObservableObject {
             (d2d >= dropJumpDistanceWhenAccuracyBad)
 
         // Drift-like: if NOT turning, drop
-        if isDriftLike && !keepBecauseTurn { return }
+        if isDriftLike && !keepBecauseTurn {
+            droppedByJumpCount += 1
+            return
+        }
 
         // Accuracy hard gate:
         // if too bad and not turning -> drop
-        if acc > maxAcceptableAccuracy && !keepBecauseTurn { return }
+        if acc > maxAcceptableAccuracy && !keepBecauseTurn {
+            droppedByAccuracyCount += 1
+            return
+        }
 
         // Speed-based outlier drop (only when NOT migration candidate)
         if !isMigrationCandidate {
             if d2d > maxJumpDistance && impliedSpeed > maxPlausibleSpeed {
-                if !keepBecauseTurn { return }
+                if !keepBecauseTurn {
+                    droppedByJumpCount += 1
+                    return
+                }
             }
         }
 
@@ -920,6 +991,7 @@ final class TrackingService: ObservableObject {
         if isMissingSegment {
             isGapLike = true
             missingFromCoord = coords.last
+            missingSegmentCount += 1
         }
 
         // =========================================================
@@ -943,7 +1015,7 @@ final class TrackingService: ObservableObject {
         // 5) Distance accumulation (2D horizontal distance)
         //    don't add nonsense on very bad accuracy unless migration
         // =========================================================
-        if !accuracyVeryBad || isMigrationCandidate {
+        if (!accuracyVeryBad || isMigrationCandidate) && !isMissingSegment {
             totalDistance += d2d
             accumulateElevation(from: last, to: loc)
         }
@@ -996,7 +1068,32 @@ final class TrackingService: ObservableObject {
         stationarySince = nil
 
         publishIfNeeded()
+        refreshDurations(now: loc.timestamp)
         rebuildRenderCache(force: false)
+    }
+
+    func elapsedDuration(at now: Date = Date()) -> TimeInterval {
+        guard let start = trackingStartedAt else { return 0 }
+        return max(0, now.timeIntervalSince(start))
+    }
+
+    func pausedDuration(at now: Date = Date()) -> TimeInterval {
+        var paused = max(0, accumulatedPausedDuration)
+        if let pauseStart = currentPauseStartedAt {
+            paused += max(0, now.timeIntervalSince(pauseStart))
+        }
+        return paused
+    }
+
+    func movingDuration(at now: Date = Date()) -> TimeInterval {
+        let elapsed = elapsedDuration(at: now)
+        return max(0, elapsed - pausedDuration(at: now))
+    }
+
+    func refreshDurations(now: Date = Date()) {
+        elapsedSeconds = Int(elapsedDuration(at: now))
+        pausedSeconds = Int(pausedDuration(at: now))
+        movingSeconds = Int(movingDuration(at: now))
     }
 
     private func resetLongStationaryReminderState() {

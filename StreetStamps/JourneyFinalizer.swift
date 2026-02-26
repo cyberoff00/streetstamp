@@ -33,6 +33,10 @@ enum JourneyFinalizer {
         _ = source
 
         var r = route
+        r.correctedCoordinates = JourneyPostCorrection.correctedCoordinates(for: r)
+        if !r.correctedCoordinates.isEmpty {
+            r.preferredRouteSource = .corrected
+        }
         r.distance = JourneyPostCorrection.correctedDistance(for: r)
 
         func persistAndReturn(_ updated: JourneyRoute, notify: (() -> Void)?) {

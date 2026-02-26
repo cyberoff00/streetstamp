@@ -209,10 +209,20 @@ extension UIImage {
 // MARK: - Journey merge helper
 // =======================================================
 struct JourneyRoute: Codable {
+    enum RouteSource: String, Codable {
+        case raw
+        case corrected
+        case matched
+    }
+
     var id: String = UUID().uuidString
     var startTime: Date?
     var endTime: Date?
     var distance: Double = 0
+    /// Cumulative paused duration in seconds for this journey.
+    var pausedDurationSeconds: TimeInterval = 0
+    /// Cumulative moving duration in seconds for this journey.
+    var movingDurationSeconds: TimeInterval = 0
     /// Total positive elevation gain (meters).
     var elevationGain: Double = 0
     /// Total negative elevation loss (meters).
@@ -221,6 +231,9 @@ struct JourneyRoute: Codable {
     var cityKey: String = "Unknown|"
     var canonicalCity: String = "Unknown"
     var coordinates: [CoordinateCodable] = []
+    var correctedCoordinates: [CoordinateCodable] = []
+    var matchedCoordinates: [CoordinateCodable] = []
+    var preferredRouteSource: RouteSource = .raw
     var memories: [JourneyMemory] = []
     var thumbnailCoordinates: [CoordinateCodable] = []
     var countryISO2: String? = nil
@@ -243,12 +256,17 @@ struct JourneyRoute: Codable {
         startTime: Date? = nil,
         endTime: Date? = nil,
         distance: Double = 0,
+        pausedDurationSeconds: TimeInterval = 0,
+        movingDurationSeconds: TimeInterval = 0,
         elevationGain: Double = 0,
         elevationLoss: Double = 0,
         isTooShort: Bool = false,
         cityKey: String = "Unknown|",
         canonicalCity: String = "Unknown",
         coordinates: [CoordinateCodable] = [],
+        correctedCoordinates: [CoordinateCodable] = [],
+        matchedCoordinates: [CoordinateCodable] = [],
+        preferredRouteSource: RouteSource = .raw,
         memories: [JourneyMemory] = [],
         thumbnailCoordinates: [CoordinateCodable] = [],
         countryISO2: String? = nil,
@@ -267,12 +285,17 @@ struct JourneyRoute: Codable {
         self.startTime = startTime
         self.endTime = endTime
         self.distance = distance
+        self.pausedDurationSeconds = pausedDurationSeconds
+        self.movingDurationSeconds = movingDurationSeconds
         self.elevationGain = elevationGain
         self.elevationLoss = elevationLoss
         self.isTooShort = isTooShort
         self.cityKey = cityKey
         self.canonicalCity = canonicalCity
         self.coordinates = coordinates
+        self.correctedCoordinates = correctedCoordinates
+        self.matchedCoordinates = matchedCoordinates
+        self.preferredRouteSource = preferredRouteSource
         self.memories = memories
         self.thumbnailCoordinates = thumbnailCoordinates
         self.countryISO2 = countryISO2
@@ -308,10 +331,12 @@ struct JourneyRoute: Codable {
 
     enum CodingKeys: String, CodingKey {
         case id, startTime, endTime, distance
+        case pausedDurationSeconds, movingDurationSeconds
         case elevationGain, elevationLoss
         case isTooShort
         case cityKey, canonicalCity
-        case coordinates, memories, thumbnailCoordinates
+        case coordinates, correctedCoordinates, matchedCoordinates, preferredRouteSource
+        case memories, thumbnailCoordinates
         case countryISO2
         case currentCity, cityName, startCityKey, endCityKey
         case exploreMode, trackingMode
@@ -330,6 +355,8 @@ struct JourneyRoute: Codable {
         endTime = try c.decodeIfPresent(Date.self, forKey: .endTime)
 
         distance = try c.decodeIfPresent(Double.self, forKey: .distance) ?? 0
+        pausedDurationSeconds = try c.decodeIfPresent(TimeInterval.self, forKey: .pausedDurationSeconds) ?? 0
+        movingDurationSeconds = try c.decodeIfPresent(TimeInterval.self, forKey: .movingDurationSeconds) ?? 0
         elevationGain = try c.decodeIfPresent(Double.self, forKey: .elevationGain) ?? 0
         elevationLoss = try c.decodeIfPresent(Double.self, forKey: .elevationLoss) ?? 0
 
@@ -343,6 +370,9 @@ struct JourneyRoute: Codable {
         if coordinates.isEmpty {
             coordinates = try c.decodeIfPresent([CoordinateCodable].self, forKey: .coords) ?? []
         }
+        correctedCoordinates = try c.decodeIfPresent([CoordinateCodable].self, forKey: .correctedCoordinates) ?? []
+        matchedCoordinates = try c.decodeIfPresent([CoordinateCodable].self, forKey: .matchedCoordinates) ?? []
+        preferredRouteSource = try c.decodeIfPresent(RouteSource.self, forKey: .preferredRouteSource) ?? .raw
 
         memories = try c.decodeIfPresent([JourneyMemory].self, forKey: .memories) ?? []
         thumbnailCoordinates = try c.decodeIfPresent([CoordinateCodable].self, forKey: .thumbnailCoordinates) ?? []
@@ -371,6 +401,8 @@ struct JourneyRoute: Codable {
         try c.encodeIfPresent(endTime, forKey: .endTime)
 
         try c.encode(distance, forKey: .distance)
+        try c.encode(pausedDurationSeconds, forKey: .pausedDurationSeconds)
+        try c.encode(movingDurationSeconds, forKey: .movingDurationSeconds)
         try c.encode(elevationGain, forKey: .elevationGain)
         try c.encode(elevationLoss, forKey: .elevationLoss)
 
@@ -380,6 +412,13 @@ struct JourneyRoute: Codable {
         try c.encode(canonicalCity, forKey: .canonicalCity)
 
         try c.encode(coordinates, forKey: .coordinates)
+        if !correctedCoordinates.isEmpty {
+            try c.encode(correctedCoordinates, forKey: .correctedCoordinates)
+        }
+        if !matchedCoordinates.isEmpty {
+            try c.encode(matchedCoordinates, forKey: .matchedCoordinates)
+        }
+        try c.encode(preferredRouteSource, forKey: .preferredRouteSource)
         // 可选：如果你想写出老 key 方便旧版本读取
         // try c.encode(coordinates, forKey: .coords)
 
@@ -411,7 +450,14 @@ extension JourneyRoute {
         var out = other
 
         if self.coordinates.count > other.coordinates.count { out.coordinates = self.coordinates }
+        if self.correctedCoordinates.count > other.correctedCoordinates.count { out.correctedCoordinates = self.correctedCoordinates }
+        if self.matchedCoordinates.count > other.matchedCoordinates.count { out.matchedCoordinates = self.matchedCoordinates }
+        if out.preferredRouteSource == .raw {
+            out.preferredRouteSource = self.preferredRouteSource
+        }
         if self.thumbnailCoordinates.count > other.thumbnailCoordinates.count { out.thumbnailCoordinates = self.thumbnailCoordinates }
+        out.pausedDurationSeconds = max(self.pausedDurationSeconds, other.pausedDurationSeconds)
+        out.movingDurationSeconds = max(self.movingDurationSeconds, other.movingDurationSeconds)
 
         var byId: [String: JourneyMemory] = [:]
         for m in self.memories { byId[m.id] = m }
@@ -425,6 +471,22 @@ extension JourneyRoute {
         if let tag = other.activityTag, !tag.isEmpty { out.activityTag = tag }
         if let memo = other.overallMemory, !memo.isEmpty { out.overallMemory = memo }
         return out
+    }
+
+    var displayRouteCoordinates: [CoordinateCodable] {
+        switch preferredRouteSource {
+        case .matched:
+            if !matchedCoordinates.isEmpty { return matchedCoordinates }
+            if !correctedCoordinates.isEmpty { return correctedCoordinates }
+            return coordinates
+        case .corrected:
+            if !correctedCoordinates.isEmpty { return correctedCoordinates }
+            return coordinates
+        case .raw:
+            if !coordinates.isEmpty { return coordinates }
+            if !correctedCoordinates.isEmpty { return correctedCoordinates }
+            return matchedCoordinates
+        }
     }
 }
 
@@ -613,6 +675,7 @@ struct MapView: View {
     @State private var isUserInteractingWithMap = false
     @State private var followUser = false
     @State private var isResolvingStartCity = false
+    @State private var isProcessingHistoricalRoute = false
 
     @State private var editingMemory: JourneyMemory? = nil
 
@@ -627,9 +690,6 @@ struct MapView: View {
 
     private var displaySegments: [RenderRouteSegment] { tracking.renderUnifiedSegmentsForMap }
     private var liveTail: [CLLocationCoordinate2D] { tracking.renderLiveTailForMap }
-    private var isGuideRecordMemoryStep: Bool { onboardingGuide.isCurrent(.recordMemory) }
-    private var isGuideFinishStep: Bool { onboardingGuide.isCurrent(.finishJourney) }
-
     private func lineWidths(for distance: CLLocationDistance, mode: TravelMode) -> (glow: CGFloat, core: CGFloat) {
         let t = max(0.9, min(2.4, distance / 700.0))
         var core = 6 * t
@@ -669,32 +729,6 @@ struct MapView: View {
         }
         .overlay(alignment: .trailing) {
             rightMiddleButtons
-        }
-        .overlay(alignment: .bottom) {
-            if isGuideRecordMemoryStep {
-                OnboardingCoachCard(
-                    message: OnboardingGuideStore.Step.recordMemory.message,
-                    actionTitle: OnboardingGuideStore.Step.recordMemory.actionTitle,
-                    onAction: {
-                        editingMemory = nil
-                        showMemoryEditor = true
-                    },
-                    onLater: { onboardingGuide.pauseForLater() },
-                    onSkip: { onboardingGuide.skipAll() }
-                )
-                .padding(.horizontal, 18)
-                .padding(.bottom, 102)
-            } else if isGuideFinishStep {
-                OnboardingCoachCard(
-                    message: OnboardingGuideStore.Step.finishJourney.message,
-                    actionTitle: OnboardingGuideStore.Step.finishJourney.actionTitle,
-                    onAction: { finishJourney() },
-                    onLater: { onboardingGuide.pauseForLater() },
-                    onSkip: { onboardingGuide.skipAll() }
-                )
-                .padding(.horizontal, 18)
-                .padding(.bottom, 102)
-            }
         }
 
         .navigationBarBackButtonHidden(true)
@@ -766,7 +800,11 @@ struct MapView: View {
             if journeyRoute.endTime == nil { flushSnapshot(.exitToHome) }
         }
         .onReceive(tracking.$coords) { onCoordsUpdated($0) }
-        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { now = $0 }
+        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) {
+            now = $0
+            tracking.refreshDurations(now: $0)
+            syncTimingFields()
+        }
         .onReceive(tracking.$userLocation.compactMap { $0 }) { loc in
             if followUser, !isUserInteractingWithMap {
                 updateCamera(for: loc)
@@ -802,7 +840,7 @@ struct MapView: View {
                 if let loc = tracking.userLocation { updateCamera(for: loc) }
             }
 
-            floatingActionButton(icon: "camera", label: "CAPTURE", dark: true, highlighted: isGuideRecordMemoryStep) {
+            floatingActionButton(icon: "camera", label: "CAPTURE", dark: true) {
                 editingMemory = nil
                 showMemoryEditor = true
             }
@@ -975,12 +1013,6 @@ struct MapView: View {
                 .background(Color.black)
                 .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                 .shadow(color: Color.black.opacity(0.30), radius: 14, x: 0, y: 4)
-                .overlay {
-                    if isGuideFinishStep {
-                        RoundedRectangle(cornerRadius: 28, style: .continuous)
-                            .stroke(Color.white, lineWidth: 3)
-                    }
-                }
             }
             .buttonStyle(.plain)
         }
@@ -989,12 +1021,8 @@ struct MapView: View {
     }
 
     private var elapsedText: String {
-        guard let start = journeyRoute.startTime else { return "00:00" }
-        let reference = journeyRoute.endTime ?? now
-        let seconds = max(0, Int(reference.timeIntervalSince(start)))
-        let m = (seconds / 60) % 60
-        let s = seconds % 60
-        return String(format: "%02d:%02d", m, s)
+        let seconds = max(0, Int(currentMovingDuration()))
+        return formatDuration(seconds)
     }
 
     private var distanceText: String {
@@ -1078,11 +1106,15 @@ struct MapView: View {
         }
 
         if journeyRoute.endTime == nil {
-            tracking.resumeJourney()
-            hasOngoingJourney = true
             journeyRoute.startTime = journeyRoute.startTime ?? Date()
+            tracking.resumeJourney(
+                startTime: journeyRoute.startTime,
+                restoredPausedDuration: journeyRoute.pausedDurationSeconds
+            )
+            hasOngoingJourney = true
         } else {
             hasOngoingJourney = false
+            maybeProcessHistoricalRouteLazily()
         }
 
         tracking.activateMapRenderingSurface()
@@ -1218,6 +1250,7 @@ struct MapView: View {
         journeyRoute.distance = tracking.totalDistance
         journeyRoute.elevationGain = tracking.totalAscent
         journeyRoute.elevationLoss = tracking.totalDescent
+        syncTimingFields()
         guard journeyRoute.endTime == nil else { return }
         persistSnapshot(.coordsTick)
     }
@@ -1278,6 +1311,7 @@ struct MapView: View {
 
     private func finishJourney() {
         onboardingGuide.advance(.finishJourney)
+        syncTimingFields()
         journeyRoute.endTime = Date()
         hasOngoingJourney = false
         tracking.stopJourney()
@@ -1297,6 +1331,60 @@ struct MapView: View {
             selectedTab = 0
             isPresented = false
         }
+    }
+
+    private func maybeProcessHistoricalRouteLazily() {
+        guard journeyRoute.endTime != nil else { return }
+        guard !isProcessingHistoricalRoute else { return }
+        guard journeyRoute.correctedCoordinates.isEmpty || journeyRoute.matchedCoordinates.isEmpty else { return }
+
+        isProcessingHistoricalRoute = true
+        let snapshot = journeyRoute
+
+        Task {
+            let processed = await JourneyRoutePostProcessor.processIfNeeded(snapshot)
+            await MainActor.run {
+                defer { isProcessingHistoricalRoute = false }
+                guard processed.id == journeyRoute.id else { return }
+                guard processed.correctedCoordinates != journeyRoute.correctedCoordinates ||
+                        processed.matchedCoordinates != journeyRoute.matchedCoordinates ||
+                        processed.preferredRouteSource != journeyRoute.preferredRouteSource else {
+                    return
+                }
+
+                journeyRoute = processed
+                tracking.syncFromJourneyIfNeeded(processed)
+                journeyStore.upsertSnapshotThrottled(processed, coordCount: processed.coordinates.count)
+                journeyStore.flushPersist(journey: processed)
+            }
+        }
+    }
+
+    private func currentMovingDuration() -> TimeInterval {
+        if journeyRoute.endTime == nil {
+            return tracking.movingDuration(at: now)
+        }
+        if journeyRoute.movingDurationSeconds > 0 {
+            return journeyRoute.movingDurationSeconds
+        }
+        guard let start = journeyRoute.startTime, let end = journeyRoute.endTime else { return 0 }
+        let elapsed = max(0, end.timeIntervalSince(start))
+        return max(0, elapsed - max(0, journeyRoute.pausedDurationSeconds))
+    }
+
+    private func syncTimingFields() {
+        journeyRoute.pausedDurationSeconds = tracking.pausedDuration(at: now)
+        journeyRoute.movingDurationSeconds = tracking.movingDuration(at: now)
+    }
+
+    private func formatDuration(_ totalSeconds: Int) -> String {
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+        if hours > 0 {
+            return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
+        }
+        return String(format: "%02d:%02d", minutes, seconds)
     }
 
     private func exitToHomeLowPower() {

@@ -179,12 +179,9 @@ struct MainTabView: View {
                 }
         }
         .tint(FigmaTheme.primary)
-        .toolbarBackground(.visible, for: .tabBar)
-        .toolbarBackground(Color.white, for: .tabBar)
         .toolbarColorScheme(.light, for: .tabBar)
-        .onAppear {
-            configureTabBarAppearance()
-        }
+        .toolbarBackground(.white, for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
     }
 
     private var canSwipeSidebar: Bool { true }
@@ -223,18 +220,6 @@ struct MainTabView: View {
             foreground: .black
         )
         .accessibilityLabel("Open sidebar")
-    }
-
-    private func configureTabBarAppearance() {
-        let appearance = UITabBarAppearance()
-        appearance.configureWithOpaqueBackground()
-        appearance.backgroundColor = .white
-        appearance.shadowColor = UIColor.black.withAlphaComponent(0.08)
-
-        UITabBar.appearance().standardAppearance = appearance
-        if #available(iOS 15.0, *) {
-            UITabBar.appearance().scrollEdgeAppearance = appearance
-        }
     }
 
     /// Prompt user once per launch if there is an unfinished journey on disk.

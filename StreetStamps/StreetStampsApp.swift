@@ -1,7 +1,9 @@
 import SwiftUI
+import UIKit
 @main
 struct StreetStampsApp: App {
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("streetstamps.intro_slides_shown.v1") private var hasSeenIntroSlides = false
     @StateObject private var locationHub = LocationHub.shared
     @StateObject private var sessionStore: UserSessionStore
     @StateObject private var journeyStore: JourneyStore
@@ -22,11 +24,21 @@ struct StreetStampsApp: App {
         _cityCache = StateObject(wrappedValue: CityCache(paths: paths, journeyStore: jStore))
         _lifelogStore = StateObject(wrappedValue: LifelogStore(paths: paths))
         _socialStore = StateObject(wrappedValue: SocialGraphStore(userID: session.currentUserID))
+
+        configureGlobalTabBarAppearance()
     }
 
     var body: some Scene {
         WindowGroup {
-            MainTabView()
+            Group {
+                if hasSeenIntroSlides {
+                    MainTabView()
+                } else {
+                    IntroSlidesView {
+                        hasSeenIntroSlides = true
+                    }
+                }
+            }
                 .environmentObject(locationHub)
                 .environmentObject(sessionStore)
                 .environmentObject(journeyStore)
@@ -43,6 +55,16 @@ struct StreetStampsApp: App {
                     lifelogStore.load()
                     lifelogStore.bind(to: locationHub)
                     onboardingGuide.startIfNeeded()
+                    let firstPromptKey = "streetstamps.auth_entry_shown.v1"
+                    if hasSeenIntroSlides &&
+                        !sessionStore.isLoggedIn &&
+                        !UserDefaults.standard.bool(forKey: firstPromptKey) {
+                        UserDefaults.standard.set(true, forKey: firstPromptKey)
+                        showAuthEntry = true
+                    }
+                }
+                .onChange(of: hasSeenIntroSlides) { _, seen in
+                    guard seen else { return }
                     let firstPromptKey = "streetstamps.auth_entry_shown.v1"
                     if !sessionStore.isLoggedIn && !UserDefaults.standard.bool(forKey: firstPromptKey) {
                         UserDefaults.standard.set(true, forKey: firstPromptKey)
@@ -77,5 +99,17 @@ struct StreetStampsApp: App {
                     }
                 }
         }
+    }
+}
+
+private func configureGlobalTabBarAppearance() {
+    let appearance = UITabBarAppearance()
+    appearance.configureWithOpaqueBackground()
+    appearance.backgroundColor = .white
+    appearance.shadowColor = UIColor.black.withAlphaComponent(0.08)
+
+    UITabBar.appearance().standardAppearance = appearance
+    if #available(iOS 15.0, *) {
+        UITabBar.appearance().scrollEdgeAppearance = appearance
     }
 }

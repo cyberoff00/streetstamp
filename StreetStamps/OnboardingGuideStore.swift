@@ -50,6 +50,15 @@ final class OnboardingGuideStore: ObservableObject {
         case skipped
     }
 
+    enum Tip: String, CaseIterable {
+        case mapLocateButton
+        case mapCaptureButton
+        case mapMemoryPin
+        case saveCardImage
+        case saveJourneyName
+        case saveActivityTag
+    }
+
     @Published private(set) var currentStep: Step?
     @Published private(set) var status: Status = .active
 
@@ -61,6 +70,8 @@ final class OnboardingGuideStore: ObservableObject {
     private let initializedKey = "streetstamps.onboarding.v1.initialized"
     private let stepKey = "streetstamps.onboarding.v1.step"
     private let statusKey = "streetstamps.onboarding.v1.status"
+    private let lightweightTipsKey = "streetstamps.onboarding.v2.lightweightTips"
+    private var shownLightweightTips: Set<String> = []
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -68,38 +79,38 @@ final class OnboardingGuideStore: ObservableObject {
     }
 
     func startIfNeeded() {
-        guard !defaults.bool(forKey: initializedKey) else { return }
-        defaults.set(true, forKey: initializedKey)
-        currentStep = .startJourney
-        status = .active
-        persist()
+        // Deprecated: step-based onboarding is intentionally disabled.
     }
 
     func isCurrent(_ step: Step) -> Bool {
-        isActive && currentStep == step
+        // Deprecated: step-based onboarding is intentionally disabled.
+        false
     }
 
     func advance(_ expected: Step) {
-        guard currentStep == expected else { return }
-        moveNext()
+        // Deprecated: step-based onboarding is intentionally disabled.
     }
 
     func pauseForLater() {
-        guard !isFinished else { return }
-        status = .paused
-        persist()
+        // Deprecated: step-based onboarding is intentionally disabled.
     }
 
     func resume() {
-        guard canResume else { return }
-        status = .active
-        persist()
+        // Deprecated: step-based onboarding is intentionally disabled.
     }
 
     func skipAll() {
-        status = .skipped
-        currentStep = nil
-        persist()
+        // Deprecated: step-based onboarding is intentionally disabled.
+    }
+
+    func shouldShowTip(_ tip: Tip) -> Bool {
+        !shownLightweightTips.contains(tip.rawValue)
+    }
+
+    func dismissTip(_ tip: Tip) {
+        guard !shownLightweightTips.contains(tip.rawValue) else { return }
+        shownLightweightTips.insert(tip.rawValue)
+        persistLightweightTips()
     }
 
     private func moveNext() {
@@ -115,20 +126,17 @@ final class OnboardingGuideStore: ObservableObject {
     }
 
     private func load() {
-        let rawStatus = defaults.string(forKey: statusKey)
-        status = rawStatus.flatMap(Status.init(rawValue:)) ?? .active
+        // Keep old keys as completed to avoid presenting legacy onboarding again.
+        currentStep = nil
+        status = .completed
+        defaults.set(true, forKey: initializedKey)
+        defaults.removeObject(forKey: stepKey)
+        defaults.set(Status.completed.rawValue, forKey: statusKey)
 
-        if let rawStep = defaults.object(forKey: stepKey) as? Int {
-            currentStep = Step(rawValue: rawStep)
+        if let values = defaults.array(forKey: lightweightTipsKey) as? [String] {
+            shownLightweightTips = Set(values)
         } else {
-            currentStep = nil
-        }
-
-        if !defaults.bool(forKey: initializedKey) {
-            currentStep = .startJourney
-            status = .active
-            defaults.set(true, forKey: initializedKey)
-            persist()
+            shownLightweightTips = []
         }
     }
 
@@ -139,5 +147,9 @@ final class OnboardingGuideStore: ObservableObject {
             defaults.removeObject(forKey: stepKey)
         }
         defaults.set(status.rawValue, forKey: statusKey)
+    }
+
+    private func persistLightweightTips() {
+        defaults.set(Array(shownLightweightTips), forKey: lightweightTipsKey)
     }
 }

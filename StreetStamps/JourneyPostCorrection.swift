@@ -18,15 +18,7 @@ enum JourneyPostCorrection {
         guard coords.count >= 2 else { return max(0, route.distance) }
 
         let config = config(for: route.trackingMode)
-
-        var cleaned = dedupeTinySteps(coords, minDistinctMeters: config.minDistinctPointMeters)
-        guard cleaned.count >= 2 else { return max(0, route.distance) }
-
-        // A few passes catch isolated GPS spikes while keeping normal turns.
-        for _ in 0..<2 {
-            cleaned = removeSinglePointSpikes(cleaned, config: config)
-            if cleaned.count < 2 { break }
-        }
+        let cleaned = correctedCoordinates(from: coords, config: config)
         guard cleaned.count >= 2 else { return max(0, route.distance) }
 
         var total: Double = 0
@@ -35,16 +27,36 @@ enum JourneyPostCorrection {
         for i in 1..<cleaned.count {
             let d = distance(cleaned[i - 1], cleaned[i])
             guard d.isFinite, d >= 0 else { continue }
-            // Keep realistic long segments with a cap instead of dropping them to zero.
-            // Extremely huge segments are still treated as outliers and ignored.
+            // Extremely huge segments are treated as outliers and ignored.
             if d > hardRejectSegment { continue }
-            if d > maxSegment {
-                total += maxSegment
-                continue
-            }
+            // Long uncertain segments are skipped instead of capped to avoid inflating distance.
+            if d > maxSegment { continue }
             total += d
         }
         return max(0, total)
+    }
+
+    static func correctedCoordinates(for route: JourneyRoute) -> [CoordinateCodable] {
+        let coords = route.coordinates.clCoords.filter(CLLocationCoordinate2DIsValid)
+        guard coords.count >= 2 else { return route.coordinates }
+        let config = config(for: route.trackingMode)
+        let cleaned = correctedCoordinates(from: coords, config: config)
+        guard cleaned.count >= 2 else { return route.coordinates }
+        return cleaned.map { CoordinateCodable(lat: $0.latitude, lon: $0.longitude) }
+    }
+
+    private static func correctedCoordinates(
+        from coords: [CLLocationCoordinate2D],
+        config: Config
+    ) -> [CLLocationCoordinate2D] {
+        var cleaned = dedupeTinySteps(coords, minDistinctMeters: config.minDistinctPointMeters)
+        guard cleaned.count >= 2 else { return cleaned }
+
+        for _ in 0..<2 {
+            cleaned = removeSinglePointSpikes(cleaned, config: config)
+            if cleaned.count < 2 { break }
+        }
+        return cleaned
     }
 
     private static func config(for mode: TrackingMode) -> Config {

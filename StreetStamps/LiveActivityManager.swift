@@ -26,6 +26,8 @@ final class LiveActivityManager: ObservableObject {
     private var cachedDistance: Double = 0
     private var cachedMemoriesCount: Int = 0
     private var cachedIsPaused: Bool = false
+    private var accumulatedPausedDuration: TimeInterval = 0
+    private var currentPauseStartedAt: Date?
     
     // App Group UserDefaults 用于与 Widget 通信
     private let sharedDefaults = UserDefaults(suiteName: "group.com.streetstamps.shared")
@@ -55,6 +57,8 @@ final class LiveActivityManager: ObservableObject {
         }
         
         trackingStartTime = Date()
+        accumulatedPausedDuration = 0
+        currentPauseStartedAt = nil
         
         let attributes = TrackingActivityAttributes(
             trackingMode: mode == .sport ? "sport" : "daily",
@@ -112,6 +116,15 @@ final class LiveActivityManager: ObservableObject {
     
     /// 暂停状态更新
     func updatePauseState(isPaused: Bool, distanceMeters: Double, elapsedSeconds: Int, memoriesCount: Int) {
+        let now = Date()
+        if isPaused {
+            if currentPauseStartedAt == nil {
+                currentPauseStartedAt = now
+            }
+        } else if let pauseStart = currentPauseStartedAt {
+            accumulatedPausedDuration += max(0, now.timeIntervalSince(pauseStart))
+            currentPauseStartedAt = nil
+        }
         cachedIsPaused = isPaused
         updateActivity(
             
@@ -142,6 +155,8 @@ final class LiveActivityManager: ObservableObject {
             )
             currentActivity = nil
             trackingStartTime = nil
+            accumulatedPausedDuration = 0
+            currentPauseStartedAt = nil
             print("[LiveActivity] Ended")
         }
     }
@@ -149,7 +164,13 @@ final class LiveActivityManager: ObservableObject {
     /// 获取当前已追踪的秒数
     func getElapsedSeconds() -> Int {
         guard let startTime = trackingStartTime else { return 0 }
-        return Int(Date().timeIntervalSince(startTime))
+        let now = Date()
+        let elapsed = max(0, now.timeIntervalSince(startTime))
+        var paused = max(0, accumulatedPausedDuration)
+        if let pauseStart = currentPauseStartedAt {
+            paused += max(0, now.timeIntervalSince(pauseStart))
+        }
+        return Int(max(0, elapsed - paused))
     }
     // MARK: - ✅ 定时更新 Timer
     
@@ -239,10 +260,10 @@ extension TrackingService {
     /// 更新 Live Activity（在位置更新时调用）
     func updateLiveActivity(memoriesCount: Int = 0) {
         Task { @MainActor in
-            let elapsedSeconds = LiveActivityManager.shared.getElapsedSeconds()
+            refreshDurations()
             LiveActivityManager.shared.updateActivity(
                 distanceMeters: totalDistance,
-                elapsedSeconds: elapsedSeconds,
+                elapsedSeconds: movingSeconds,
                 isPaused: isPaused,
                 memoriesCount: memoriesCount
             )

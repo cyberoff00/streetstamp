@@ -143,19 +143,6 @@ struct PopSharingCard: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
-            .overlay(alignment: .bottom) {
-                if onboardingGuide.isCurrent(.saveJourney) {
-                    OnboardingCoachCard(
-                        message: OnboardingGuideStore.Step.saveJourney.message,
-                        actionTitle: OnboardingGuideStore.Step.saveJourney.actionTitle,
-                        onAction: { completeJourneyAndMaybeUnlock() },
-                        onLater: { onboardingGuide.pauseForLater() },
-                        onSkip: { onboardingGuide.skipAll() }
-                    )
-                    .padding(.horizontal, 18)
-                    .padding(.bottom, 18)
-                }
-            }
             .alert(L10n.t("discard_journey_title"), isPresented: $showDiscardConfirm) {
                 Button(L10n.t("cancel"), role: .cancel) {}
                 Button(L10n.t("discard"), role: .destructive) {
@@ -387,12 +374,6 @@ struct PopSharingCard: View {
                     .background(Color.black)
                     .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                     .shadow(color: Color.black.opacity(0.30), radius: 14, x: 0, y: 4)
-                    .overlay {
-                        if onboardingGuide.isCurrent(.saveJourney) {
-                            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                                .stroke(Color.white, lineWidth: 3)
-                        }
-                    }
             }
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.top, 6)

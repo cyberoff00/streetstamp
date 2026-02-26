@@ -58,15 +58,16 @@ final class WatchJourneyRecorder: NSObject, ObservableObject {
     private var lastStatePersistedAt: Date = .distantPast
     private var lastLocationErrorAt: Date = .distantPast
 
-    private let minMoveMeters: Double = 5
+    private let minMoveMeters: Double = 3
     private let minSecondsBetweenSamples: TimeInterval = 4
-    private let firstFixMaxAccuracyMeters: Double = 65
-    private let stationarySpeedThreshold: Double = 0.45
-    private let weakAccuracyThresholdMeters: Double = 55
-    private let weakAccuracyMinSpeed: Double = 0.9
+    private let firstFixMaxAccuracyMeters: Double = 30
+    private let maxAcceptableAccuracyMeters: Double = 35
+    private let stationarySpeedThreshold: Double = 0.35
+    private let weakAccuracyThresholdMeters: Double = 30
+    private let weakAccuracyMinSpeed: Double = 0.8
     private let weakAccuracyMinDistance: Double = 18
-    private let maxPlausibleSpeedMetersPerSecond: Double = 12
-    private let maxJumpDistanceMeters: Double = 140
+    private let maxPlausibleSpeedMetersPerSecond: Double = 18
+    private let maxJumpDistanceMeters: Double = 120
     private let progressBatchSize: Int = 8
     private let progressFlushSeconds: TimeInterval = 10
     private let endedChunkPointSize: Int = 120
@@ -429,7 +430,7 @@ final class WatchJourneyRecorder: NSObject, ObservableObject {
     private func accept(_ location: CLLocation) {
         guard state == .recording else { return }
         let accuracy = location.horizontalAccuracy
-        guard accuracy >= 0, accuracy <= 120 else { return }
+        guard accuracy >= 0, accuracy <= maxAcceptableAccuracyMeters else { return }
 
         if let last = lastAcceptedLocation {
             let deltaDistance = location.distance(from: last)
