@@ -10,11 +10,6 @@
 
 import SwiftUI
 
-fileprivate enum EquipmentSegment {
-    case myGear
-    case shopGear
-}
-
 struct EquipmentView: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -22,16 +17,18 @@ struct EquipmentView: View {
     @ObservedObject private var store: AvatarCatalogStore = .shared
 
     @State private var selectedCategoryId: String = "hair"
-    @State private var activeSegment: EquipmentSegment = .myGear
+    @State private var isTryOnMode = false
+    @State private var tryOnLoadout: RobotLoadout? = nil
     @State private var economy: EquipmentEconomy = EquipmentEconomyStore.load()
 
     @State private var showCoinPurchaseDialog = false
     @State private var showInsufficientCoinsAlert = false
     @State private var showPurchaseConfirmAlert = false
+    @State private var showTryOnPurchaseDialog = false
     @State private var pendingPurchase: PendingPurchase?
+    @State private var pendingTryOnPurchase: TryOnPurchasePlan?
     @State private var feedbackMessage: String?
-    @State private var isSkinToneExpanded = false
-    @State private var isHairColorExpanded = false
+    @State private var expandedColorCategoryId: String?
 
     private let itemPrice = 200
     private let hairColorOptions = [
@@ -58,7 +55,7 @@ struct EquipmentView: View {
 
             VStack(spacing: 0) {
                 header
-                segmentRow
+                tryOnRow
                     .padding(.horizontal, 20)
                     .padding(.top, 8)
                     .padding(.bottom, 10)
@@ -67,13 +64,7 @@ struct EquipmentView: View {
                         avatarPreviewCard
                         categoryIconRow
 
-                        if selectedCategoryId == "expression" {
-                            skinToneCard
-                        }
-
-                        if selectedCategoryId == "hair" {
-                            hairColorCard
-                        }
+                        inlineColorFilterPanel
 
                         itemGrid
                     }
@@ -112,6 +103,11 @@ struct EquipmentView: View {
             AvatarLoadoutStore.save(newValue)
             economy.ensureCurrentLoadoutOwned(loadout: newValue)
         }
+        .onChange(of: isTryOnMode) { _, enabled in
+            if !enabled {
+                tryOnLoadout = nil
+            }
+        }
         .onChange(of: economy) { _, newValue in
             EquipmentEconomyStore.save(newValue)
         }
@@ -139,14 +135,23 @@ struct EquipmentView: View {
         } message: {
             Text(purchaseConfirmMessage)
         }
+        .overlay {
+            if showTryOnPurchaseDialog {
+                tryOnPurchaseDialog
+            }
+        }
+    }
+
+    private var effectiveLoadout: RobotLoadout {
+        tryOnLoadout ?? loadout
     }
 
     private var selectedHairColorHex: String {
-        normalizedHex(loadout.hairColorHex, fallback: RobotLoadout.defaultHairColorHex)
+        normalizedHex(effectiveLoadout.hairColorHex, fallback: RobotLoadout.defaultHairColorHex)
     }
 
     private var selectedBodyColorHex: String {
-        normalizedHex(loadout.bodyColorHex, fallback: RobotLoadout.defaultBodyColorHex)
+        normalizedHex(effectiveLoadout.bodyColorHex, fallback: RobotLoadout.defaultBodyColorHex)
     }
 
     private func normalizedHex(_ raw: String, fallback: String) -> String {
@@ -221,12 +226,50 @@ struct EquipmentView: View {
         .zIndex(2)
     }
 
-    private var segmentRow: some View {
-        HStack(spacing: 6) {
-            segmentButton(title: L10n.t("equipment_title"), segment: .myGear)
-            segmentButton(title: L10n.t("equipment_shop_gear"), segment: .shopGear)
+    private var tryOnRow: some View {
+        HStack(spacing: 10) {
+            Toggle(isOn: $isTryOnMode) {
+                Text("试穿模式")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(FigmaTheme.text)
+            }
+            .toggleStyle(.switch)
+
+            Spacer()
+
+            if isTryOnMode, let tryOnLoadout, tryOnLoadout != loadout {
+                Button("应用试穿") {
+                    let missing = missingItemsForTryOn(loadout: tryOnLoadout)
+                    guard !missing.isEmpty else {
+                        loadout = tryOnLoadout
+                        self.tryOnLoadout = nil
+                        isTryOnMode = false
+                        showFeedback("已应用")
+                        return
+                    }
+                    pendingTryOnPurchase = TryOnPurchasePlan(targetLoadout: tryOnLoadout, missingItems: missing)
+                    showTryOnPurchaseDialog = true
+                }
+                .font(.system(size: 12, weight: .semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(FigmaTheme.primary.opacity(0.16))
+                .clipShape(Capsule())
+                .buttonStyle(.plain)
+
+                Button("取消") {
+                    self.tryOnLoadout = nil
+                }
+                .font(.system(size: 12, weight: .semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(Color.black.opacity(0.06))
+                .clipShape(Capsule())
+                .buttonStyle(.plain)
+            }
         }
-        .padding(4)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .background(Color.white.opacity(0.88))
         .clipShape(Capsule())
         .overlay(
@@ -235,74 +278,39 @@ struct EquipmentView: View {
         )
     }
 
-    private func segmentButton(title: String, segment: EquipmentSegment) -> some View {
-        let isActive = activeSegment == segment
-
-        return Button {
-            activeSegment = segment
-        } label: {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(isActive ? FigmaTheme.text : FigmaTheme.subtext)
-                .frame(maxWidth: .infinity)
-                .frame(height: 34)
-                .background(
-                    Capsule()
-                        .fill(isActive ? FigmaTheme.primary.opacity(0.18) : Color.clear)
-                )
-                .overlay(
-                    Capsule()
-                        .stroke(isActive ? FigmaTheme.primary.opacity(0.5) : Color.clear, lineWidth: 1)
-                )
-        }
-        .buttonStyle(.plain)
-    }
-
     private var avatarPreviewCard: some View {
         RoundedRectangle(cornerRadius: 36, style: .continuous)
             .fill(Color(red: 216.0 / 255.0, green: 240.0 / 255.0, blue: 227.0 / 255.0))
             .frame(height: 216)
             .overlay {
-                RobotRendererView(size: 176, face: .front, loadout: loadout)
+                RobotRendererView(size: 176, face: .front, loadout: effectiveLoadout)
             }
             .shadow(color: Color.black.opacity(0.06), radius: 24, x: 0, y: 6)
     }
 
-    private var skinToneCard: some View {
-        colorPickerCard(
-            title: "Skin Tone",
-            symbol: "paintpalette",
-            selectedHex: selectedBodyColorHex,
-            isExpanded: isSkinToneExpanded,
-            colors: bodyColorOptions
-        ) { hex in
-            loadout.bodyColorHex = hex.uppercased()
-        } onToggle: {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                isSkinToneExpanded.toggle()
+    @ViewBuilder
+    private var inlineColorFilterPanel: some View {
+        switch expandedColorCategoryId {
+        case "expression":
+            compactColorSwatches(colors: bodyColorOptions, selectedHex: selectedBodyColorHex) { hex in
+                updateLoadout {
+                    $0.bodyColorHex = hex.uppercased()
+                }
             }
-        }
-    }
-
-    private var hairColorCard: some View {
-        colorPickerCard(
-            title: "Hair Color",
-            symbol: "paintpalette",
-            selectedHex: selectedHairColorHex,
-            isExpanded: isHairColorExpanded,
-            colors: hairColorOptions
-        ) { hex in
-            loadout.hairColorHex = hex.uppercased()
-        } onToggle: {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                isHairColorExpanded.toggle()
+        case "hair":
+            compactColorSwatches(colors: hairColorOptions, selectedHex: selectedHairColorHex) { hex in
+                updateLoadout {
+                    $0.hairColorHex = hex.uppercased()
+                }
             }
+        default:
+            EmptyView()
         }
     }
 
     private var orderedCategories: [GearCategory] {
         let map = Dictionary(uniqueKeysWithValues: store.catalog.categories.map { ($0.id, $0) })
-        let preferred = ["expression", "hair", "outfit", "accessory"]
+        let preferred = ["expression", "hair", "suit", "upper", "under", "accessory"]
         let preferredItems = preferred.compactMap { map[$0] }
         let rest = store.catalog.categories.filter { !preferred.contains($0.id) }
         return preferredItems + rest
@@ -314,7 +322,22 @@ struct EquipmentView: View {
                 ForEach(orderedCategories) { cat in
                     let selected = selectedCategoryId == cat.id
                     Button {
+                        let isColorCategory = cat.id == "expression" || cat.id == "hair"
+                        let isSameCategory = selectedCategoryId == cat.id
                         selectedCategoryId = cat.id
+
+                        guard isColorCategory else {
+                            expandedColorCategoryId = nil
+                            return
+                        }
+
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            if isSameCategory {
+                                expandedColorCategoryId = (expandedColorCategoryId == cat.id) ? nil : cat.id
+                            } else {
+                                expandedColorCategoryId = cat.id
+                            }
+                        }
                     } label: {
                         Image(systemName: categorySymbol(for: cat.id))
                             .font(.system(size: 19, weight: .semibold))
@@ -344,66 +367,26 @@ struct EquipmentView: View {
         )
     }
 
-    private func colorPickerCard(
-        title: String,
-        symbol: String,
-        selectedHex: String,
-        isExpanded: Bool,
+    private func compactColorSwatches(
         colors: [String],
-        onSelect: @escaping (String) -> Void,
-        onToggle: @escaping () -> Void
+        selectedHex: String,
+        onSelect: @escaping (String) -> Void
     ) -> some View {
-        VStack(spacing: 12) {
-            Button(action: onToggle) {
-                HStack(spacing: 10) {
-                    Image(systemName: symbol)
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundColor(FigmaTheme.primary)
-
-                    Text(title)
-                        .font(.system(size: 16, weight: .semibold))
-                        .minimumScaleFactor(0.6)
-                        .lineLimit(1)
-                        .foregroundColor(FigmaTheme.text)
-
-                    Spacer(minLength: 12)
-
-                    Circle()
-                        .fill(Color(hexRGB: selectedHex, fallback: .white))
-                        .frame(width: 32, height: 32)
-                        .overlay(
-                            Circle()
-                                .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                        )
-                        .shadow(color: Color.black.opacity(0.08), radius: 3, x: 0, y: 1)
-
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(FigmaTheme.subtext)
-                }
-                .frame(minHeight: 44)
-            }
-            .buttonStyle(.plain)
-
-            if isExpanded {
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 34), spacing: 10)],
-                    alignment: .leading,
-                    spacing: 10
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 34), spacing: 10)],
+            alignment: .leading,
+            spacing: 10
+        ) {
+            ForEach(colors, id: \.self) { hex in
+                colorSwatch(
+                    hex: hex,
+                    isSelected: selectedHex == hex.uppercased()
                 ) {
-                    ForEach(colors, id: \.self) { hex in
-                        colorSwatch(
-                            hex: hex,
-                            isSelected: selectedHex == hex.uppercased()
-                        ) {
-                            onSelect(hex)
-                        }
-                    }
+                    onSelect(hex)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(Color.white.opacity(0.95))
@@ -412,6 +395,7 @@ struct EquipmentView: View {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .stroke(FigmaTheme.border, lineWidth: 1)
         )
+        .transition(.opacity.combined(with: .move(edge: .top)))
     }
 
     private func categorySymbol(for categoryId: String) -> String {
@@ -420,8 +404,12 @@ struct EquipmentView: View {
             return "face.smiling"
         case "hair":
             return "person.crop.circle"
-        case "outfit":
+        case "suit":
             return "tshirt"
+        case "upper":
+            return "tshirt.fill"
+        case "under":
+            return "figure.walk"
         case "accessory":
             return "eyeglasses"
         default:
@@ -450,16 +438,8 @@ struct EquipmentView: View {
                 GridItem(.flexible(), spacing: 10, alignment: .top),
                 GridItem(.flexible(), spacing: 10, alignment: .top)
             ]
-            let visibleItems = category.items.filter { item in
-                let ownership = ownershipState(category: category, item: item)
-                if activeSegment == .myGear {
-                    return ownership != .locked
-                }
-                return true
-            }
-
             LazyVGrid(columns: columns, spacing: 10) {
-                ForEach(visibleItems) { item in
+                ForEach(category.items) { item in
                     let ownership = ownershipState(category: category, item: item)
 
                     Button {
@@ -492,39 +472,30 @@ struct EquipmentView: View {
     }
 
     private func handleTap(category: GearCategory, item: GearItem, ownership: GearOwnership) {
-        switch activeSegment {
-        case .myGear:
-            switch ownership {
-            case .equipped:
-                break
-            case .owned:
-                applySelection(category: category, item: item)
-                showFeedback("Equipped")
-            case .locked:
-                activeSegment = .shopGear
-                showFeedback("Item is locked. Go unlock it in Shop Gear.")
+        if isTryOnMode {
+            applySelection(category: category, item: item)
+            showFeedback("试穿中")
+            return
+        }
+
+        switch ownership {
+        case .equipped:
+            break
+        case .owned:
+            applySelection(category: category, item: item)
+            showFeedback("Equipped")
+        case .locked:
+            if economy.coins < itemPrice {
+                showInsufficientCoinsAlert = true
+                return
             }
 
-        case .shopGear:
-            switch ownership {
-            case .equipped:
-                break
-            case .owned:
-                applySelection(category: category, item: item)
-                showFeedback("Equipped")
-            case .locked:
-                if economy.coins < itemPrice {
-                    showInsufficientCoinsAlert = true
-                    return
-                }
-
-                pendingPurchase = PendingPurchase(
-                    categoryId: category.id,
-                    itemId: item.id,
-                    itemName: L10n.t(item.nameKey)
-                )
-                showPurchaseConfirmAlert = true
-            }
+            pendingPurchase = PendingPurchase(
+                categoryId: category.id,
+                itemId: item.id,
+                itemName: L10n.t(item.nameKey)
+            )
+            showPurchaseConfirmAlert = true
         }
     }
 
@@ -573,35 +544,233 @@ struct EquipmentView: View {
         self.pendingPurchase = nil
     }
 
+    private var pendingTryOnPurchaseCost: Int {
+        guard let pendingTryOnPurchase else { return 0 }
+        return pendingTryOnPurchase.missingItems.count * itemPrice
+    }
+
+    @ViewBuilder
+    private var tryOnPurchaseDialog: some View {
+        let items = pendingTryOnPurchase?.missingItems ?? []
+        ZStack {
+            Color.black.opacity(0.28)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    showTryOnPurchaseDialog = false
+                    pendingTryOnPurchase = nil
+                }
+
+            VStack(spacing: 14) {
+                Text("未购买装备")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(FigmaTheme.text)
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 56), spacing: 10)],
+                    alignment: .leading,
+                    spacing: 10
+                ) {
+                    ForEach(items, id: \.self) { item in
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color(red: 231.0 / 255.0, green: 245.0 / 255.0, blue: 236.0 / 255.0))
+                            .frame(height: 56)
+                            .overlay {
+                                if let imageName = item.imageName {
+                                    Image(imageName)
+                                        .resizable()
+                                        .interpolation(.none)
+                                        .scaledToFit()
+                                        .padding(8)
+                                } else {
+                                    Image(systemName: "questionmark")
+                                        .font(.system(size: 14, weight: .bold))
+                                        .foregroundColor(FigmaTheme.subtext)
+                                }
+                            }
+                    }
+                }
+                .frame(maxHeight: 210)
+
+                HStack(spacing: 6) {
+                    Image(systemName: "bitcoinsign.circle.fill")
+                        .foregroundColor(FigmaTheme.primary)
+                    Text("总价 \(pendingTryOnPurchaseCost)")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(FigmaTheme.text)
+                }
+
+                HStack(spacing: 10) {
+                    Button(L10n.t("cancel")) {
+                        showTryOnPurchaseDialog = false
+                        pendingTryOnPurchase = nil
+                    }
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(FigmaTheme.text)
+                    .frame(maxWidth: .infinity, minHeight: 38)
+                    .background(Color.black.opacity(0.06))
+                    .clipShape(Capsule())
+                    .buttonStyle(.plain)
+
+                    Button("一键购买并应用") {
+                        confirmTryOnPurchaseAndApply()
+                    }
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity, minHeight: 38)
+                    .background(FigmaTheme.primary)
+                    .clipShape(Capsule())
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: 340)
+            .background(Color.white)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(FigmaTheme.border, lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.18), radius: 20, x: 0, y: 10)
+            .padding(.horizontal, 24)
+        }
+    }
+
+    private func confirmTryOnPurchaseAndApply() {
+        guard let pendingTryOnPurchase else { return }
+        let cost = pendingTryOnPurchaseCost
+        guard economy.coins >= cost else {
+            showInsufficientCoinsAlert = true
+            showTryOnPurchaseDialog = false
+            self.pendingTryOnPurchase = nil
+            return
+        }
+
+        economy.coins -= cost
+        for item in pendingTryOnPurchase.missingItems {
+            economy.markOwned(categoryId: item.categoryId, itemId: item.itemId)
+        }
+
+        loadout = pendingTryOnPurchase.targetLoadout
+        tryOnLoadout = nil
+        isTryOnMode = false
+        showTryOnPurchaseDialog = false
+        showFeedback("已购买并应用")
+        self.pendingTryOnPurchase = nil
+    }
+
     private func isSelected(category: GearCategory, item: GearItem) -> Bool {
+        let current = effectiveLoadout
         switch category.selectionKey {
         case "hairId":
-            return loadout.hairId == item.id
-        case "outfitId":
-            return loadout.outfitId == item.id
+            return current.hairId == item.id
+        case "suitId":
+            if item.id == "none" { return current.suitId == nil }
+            return current.suitId == item.id
+        case "upperId":
+            if item.id == "none" { return current.upperId == "none" }
+            return current.upperId == item.id
+        case "underId":
+            if item.id == "none" { return current.underId == "none" }
+            return current.underId == item.id
         case "accessoryId":
-            if item.id == "none" { return loadout.accessoryId == nil }
-            return loadout.accessoryId == item.id
+            if item.id == "none" { return current.accessoryIds.isEmpty }
+            return current.accessoryIds.contains(item.id)
         case "expressionId":
-            return loadout.expressionId == item.id
+            return current.expressionId == item.id
         default:
             return false
         }
     }
 
-    private func applySelection(category: GearCategory, item: GearItem) {
-        switch category.selectionKey {
-        case "hairId":
-            loadout.hairId = item.id
-        case "outfitId":
-            loadout.outfitId = item.id
-        case "accessoryId":
-            loadout.accessoryId = (item.id == "none") ? nil : item.id
-        case "expressionId":
-            loadout.expressionId = item.id
-        default:
-            break
+    private func updateLoadout(_ transform: (inout RobotLoadout) -> Void) {
+        if isTryOnMode {
+            var temp = tryOnLoadout ?? loadout
+            transform(&temp)
+            tryOnLoadout = temp
+        } else {
+            transform(&loadout)
         }
+    }
+
+    private func applySelection(category: GearCategory, item: GearItem) {
+        updateLoadout { target in
+            switch category.selectionKey {
+            case "hairId":
+                target.hairId = item.id
+            case "suitId":
+                let selectedSuit = (item.id == "none") ? nil : item.id
+                if selectedSuit != nil {
+                    if target.upperId != "none" {
+                        target.savedUpperIdForSuit = target.upperId
+                    }
+                    if target.underId != "none" {
+                        target.savedUnderIdForSuit = target.underId
+                    }
+                    target.suitId = selectedSuit
+                    target.upperId = "none"
+                    target.underId = "none"
+                } else {
+                    target.suitId = nil
+                    if target.upperId == "none" {
+                        target.upperId = target.savedUpperIdForSuit
+                    }
+                    if target.underId == "none" {
+                        target.underId = target.savedUnderIdForSuit
+                    }
+                }
+            case "upperId":
+                target.upperId = item.id
+                if item.id != "none" {
+                    target.savedUpperIdForSuit = item.id
+                    target.suitId = nil
+                }
+            case "underId":
+                target.underId = item.id
+                if item.id != "none" {
+                    target.savedUnderIdForSuit = item.id
+                    target.suitId = nil
+                }
+            case "accessoryId":
+                if item.id == "none" {
+                    target.accessoryIds = []
+                } else {
+                    if let idx = target.accessoryIds.firstIndex(of: item.id) {
+                        target.accessoryIds.remove(at: idx)
+                    } else {
+                        target.accessoryIds.append(item.id)
+                    }
+                }
+            case "expressionId":
+                target.expressionId = item.id
+            default:
+                break
+            }
+        }
+    }
+
+    private func missingItemsForTryOn(loadout: RobotLoadout) -> [TryOnMissingItem] {
+        var seen = Set<String>()
+        var result: [TryOnMissingItem] = []
+
+        func appendIfMissing(categoryId: String, itemId: String?) {
+            guard let itemId, itemId != "none" else { return }
+            guard !economy.owns(categoryId: categoryId, itemId: itemId) else { return }
+            let key = "\(categoryId)::\(itemId)"
+            guard !seen.contains(key) else { return }
+            seen.insert(key)
+            let imageName = store.item(categoryId: categoryId, itemId: itemId).flatMap { store.imageName($0.images, face: .front) }
+            result.append(TryOnMissingItem(categoryId: categoryId, itemId: itemId, imageName: imageName))
+        }
+
+        appendIfMissing(categoryId: "hair", itemId: loadout.hairId)
+        appendIfMissing(categoryId: "expression", itemId: loadout.expressionId)
+        appendIfMissing(categoryId: "suit", itemId: loadout.suitId)
+        appendIfMissing(categoryId: "upper", itemId: loadout.upperId)
+        appendIfMissing(categoryId: "under", itemId: loadout.underId)
+        for accessoryId in loadout.accessoryIds {
+            appendIfMissing(categoryId: "accessory", itemId: accessoryId)
+        }
+        return result
     }
 }
 
@@ -609,6 +778,17 @@ private struct PendingPurchase: Equatable {
     let categoryId: String
     let itemId: String
     let itemName: String
+}
+
+private struct TryOnMissingItem: Equatable, Hashable {
+    let categoryId: String
+    let itemId: String
+    let imageName: String?
+}
+
+private struct TryOnPurchasePlan: Equatable {
+    let targetLoadout: RobotLoadout
+    let missingItems: [TryOnMissingItem]
 }
 
 private enum GearOwnership {
@@ -729,11 +909,18 @@ private struct EquipmentEconomy: Codable, Equatable {
 
     mutating func ensureCurrentLoadoutOwned(loadout: RobotLoadout) {
         markOwned(categoryId: "hair", itemId: loadout.hairId)
-        markOwned(categoryId: "outfit", itemId: loadout.outfitId)
+        markOwned(categoryId: "suit", itemId: "none")
+        markOwned(categoryId: "upper", itemId: "none")
+        markOwned(categoryId: "under", itemId: "none")
+        if let suitId = loadout.suitId {
+            markOwned(categoryId: "suit", itemId: suitId)
+        }
+        markOwned(categoryId: "upper", itemId: loadout.upperId)
+        markOwned(categoryId: "under", itemId: loadout.underId)
         markOwned(categoryId: "expression", itemId: loadout.expressionId)
         markOwned(categoryId: "accessory", itemId: "none")
 
-        if let accessoryId = loadout.accessoryId {
+        for accessoryId in loadout.accessoryIds {
             markOwned(categoryId: "accessory", itemId: accessoryId)
         }
     }
@@ -753,10 +940,14 @@ private struct EquipmentEconomy: Codable, Equatable {
         switch selectionKey {
         case "hairId":
             return loadout.hairId
-        case "outfitId":
-            return loadout.outfitId
+        case "suitId":
+            return loadout.suitId
+        case "upperId":
+            return loadout.upperId
+        case "underId":
+            return loadout.underId
         case "accessoryId":
-            return loadout.accessoryId
+            return loadout.accessoryIds.first
         case "expressionId":
             return loadout.expressionId
         default:

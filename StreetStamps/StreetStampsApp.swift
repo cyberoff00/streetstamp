@@ -14,6 +14,13 @@ struct StreetStampsApp: App {
     @StateObject private var onboardingGuide = OnboardingGuideStore()
     @State private var showAuthEntry = false
 
+    /// Ensure passive location stream is alive for Lifelog when no active journey is running.
+    private func ensurePassiveLocationTrackingIfNeeded() {
+        if !TrackingService.shared.isTracking {
+            locationHub.startLowPower()
+        }
+    }
+
     init() {
         let session = UserSessionStore()
         _sessionStore = StateObject(wrappedValue: session)
@@ -54,6 +61,8 @@ struct StreetStampsApp: App {
                     journeyStore.load()
                     lifelogStore.load()
                     lifelogStore.bind(to: locationHub)
+                    locationHub.requestPermissionIfNeeded()
+                    ensurePassiveLocationTrackingIfNeeded()
                     onboardingGuide.startIfNeeded()
                     let firstPromptKey = "streetstamps.auth_entry_shown.v1"
                     if hasSeenIntroSlides &&
@@ -80,6 +89,7 @@ struct StreetStampsApp: App {
                     lifelogStore.rebind(paths: paths)
                     lifelogStore.load()
                     lifelogStore.bind(to: locationHub)
+                    ensurePassiveLocationTrackingIfNeeded()
                     socialStore.switchUser(uid)
                 }
                 .fullScreenCover(isPresented: $showAuthEntry) {
@@ -96,6 +106,9 @@ struct StreetStampsApp: App {
                     // Best-effort: reduce data loss when the app is backgrounded or suspended.
                     if phase == .background || phase == .inactive {
                         journeyStore.flushPersist()
+                    }
+                    if phase == .active {
+                        ensurePassiveLocationTrackingIfNeeded()
                     }
                 }
         }

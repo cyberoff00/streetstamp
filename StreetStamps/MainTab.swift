@@ -2,7 +2,6 @@ import SwiftUI
 import Combine
 
 private enum MainSidebarDestination: String, Identifiable {
-    case accountCenter
     case profile
     case settings
     case equipment
@@ -91,8 +90,6 @@ struct MainTabView: View {
         .sheet(item: $sidebarDestination) { destination in
             NavigationStack {
                 switch destination {
-                case .accountCenter:
-                    AccountCenterView()
                 case .profile:
                     ProfileView()
                 case .settings:
@@ -355,7 +352,7 @@ private struct MainSidebarMenuView: View {
             }
 
             Button {
-                onSelectDestination(.accountCenter)
+                onSelectDestination(.profile)
                 withAnimation(.easeOut(duration: 0.25)) {
                     isPresented = false
                 }

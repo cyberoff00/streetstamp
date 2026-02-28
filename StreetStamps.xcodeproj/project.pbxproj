@@ -83,7 +83,6 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
-				StreetStampsWidgets/.entitlements,
 				StreetStampsWidgets/Info.plist,
 			);
 			target = B53E1F772F24FA2C00055ED1 /* TrackingWidgeExtension */;
@@ -104,21 +103,10 @@
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
-/* Begin PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
-		B53E1FAB2F250A3000055ED1 /* Exceptions for "TrackingWidge" folder in "Compile Sources" phase from "StreetStamps" target */ = {
-			isa = PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet;
-			buildPhase = B5F75DB22F0D641D00FEF837 /* Sources */;
-			membershipExceptions = (
-				StreetStampsWidgets/.entitlements,
-			);
-		};
-/* End PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		B53E1F7D2F24FA2C00055ED1 /* TrackingWidge */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				B53E1FAB2F250A3000055ED1 /* Exceptions for "TrackingWidge" folder in "Compile Sources" phase from "StreetStamps" target */,
 				B53E1F902F24FA2D00055ED1 /* Exceptions for "TrackingWidge" folder in "TrackingWidgeExtension" target */,
 			);
 			path = TrackingWidge;

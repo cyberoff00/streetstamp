@@ -160,7 +160,7 @@ struct PopSharingCard: View {
     private var header: some View {
         ZStack {
             Text(L10n.t("share_save_journey_title"))
-                .appHeaderStyle()
+                .appTitleStyle()
                 .foregroundColor(.black)
 
             HStack {
@@ -192,7 +192,7 @@ struct PopSharingCard: View {
         VStack(spacing: 12) {
             HStack {
                 Text(L10n.t("share_journey_card"))
-                    .font(.system(size: 14, weight: .black))
+                    .font(.system(size: AppTypography.bodySize, weight: .semibold))
                     .foregroundColor(.black)
                 Spacer()
 
@@ -303,7 +303,7 @@ struct PopSharingCard: View {
         VStack(spacing: 22) {
             VStack(alignment: .leading, spacing: 8) {
                 Text(L10n.t("share_journey_name_optional"))
-                    .font(.system(size: 14, weight: .black))
+                    .font(.system(size: AppTypography.bodySize, weight: .semibold))
                     .foregroundColor(.black.opacity(0.85))
                 TextField(L10n.t("share_journey_name_placeholder"), text: $customTitle)
                     .font(.system(size: 14, weight: .regular))
@@ -315,7 +315,7 @@ struct PopSharingCard: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(L10n.t("share_activity_optional"))
-                    .font(.system(size: 14, weight: .black))
+                    .font(.system(size: AppTypography.bodySize, weight: .semibold))
                     .foregroundColor(.black.opacity(0.85))
                 HStack(spacing: 8) {
                     TextField(L10n.t("share_activity_placeholder"), text: $activityTag)
@@ -347,7 +347,7 @@ struct PopSharingCard: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(L10n.t("share_overall_memory_optional"))
-                    .font(.system(size: 14, weight: .black))
+                    .font(.system(size: AppTypography.bodySize, weight: .semibold))
                     .foregroundColor(.black.opacity(0.85))
                 TextEditor(text: $overallMemory)
                     .font(.system(size: 14))
@@ -368,7 +368,7 @@ struct PopSharingCard: View {
 
             Button(action: completeJourneyAndMaybeUnlock) {
                 Text(L10n.t("save"))
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: AppTypography.bodyStrongSize, weight: .semibold))
                     .foregroundColor(.white)
                     .frame(width: 236, height: 60)
                     .background(Color.black)
@@ -711,8 +711,12 @@ struct PopSharingCard: View {
                         // Face: if we only have 1 point, default to front
                         let face: RobotFaceSnap = .front
 
-                        // marker size for snapshot 900x1200
-                        drawRobotMarker(in: renderer.cgContext, at: p, face: face, size: 96)
+                        drawRobotMarker(
+                            in: renderer.cgContext,
+                            at: p,
+                            face: face,
+                            size: AvatarMapMarkerStyle.visualSize
+                        )
                         return
                     }
 
@@ -730,7 +734,6 @@ struct PopSharingCard: View {
                         let endPoint = snap.point(for: last)
 
                         let face: RobotFaceSnap = {
-                            // Use last two points to infer direction; if not enough, default front
                             if drawCoords.count >= 2 {
                                 let a = drawCoords[drawCoords.count - 2]
                                 let b = drawCoords[drawCoords.count - 1]
@@ -741,7 +744,12 @@ struct PopSharingCard: View {
                             }
                         }()
 
-                        drawRobotMarker(in: renderer.cgContext, at: endPoint, face: face, size: 96)
+                        drawRobotMarker(
+                            in: renderer.cgContext,
+                            at: endPoint,
+                            face: face,
+                            size: AvatarMapMarkerStyle.visualSize
+                        )
                     }
 
                 }
@@ -1138,7 +1146,12 @@ struct ShareCardGenerator {
                         guard let c = centerCoord else { return }
                         let p = snap.point(for: c)
                         let face: RobotFaceSnap = .front
-                        drawRobotMarker(in: renderer.cgContext, at: p, face: face, size: 96)
+                        drawRobotMarker(
+                            in: renderer.cgContext,
+                            at: p,
+                            face: face,
+                            size: AvatarMapMarkerStyle.visualSize
+                        )
                         return
                     }
 
@@ -1165,7 +1178,12 @@ struct ShareCardGenerator {
                             }
                         }()
 
-                        drawRobotMarker(in: renderer.cgContext, at: endPoint, face: face, size: 96)
+                        drawRobotMarker(
+                            in: renderer.cgContext,
+                            at: endPoint,
+                            face: face,
+                            size: AvatarMapMarkerStyle.visualSize
+                        )
                     }
                 }
 
@@ -1406,109 +1424,33 @@ private func bearingDegrees(from a: CLLocationCoordinate2D, to b: CLLocationCoor
     return brng
 }
 
-private func robotImageForFace(_ face: RobotFaceSnap) -> UIImage? {
-    return UIImage(named: "base_default_\(face.rawValue)")
-}
-
-private struct AvatarPartRender {
-    let name: String
-    let mirrored: Bool
-    let alpha: CGFloat
-}
-
-private func avatarPartRender(
-    images: PartImages,
-    face: RobotFaceSnap,
-    sideFallbackAlpha: CGFloat,
-    backFallbackAlpha: CGFloat
-) -> AvatarPartRender? {
+private func toRobotFace(_ face: RobotFaceSnap) -> RobotFace {
     switch face {
-    case .front:
-        guard let n = images.front else { return nil }
-        return .init(name: n, mirrored: false, alpha: 1.0)
-    case .right:
-        if let n = images.right {
-            return .init(name: n, mirrored: false, alpha: 1.0)
-        }
-        if let n = images.front {
-            return .init(name: n, mirrored: false, alpha: sideFallbackAlpha)
-        }
-        return nil
-    case .left:
-        if let n = images.left {
-            return .init(name: n, mirrored: false, alpha: 1.0)
-        }
-        if let n = images.right {
-            return .init(name: n, mirrored: true, alpha: 1.0)
-        }
-        if let n = images.front {
-            return .init(name: n, mirrored: true, alpha: sideFallbackAlpha)
-        }
-        return nil
-    case .back:
-        if let n = images.back {
-            return .init(name: n, mirrored: false, alpha: 1.0)
-        }
-        if let n = images.front {
-            return .init(name: n, mirrored: false, alpha: backFallbackAlpha)
-        }
-        return nil
+    case .front: return .front
+    case .right: return .right
+    case .back: return .back
+    case .left: return .left
     }
 }
 
-private func drawAvatarPart(
-    _ render: AvatarPartRender,
-    in rect: CGRect,
-    ctx: CGContext
-) {
-    guard let image = UIImage(named: render.name) else { return }
-    ctx.saveGState()
-    if render.mirrored {
-        ctx.translateBy(x: rect.midX, y: rect.midY)
-        ctx.scaleBy(x: -1, y: 1)
-        image.draw(in: CGRect(x: -rect.width / 2, y: -rect.height / 2, width: rect.width, height: rect.height), blendMode: .normal, alpha: render.alpha)
-    } else {
-        image.draw(in: rect, blendMode: .normal, alpha: render.alpha)
-    }
-    ctx.restoreGState()
-}
+private func avatarImageForFace(_ face: RobotFaceSnap, size: CGFloat) -> UIImage? {
+    let view = RobotRendererView(
+        size: size,
+        face: toRobotFace(face),
+        loadout: AvatarLoadoutStore.load()
+    )
+    let host = UIHostingController(rootView: view)
+    let rect = CGRect(x: 0, y: 0, width: size, height: size)
+    host.view.frame = rect
+    host.view.backgroundColor = .clear
+    host.view.isOpaque = false
 
-private func avatarImageForFace(_ face: RobotFaceSnap) -> UIImage? {
-    let loadout = AvatarLoadoutStore.load()
-    let catalogStore = AvatarCatalogStore.shared
-    let catalog = catalogStore.catalog
-    let canvas = CGSize(width: 256, height: 256)
-    let rect = CGRect(origin: .zero, size: canvas)
+    let format = UIGraphicsImageRendererFormat.default()
+    format.opaque = false
+    format.scale = UIScreen.main.scale
 
-    return UIGraphicsImageRenderer(size: canvas).image { renderer in
-        let ctx = renderer.cgContext
-
-        if let part = avatarPartRender(images: catalog.base.body, face: face, sideFallbackAlpha: 1.0, backFallbackAlpha: 0.35) {
-            drawAvatarPart(part, in: rect, ctx: ctx)
-        }
-        if let part = avatarPartRender(images: catalog.base.baseOutfit, face: face, sideFallbackAlpha: 1.0, backFallbackAlpha: 0.25) {
-            drawAvatarPart(part, in: rect, ctx: ctx)
-        }
-        if let outfit = catalogStore.item(categoryId: "outfit", itemId: loadout.outfitId),
-           let part = avatarPartRender(images: outfit.images, face: face, sideFallbackAlpha: 0.25, backFallbackAlpha: 0.20) {
-            drawAvatarPart(part, in: rect, ctx: ctx)
-        }
-        if let part = avatarPartRender(images: catalog.base.head, face: face, sideFallbackAlpha: 1.0, backFallbackAlpha: 0.25) {
-            drawAvatarPart(part, in: rect, ctx: ctx)
-        }
-        if let expr = catalogStore.item(categoryId: "expression", itemId: loadout.expressionId),
-           let part = avatarPartRender(images: expr.images, face: face, sideFallbackAlpha: 0.20, backFallbackAlpha: 0.20) {
-            drawAvatarPart(part, in: rect, ctx: ctx)
-        }
-        if let accessoryId = loadout.accessoryId,
-           let accessory = catalogStore.item(categoryId: "accessory", itemId: accessoryId),
-           let part = avatarPartRender(images: accessory.images, face: face, sideFallbackAlpha: 0.20, backFallbackAlpha: 0.20) {
-            drawAvatarPart(part, in: rect, ctx: ctx)
-        }
-        if let hair = catalogStore.item(categoryId: "hair", itemId: loadout.hairId),
-           let part = avatarPartRender(images: hair.images, face: face, sideFallbackAlpha: 0.20, backFallbackAlpha: 0.20) {
-            drawAvatarPart(part, in: rect, ctx: ctx)
-        }
+    return UIGraphicsImageRenderer(size: rect.size, format: format).image { renderer in
+        host.view.layer.render(in: renderer.cgContext)
     }
 }
 
@@ -1518,28 +1460,9 @@ private func drawRobotMarker(
     face: RobotFaceSnap,
     size: CGFloat
 ) {
-    guard let img = avatarImageForFace(face) ?? robotImageForFace(face) else { return }
+    guard let img = avatarImageForFace(face, size: size) else { return }
 
-    // Ground shadow (subtle)
-    let shadowRect = CGRect(
-        x: point.x - size * 0.26,
-        y: point.y + size * 0.24,
-        width: size * 0.52,
-        height: size * 0.16
-    )
-    ctx.saveGState()
-    ctx.setFillColor(UIColor.black.withAlphaComponent(0.22).cgColor)
-    ctx.fillEllipse(in: shadowRect)
-    ctx.restoreGState()
-
-    // Draw the robot centered
+    // Keep the same transparent avatar rendering style as RobotRendererView in MapView.
     let rect = CGRect(x: point.x - size/2, y: point.y - size/2, width: size, height: size)
-
-    ctx.saveGState()
-    ctx.setShadow(offset: CGSize(width: 0, height: 6), blur: 10, color: UIColor.black.withAlphaComponent(0.18).cgColor)
     img.draw(in: rect)
-    ctx.restoreGState()
-
-
-    
 }

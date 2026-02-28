@@ -1144,6 +1144,7 @@ private struct FriendProfileScreen: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var socialStore: SocialGraphStore
     @EnvironmentObject private var sessionStore: UserSessionStore
+    @EnvironmentObject private var flow: AppFlowCoordinator
 
     let friendID: String
 
@@ -1151,6 +1152,7 @@ private struct FriendProfileScreen: View {
     @State private var isSendingStomp = false
     @State private var stompToastText = ""
     @State private var showStompToast = false
+    @State private var sidebarHideToken = UUID().uuidString
 
     private var canStomp: Bool {
         (sessionStore.accountUserID ?? "") != friendID
@@ -1172,6 +1174,10 @@ private struct FriendProfileScreen: View {
         )
     }
 
+    private var levelProgress: UserLevelProgress {
+        UserLevelProgress.from(completedJourneyCount: max(0, (friend ?? fallbackFriend).stats.totalJourneys))
+    }
+
     var body: some View {
         let f = friend ?? fallbackFriend
 
@@ -1180,8 +1186,15 @@ private struct FriendProfileScreen: View {
 
             VStack(spacing: 0) {
                 HStack {
-                    Color.clear
-                        .frame(width: 42, height: 42)
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundColor(FigmaTheme.text)
+                            .frame(width: 42, height: 42)
+                    }
+                    .buttonStyle(.plain)
 
                     Spacer()
 
@@ -1236,11 +1249,20 @@ private struct FriendProfileScreen: View {
                             }
                             .padding(.top, 32)
 
+                            HStack(spacing: 8) {
+                                Text(f.displayName)
+                                    .font(.system(size: 20, weight: .bold))
+                                    .tracking(-0.3)
+                                    .foregroundColor(FigmaTheme.text)
+                                LevelBadgeView(level: levelProgress.level)
+                            }
+                            .padding(.top, 20)
+
                             Text(String(format: L10n.t("friends_exclusive_id_format"), f.handle))
                                 .font(.system(size: 13, weight: .regular))
                                 .tracking(0.2)
                                 .foregroundColor(FigmaTheme.subtext)
-                                .padding(.top, 24)
+                                .padding(.top, 8)
 
                             if canStomp {
                                 Button {
@@ -1265,8 +1287,8 @@ private struct FriendProfileScreen: View {
                                 .padding(.top, 10)
                             }
 
-                            if !f.bio.isEmpty {
-                                Text(f.bio)
+                            if let displayBio = resolvedBioText(for: f) {
+                                Text(displayBio)
                                     .font(.system(size: 12, weight: .medium))
                                     .foregroundColor(FigmaTheme.text.opacity(0.72))
                                     .multilineTextAlignment(.center)
@@ -1347,19 +1369,6 @@ private struct FriendProfileScreen: View {
                             .buttonStyle(.plain)
                         }
 
-                        NavigationLink {
-                            FriendJourneysScreen(friendID: friendID)
-                        } label: {
-                            friendProfileMenuTile(
-                                icon: "point.topleft.down.curvedto.point.bottomright.up",
-                                iconColor: Color(red: 68 / 255, green: 92 / 255, blue: 127 / 255),
-                                iconBg: Color(red: 68 / 255, green: 92 / 255, blue: 127 / 255).opacity(0.14),
-                                title: "JOURNEYS"
-                            )
-                            .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.plain)
-
                         if sessionStore.isLoggedIn {
                             Button(role: .destructive) {
                                 Task {
@@ -1383,7 +1392,14 @@ private struct FriendProfileScreen: View {
                 }
             }
         }
+        .navigationBarBackButtonHidden(true)
         .navigationBarHidden(true)
+        .onAppear {
+            flow.pushSidebarButtonHidden(token: sidebarHideToken)
+        }
+        .onDisappear {
+            flow.popSidebarButtonHidden(token: sidebarHideToken)
+        }
         .overlay(alignment: .top) {
             if showStompToast {
                 Text(stompToastText)
@@ -1405,6 +1421,28 @@ private struct FriendProfileScreen: View {
         .onReceive(socialStore.$friends) { snapshots in
             friend = snapshots.first(where: { $0.id == friendID })
         }
+    }
+
+    private func resolvedBioText(for friend: FriendProfileSnapshot) -> String? {
+        let trimmed = friend.bio.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let normalized = normalizeBio(trimmed)
+        let placeholders = Set([
+            L10n.t("profile_tagline_travel_enthusiastic"),
+            "Travel Enthusiastic",
+            "旅行爱好者",
+            "旅行愛好者"
+        ].map(normalizeBio))
+
+        return placeholders.contains(normalized) ? nil : trimmed
+    }
+
+    private func normalizeBio(_ raw: String) -> String {
+        raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .replacingOccurrences(of: " ", with: "")
     }
 
     private func friendProfileMenuTile(icon: String, iconColor: Color, iconBg: Color, title: String) -> some View {
@@ -1497,6 +1535,10 @@ private struct FriendProfileScreen: View {
 }
 
 private extension View {
+    func friendChevronBackButton() -> some View {
+        modifier(FriendChevronBackButtonModifier())
+    }
+
     func friendAvatarCardStyle() -> some View {
         self
             .background(Color.white)
@@ -1512,6 +1554,25 @@ private extension View {
     }
 }
 
+private struct FriendChevronBackButtonModifier: ViewModifier {
+    @Environment(\.dismiss) private var dismiss
+
+    func body(content: Content) -> some View {
+        content
+            .navigationBarBackButtonHidden(true)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 17, weight: .semibold))
+                    }
+                }
+            }
+    }
+}
+
 @MainActor
 private final class FriendMirrorContext: ObservableObject {
     let friendID: String
@@ -1520,6 +1581,7 @@ private final class FriendMirrorContext: ObservableObject {
     let cityCache: CityCache
 
     private var lastSignature: String = ""
+    private var applyTask: Task<Void, Never>?
 
     init(friendID: String) {
         self.friendID = friendID
@@ -1547,19 +1609,29 @@ private final class FriendMirrorContext: ObservableObject {
         guard sig != lastSignature else { return }
         lastSignature = sig
 
-        try? paths.ensureBaseDirectoriesExist()
-        clearMirroredFiles()
-
-        let routes = buildMirroredRoutes(from: snapshot)
-        persistJourneys(routes)
-        persistCities(from: snapshot, mirroredRoutes: routes)
-
-        journeyStore.rebind(paths: paths)
-        cityCache.rebind(paths: paths)
-        journeyStore.load()
+        applyTask?.cancel()
+        let snapshotCopy = snapshot
+        let targetPaths = paths
+        applyTask = Task { [weak self] in
+            await Task.detached(priority: .userInitiated) {
+                FriendMirrorContext.mirrorSnapshot(snapshotCopy, to: targetPaths)
+            }.value
+            guard !Task.isCancelled, let self else { return }
+            self.journeyStore.rebind(paths: targetPaths)
+            self.cityCache.rebind(paths: targetPaths)
+            self.journeyStore.load()
+        }
     }
 
-    private func clearMirroredFiles() {
+    nonisolated private static func mirrorSnapshot(_ snapshot: FriendProfileSnapshot, to paths: StoragePath) {
+        try? paths.ensureBaseDirectoriesExist()
+        clearMirroredFiles(paths: paths)
+        let routes = buildMirroredRoutes(from: snapshot)
+        persistJourneys(routes, paths: paths)
+        persistCities(from: snapshot, mirroredRoutes: routes, paths: paths)
+    }
+
+    nonisolated private static func clearMirroredFiles(paths: StoragePath) {
         let fm = FileManager.default
         if let files = try? fm.contentsOfDirectory(at: paths.journeysDir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) {
             for f in files {
@@ -1570,7 +1642,7 @@ private final class FriendMirrorContext: ObservableObject {
         try? fm.removeItem(at: paths.routeCacheURL)
     }
 
-    private func persistJourneys(_ routes: [JourneyRoute]) {
+    nonisolated private static func persistJourneys(_ routes: [JourneyRoute], paths: StoragePath) {
         let fileStore = JourneysFileStore(baseURL: paths.journeysDir)
         let indexStore = JourneysIndexStore(baseURL: paths.journeysDir)
         for route in routes {
@@ -1579,7 +1651,7 @@ private final class FriendMirrorContext: ObservableObject {
         try? indexStore.replaceIDs(routes.map(\.id))
     }
 
-    private func persistCities(from snapshot: FriendProfileSnapshot, mirroredRoutes: [JourneyRoute]) {
+    nonisolated private static func persistCities(from snapshot: FriendProfileSnapshot, mirroredRoutes: [JourneyRoute], paths: StoragePath) {
         let routesByCityID = Dictionary(grouping: mirroredRoutes) { $0.startCityKey ?? $0.cityKey }
         let cities: [CachedCity] = snapshot.unlockedCityCards.map { card in
             let js = routesByCityID[card.id] ?? []
@@ -1607,14 +1679,14 @@ private final class FriendMirrorContext: ObservableObject {
         }
     }
 
-    private func buildMirroredRoutes(from snapshot: FriendProfileSnapshot) -> [JourneyRoute] {
+    nonisolated private static func buildMirroredRoutes(from snapshot: FriendProfileSnapshot) -> [JourneyRoute] {
         let cards = snapshot.unlockedCityCards
         return snapshot.journeys
             .sorted { ($0.endTime ?? $0.startTime ?? .distantPast) > ($1.endTime ?? $1.startTime ?? .distantPast) }
             .map { toJourneyRoute(friendJourney: $0, cards: cards) }
     }
 
-    private func toJourneyRoute(friendJourney: FriendSharedJourney, cards: [FriendCityCard]) -> JourneyRoute {
+    nonisolated private static func toJourneyRoute(friendJourney: FriendSharedJourney, cards: [FriendCityCard]) -> JourneyRoute {
         let routeCoords = friendJourney.routeCoordinates
         let cityID = resolveCityID(for: friendJourney, cards: cards)
         let cityCard = cards.first(where: { $0.id == cityID })
@@ -1664,7 +1736,7 @@ private final class FriendMirrorContext: ObservableObject {
         )
     }
 
-    private func resolveCityID(for journey: FriendSharedJourney, cards: [FriendCityCard]) -> String {
+    nonisolated private static func resolveCityID(for journey: FriendSharedJourney, cards: [FriendCityCard]) -> String {
         guard !cards.isEmpty else { return "Unknown|" }
         let normalizedTitle = normalizeKey(journey.title)
         if let hit = cards.first(where: { normalizeKey($0.name) == normalizedTitle }) {
@@ -1679,7 +1751,7 @@ private final class FriendMirrorContext: ObservableObject {
         return cards[0].id
     }
 
-    private func normalizeKey(_ input: String) -> String {
+    nonisolated private static func normalizeKey(_ input: String) -> String {
         input
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
@@ -1690,10 +1762,12 @@ private final class FriendMirrorContext: ObservableObject {
 private struct FriendJourneysScreen: View {
     @EnvironmentObject private var socialStore: SocialGraphStore
     @EnvironmentObject private var sessionStore: UserSessionStore
+    @EnvironmentObject private var flow: AppFlowCoordinator
 
     let friendID: String
 
     @StateObject private var mirror: FriendMirrorContext
+    @State private var sidebarHideToken = UUID().uuidString
 
     init(friendID: String) {
         self.friendID = friendID
@@ -1703,7 +1777,11 @@ private struct FriendJourneysScreen: View {
     var body: some View {
         Group {
             if let friend = socialStore.friends.first(where: { $0.id == friendID }) {
-                MyJourneysView(routeDetailReadOnly: true, routeDetailHeaderTitle: L10n.t("friends_journey_title"))
+                MyJourneysView(
+                    routeDetailReadOnly: true,
+                    routeDetailHeaderTitle: "\(friend.displayName) · Journey",
+                    headerTitle: "\(friend.displayName) · Journeys"
+                )
                     .environmentObject(mirror.journeyStore)
                     .environmentObject(sessionStore)
                     .task(id: FriendMirrorContext.signature(for: friend)) {
@@ -1715,14 +1793,30 @@ private struct FriendJourneysScreen: View {
                     .foregroundColor(.secondary)
             }
         }
+        .onAppear {
+            flow.pushSidebarButtonHidden(token: sidebarHideToken)
+        }
+        .onDisappear {
+            flow.popSidebarButtonHidden(token: sidebarHideToken)
+        }
+        .task {
+            await socialStore.refreshFriendProfileIfPossible(
+                friendID: friendID,
+                accessToken: sessionStore.currentAccessToken
+            )
+        }
+        .navigationBarHidden(true)
     }
 }
 
 private struct FriendCitiesScreen: View {
     @EnvironmentObject private var socialStore: SocialGraphStore
+    @EnvironmentObject private var sessionStore: UserSessionStore
+    @EnvironmentObject private var flow: AppFlowCoordinator
     let friendID: String
 
     @StateObject private var mirror: FriendMirrorContext
+    @State private var sidebarHideToken = UUID().uuidString
 
     init(friendID: String) {
         self.friendID = friendID
@@ -1736,7 +1830,8 @@ private struct FriendCitiesScreen: View {
                     showSidebar: .constant(false),
                     autoRebuildFromJourneyStore: false,
                     usesSidebarHeader: false,
-                    allowCityDetailNavigation: false
+                    allowCityDetailNavigation: false,
+                    headerTitle: "\(friend.displayName) · City Library"
                 )
                     .environmentObject(mirror.journeyStore)
                     .environmentObject(mirror.cityCache)
@@ -1749,6 +1844,19 @@ private struct FriendCitiesScreen: View {
                     .foregroundColor(.secondary)
             }
         }
+        .onAppear {
+            flow.pushSidebarButtonHidden(token: sidebarHideToken)
+        }
+        .onDisappear {
+            flow.popSidebarButtonHidden(token: sidebarHideToken)
+        }
+        .task {
+            await socialStore.refreshFriendProfileIfPossible(
+                friendID: friendID,
+                accessToken: sessionStore.currentAccessToken
+            )
+        }
+        .navigationBarHidden(true)
     }
 }
 
@@ -1768,34 +1876,45 @@ private struct FriendEquipmentScreen: View {
         return L10n.t(nameKey)
     }
 
-    var body: some View {
-        if let friend {
-            ScrollView {
-                VStack(spacing: 12) {
-                    RobotRendererView(size: 150, face: .front, loadout: friend.loadout)
-                        .frame(width: 180, height: 180)
-                        .background(Color(red: 227.0/255.0, green: 239.0/255.0, blue: 235.0/255.0))
-                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+    private func equippedAccessoryNames(_ itemIDs: [String]) -> String {
+        let visible = itemIDs.filter { !$0.isEmpty && $0 != "none" }
+        guard !visible.isEmpty else { return "None" }
+        return visible.map { equippedName(categoryID: "accessory", itemID: $0) }.joined(separator: ", ")
+    }
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        FriendEquipmentRow(title: "Hair", value: equippedName(categoryID: "hair", itemID: friend.loadout.hairId))
-                        FriendEquipmentRow(title: "Outfit", value: equippedName(categoryID: "outfit", itemID: friend.loadout.outfitId))
-                        FriendEquipmentRow(title: "Accessory", value: equippedName(categoryID: "accessory", itemID: friend.loadout.accessoryId))
-                        FriendEquipmentRow(title: "Expression", value: equippedName(categoryID: "expression", itemID: friend.loadout.expressionId))
+    var body: some View {
+        Group {
+            if let friend {
+                ScrollView {
+                    VStack(spacing: 12) {
+                        RobotRendererView(size: 150, face: .front, loadout: friend.loadout)
+                            .frame(width: 180, height: 180)
+                            .background(Color(red: 227.0/255.0, green: 239.0/255.0, blue: 235.0/255.0))
+                            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            FriendEquipmentRow(title: "Hair", value: equippedName(categoryID: "hair", itemID: friend.loadout.hairId))
+                            FriendEquipmentRow(title: "Suit", value: equippedName(categoryID: "suit", itemID: friend.loadout.suitId))
+                            FriendEquipmentRow(title: "Upper", value: equippedName(categoryID: "upper", itemID: friend.loadout.upperId))
+                            FriendEquipmentRow(title: "Under", value: equippedName(categoryID: "under", itemID: friend.loadout.underId))
+                            FriendEquipmentRow(title: "Accessory", value: equippedAccessoryNames(friend.loadout.accessoryIds))
+                            FriendEquipmentRow(title: "Expression", value: equippedName(categoryID: "expression", itemID: friend.loadout.expressionId))
+                        }
+                        .padding(14)
+                        .background(Color.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
-                    .padding(14)
-                    .background(Color.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .padding(12)
                 }
-                .padding(12)
+                .background(Color(red: 251.0/255.0, green: 251.0/255.0, blue: 249.0/255.0).ignoresSafeArea())
+                .navigationTitle("\(friend.displayName) Equipment")
+            } else {
+                Text(L10n.t("content_unavailable"))
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.secondary)
             }
-            .background(Color(red: 251.0/255.0, green: 251.0/255.0, blue: 249.0/255.0).ignoresSafeArea())
-            .navigationTitle("\(friend.displayName) Equipment")
-        } else {
-            Text(L10n.t("content_unavailable"))
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(.secondary)
         }
+        .friendChevronBackButton()
     }
 }
 
@@ -1820,9 +1939,11 @@ private struct FriendEquipmentRow: View {
 private struct FriendPublicMemoriesScreen: View {
     @EnvironmentObject private var socialStore: SocialGraphStore
     @EnvironmentObject private var sessionStore: UserSessionStore
+    @EnvironmentObject private var flow: AppFlowCoordinator
     let friendID: String
 
     @StateObject private var mirror: FriendMirrorContext
+    @State private var sidebarHideToken = UUID().uuidString
 
     init(friendID: String) {
         self.friendID = friendID
@@ -1832,40 +1953,12 @@ private struct FriendPublicMemoriesScreen: View {
     var body: some View {
         Group {
             if let friend = socialStore.friends.first(where: { $0.id == friendID }) {
-                JourneyMemoryMainView(showSidebar: .constant(false), usesSidebarHeader: false, readOnly: true)
-                    .environmentObject(mirror.journeyStore)
-                    .environmentObject(sessionStore)
-                    .task(id: FriendMirrorContext.signature(for: friend)) {
-                        mirror.apply(snapshot: friend)
-                    }
-            } else {
-                Text(L10n.t("content_unavailable"))
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.secondary)
-            }
-        }        
-    }
-}
-
-private struct FriendJourneyRouteScreen: View {
-    @EnvironmentObject private var socialStore: SocialGraphStore
-    @EnvironmentObject private var sessionStore: UserSessionStore
-
-    let friendID: String
-    let journeyID: String
-
-    @StateObject private var mirror: FriendMirrorContext
-
-    init(friendID: String, journeyID: String) {
-        self.friendID = friendID
-        self.journeyID = journeyID
-        _mirror = StateObject(wrappedValue: FriendMirrorContext(friendID: friendID))
-    }
-
-    var body: some View {
-        Group {
-            if let friend = socialStore.friends.first(where: { $0.id == friendID }) {
-                JourneyRouteDetailView(journeyID: journeyID, isReadOnly: true, headerTitle: L10n.t("friends_journey_title"))
+                JourneyMemoryMainView(
+                    showSidebar: .constant(false),
+                    usesSidebarHeader: false,
+                    readOnly: true,
+                    headerTitle: "\(friend.displayName) · Journey Memory"
+                )
                     .environmentObject(mirror.journeyStore)
                     .environmentObject(sessionStore)
                     .task(id: FriendMirrorContext.signature(for: friend)) {
@@ -1877,5 +1970,70 @@ private struct FriendJourneyRouteScreen: View {
                     .foregroundColor(.secondary)
             }
         }
+        .onAppear {
+            flow.pushSidebarButtonHidden(token: sidebarHideToken)
+        }
+        .onDisappear {
+            flow.popSidebarButtonHidden(token: sidebarHideToken)
+        }
+        .task {
+            await socialStore.refreshFriendProfileIfPossible(
+                friendID: friendID,
+                accessToken: sessionStore.currentAccessToken
+            )
+        }
+        .navigationBarHidden(true)
+    }
+}
+
+private struct FriendJourneyRouteScreen: View {
+    @EnvironmentObject private var socialStore: SocialGraphStore
+    @EnvironmentObject private var sessionStore: UserSessionStore
+    @EnvironmentObject private var flow: AppFlowCoordinator
+
+    let friendID: String
+    let journeyID: String
+
+    @StateObject private var mirror: FriendMirrorContext
+    @State private var sidebarHideToken = UUID().uuidString
+
+    init(friendID: String, journeyID: String) {
+        self.friendID = friendID
+        self.journeyID = journeyID
+        _mirror = StateObject(wrappedValue: FriendMirrorContext(friendID: friendID))
+    }
+
+    var body: some View {
+        Group {
+            if let friend = socialStore.friends.first(where: { $0.id == friendID }) {
+                JourneyRouteDetailView(
+                    journeyID: journeyID,
+                    isReadOnly: true,
+                    headerTitle: "\(friend.displayName) · Journey"
+                )
+                    .environmentObject(mirror.journeyStore)
+                    .environmentObject(sessionStore)
+                    .task(id: FriendMirrorContext.signature(for: friend)) {
+                        mirror.apply(snapshot: friend)
+                    }
+            } else {
+                Text(L10n.t("content_unavailable"))
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .onAppear {
+            flow.pushSidebarButtonHidden(token: sidebarHideToken)
+        }
+        .onDisappear {
+            flow.popSidebarButtonHidden(token: sidebarHideToken)
+        }
+        .task {
+            await socialStore.refreshFriendProfileIfPossible(
+                friendID: friendID,
+                accessToken: sessionStore.currentAccessToken
+            )
+        }
+        .navigationBarHidden(true)
     }
 }

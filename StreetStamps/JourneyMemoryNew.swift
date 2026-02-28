@@ -34,17 +34,20 @@ struct JourneyMemoryMainView: View {
     private let usesSidebarHeader: Bool
     private let hideLeadingControl: Bool
     private let readOnly: Bool
+    private let headerTitle: String?
     
     init(
         showSidebar: Binding<Bool>,
         usesSidebarHeader: Bool = true,
         hideLeadingControl: Bool = false,
-        readOnly: Bool = false
+        readOnly: Bool = false,
+        headerTitle: String? = nil
     ) {
         self._showSidebar = showSidebar
         self.usesSidebarHeader = usesSidebarHeader
         self.hideLeadingControl = hideLeadingControl
         self.readOnly = readOnly
+        self.headerTitle = headerTitle
     }
 
     private var allMemoryJourneys: [JourneyRoute] {
@@ -160,7 +163,7 @@ struct JourneyMemoryMainView: View {
     // MARK: - Header
     
     private var headerView: some View {
-        UnifiedTabPageHeader(title: L10n.t("memories_title"), horizontalPadding: 20, topPadding: 14, bottomPadding: 12) {
+        UnifiedTabPageHeader(title: resolvedHeaderTitle, horizontalPadding: 20, topPadding: 14, bottomPadding: 12) {
             if hideLeadingControl {
                 Color.clear
             } else if usesSidebarHeader {
@@ -205,6 +208,11 @@ struct JourneyMemoryMainView: View {
                 .presentationCompactAdaptation(.popover)
             }
         }
+    }
+
+    private var resolvedHeaderTitle: String {
+        let trimmed = headerTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? L10n.t("memories_title") : trimmed
     }
     
     // MARK: - Empty State

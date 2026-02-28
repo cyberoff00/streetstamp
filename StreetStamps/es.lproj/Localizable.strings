@@ -258,7 +258,7 @@
 "auth_email" = "EMAIL";
 "auth_fill_email_password" = "Please enter email and password";
 "auth_forgot_password" = "Forgot password?";
-"auth_forgot_password_hint" = "Please use the change-password action in Account Center.";
+"auth_forgot_password_hint" = "Please use the change-password action in Settings.";
 "auth_full_name" = "FULL NAME";
 "auth_have_account" = "Already have an account?";
 "auth_no_account" = "Don't have an account?";
@@ -315,7 +315,7 @@
 "gpx_import_detected_cities" = "Detected by sampled reverse-geocode:";
 "gpx_import_existing_city_card" = "Existing City Card";
 "gpx_import_points_distance" = "Points: %d  ·  Distance: %@";
-"guest_mode_message" = "Guest accounts cannot use social features. You can register or sign in later in Account Center.";
+"guest_mode_message" = "Guest accounts cannot use social features. You can register or sign in later in Settings.";
 "guest_mode_title" = "Guest Mode";
 "import" = "Import";
 "import_gpx_title" = "Import GPX";

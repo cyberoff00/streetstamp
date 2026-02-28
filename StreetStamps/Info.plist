@@ -35,10 +35,13 @@
 	<string>我们需要您的位置来追踪您的旅程</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>我们需要您的位置来持续追踪您的旅程</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>用于读取你当日步数并在 Lifelog 中展示每日记录。</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
 		<string>location</string>
+		<string>audio</string>
 	</array>
 	<key>NSSupportsLiveActivities</key>
 	<true/>

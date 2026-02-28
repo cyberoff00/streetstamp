@@ -1014,8 +1014,17 @@ final class TrackingService: ObservableObject {
         // =========================================================
         // 5) Distance accumulation (2D horizontal distance)
         //    don't add nonsense on very bad accuracy unless migration
+        //    Daily mode: count missing (dashed) segment mileage as requested.
         // =========================================================
-        if (!accuracyVeryBad || isMigrationCandidate) && !isMissingSegment {
+        let shouldAccumulateDistance: Bool = {
+            guard (!accuracyVeryBad || isMigrationCandidate) else { return false }
+            if isMissingSegment {
+                return trackingMode == .daily
+            }
+            return true
+        }()
+
+        if shouldAccumulateDistance {
             totalDistance += d2d
             accumulateElevation(from: last, to: loc)
         }

@@ -77,7 +77,9 @@ enum JourneyPostCorrection {
                 spikeMinDetourMeters: 90,
                 spikeDetourRatio: 2.9,
                 spikeDirectRatioMax: 0.7,
-                maxSegmentMeters: 3_000
+                // Daily mode may contain long GPS-loss bridges (dashed missing segments).
+                // Keep a wider threshold so corrected distance does not erase that mileage.
+                maxSegmentMeters: 20_000
             )
         }
     }

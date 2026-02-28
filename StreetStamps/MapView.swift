@@ -642,6 +642,7 @@ struct MapView: View {
     @State private var showMemoryEditor = false
     @State private var showFinishConfirm = false
     @State private var showExitWarning = false
+    @State private var showModeSelector = false
     @State private var exitToastMessage: String = ""
     @State private var now: Date = Date()
 
@@ -734,6 +735,11 @@ struct MapView: View {
         .navigationBarBackButtonHidden(true)
         .overlay(alignment: .top) { exitToast }
         .overlay {
+            if showModeSelector {
+                modeSelectorOverlay
+            }
+        }
+        .overlay {
             if showMemoryEditor {
                 MemoryEditorSheet(
                     isPresented: $showMemoryEditor,
@@ -782,6 +788,7 @@ struct MapView: View {
         .onChange(of: showMemoryEditor) { visible in
             if !visible { editingMemory = nil }
         }
+        .animation(.easeInOut(duration: 0.18), value: showModeSelector)
         .alert(L10n.t("finish_confirm_title"), isPresented: $showFinishConfirm) {
             Button(L10n.t("finish_confirm_finish"), role: .destructive) { finishJourney() }
             Button(L10n.t("finish_confirm_continue"), role: .cancel) {}
@@ -936,6 +943,31 @@ struct MapView: View {
                 .buttonStyle(.plain)
 
                 Spacer()
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        showModeSelector = true
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: journeyRoute.trackingMode == .sport ? "bolt.fill" : "shoeprints.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(FigmaTheme.secondary)
+                        Text(journeyRoute.trackingMode == .sport ? L10n.key("lockscreen_sport_mode") : L10n.key("lockscreen_daily_mode"))
+                            .font(.system(size: 11, weight: .bold))
+                            .lineLimit(1)
+                            .foregroundColor(FigmaTheme.secondary)
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(height: 32)
+                    .background(Color.white.opacity(0.94))
+                    .clipShape(Capsule(style: .continuous))
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .stroke(FigmaTheme.secondary.opacity(0.6), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 16)
@@ -1098,6 +1130,8 @@ struct MapView: View {
             journeyRoute.currentCity = cityName
             journeyRoute.cityName = cityName
         }
+
+        tracking.setTrackingMode(journeyRoute.trackingMode)
 
         tracking.activateMapRenderingSurface()
 
@@ -1385,6 +1419,41 @@ struct MapView: View {
             return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
         }
         return String(format: "%02d:%02d", minutes, seconds)
+    }
+
+    private var modeSelectorOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        showModeSelector = false
+                    }
+                }
+
+            MapTrackingModeSelector(
+                selectedMode: journeyRoute.trackingMode,
+                onSelect: { mode in
+                    applyTrackingMode(mode)
+                    withAnimation(.easeInOut(duration: 0.18)) { showModeSelector = false }
+                },
+                onClose: {
+                    withAnimation(.easeInOut(duration: 0.18)) { showModeSelector = false }
+                }
+            )
+            .frame(maxWidth: 360)
+            .padding(.horizontal, 28)
+            .transition(.opacity)
+        }
+    }
+
+    private func applyTrackingMode(_ mode: TrackingMode) {
+        guard journeyRoute.trackingMode != mode else { return }
+        journeyRoute.trackingMode = mode
+        tracking.setTrackingMode(mode)
+        if journeyRoute.endTime == nil {
+            persistSnapshot(.coordsTick)
+        }
     }
 
     private func exitToHomeLowPower() {
@@ -1697,6 +1766,123 @@ struct MemoryDetailPage: View {
     }
 }
 
+private struct MapTrackingModeSelector: View {
+    let selectedMode: TrackingMode
+    let onSelect: (TrackingMode) -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(L10n.t("select_mode"))
+                    .font(.system(size: 16, weight: .bold))
+                    .tracking(1)
+                    .foregroundColor(.white)
+
+                Spacer()
+
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.9))
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .background(FigmaTheme.primary)
+
+            VStack(spacing: 14) {
+                MapModeOptionCard(
+                    mode: .sport,
+                    isSelected: selectedMode == .sport,
+                    onSelect: { onSelect(.sport) }
+                )
+
+                MapModeOptionCard(
+                    mode: .daily,
+                    isSelected: selectedMode == .daily,
+                    onSelect: { onSelect(.daily) }
+                )
+            }
+            .padding(18)
+            .background(Color.white)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.black.opacity(0.10), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.18), radius: 18, x: 0, y: 10)
+    }
+}
+
+private struct MapModeOptionCard: View {
+    let mode: TrackingMode
+    let isSelected: Bool
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 16) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(isSelected ? FigmaTheme.primary.opacity(0.15) : Color.black.opacity(0.05))
+                        .frame(width: 48, height: 48)
+
+                    Image(systemName: mode == .sport ? "bolt.fill" : "figure.walk")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(isSelected ? FigmaTheme.primary : .black.opacity(0.5))
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(mode == .sport ? L10n.key("lockscreen_sport_mode") : L10n.key("lockscreen_daily_mode"))
+                        .font(.system(size: 15, weight: .bold))
+                        .tracking(0.8)
+                        .foregroundColor(FigmaTheme.text)
+
+                    Text(mode == .sport ? L10n.key("sport_mode_desc") : L10n.key("daily_mode_desc"))
+                        .font(.system(size: 12))
+                        .foregroundColor(FigmaTheme.text.opacity(0.55))
+                        .lineLimit(3)
+                        .multilineTextAlignment(.leading)
+
+                    HStack(spacing: 12) {
+                        if mode == .sport {
+                            Text(L10n.key("hint_precise"))
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(FigmaTheme.primary)
+                            Text(L10n.key("hint_battery"))
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(FigmaTheme.text.opacity(0.35))
+                        } else {
+                            Text(L10n.key("hint_precision"))
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(FigmaTheme.text.opacity(0.35))
+                            Text(L10n.key("hint_efficient"))
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(FigmaTheme.primary)
+                        }
+                    }
+                    .padding(.top, 2)
+                }
+
+                Spacer()
+            }
+            .padding(16)
+            .background(isSelected ? FigmaTheme.background : Color.white)
+            .cornerRadius(16)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(isSelected ? FigmaTheme.primary : Color.black.opacity(0.10), lineWidth: isSelected ? 2 : 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 // =======================================================
 // MARK: - Unified Memory Editor (System Camera, Photo Library, mirror toggle)
 // =======================================================
@@ -1794,7 +1980,7 @@ private var hasUnsavedChanges: Bool {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.20)
+            Color.black.opacity(0.14)
                 .ignoresSafeArea()
                 .onTapGesture {
                     notesFocused = false
@@ -1813,7 +1999,7 @@ private var hasUnsavedChanges: Bool {
                 .frame(maxWidth: 430)
                 .background(FigmaTheme.mutedBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
-                .shadow(color: Color.black.opacity(0.25), radius: 32, x: 0, y: 12)
+                .shadow(color: Color.black.opacity(0.14), radius: 20, x: 0, y: 8)
 
                 Spacer()
             }
@@ -1909,7 +2095,9 @@ private var hasUnsavedChanges: Bool {
     private var header: some View {
         HStack(spacing: 10) {
             Text(existing == nil ? L10n.key("add_memory") : L10n.key("edit_memory"))
-                .appHeaderStyle()
+                .font(.system(size: 20, weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
                 .foregroundColor(FigmaTheme.text)
 
             Spacer()
@@ -1933,18 +2121,6 @@ private var hasUnsavedChanges: Bool {
                     .clipShape(Circle())
             }
             .buttonStyle(.plain)
-
-            if existing != nil {
-                Button { showDeleteAlert = true } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.red.opacity(0.85))
-                        .frame(width: 32, height: 32)
-                        .background(Color.red.opacity(0.10))
-                        .clipShape(Circle())
-                }
-                .buttonStyle(.plain)
-            }
         }
         .padding(.horizontal, 24)
         .frame(height: 58)
@@ -1995,9 +2171,9 @@ private var hasUnsavedChanges: Bool {
             .frame(minHeight: 290)
             .background(Color.white)
             .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-            .padding(.horizontal, 24)
-            .padding(.top, 22)
-            .padding(.bottom, 18)
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+            .padding(.bottom, 10)
             .onTapGesture {
                 notesFocused = false
                 hideKeyboard()
@@ -2030,18 +2206,32 @@ private var hasUnsavedChanges: Bool {
             }
             Spacer()
 
-            Button { saveAndDismiss() } label: {
-                Text(L10n.t("save").uppercased())
-                    .font(.system(size: 14, weight: .semibold))
-                    .tracking(-0.3)
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 30)
-                    .frame(height: 48)
-                    .background(UITheme.accent)
-                    .clipShape(Capsule(style: .continuous))
-                    .shadow(color: UITheme.accent.opacity(0.22), radius: 10, x: 0, y: 3)
+            HStack(spacing: 10) {
+                if existing != nil {
+                    Button { showDeleteAlert = true } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.red.opacity(0.9))
+                            .frame(width: 48, height: 48)
+                            .background(Color.red.opacity(0.10))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Button { saveAndDismiss() } label: {
+                    Text(L10n.t("save").uppercased())
+                        .font(.system(size: 14, weight: .semibold))
+                        .tracking(-0.3)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 30)
+                        .frame(height: 48)
+                        .background(UITheme.accent)
+                        .clipShape(Capsule(style: .continuous))
+                        .shadow(color: UITheme.accent.opacity(0.22), radius: 10, x: 0, y: 3)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 24)
         .padding(.bottom, 20)
@@ -2265,9 +2455,9 @@ struct MemoryEditorPage: View {
             .frame(minHeight: 290)
             .background(Color.white)
             .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-            .padding(.horizontal, 24)
-            .padding(.top, 22)
-            .padding(.bottom, 18)
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+            .padding(.bottom, 10)
             .onTapGesture {
                 notesFocused = false
                 endEditingGlobal()
@@ -2300,18 +2490,32 @@ struct MemoryEditorPage: View {
             }
             Spacer()
 
-            Button(action: onSave) {
-                Text(L10n.t("save").uppercased())
-                    .font(.system(size: 14, weight: .semibold))
-                    .tracking(-0.3)
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 30)
-                    .frame(height: 48)
-                    .background(UITheme.accent)
-                    .clipShape(Capsule(style: .continuous))
-                    .shadow(color: UITheme.accent.opacity(0.22), radius: 10, x: 0, y: 3)
+            HStack(spacing: 10) {
+                if onDelete != nil {
+                    Button { showDeleteConfirm = true } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.red.opacity(0.9))
+                            .frame(width: 48, height: 48)
+                            .background(Color.red.opacity(0.10))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Button(action: onSave) {
+                    Text(L10n.t("save").uppercased())
+                        .font(.system(size: 14, weight: .semibold))
+                        .tracking(-0.3)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 30)
+                        .frame(height: 48)
+                        .background(UITheme.accent)
+                        .clipShape(Capsule(style: .continuous))
+                        .shadow(color: UITheme.accent.opacity(0.22), radius: 10, x: 0, y: 3)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 24)
         .padding(.bottom, 20)
@@ -2320,7 +2524,9 @@ struct MemoryEditorPage: View {
     private var header: some View {
         HStack(spacing: 10) {
             Text(isNew ? L10n.key("add_memory") : L10n.key("edit_memory"))
-                .appHeaderStyle()
+                .font(.system(size: 20, weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
                 .foregroundColor(FigmaTheme.text)
 
             Spacer()
@@ -2334,18 +2540,6 @@ struct MemoryEditorPage: View {
                     .clipShape(Circle())
             }
             .buttonStyle(.plain)
-
-            if onDelete != nil {
-                Button { showDeleteConfirm = true } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.red.opacity(0.85))
-                        .frame(width: 32, height: 32)
-                        .background(Color.red.opacity(0.10))
-                        .clipShape(Circle())
-                }
-                .buttonStyle(.plain)
-            }
         }
         .padding(.horizontal, 24)
         .frame(height: 58)

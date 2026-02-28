@@ -223,6 +223,9 @@
 "equipment_status_owned" = "已拥有";
 "equipment_buy_short" = "购买 %d";
 "equipment_hair" = "发型";
+"equipment_suit" = "连体衣";
+"equipment_upper" = "上身";
+"equipment_under" = "下身";
 "equipment_outfit" = "衣服";
 "equipment_accessory" = "配饰";
 "equipment_coming_soon" = "敬请期待";
@@ -264,7 +267,7 @@
 "auth_email" = "邮箱";
 "auth_fill_email_password" = "请先填写邮箱和密码";
 "auth_forgot_password" = "忘记密码？";
-"auth_forgot_password_hint" = "请在账号中心使用修改密码功能。";
+"auth_forgot_password_hint" = "请在设置中使用修改密码功能。";
 "auth_full_name" = "昵称";
 "auth_have_account" = "已有账号？";
 "auth_no_account" = "还没有账号？";
@@ -323,7 +326,7 @@
 "gpx_import_detected_cities" = "根据采样逆地理检测到：";
 "gpx_import_existing_city_card" = "已有城市卡";
 "gpx_import_points_distance" = "点数：%d  ·  距离：%@";
-"guest_mode_message" = "游客账号无法使用好友功能，后续可随时在账号中心注册或登录。";
+"guest_mode_message" = "游客账号无法使用好友功能，后续可随时在设置中注册或登录。";
 "guest_mode_title" = "游客模式";
 "import" = "导入";
 "import_gpx_title" = "导入 GPX";
@@ -346,6 +349,9 @@
 "lifelog_mood_title" = "选择今天的心情";
 "lifelog_permission_action" = "去开启";
 "lifelog_permission_hint" = "开启“始终允许”后，才能在后台持续记录你的轨迹。";
+"lifelog_permission_settings_action" = "去设置开启";
+"lifelog_permission_settings_message" = "开启“始终允许”后才可以离线记录轨迹。所有轨迹仅保存在本机，无需担心隐私问题。";
+"lifelog_permission_settings_title" = "需要“始终允许”权限";
 "lifelog_title" = "LIFELOG";
 "memories_title" = "记忆";
 "my_journey_title_upper" = "我的旅程";
@@ -431,3 +437,6 @@
 "unknown_city" = "未知城市";
 "friends_exclusive_id_format" = "专属ID：%@";
 "friends_journey_title" = "好友旅程";
+"lifelog_mood_subtitle" = "今天过得怎么样呢？";
+"lifelog_mood_later" = "稍后再选";
+"lifelog_health_permission_denied_short" = "未授权健康步数";

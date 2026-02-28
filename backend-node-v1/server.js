@@ -81,6 +81,47 @@ const appleAudienceList = APPLE_AUDIENCES
   .map((x) => x.trim())
   .filter(Boolean);
 
+function normalizeEmail(raw) {
+  const email = String(raw || "").trim().toLowerCase();
+  return email.includes("@") ? email : "";
+}
+
+function parseTruthy(raw) {
+  if (typeof raw === "boolean") return raw;
+  const value = String(raw || "").trim().toLowerCase();
+  return value === "true" || value === "1";
+}
+
+async function verifyGoogleIdentity(idToken) {
+  const verifyOptions = { idToken };
+  if (GOOGLE_CLIENT_ID) verifyOptions.audience = GOOGLE_CLIENT_ID;
+  const ticket = await googleOAuthClient.verifyIdToken(verifyOptions);
+  const payload = ticket.getPayload() || {};
+  const subject = String(payload.sub || "").trim();
+  if (!subject) throw new Error("invalid google token subject");
+  const email = normalizeEmail(payload.email);
+  const emailVerified = parseTruthy(payload.email_verified);
+  return { subject, email, emailVerified };
+}
+
+async function verifyAppleIdentity(idToken) {
+  const verifyOptions = { issuer: "https://appleid.apple.com" };
+  if (appleAudienceList.length === 1) verifyOptions.audience = appleAudienceList[0];
+  else if (appleAudienceList.length > 1) verifyOptions.audience = appleAudienceList;
+  const { payload } = await jwtVerify(idToken, appleJWKS, verifyOptions);
+  const subject = String(payload?.sub || "").trim();
+  if (!subject) throw new Error("invalid apple token subject");
+  const email = normalizeEmail(payload?.email);
+  const emailVerified = parseTruthy(payload?.email_verified);
+  return { subject, email, emailVerified };
+}
+
+async function verifyOAuthIdentity(provider, idToken) {
+  if (provider === "google") return verifyGoogleIdentity(idToken);
+  if (provider === "apple") return verifyAppleIdentity(idToken);
+  throw new Error("unsupported oauth provider");
+}
+
 function nowUnix() {
   return Math.floor(Date.now() / 1000);
 }
@@ -716,8 +757,18 @@ async function main() {
       const idToken = String(req.body?.idToken || "").trim();
       if (provider !== "apple" && provider !== "google") return res.status(400).json({ message: "provider must be apple or google" });
       if (!idToken) return res.status(400).json({ message: "idToken required" });
-      const key = `${provider}:${hashSHA256(idToken)}`;
+      const identity = await verifyOAuthIdentity(provider, idToken);
+      const key = `${provider}:${identity.subject}`;
       let uid = db.oauthIndex[key];
+      let changed = false;
+
+      if (!uid && identity.email && identity.emailVerified) {
+        const emailUID = db.emailIndex[identity.email];
+        if (emailUID && db.users[emailUID]) {
+          uid = emailUID;
+        }
+      }
+
       if (!uid) {
         uid = `u_${randHex(12)}`;
         const invite = genInviteCode();
@@ -738,13 +789,38 @@ async function main() {
           createdAt: nowUnix()
         };
         setUserHandle(uid, null, { strict: false });
-        db.oauthIndex[key] = uid;
         db.inviteIndex[invite] = uid;
+        changed = true;
+      }
+
+      if (db.oauthIndex[key] !== uid) {
+        db.oauthIndex[key] = uid;
+        changed = true;
+      }
+
+      const u = db.users[uid];
+      if (!u) return res.status(500).json({ message: "user not found after oauth login" });
+
+      if (identity.email && identity.emailVerified) {
+        if (!u.email) {
+          u.email = identity.email;
+          changed = true;
+        }
+        if (!db.emailIndex[identity.email]) {
+          db.emailIndex[identity.email] = uid;
+          changed = true;
+        }
+      }
+
+      if (changed) {
         await saveDB();
       }
-      const u = db.users[uid];
       return res.status(200).json({ userId: uid, provider: u.provider, email: u.email || null, accessToken: makeAccessToken(uid, u.provider), refreshToken: makeRefreshToken(uid, u.provider) });
-    } catch {
+    } catch (e) {
+      const message = String(e?.message || "").toLowerCase();
+      if (message.includes("token") || message.includes("jwt") || message.includes("audience") || message.includes("issuer")) {
+        return res.status(401).json({ message: "invalid oauth token" });
+      }
       return res.status(500).json({ message: "internal error" });
     }
   });

@@ -3,14 +3,15 @@ import SwiftUI
 struct AccountCenterView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var sessionStore: UserSessionStore
-    @EnvironmentObject private var journeyStore: JourneyStore
-    @EnvironmentObject private var cityCache: CityCache
-    @EnvironmentObject private var socialStore: SocialGraphStore
 
     @State private var backendBaseURL = BackendConfig.baseURLString
     @State private var googleClientID = BackendConfig.googleIOSClientID
     @State private var displayNameDraft = ""
+    @State private var displayNameInput = ""
+    @State private var isEditingDisplayName = false
     @State private var exclusiveIDDraft = ""
+    @State private var exclusiveIDInput = ""
+    @State private var isEditingExclusiveID = false
     @State private var accountEmail = ""
     @State private var canChangeExclusiveID = true
     @State private var profileVisibility: ProfileVisibility = ProfileSharingSettings.visibility
@@ -18,7 +19,6 @@ struct AccountCenterView: View {
     @State private var isLoading = false
     @State private var message = ""
     @State private var showMessage = false
-    @State private var recoveryCandidates: [GuestRecoveryCandidate] = []
     @State private var showAuthSheet = false
     @State private var authSheetMode: AuthEntryMode = .signIn
 
@@ -33,9 +33,6 @@ struct AccountCenterView: View {
 
                     sectionTitle("PROFILE VISIBILITY")
                     visibilityPanel
-
-                    sectionTitle("DATA")
-                    dataPanel
 
                     sectionTitle("SECURITY")
                     securityPanel
@@ -55,7 +52,6 @@ struct AccountCenterView: View {
         .navigationBarHidden(true)
         .task {
             await refreshMeIfPossible()
-            scanRecoveryCandidates()
         }
         .alert("提示", isPresented: $showMessage) {
             Button("好", role: .cancel) {}
@@ -138,27 +134,58 @@ struct AccountCenterView: View {
 
                 Divider().overlay(Color.black.opacity(0.08))
 
-                TextField("昵称（可重复）", text: $displayNameDraft)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 14, weight: .semibold))
+                if isEditingDisplayName {
+                    TextField("昵称（可重复）", text: $displayNameInput)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 14, weight: .semibold))
 
-                TextField("专属ID（字母/数字/下划线）", text: $exclusiveIDDraft)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled(true)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 14, weight: .semibold))
-                    .disabled(!canChangeExclusiveID)
-
-                Text(canChangeExclusiveID ? "专属ID仅可修改一次，请谨慎设置" : "专属ID已完成一次修改，无法再次更改")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(FigmaTheme.subtext)
-
-                HStack(spacing: 8) {
-                    capsuleAction("保存昵称", filled: true) { Task { await updateDisplayName() } }
-                    capsuleAction(canChangeExclusiveID ? "保存专属ID" : "专属ID已锁定", filled: false) {
-                        Task { await updateExclusiveID() }
+                    HStack(spacing: 8) {
+                        capsuleAction("保存昵称", filled: true) {
+                            Task { await updateDisplayName(to: displayNameInput) }
+                        }
+                        capsuleAction("取消", filled: false) {
+                            isEditingDisplayName = false
+                            displayNameInput = displayNameDraft
+                        }
                     }
-                    .disabled(!canChangeExclusiveID)
+                } else {
+                    capsuleAction("编辑昵称", filled: false) {
+                        displayNameInput = displayNameDraft
+                        isEditingDisplayName = true
+                    }
+                }
+
+                if canChangeExclusiveID {
+                    if isEditingExclusiveID {
+                        TextField("专属ID（字母/数字/下划线）", text: $exclusiveIDInput)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled(true)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 14, weight: .semibold))
+
+                        Text("专属ID仅可修改一次，请谨慎设置")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(FigmaTheme.subtext)
+
+                        HStack(spacing: 8) {
+                            capsuleAction("保存专属ID", filled: true) {
+                                Task { await updateExclusiveID(to: exclusiveIDInput) }
+                            }
+                            capsuleAction("取消", filled: false) {
+                                isEditingExclusiveID = false
+                                exclusiveIDInput = exclusiveIDDraft
+                            }
+                        }
+                    } else {
+                        capsuleAction("编辑专属ID", filled: false) {
+                            exclusiveIDInput = exclusiveIDDraft
+                            isEditingExclusiveID = true
+                        }
+                    }
+                } else {
+                    Text("专属ID已完成一次修改，无法再次更改")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(FigmaTheme.subtext)
                 }
 
                 capsuleAction("退出登录", filled: false) {
@@ -206,56 +233,26 @@ struct AccountCenterView: View {
 
     private var visibilityPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Picker("主页可见性", selection: $profileVisibility) {
-                ForEach(ProfileVisibility.frontendCases) { v in
-                    Text(v.localizedTitle).tag(v)
+            Toggle(isOn: Binding(
+                get: { profileVisibility != .private },
+                set: { newValue in
+                    let previousVisibility = profileVisibility
+                    let newVisibility: ProfileVisibility = newValue ? .friendsOnly : .private
+                    guard profileVisibility != newVisibility else { return }
+                    profileVisibility = newVisibility
+                    Task { await updateVisibility(previous: previousVisibility) }
                 }
-            }
-            .pickerStyle(.segmented)
-
-            capsuleAction("保存可见性", filled: false) {
-                Task { await updateVisibility() }
+            )) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("仅好友可见")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(FigmaTheme.text)
+                    Text(profileVisibility == .private ? "当前：仅自己可见" : "当前：好友可见")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(FigmaTheme.subtext)
+                }
             }
             .disabled(!sessionStore.isLoggedIn)
-        }
-        .cardStyle()
-        .onChange(of: profileVisibility) { _, newValue in
-            ProfileSharingSettings.visibility = newValue
-        }
-    }
-
-    private var dataPanel: some View {
-        VStack(spacing: 0) {
-            infoRow(
-                icon: "externaldrive",
-                title: "Check Local Data Migration",
-                subtitle: "Verify device Lifelog data migration"
-            ) {
-                scanRecoveryCandidates()
-                if recoveryCandidates.isEmpty {
-                    toast("未发现可恢复的本地数据")
-                } else {
-                    toast("发现 \(recoveryCandidates.count) 组可恢复本地数据")
-                }
-            }
-            Divider().overlay(Color.black.opacity(0.08))
-            infoRow(
-                icon: "arrow.triangle.2.circlepath",
-                title: "Lifelog Device Transfer",
-                subtitle: "Import/Export data to new device"
-            ) {
-                toast("Lifelog 不上云，请使用本地导入/导出手动迁移")
-            }
-            if sessionStore.isLoggedIn {
-                Divider().overlay(Color.black.opacity(0.08))
-                infoRow(
-                    icon: "icloud.and.arrow.up",
-                    title: "Sync Shareable Journeys",
-                    subtitle: "Upload public/friendsOnly journeys and memories"
-                ) {
-                    Task { await migrateAll() }
-                }
-            }
         }
         .cardStyle()
     }
@@ -362,6 +359,10 @@ struct AccountCenterView: View {
             let me = try await BackendAPIClient.shared.fetchMyProfile(token: token)
             displayNameDraft = me.displayName
             exclusiveIDDraft = me.resolvedExclusiveID ?? ""
+            displayNameInput = displayNameDraft
+            exclusiveIDInput = exclusiveIDDraft
+            isEditingDisplayName = false
+            isEditingExclusiveID = false
             accountEmail = me.email ?? sessionStore.currentEmail ?? ""
             canChangeExclusiveID = me.canChangeExclusiveID
             if let pv = me.profileVisibility {
@@ -373,28 +374,31 @@ struct AccountCenterView: View {
         }
     }
 
-    private func updateDisplayName() async {
+    private func updateDisplayName(to input: String) async {
         guard let token = sessionStore.currentAccessToken, !token.isEmpty else { return }
-        guard !displayNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else {
             return toast("昵称不能为空")
         }
         isLoading = true
         defer { isLoading = false }
 
         do {
-            _ = try await BackendAPIClient.shared.updateDisplayName(token: token, displayName: displayNameDraft)
+            _ = try await BackendAPIClient.shared.updateDisplayName(token: token, displayName: value)
+            displayNameDraft = value
+            displayNameInput = value
+            isEditingDisplayName = false
             toast("昵称已更新")
-            await refreshMeIfPossible()
         } catch {
             toast("更新失败：\(error.localizedDescription)")
         }
     }
 
-    private func updateExclusiveID() async {
+    private func updateExclusiveID(to input: String) async {
         guard let token = sessionStore.currentAccessToken, !token.isEmpty else { return }
         guard canChangeExclusiveID else { return toast("专属ID已完成一次修改，无法再次更改") }
 
-        let value = exclusiveIDDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return toast("专属ID不能为空") }
         guard value.range(of: #"^[A-Za-z0-9_]{1,24}$"#, options: .regularExpression) != nil else {
             return toast("专属ID仅支持字母、数字、下划线")
@@ -406,41 +410,17 @@ struct AccountCenterView: View {
         do {
             let updated = try await BackendAPIClient.shared.updateExclusiveID(token: token, exclusiveID: value)
             exclusiveIDDraft = updated.resolvedExclusiveID ?? value
+            exclusiveIDInput = exclusiveIDDraft
             canChangeExclusiveID = updated.canChangeExclusiveID
             accountEmail = updated.email ?? sessionStore.currentEmail ?? accountEmail
+            isEditingExclusiveID = false
             toast("专属ID已更新")
         } catch {
             toast("更新失败：\(error.localizedDescription)")
         }
     }
 
-    private func migrateAll() async {
-        guard let token = sessionStore.currentAccessToken, !token.isEmpty else {
-            return toast("请先登录账号")
-        }
-        isLoading = true
-        defer { isLoading = false }
-
-        do {
-            let report = try await JourneyCloudMigrationService.migrateAll(
-                sessionStore: sessionStore,
-                journeyStore: journeyStore,
-                cityCache: cityCache
-            )
-            let msg = "迁移完成，已上传 \(report.uploadedJourneys) 条旅程，\(report.uploadedMemories) 条记忆（媒体 \(report.uploadedMediaFiles) 个），私密本地 \(report.localOnlyPrivateJourneys) 条。Lifelog 未上传云端。"
-            MigrationStatusStore.save(msg)
-            await socialStore.reloadFromBackendIfPossible(accessToken: sessionStore.currentAccessToken)
-            toast(msg)
-        } catch {
-            toast("迁移失败：\(error.localizedDescription)")
-        }
-    }
-
-    private func scanRecoveryCandidates() {
-        recoveryCandidates = GuestDataRecoveryService.discoverCandidates(currentUserID: sessionStore.currentUserID)
-    }
-
-    private func updateVisibility() async {
+    private func updateVisibility(previous: ProfileVisibility) async {
         guard let token = sessionStore.currentAccessToken, !token.isEmpty else { return }
         isLoading = true
         defer { isLoading = false }
@@ -448,8 +428,8 @@ struct AccountCenterView: View {
             _ = try await BackendAPIClient.shared.updateProfileVisibility(token: token, visibility: profileVisibility)
             ProfileSharingSettings.visibility = profileVisibility
             toast("可见性已更新")
-            await refreshMeIfPossible()
         } catch {
+            profileVisibility = previous
             toast("更新失败：\(error.localizedDescription)")
         }
     }

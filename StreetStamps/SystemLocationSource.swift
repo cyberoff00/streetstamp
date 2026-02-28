@@ -40,11 +40,7 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         let status = manager.authorizationStatus
         switch status {
         case .notDetermined:
-            // ✅ 修改：先请求WhenInUse，用户授权后再请求Always
             manager.requestWhenInUseAuthorization()
-        case .authorizedWhenInUse:
-            // ✅ 已有WhenInUse，升级请求Always以支持后台追踪
-            manager.requestAlwaysAuthorization()
         default:
             break
         }
@@ -229,14 +225,6 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
     
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         authSubject.send(manager.authorizationStatus)
-        
-        // ✅ 当用户授权WhenInUse后，自动请求升级到Always
-        if manager.authorizationStatus == .authorizedWhenInUse {
-            // 延迟一点请求，避免连续弹窗
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                manager.requestAlwaysAuthorization()
-            }
-        }
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {

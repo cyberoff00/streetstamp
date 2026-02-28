@@ -32,10 +32,27 @@ struct SettingsView: View {
     @State private var isImportingGPX = false
     @StateObject private var privateTransfer = PrivateDataTransferManager()
     @State private var showTransferScanner = false
+    @State private var displayNameDraft = ""
+    @State private var displayNameInput = ""
+    @State private var showDisplayNameEditor = false
+    @State private var exclusiveIDDraft = ""
+    @State private var accountEmail = ""
+    @State private var profileVisibility: ProfileVisibility = ProfileSharingSettings.visibility
+    @State private var accountMessage = ""
+    @State private var showAccountMessage = false
+    @State private var showAuthSheet = false
+    @State private var authSheetMode: AuthEntryMode = .signIn
 
     private var appearance: MapAppearanceStyle {
         get { MapAppearanceStyle(rawValue: mapAppearanceRaw) ?? .dark }
         nonmutating set { mapAppearanceRaw = newValue.rawValue }
+    }
+
+    private var accountValue: String {
+        if let userID = sessionStore.accountUserID, !userID.isEmpty {
+            return userID
+        }
+        return "游客模式"
     }
 
     private var appVersionText: String {
@@ -47,11 +64,11 @@ struct SettingsView: View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 24) {
+                    accountSection
                     mapAppearanceSection
                     trackingAssistSection
                     generalSection
                     levelRulesSection
-                    accountSection
                     infoSection
                 }
                 .padding(.horizontal, 18)
@@ -66,6 +83,28 @@ struct SettingsView: View {
                 Button(L10n.t("ok"), role: .cancel) {}
             } message: {
                 Text(String(format: L10n.t("coming_soon_message"), comingSoonTitle))
+            }
+            .alert("提示", isPresented: $showAccountMessage) {
+                Button("好", role: .cancel) {}
+            } message: {
+                Text(accountMessage)
+            }
+            .task {
+                await refreshAccountIfPossible()
+            }
+            .sheet(isPresented: $showDisplayNameEditor) {
+                displayNameEditorSheet
+            }
+            .sheet(isPresented: $showAuthSheet) {
+                AuthEntryView(
+                    onContinueGuest: { showAuthSheet = false },
+                    initialMode: authSheetMode,
+                    onAuthenticated: {
+                        Task { await refreshAccountIfPossible() }
+                        showAuthSheet = false
+                    }
+                )
+                .environmentObject(sessionStore)
             }
         }
     }
@@ -256,12 +295,7 @@ struct SettingsView: View {
             sectionTitle("ACCOUNT")
 
             VStack(spacing: 10) {
-                NavigationLink {
-                    AccountCenterView()
-                } label: {
-                    settingsRowLabel(title: "ACCOUNT CENTER", icon: "person.crop.circle", iconColor: FigmaTheme.primary)
-                }
-                .buttonStyle(.plain)
+                accountInfoCard
 
                 NavigationLink {
                     privateTransferView
@@ -270,10 +304,140 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
 
+                if !sessionStore.isLoggedIn {
+                    settingsRow(title: "LOGIN", icon: "person.badge.key.fill", iconColor: FigmaTheme.primary) {
+                        authSheetMode = .signIn
+                        showAuthSheet = true
+                    }
+                }
+
                 settingsRow(title: "SUBSCRIPTION", icon: "creditcard", iconColor: FigmaTheme.primary) {
                     showPlaceholder("Subscription")
                 }
             }
+        }
+    }
+
+    private var accountInfoCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            accountInfoRow(title: "账号", value: accountValue)
+
+            HStack(alignment: .center, spacing: 8) {
+                Text("昵称")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(FigmaTheme.subtext)
+
+                Spacer(minLength: 8)
+
+                Text(displayNameDraft.isEmpty ? "Explorer" : displayNameDraft)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(FigmaTheme.text)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Button {
+                    displayNameInput = displayNameDraft
+                    showDisplayNameEditor = true
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(FigmaTheme.primary)
+                        .frame(width: 24, height: 24)
+                        .background(FigmaTheme.mutedBackground)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!sessionStore.isLoggedIn)
+                .opacity(sessionStore.isLoggedIn ? 1 : 0.45)
+            }
+
+            accountInfoRow(title: "专属ID", value: exclusiveIDDraft.isEmpty ? "--" : exclusiveIDDraft)
+            accountInfoRow(title: "邮箱", value: accountEmail.isEmpty ? "未绑定" : accountEmail)
+
+            Divider().overlay(Color.black.opacity(0.08))
+
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Profile 可见性")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(FigmaTheme.subtext)
+                    Text("好友可见")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(FigmaTheme.text)
+                }
+
+                Spacer(minLength: 8)
+
+                figmaToggle(isOn: Binding(
+                    get: { profileVisibility != .private },
+                    set: { newValue in
+                        let previousVisibility = profileVisibility
+                        let newVisibility: ProfileVisibility = newValue ? .friendsOnly : .private
+                        guard profileVisibility != newVisibility else { return }
+                        profileVisibility = newVisibility
+                        Task { await updateVisibility(previous: previousVisibility) }
+                    }
+                ))
+                .disabled(!sessionStore.isLoggedIn)
+                .opacity(sessionStore.isLoggedIn ? 1 : 0.45)
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 18)
+        .figmaSurfaceCard(radius: 30)
+    }
+
+    private var displayNameEditorSheet: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("编辑昵称")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(FigmaTheme.text)
+
+                TextField("昵称（可重复）", text: $displayNameInput)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 14, weight: .semibold))
+
+                Text("支持 1-24 个字符")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(FigmaTheme.subtext)
+
+                Spacer(minLength: 0)
+            }
+            .padding(18)
+            .background(FigmaTheme.mutedBackground.ignoresSafeArea())
+            .navigationTitle("修改昵称")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") {
+                        showDisplayNameEditor = false
+                        displayNameInput = displayNameDraft
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        Task { await updateDisplayName(to: displayNameInput) }
+                    }
+                    .disabled(!sessionStore.isLoggedIn)
+                }
+            }
+        }
+    }
+
+    private func accountInfoRow(title: String, value: String) -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            Text(title)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(FigmaTheme.subtext)
+
+            Spacer(minLength: 8)
+
+            Text(value)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(FigmaTheme.text)
+                .lineLimit(1)
+                .truncationMode(.middle)
         }
     }
 
@@ -706,6 +870,64 @@ struct SettingsView: View {
     private func showPlaceholder(_ title: String) {
         comingSoonTitle = title
         showComingSoon = true
+    }
+
+    private func refreshAccountIfPossible() async {
+        guard let token = sessionStore.currentAccessToken, !token.isEmpty else {
+            displayNameDraft = UserDefaults.standard.string(forKey: "streetstamps.profile.displayName") ?? "Explorer"
+            displayNameInput = displayNameDraft
+            accountEmail = sessionStore.currentEmail ?? ""
+            profileVisibility = ProfileSharingSettings.visibility
+            return
+        }
+        do {
+            let me = try await BackendAPIClient.shared.fetchMyProfile(token: token)
+            displayNameDraft = me.displayName
+            displayNameInput = displayNameDraft
+            exclusiveIDDraft = me.resolvedExclusiveID ?? ""
+            accountEmail = me.email ?? sessionStore.currentEmail ?? ""
+            if let pv = me.profileVisibility {
+                profileVisibility = pv
+                ProfileSharingSettings.visibility = pv
+            } else {
+                profileVisibility = .friendsOnly
+            }
+        } catch {
+            toastAccount("获取账号信息失败：\(error.localizedDescription)")
+        }
+    }
+
+    private func updateDisplayName(to input: String) async {
+        guard let token = sessionStore.currentAccessToken, !token.isEmpty else { return }
+        let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else {
+            return toastAccount("昵称不能为空")
+        }
+        do {
+            _ = try await BackendAPIClient.shared.updateDisplayName(token: token, displayName: value)
+            displayNameDraft = value
+            displayNameInput = value
+            showDisplayNameEditor = false
+            toastAccount("昵称已更新")
+        } catch {
+            toastAccount("更新失败：\(error.localizedDescription)")
+        }
+    }
+
+    private func updateVisibility(previous: ProfileVisibility) async {
+        guard let token = sessionStore.currentAccessToken, !token.isEmpty else { return }
+        do {
+            _ = try await BackendAPIClient.shared.updateProfileVisibility(token: token, visibility: profileVisibility)
+            ProfileSharingSettings.visibility = profileVisibility
+        } catch {
+            profileVisibility = previous
+            toastAccount("更新失败：\(error.localizedDescription)")
+        }
+    }
+
+    private func toastAccount(_ text: String) {
+        accountMessage = text
+        showAccountMessage = true
     }
 
     private func handleGPXFileSelection(_ result: Result<[URL], Error>) {

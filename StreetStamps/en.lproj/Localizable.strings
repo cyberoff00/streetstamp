@@ -223,6 +223,9 @@
 "equipment_status_owned" = "OWNED";
 "equipment_buy_short" = "BUY %d";
 "equipment_hair" = "Hair";
+"equipment_suit" = "Suit";
+"equipment_upper" = "Upper";
+"equipment_under" = "Under";
 "equipment_outfit" = "Outfit";
 "equipment_accessory" = "Accessories";
 "equipment_coming_soon" = "Coming soon";
@@ -264,7 +267,7 @@
 "auth_email" = "EMAIL";
 "auth_fill_email_password" = "Please enter email and password";
 "auth_forgot_password" = "Forgot password?";
-"auth_forgot_password_hint" = "Please use the change-password action in Account Center.";
+"auth_forgot_password_hint" = "Please use the change-password action in Settings.";
 "auth_full_name" = "FULL NAME";
 "auth_have_account" = "Already have an account?";
 "auth_no_account" = "Don't have an account?";
@@ -321,7 +324,7 @@
 "gpx_import_detected_cities" = "Detected by sampled reverse-geocode:";
 "gpx_import_existing_city_card" = "Existing City Card";
 "gpx_import_points_distance" = "Points: %d  ·  Distance: %@";
-"guest_mode_message" = "Guest accounts cannot use social features. You can register or sign in later in Account Center.";
+"guest_mode_message" = "Guest accounts cannot use social features. You can register or sign in later in Settings.";
 "guest_mode_title" = "Guest Mode";
 "import" = "Import";
 "import_gpx_title" = "Import GPX";
@@ -344,6 +347,9 @@
 "lifelog_mood_title" = "Choose mood";
 "lifelog_permission_action" = "Enable";
 "lifelog_permission_hint" = "Enable Always Allow to keep tracking in the background.";
+"lifelog_permission_settings_action" = "Open Settings";
+"lifelog_permission_settings_message" = "Enable Always Allow to record routes offline. All route data stays on this device, so your privacy is protected.";
+"lifelog_permission_settings_title" = "Always Allow Required";
 "lifelog_title" = "LIFELOG";
 "memories_title" = "MEMORIES";
 "my_journey_title_upper" = "MY JOURNEY";
@@ -429,3 +435,6 @@
 "unknown_city" = "Unknown City";
 "friends_exclusive_id_format" = "Exclusive ID: %@";
 "friends_journey_title" = "Friend's Journey";
+"lifelog_mood_subtitle" = "How did today feel?";
+"lifelog_mood_later" = "Maybe later";
+"lifelog_health_permission_denied_short" = "Health steps denied";

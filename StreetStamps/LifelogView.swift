@@ -1,6 +1,7 @@
 import SwiftUI
 import MapKit
 import UIKit
+import HealthKit
 
 private struct LifelogShareImageItem: Identifiable {
     let id = UUID()
@@ -21,10 +22,15 @@ struct LifelogView: View {
     @State private var globeJourneysSnapshot: [JourneyRoute] = []
     @State private var showEnableHint = false
     @State private var showDisableConfirm = false
+    @State private var showPermissionSettingsPrompt = false
     @State private var shareItem: LifelogShareImageItem? = nil
     @State private var didCenterOnEnter = false
     @State private var selectedDay: Date? = nil
     @State private var moodPickerDay: Date? = nil
+    @State private var isMoodPopupVisible = false
+    @State private var isStepPopupVisible = false
+    @State private var isRefreshingSteps = false
+    @State private var hasHealthStepPermission = false
     @State private var calendarDisplayMode: CalendarDisplayMode = .day
     @State private var visibleMonthAnchor: Date = Calendar.current.startOfDay(for: Date())
     @State private var isSheetExpanded = true
@@ -33,6 +39,10 @@ struct LifelogView: View {
     @State private var visibleRegion: MKCoordinateRegion? = nil
     @State private var cameraRegion: MKCoordinateRegion? = nil
     @AppStorage(MapAppearanceSettings.storageKey) private var mapAppearanceRaw = MapAppearanceSettings.current.rawValue
+    @AppStorage("streetstamps.lifelog.health.steps.snapshot.day") private var stepSnapshotDay = ""
+    @AppStorage("streetstamps.lifelog.health.steps.snapshot.value") private var stepSnapshotValue = 0
+    @AppStorage("streetstamps.lifelog.steps.popup.prompted.day") private var stepPopupPromptedDay = ""
+    @AppStorage("streetstamps.lifelog.mood.prompted.day") private var moodPromptedDay = ""
 
     private var mapAppearance: MapAppearanceStyle {
         MapAppearanceStyle(rawValue: mapAppearanceRaw) ?? .dark
@@ -112,9 +122,21 @@ struct LifelogView: View {
                     VStack(spacing: 0) {
                         header
                         permissionHint
+                            .padding(.horizontal, 16)
+                            .padding(.top, 10)
+
+                        HStack {
+                            Spacer()
+                            VStack(spacing: 8) {
+                                stepPopupToggleButton
+                                if isStepPopupVisible {
+                                    stepCompactBadge
+                                }
+                            }
+                        }
+                        .padding(.trailing, 16)
+                        .padding(.top, 10)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
 
                     Spacer()
 
@@ -146,6 +168,10 @@ struct LifelogView: View {
                 }
 
                 floatingBottomRightButtons(bottomInset: proxy.safeAreaInsets.bottom + 24)
+
+                if isMoodPopupVisible {
+                    moodPickerPopup
+                }
             }
         }
         .fullScreenCover(isPresented: $showGlobe) {
@@ -165,25 +191,13 @@ struct LifelogView: View {
         } message: {
             Text(L10n.t("lifelog_disable_message"))
         }
-        .confirmationDialog(
-            L10n.t("lifelog_mood_title"),
-            isPresented: Binding(
-                get: { moodPickerDay != nil },
-                set: { if !$0 { moodPickerDay = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            ForEach(Self.moodOptions, id: \.id) { mood in
-                Button("\(mood.placeholderEmoji) \(mood.label)") {
-                    guard let day = moodPickerDay else { return }
-                    lifelogStore.setMood(mood.moodValue, for: day)
-                }
-            }
-            Button(L10n.t("lifelog_clear_mood"), role: .destructive) {
-                guard let day = moodPickerDay else { return }
-                lifelogStore.setMood(nil, for: day)
+        .alert(L10n.t("lifelog_permission_settings_title"), isPresented: $showPermissionSettingsPrompt) {
+            Button(L10n.t("lifelog_permission_settings_action")) {
+                openAppSettings()
             }
             Button(L10n.t("cancel"), role: .cancel) {}
+        } message: {
+            Text(L10n.t("lifelog_permission_settings_message"))
         }
         .onAppear {
             didCenterOnEnter = false
@@ -193,6 +207,16 @@ struct LifelogView: View {
                 showEnableHint = true
             }
             centerOnCurrent(force: true)
+            Task {
+                await refreshHealthPermissionState()
+                await requestHealthPermissionIfNeeded()
+                await captureDailyStepSnapshotIfNeeded()
+                if stepPopupPromptedDay != todayKey() {
+                    stepPopupPromptedDay = todayKey()
+                    isStepPopupVisible = true
+                }
+                presentMoodPopupIfNeeded()
+            }
         }
         .onChange(of: lifelogStore.availableDays) { _ in seedSelectedDayIfNeeded() }
         .onChange(of: lifelogStore.currentLocation?.coordinate.latitude) { _ in
@@ -230,6 +254,7 @@ struct LifelogView: View {
                         if shouldShowMoodQuestionMark {
                             Button {
                                 moodPickerDay = Calendar.current.startOfDay(for: Date())
+                                isMoodPopupVisible = true
                             } label: {
                                 Text("❓")
                                     .font(.system(size: 21))
@@ -302,8 +327,7 @@ struct LifelogView: View {
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(FigmaTheme.text)
                         .frame(width: 42, height: 42)
-                        .background(FigmaTheme.card.opacity(0.92))
-                        .clipShape(Circle())
+                        .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
             }
@@ -311,11 +335,24 @@ struct LifelogView: View {
             Text(L10n.t("lifelog_title"))
                 .appHeaderStyle()
         }
+        .padding(.horizontal, 18)
+        .padding(.top, 14)
+        .padding(.bottom, 12)
+        .background(FigmaTheme.card.opacity(0.92).ignoresSafeArea(edges: .top))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(FigmaTheme.border)
+                .frame(height: 1)
+        }
     }
 
     private var shouldShowMoodQuestionMark: Bool {
         let today = Calendar.current.startOfDay(for: Date())
         return lifelogStore.mood(for: today) == nil
+    }
+
+    private var canShowStepSnapshot: Bool {
+        hasHealthStepPermission && stepSnapshotDay == todayKey() && stepSnapshotValue > 0
     }
 
     private var recenterButton: some View {
@@ -341,7 +378,7 @@ struct LifelogView: View {
                     .appCaptionStyle()
                     .foregroundColor(panelText)
                 Button(L10n.t("lifelog_permission_action")) {
-                    locationHub.requestPermissionIfNeeded()
+                    handleAlwaysPermissionAction()
                 }
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(isDarkAppearance ? .black : .white)
@@ -442,18 +479,23 @@ struct LifelogView: View {
 
     private var lifelogRecordToggle: some View {
         Button {
+            if hasAlwaysPermission {
+                showEnableHint = false
+            }
+
+            if !hasAlwaysPermission {
+                handleUnavailableAlwaysPermissionToggleTap()
+                return
+            }
+
             if lifelogStore.isEnabled {
                 showDisableConfirm = true
             } else {
                 lifelogStore.setEnabled(true)
-                if locationHub.authorizationStatus != .authorizedAlways {
-                    showEnableHint = true
-                    locationHub.requestPermissionIfNeeded()
-                }
             }
         } label: {
             Circle()
-                .fill(lifelogStore.isEnabled ? Color(red: 0.42, green: 0.78, blue: 0.58) : Color.gray.opacity(0.65))
+                .fill((hasAlwaysPermission && lifelogStore.isEnabled) ? Color(red: 0.42, green: 0.78, blue: 0.58) : Color.gray.opacity(0.65))
                 .frame(width: 12, height: 12)
                 .frame(width: 34, height: 34)
                 .background(Color.white.opacity(0.92))
@@ -461,6 +503,40 @@ struct LifelogView: View {
                 .shadow(color: Color.black.opacity(0.10), radius: 6, y: 2)
         }
         .buttonStyle(.plain)
+    }
+
+    private func handleAlwaysPermissionAction() {
+        switch locationHub.authorizationStatus {
+        case .authorizedAlways:
+            showEnableHint = false
+        case .denied, .restricted:
+            openAppSettings()
+        case .notDetermined, .authorizedWhenInUse:
+            locationHub.requestAlwaysPermissionIfNeeded()
+        @unknown default:
+            locationHub.requestAlwaysPermissionIfNeeded()
+        }
+    }
+
+    private var hasAlwaysPermission: Bool {
+        locationHub.authorizationStatus == .authorizedAlways
+    }
+
+    private func handleUnavailableAlwaysPermissionToggleTap() {
+        showEnableHint = true
+        switch locationHub.authorizationStatus {
+        case .notDetermined:
+            locationHub.requestAlwaysPermissionIfNeeded()
+        case .authorizedWhenInUse, .denied, .restricted:
+            showPermissionSettingsPrompt = true
+        @unknown default:
+            showPermissionSettingsPrompt = true
+        }
+    }
+
+    private func openAppSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 
     private var bottomDock: some View {
@@ -508,6 +584,7 @@ struct LifelogView: View {
                 .stroke(Color.black.opacity(0.04), lineWidth: 1)
         )
         .shadow(color: Color.black.opacity(0.14), radius: 22, x: 0, y: 10)
+        .ignoresSafeArea(edges: .bottom)
         .background(
             GeometryReader { proxy in
                 Color.clear
@@ -597,6 +674,34 @@ struct LifelogView: View {
             }
         }
         .ignoresSafeArea(edges: .bottom)
+    }
+
+    private var stepPopupToggleButton: some View {
+        Button {
+            if isStepPopupVisible {
+                isStepPopupVisible = false
+            } else {
+                Task { await openStepPopup() }
+            }
+        } label: {
+            Image(systemName: "shoeprints.fill")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(.white)
+                .frame(width: 30, height: 30)
+                .background(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.18, green: 0.80, blue: 0.74),
+                            Color(red: 0.08, green: 0.63, blue: 0.57)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .clipShape(Circle())
+                .shadow(color: Color.black.opacity(0.18), radius: 6, y: 2)
+        }
+        .buttonStyle(.plain)
     }
 
     private var currentHeadingDegrees: Double {
@@ -1132,6 +1237,7 @@ struct LifelogView: View {
         let targetDay = Calendar.current.startOfDay(for: day)
         if isSelectedDay(targetDay) {
             moodPickerDay = targetDay
+            isMoodPopupVisible = true
             return
         }
         selectedDay = targetDay
@@ -1157,10 +1263,207 @@ struct LifelogView: View {
     }
 
     private static let moodOptions: [MoodOption] = [
-        .init(id: "sad", moodValue: "😢", placeholderEmoji: "😢", label: "Sad"),
-        .init(id: "normal", moodValue: "😐", placeholderEmoji: "😐", label: "Normal"),
-        .init(id: "happy", moodValue: "😄", placeholderEmoji: "😄", label: "Happy")
+        .init(id: "awful", moodValue: "😭", placeholderEmoji: "😭", label: "崩溃"),
+        .init(id: "sad", moodValue: "😢", placeholderEmoji: "😢", label: "低落"),
+        .init(id: "normal", moodValue: "😐", placeholderEmoji: "😐", label: "一般"),
+        .init(id: "happy", moodValue: "😄", placeholderEmoji: "😄", label: "开心"),
+        .init(id: "great", moodValue: "🤩", placeholderEmoji: "🤩", label: "超棒")
     ]
+
+    @ViewBuilder
+    private var moodPickerPopup: some View {
+        ZStack {
+            Color.black.opacity(0.45)
+                .ignoresSafeArea()
+                .onTapGesture {}
+
+            VStack(spacing: 14) {
+                Text(L10n.t("lifelog_mood_title"))
+                    .font(.system(size: 24, weight: .heavy, design: .rounded))
+                    .foregroundColor(.white)
+                    .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+
+                Text(L10n.t("lifelog_mood_subtitle"))
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.92))
+
+                HStack(spacing: 10) {
+                    ForEach(Self.moodOptions, id: \.id) { mood in
+                        Button {
+                            guard let day = moodPickerDay else { return }
+                            lifelogStore.setMood(mood.moodValue, for: day)
+                            moodPromptedDay = todayKey()
+                            isMoodPopupVisible = false
+                            moodPickerDay = nil
+                        } label: {
+                            VStack(spacing: 8) {
+                                Text(mood.placeholderEmoji)
+                                    .font(.system(size: 34))
+                                Text(mood.label)
+                                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                            }
+                            .foregroundColor(Color(red: 0.18, green: 0.24, blue: 0.28))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(Color.white.opacity(0.94))
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                HStack(spacing: 10) {
+                    Button(L10n.t("lifelog_clear_mood")) {
+                        guard let day = moodPickerDay else { return }
+                        lifelogStore.setMood(nil, for: day)
+                        moodPromptedDay = todayKey()
+                        isMoodPopupVisible = false
+                        moodPickerDay = nil
+                    }
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.92))
+
+                    Spacer()
+
+                    Button(L10n.t("lifelog_mood_later")) {
+                        moodPromptedDay = todayKey()
+                        isMoodPopupVisible = false
+                        moodPickerDay = nil
+                    }
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.92))
+                }
+            }
+            .padding(18)
+            .background(
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.18, green: 0.57, blue: 0.91),
+                        Color(red: 0.16, green: 0.77, blue: 0.65)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(Color.white.opacity(0.22), lineWidth: 1)
+            )
+            .padding(.horizontal, 18)
+        }
+    }
+
+    private var stepCompactBadge: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "shoeprints.fill")
+                .font(.system(size: 11, weight: .bold))
+            Text(stepCompactText)
+                .font(.system(size: 24, weight: .black, design: .rounded))
+                .contentTransition(.numericText())
+        }
+        .foregroundColor(Color(red: 0.10, green: 0.12, blue: 0.16))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.90))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.black.opacity(0.08), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.10), radius: 5, y: 2)
+    }
+
+    private var stepCompactText: String {
+        if isRefreshingSteps { return "..." }
+        if canShowStepSnapshot { return "\(stepSnapshotValue)" }
+        return "--"
+    }
+
+    private func presentMoodPopupIfNeeded() {
+        let today = Calendar.current.startOfDay(for: Date())
+        guard lifelogStore.mood(for: today) == nil else { return }
+        guard moodPromptedDay != todayKey() else { return }
+        moodPickerDay = today
+        isMoodPopupVisible = true
+    }
+
+    private func refreshHealthPermissionState() async {
+        guard HKHealthStore.isHealthDataAvailable() else { return }
+        guard let stepType = HKQuantityType.quantityType(forIdentifier: .stepCount) else { return }
+        let status = HKHealthStore().authorizationStatus(for: stepType)
+        // `authorizationStatus(for:)` is share-oriented; for read-only requests it can be misleading.
+        // Treat "requested before" as available, and confirm by running a read query afterwards.
+        hasHealthStepPermission = status != .notDetermined
+    }
+
+    private func openStepPopup() async {
+        isStepPopupVisible = true
+        isRefreshingSteps = true
+        await refreshHealthPermissionState()
+        await requestHealthPermissionIfNeeded()
+        await refreshHealthPermissionState()
+        await captureDailyStepSnapshotIfNeeded()
+        isRefreshingSteps = false
+    }
+
+    private func requestHealthPermissionIfNeeded() async {
+        guard HKHealthStore.isHealthDataAvailable() else { return }
+        guard let stepType = HKObjectType.quantityType(forIdentifier: .stepCount) else { return }
+        let store = HKHealthStore()
+        if store.authorizationStatus(for: stepType) != .notDetermined {
+            return
+        }
+        do {
+            try await store.requestAuthorization(toShare: [], read: [stepType])
+            await refreshHealthPermissionState()
+        } catch {
+            await refreshHealthPermissionState()
+        }
+    }
+
+    private func captureDailyStepSnapshotIfNeeded() async {
+        guard hasHealthStepPermission else { return }
+        let today = todayKey()
+        guard stepSnapshotDay != today else { return }
+        guard let count = try? await fetchTodayStepCount() else { return }
+        stepSnapshotValue = max(0, count)
+        stepSnapshotDay = today
+    }
+
+    private func fetchTodayStepCount() async throws -> Int {
+        guard let stepType = HKQuantityType.quantityType(forIdentifier: .stepCount) else { return 0 }
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: Date())
+        let predicate = HKQuery.predicateForSamples(withStart: startOfDay, end: Date(), options: .strictStartDate)
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let query = HKStatisticsQuery(
+                quantityType: stepType,
+                quantitySamplePredicate: predicate,
+                options: .cumulativeSum
+            ) { _, result, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                let value = result?.sumQuantity()?.doubleValue(for: HKUnit.count()) ?? 0
+                continuation.resume(returning: Int(value.rounded(.down)))
+            }
+            HKHealthStore().execute(query)
+        }
+    }
+
+    private func todayKey() -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
+        f.timeZone = TimeZone.current
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: Date())
+    }
 
     private enum CalendarDisplayMode {
         case day

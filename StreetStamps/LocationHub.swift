@@ -226,6 +226,14 @@ final class LocationHub: ObservableObject {
         current.requestPermissionIfNeeded()
     }
 
+    func requestAlwaysPermissionIfNeeded() {
+        if current === systemSource {
+            systemSource.requestAlwaysAuthorizationIfNeeded()
+        } else {
+            current.requestPermissionIfNeeded()
+        }
+    }
+
     /// 默认 start：高功耗（前台精细）
     func start() {
         startRealTime()

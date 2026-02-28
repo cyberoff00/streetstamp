@@ -32,6 +32,7 @@ struct CityDeepView: View {
     @State private var activeCityKey: String
 
     @State private var editingMemory: JourneyMemory? = nil
+    @State private var showMemoriesOnMap = true
 
     @State private var fittedRegion: MKCoordinateRegion? = nil
     @State private var fetchedBoundaryPolygon: [CLLocationCoordinate2D]? = nil
@@ -295,7 +296,7 @@ struct CityDeepView: View {
         ZStack(alignment: .top) {
             CityDeepMKMap(
                 segments: styledSegments(),
-                memoryGroups: groupedMemories,
+                memoryGroups: showMemoriesOnMap ? groupedMemories : [],
                 initialRegion: fittedRegion,
                 onTapMemoryGroup: { group in
                     guard let latest = group.items.sorted(by: { $0.timestamp > $1.timestamp }).first else { return }
@@ -310,9 +311,30 @@ struct CityDeepView: View {
             VStack(spacing: 0) {
                 headerBar
 
-                HStack {
+                HStack(alignment: .top) {
                     statsBadge
                     Spacer(minLength: 0)
+                    Button {
+                        showMemoriesOnMap.toggle()
+                        if !showMemoriesOnMap {
+                            editingMemory = nil
+                        }
+                    } label: {
+                        Text(showMemoriesOnMap ? "记忆 开" : "记忆 关")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(UITheme.softBlack)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(UITheme.cardBg)
+                            .clipShape(Capsule())
+                            .overlay(
+                                Capsule()
+                                    .stroke(UITheme.cardStroke, lineWidth: 0.8)
+                            )
+                            .shadow(radius: 2, y: 1)
+                    }
+                    .buttonStyle(CardPressButtonStyle(pressedScale: 0.94, pressedOpacity: 0.88))
+                    .accessibilityLabel(showMemoriesOnMap ? "Hide memories on map" : "Show memories on map")
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 10)

@@ -52,19 +52,22 @@ struct CityStampLibraryView: View {
     private let usesSidebarHeader: Bool
     private let showHeader: Bool
     private let allowCityDetailNavigation: Bool
+    private let headerTitle: String?
 
     init(
         showSidebar: Binding<Bool>,
         autoRebuildFromJourneyStore: Bool = true,
         usesSidebarHeader: Bool = true,
         showHeader: Bool = true,
-        allowCityDetailNavigation: Bool = true
+        allowCityDetailNavigation: Bool = true,
+        headerTitle: String? = nil
     ) {
         self._showSidebar = showSidebar
         self.autoRebuildFromJourneyStore = autoRebuildFromJourneyStore
         self.usesSidebarHeader = usesSidebarHeader
         self.showHeader = showHeader
         self.allowCityDetailNavigation = allowCityDetailNavigation
+        self.headerTitle = headerTitle
     }
 
     var body: some View {
@@ -161,9 +164,12 @@ struct CityStampLibraryView: View {
     }
 
     private var headerBar: some View {
-        Group {
+        let titleText = (headerTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+            ? (headerTitle ?? "")
+            : "CITIES"
+        return Group {
             if usesSidebarHeader {
-                AppTopHeader(title: "CITIES", showSidebar: $showSidebar)
+                AppTopHeader(title: titleText, showSidebar: $showSidebar)
             } else {
                 HStack(spacing: 10) {
                     Button {
@@ -178,7 +184,7 @@ struct CityStampLibraryView: View {
 
                     Spacer()
 
-                    Text("CITIES")
+                    Text(titleText)
                         .appHeaderStyle()
 
                     Spacer()
