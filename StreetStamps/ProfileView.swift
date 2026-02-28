@@ -9,11 +9,13 @@ import Foundation
 import SwiftUI
 import UIKit
 import CoreLocation
+import AVFoundation
 
 struct ProfileView: View {
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var sessionStore: UserSessionStore
+    @EnvironmentObject private var socialStore: SocialGraphStore
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
 
     @State private var faceIndex: Int = 0
@@ -31,6 +33,11 @@ struct ProfileView: View {
     @State private var unreadSocialCount = 0
     @State private var showNotificationsSheet = false
     @State private var notificationsLoading = false
+    @State private var showInviteFriendSheet = false
+    @State private var myExclusiveID = ""
+    @State private var myInviteCode = ""
+    @State private var lastSyncedLoadout: RobotLoadout?
+    @State private var loadoutSyncTask: Task<Void, Never>?
 
     init() {
         self._loadout = State(initialValue: AvatarLoadoutStore.load())
@@ -105,12 +112,23 @@ struct ProfileView: View {
         }
         .onChange(of: loadout) { _, newValue in
             AvatarLoadoutStore.save(newValue)
+            scheduleLoadoutSync(newValue)
         }
         .sheet(isPresented: $showNameEditor) {
             profileNameEditorSheet
         }
         .sheet(isPresented: $showNotificationsSheet) {
             socialNotificationsSheet
+        }
+        .sheet(isPresented: $showInviteFriendSheet) {
+            InviteFriendSheet(
+                displayName: displayName,
+                loadout: loadout,
+                exclusiveID: resolvedExclusiveIDForInvite(),
+                inviteCode: resolvedInviteCodeForInvite()
+            )
+            .environmentObject(socialStore)
+            .environmentObject(sessionStore)
         }
         .alert(L10n.t("level_dialog_title"), isPresented: $showLevelProgressDialog) {
             Button(L10n.t("ok"), role: .cancel) {}
@@ -127,6 +145,7 @@ struct ProfileView: View {
         }
         .onChange(of: sessionStore.currentAccessToken) { _, _ in
             Task {
+                await refreshDisplayNameIfNeeded()
                 await refreshSocialNotifications(showToastForLatestUnread: false)
             }
         }
@@ -323,6 +342,13 @@ struct ProfileView: View {
                 socialNotificationTile
             }
             .buttonStyle(.plain)
+
+            Button {
+                showInviteFriendSheet = true
+            } label: {
+                inviteFriendTile
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -411,6 +437,44 @@ struct ProfileView: View {
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(Color(red: 0.22, green: 0.45, blue: 0.89))
                 }
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(FigmaTheme.subtext)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity)
+        .profileFeatureCardStyle()
+    }
+
+    private var inviteFriendTile: some View {
+        let idText = resolvedExclusiveIDForInvite()
+        let codeText = resolvedInviteCodeForInvite()
+        return HStack(spacing: 14) {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color(red: 0.95, green: 0.98, blue: 0.92))
+                .frame(width: 56, height: 56)
+                .overlay {
+                    Image(systemName: "person.crop.circle.badge.plus")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundColor(Color(red: 0.24, green: 0.56, blue: 0.21))
+                }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("邀请好友")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(FigmaTheme.text)
+                Text("扫码添加 · 也可搜索ID/邀请码")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(FigmaTheme.subtext)
+                Text("@\(idText)  ·  \(codeText)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(FigmaTheme.text.opacity(0.62))
+                    .lineLimit(1)
             }
 
             Spacer()
@@ -620,14 +684,56 @@ struct ProfileView: View {
     private func refreshDisplayNameIfNeeded() async {
         guard BackendConfig.isEnabled,
               let token = sessionStore.currentAccessToken,
-              !token.isEmpty else { return }
+              !token.isEmpty else {
+            syncInviteIdentityFallback()
+            return
+        }
         do {
             let me = try await BackendAPIClient.shared.fetchMyProfile(token: token)
+            if let remoteLoadout = me.loadout?.normalizedForCurrentAvatar() {
+                lastSyncedLoadout = remoteLoadout
+                loadout = remoteLoadout
+            }
             if !me.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 profileName = me.displayName
             }
+            if let id = me.resolvedExclusiveID?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !id.isEmpty {
+                myExclusiveID = id
+            }
+            if let code = me.inviteCode?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !code.isEmpty {
+                myInviteCode = code.uppercased()
+            } else {
+                myInviteCode = SocialGraphStore.generateInviteCode(source: me.id)
+            }
         } catch {
             // Keep profile editable even if backend request fails.
+            syncInviteIdentityFallback()
+        }
+    }
+
+    @MainActor
+    private func scheduleLoadoutSync(_ target: RobotLoadout) {
+        loadoutSyncTask?.cancel()
+        loadoutSyncTask = Task {
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            await syncLoadoutIfNeeded(target)
+        }
+    }
+
+    @MainActor
+    private func syncLoadoutIfNeeded(_ target: RobotLoadout) async {
+        let normalizedTarget = target.normalizedForCurrentAvatar()
+        if let last = lastSyncedLoadout, last == normalizedTarget { return }
+        guard BackendConfig.isEnabled,
+              let token = sessionStore.currentAccessToken,
+              !token.isEmpty else { return }
+        do {
+            let profile = try await BackendAPIClient.shared.updateLoadout(token: token, loadout: normalizedTarget)
+            lastSyncedLoadout = (profile.loadout ?? normalizedTarget).normalizedForCurrentAvatar()
+        } catch {
+            // Keep local loadout usable even when cloud sync fails temporarily.
         }
     }
 
@@ -704,6 +810,588 @@ struct ProfileView: View {
                 showToast = false
             }
         }
+    }
+
+    private func syncInviteIdentityFallback() {
+        if myExclusiveID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            myExclusiveID = fallbackExclusiveID()
+        }
+        if myInviteCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let source = sessionStore.accountUserID ?? myExclusiveID
+            myInviteCode = SocialGraphStore.generateInviteCode(source: source)
+        }
+    }
+
+    private func fallbackExclusiveID() -> String {
+        let base = displayName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "")
+        if !base.isEmpty { return base }
+        return "explorer"
+    }
+
+    private func resolvedExclusiveIDForInvite() -> String {
+        let id = myExclusiveID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return id.isEmpty ? fallbackExclusiveID() : id
+    }
+
+    private func resolvedInviteCodeForInvite() -> String {
+        let code = myInviteCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if !code.isEmpty { return code }
+        let source = sessionStore.accountUserID ?? resolvedExclusiveIDForInvite()
+        return SocialGraphStore.generateInviteCode(source: source)
+    }
+}
+
+struct InviteFriendSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var socialStore: SocialGraphStore
+    @EnvironmentObject private var sessionStore: UserSessionStore
+
+    let displayName: String
+    let loadout: RobotLoadout
+    let exclusiveID: String
+    let inviteCode: String
+
+    @State private var qrImage: UIImage?
+    @State private var shareCardImage: UIImage?
+    @State private var showShare = false
+    @State private var copiedToast = ""
+    @State private var showCopiedToast = false
+    @State private var requestInput = ""
+    @State private var sendingRequest = false
+    @State private var requestMessage = ""
+    @State private var showRequestMessage = false
+    @State private var showScannerSheet = false
+
+    private var inviteDeepLink: String {
+        var components = URLComponents()
+        components.scheme = "streetstamps"
+        components.host = "add-friend"
+        components.queryItems = [
+            URLQueryItem(name: "code", value: inviteCode),
+            URLQueryItem(name: "handle", value: exclusiveID)
+        ]
+        return components.string ?? "streetstamps://add-friend?code=\(inviteCode)&handle=\(exclusiveID)"
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 16) {
+                    VStack(spacing: 12) {
+                        HStack(spacing: 10) {
+                            RobotRendererView(
+                                size: 58,
+                                face: .front,
+                                loadout: loadout
+                            )
+                            .frame(width: 58, height: 58)
+                            .background(Color.black.opacity(0.04))
+                            .clipShape(Circle())
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("StreetStamps")
+                                    .font(.system(size: 19, weight: .bold))
+                                    .foregroundColor(FigmaTheme.text)
+                                Text("好友邀请码")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundColor(FigmaTheme.subtext)
+                            }
+                            Spacer()
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+
+                        if let qrImage {
+                            Image(uiImage: qrImage)
+                                .interpolation(.none)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 210, height: 210)
+                                .padding(10)
+                                .background(Color.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                        .stroke(FigmaTheme.border, lineWidth: 1)
+                                )
+                        } else {
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                .fill(Color.white)
+                                .frame(width: 220, height: 220)
+                                .overlay {
+                                    ProgressView()
+                                }
+                        }
+
+                        Text(displayName.uppercased())
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(FigmaTheme.text)
+                        Text("@\(exclusiveID)")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(FigmaTheme.subtext)
+
+                        HStack(spacing: 10) {
+                            Text(inviteCode)
+                                .font(.system(size: 34, weight: .black, design: .rounded))
+                                .foregroundColor(FigmaTheme.text)
+                                .tracking(1.6)
+                            Button {
+                                copyText(inviteCode, success: "邀请码已复制")
+                            } label: {
+                                Image(systemName: "doc.on.doc")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(FigmaTheme.subtext)
+                                    .frame(width: 36, height: 36)
+                                    .background(Color.black.opacity(0.06))
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        Button {
+                            if shareCardImage == nil {
+                                shareCardImage = InviteShareCardRenderer.render(
+                                    displayName: displayName,
+                                    exclusiveID: exclusiveID,
+                                    inviteCode: inviteCode,
+                                    loadout: loadout,
+                                    qrImage: qrImage
+                                )
+                            }
+                            showShare = true
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "square.and.arrow.up")
+                                    .font(.system(size: 14, weight: .semibold))
+                                Text("分享卡片")
+                                    .font(.system(size: 16, weight: .semibold))
+                            }
+                            .foregroundColor(FigmaTheme.primary)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 48)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                                    .stroke(FigmaTheme.primary, lineWidth: 2)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 18)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 20)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                    .shadow(color: Color.black.opacity(0.04), radius: 16, x: 0, y: 6)
+
+                    VStack(spacing: 10) {
+                        Text("传送好友请求")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(FigmaTheme.text)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.top, 4)
+
+                        TextField("输入好友邀请码 / 专属ID / 邀请链接", text: $requestInput)
+                            .textInputAutocapitalization(.never)
+                            .disableAutocorrection(true)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 15, weight: .medium))
+
+                        Button {
+                            Task { await sendFriendRequestFromInput() }
+                        } label: {
+                            HStack(spacing: 8) {
+                                if sendingRequest {
+                                    ProgressView()
+                                        .tint(.white)
+                                }
+                                Text(sendingRequest ? "发送中..." : "发送好友申请")
+                                    .font(.system(size: 15, weight: .semibold))
+                            }
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 44)
+                            .background(FigmaTheme.primary)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(sendingRequest)
+
+                        Button {
+                            showScannerSheet = true
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "qrcode.viewfinder")
+                                    .font(.system(size: 16, weight: .semibold))
+                                Text("扫描QR码")
+                                    .font(.system(size: 15, weight: .semibold))
+                            }
+                            .foregroundColor(FigmaTheme.primary)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 44)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .stroke(FigmaTheme.primary, lineWidth: 1.5)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(14)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .shadow(color: Color.black.opacity(0.03), radius: 12, x: 0, y: 4)
+                }
+                .padding(16)
+            }
+            .background(FigmaTheme.background.ignoresSafeArea())
+            .navigationTitle("邀请好友")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("关闭") { dismiss() }
+                }
+            }
+            .overlay(alignment: .top) {
+                if showCopiedToast {
+                    Text(copiedToast)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.black.opacity(0.85))
+                        .clipShape(Capsule())
+                        .padding(.top, 8)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .task {
+                if qrImage == nil {
+                    qrImage = InviteQRCodeGenerator.generate(from: inviteDeepLink)
+                }
+                if shareCardImage == nil {
+                    shareCardImage = InviteShareCardRenderer.render(
+                        displayName: displayName,
+                        exclusiveID: exclusiveID,
+                        inviteCode: inviteCode,
+                        loadout: loadout,
+                        qrImage: qrImage
+                    )
+                }
+            }
+            .sheet(isPresented: $showShare) {
+                if let card = shareCardImage {
+                    ShareSheet(activityItems: [card])
+                } else if let qr = qrImage {
+                    ShareSheet(activityItems: [qr])
+                } else {
+                    ShareSheet(activityItems: [inviteCode])
+                }
+            }
+            .sheet(isPresented: $showScannerSheet) {
+                ProfileInviteScannerSheet { code in
+                    requestInput = code
+                    Task { await sendFriendRequestFromInput() }
+                }
+            }
+            .alert("提示", isPresented: $showRequestMessage) {
+                Button("知道了", role: .cancel) {}
+            } message: {
+                Text(requestMessage)
+            }
+        }
+    }
+
+    private func copyText(_ text: String, success: String) {
+        UIPasteboard.general.string = text
+        copiedToast = success
+        withAnimation(.easeInOut(duration: 0.2)) {
+            showCopiedToast = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                showCopiedToast = false
+            }
+        }
+    }
+
+    @MainActor
+    private func sendFriendRequestFromInput() async {
+        guard !sendingRequest else { return }
+        let raw = requestInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else {
+            requestMessage = "请先输入邀请码、专属ID或邀请链接。"
+            showRequestMessage = true
+            return
+        }
+        sendingRequest = true
+        defer { sendingRequest = false }
+
+        let parsed = AppDeepLinkStore.parseInvite(from: raw)
+        let inviteCode = parsed?.inviteCode
+        let handle = parsed?.handle
+        let directHandle: String? = {
+            guard parsed == nil else { return nil }
+            let v = raw.hasPrefix("@") ? String(raw.dropFirst()) : raw
+            return v.isEmpty ? nil : v
+        }()
+
+        do {
+            try await socialStore.addFriendSmart(
+                displayName: "",
+                inviteCode: inviteCode,
+                handle: handle ?? directHandle,
+                accessToken: sessionStore.currentAccessToken
+            )
+            requestMessage = "好友申请已发送。"
+            showRequestMessage = true
+            requestInput = ""
+        } catch {
+            requestMessage = "发送失败：\(error.localizedDescription)"
+            showRequestMessage = true
+        }
+    }
+}
+
+private enum InviteQRCodeGenerator {
+    static func generate(from text: String) -> UIImage? {
+        let data = Data(text.utf8)
+        guard let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
+        filter.setValue(data, forKey: "inputMessage")
+        filter.setValue("Q", forKey: "inputCorrectionLevel")
+        guard let output = filter.outputImage else { return nil }
+        let transform = CGAffineTransform(scaleX: 10, y: 10)
+        let scaled = output.transformed(by: transform)
+        let context = CIContext(options: nil)
+        guard let cgImage = context.createCGImage(scaled, from: scaled.extent) else { return nil }
+        return UIImage(cgImage: cgImage)
+    }
+}
+
+private enum InviteShareCardRenderer {
+    @MainActor
+    static func render(
+        displayName: String,
+        exclusiveID: String,
+        inviteCode: String,
+        loadout: RobotLoadout,
+        qrImage: UIImage?
+    ) -> UIImage? {
+        guard let qrImage else { return nil }
+        let view = InviteShareCardView(
+            displayName: displayName,
+            exclusiveID: exclusiveID,
+            inviteCode: inviteCode,
+            loadout: loadout,
+            qrImage: qrImage
+        )
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = UIScreen.main.scale
+        return renderer.uiImage
+    }
+}
+
+private struct InviteShareCardView: View {
+    let displayName: String
+    let exclusiveID: String
+    let inviteCode: String
+    let loadout: RobotLoadout
+    let qrImage: UIImage
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(red: 0.94, green: 0.95, blue: 0.99), Color.white],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 14) {
+                Text("StreetStamps")
+                    .font(.system(size: 28, weight: .black))
+                    .foregroundColor(FigmaTheme.text)
+
+                HStack(spacing: 10) {
+                    RobotRendererView(size: 62, face: .front, loadout: loadout)
+                        .frame(width: 62, height: 62)
+                        .background(Color.black.opacity(0.05))
+                        .clipShape(Circle())
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(displayName.uppercased())
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(FigmaTheme.text)
+                        Text("@\(exclusiveID)")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(FigmaTheme.subtext)
+                    }
+                    Spacer()
+                }
+
+                Image(uiImage: qrImage)
+                    .interpolation(.none)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 220, height: 220)
+                    .padding(12)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+                Text(inviteCode)
+                    .font(.system(size: 38, weight: .black, design: .rounded))
+                    .foregroundColor(FigmaTheme.text)
+                    .tracking(1.8)
+
+                Text("打开 StreetStamps → 好友 → 扫描二维码")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(FigmaTheme.subtext)
+            }
+            .padding(24)
+        }
+        .frame(width: 680, height: 1020)
+    }
+}
+
+private struct ProfileInviteScannerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let onScanned: (String) -> Void
+
+    @State private var scannerError: String?
+
+    var body: some View {
+        NavigationStack {
+            ZStack(alignment: .bottom) {
+                ProfileInviteScannerRepresentable(
+                    onDetected: { code in
+                        dismiss()
+                        onScanned(code)
+                    },
+                    onFailure: { scannerError = $0 }
+                )
+                .ignoresSafeArea()
+
+                Text("将好友邀请码二维码放入框内")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.black.opacity(0.55))
+                    .clipShape(Capsule())
+                    .padding(.bottom, 24)
+            }
+            .navigationTitle("扫描二维码")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("关闭") { dismiss() }
+                }
+            }
+            .alert("扫描失败", isPresented: Binding(
+                get: { scannerError != nil },
+                set: { if !$0 { scannerError = nil } }
+            )) {
+                Button("知道了", role: .cancel) {}
+            } message: {
+                Text(scannerError ?? "")
+            }
+        }
+    }
+}
+
+private struct ProfileInviteScannerRepresentable: UIViewControllerRepresentable {
+    let onDetected: (String) -> Void
+    let onFailure: (String) -> Void
+
+    func makeUIViewController(context: Context) -> ProfileInviteScannerViewController {
+        let vc = ProfileInviteScannerViewController()
+        vc.onDetected = onDetected
+        vc.onFailure = onFailure
+        return vc
+    }
+
+    func updateUIViewController(_ uiViewController: ProfileInviteScannerViewController, context: Context) {}
+}
+
+private final class ProfileInviteScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
+    var onDetected: ((String) -> Void)?
+    var onFailure: ((String) -> Void)?
+
+    private let session = AVCaptureSession()
+    private var previewLayer: AVCaptureVideoPreviewLayer?
+    private var didFinish = false
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black
+        configureCapture()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        previewLayer?.frame = view.bounds
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        if !session.isRunning {
+            session.startRunning()
+        }
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        if session.isRunning {
+            session.stopRunning()
+        }
+    }
+
+    private func configureCapture() {
+        guard let device = AVCaptureDevice.default(for: .video) else {
+            onFailure?("当前设备不支持摄像头扫描。")
+            return
+        }
+        do {
+            let input = try AVCaptureDeviceInput(device: device)
+            guard session.canAddInput(input) else {
+                onFailure?("无法访问摄像头输入。")
+                return
+            }
+            session.addInput(input)
+
+            let output = AVCaptureMetadataOutput()
+            guard session.canAddOutput(output) else {
+                onFailure?("无法配置扫描输出。")
+                return
+            }
+            session.addOutput(output)
+            output.setMetadataObjectsDelegate(self, queue: .main)
+            output.metadataObjectTypes = [.qr]
+
+            let preview = AVCaptureVideoPreviewLayer(session: session)
+            preview.videoGravity = .resizeAspectFill
+            view.layer.addSublayer(preview)
+            previewLayer = preview
+        } catch {
+            onFailure?("摄像头权限不可用，请在系统设置中允许访问。")
+        }
+    }
+
+    func metadataOutput(
+        _ output: AVCaptureMetadataOutput,
+        didOutput metadataObjects: [AVMetadataObject],
+        from connection: AVCaptureConnection
+    ) {
+        guard !didFinish else { return }
+        guard let first = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
+              let code = first.stringValue,
+              !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+        didFinish = true
+        session.stopRunning()
+        onDetected?(code)
     }
 }
 

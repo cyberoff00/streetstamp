@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import MapKit
+import AVFoundation
 
 private enum FriendsTopTab: String, CaseIterable, Identifiable {
     case activity
@@ -79,6 +80,9 @@ struct FriendsHubView: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var socialStore: SocialGraphStore
     @EnvironmentObject private var sessionStore: UserSessionStore
+    @EnvironmentObject private var deepLinkStore: AppDeepLinkStore
+    @EnvironmentObject private var journeyStore: JourneyStore
+    @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
 
     @State private var tab: FriendsTopTab = .activity
     @State private var showAddFriendSheet = false
@@ -96,6 +100,11 @@ struct FriendsHubView: View {
     @State private var incomingFriendRequests: [BackendFriendRequestDTO] = []
     @State private var outgoingFriendRequests: [BackendFriendRequestDTO] = []
     @State private var requestActionLoadingIDs: Set<String> = []
+    @State private var addFriendPrefillInviteCode: String?
+    @State private var addFriendPrefillHandle: String?
+    @State private var showInviteFriendSheet = false
+    @State private var myExclusiveID = ""
+    @State private var myInviteCode = ""
 
     private var sortedFriends: [FriendProfileSnapshot] {
         socialStore.friends.sorted { lhs, rhs in
@@ -103,14 +112,59 @@ struct FriendsHubView: View {
         }
     }
 
+    private var currentUserID: String {
+        sessionStore.accountUserID ?? sessionStore.currentUserID
+    }
+
+    private var selfSnapshotForFeed: FriendProfileSnapshot? {
+        let uid = currentUserID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !uid.isEmpty else { return nil }
+        let name = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let journeys = journeyStore.journeys.map(FriendSharedJourney.from(route:))
+        let fallbackInvite = SocialGraphStore.generateInviteCode(source: uid)
+        let invite = myInviteCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let handle = myExclusiveID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallbackHandle = SocialGraphStore.generateInviteCode(source: name).lowercased()
+        return FriendProfileSnapshot(
+            id: uid,
+            handle: handle.isEmpty ? fallbackHandle : handle,
+            inviteCode: invite.isEmpty ? fallbackInvite : invite,
+            profileVisibility: .friendsOnly,
+            displayName: name.isEmpty ? "Explorer" : name,
+            bio: "",
+            loadout: AvatarLoadoutStore.load().normalizedForCurrentAvatar(),
+            stats: ProfileStatsSnapshot(
+                totalJourneys: journeys.count,
+                totalDistance: journeys.reduce(0) { $0 + $1.distance },
+                totalMemories: journeys.reduce(0) { $0 + $1.memories.count },
+                totalUnlockedCities: 0
+            ),
+            journeys: journeys,
+            unlockedCityCards: [],
+            createdAt: Date()
+        )
+    }
+
+    private var feedSourceProfiles: [FriendProfileSnapshot] {
+        if let me = selfSnapshotForFeed {
+            return [me] + sortedFriends
+        }
+        return sortedFriends
+    }
+
+    private var feedProfileByID: [String: FriendProfileSnapshot] {
+        Dictionary(uniqueKeysWithValues: feedSourceProfiles.map { ($0.id, $0) })
+    }
+
     private var feedEvents: [FriendFeedEvent] {
-        buildFeedEvents(from: sortedFriends)
+        buildFeedEvents(from: feedSourceProfiles)
     }
 
     private var feedLikeSignature: String {
         feedEvents
             .compactMap { event -> String? in
                 guard let journeyID = event.journeyID else { return nil }
+                guard event.friendID != currentUserID else { return nil }
                 return feedLikeKey(friendID: event.friendID, journeyID: journeyID)
             }
             .sorted()
@@ -131,14 +185,14 @@ struct FriendsHubView: View {
                             emptyState(L10n.t("friends_empty_activity"))
                         } else {
                             ForEach(feedEvents) { event in
-                                if let friend = sortedFriends.first(where: { $0.id == event.friendID }) {
+                                if let friend = feedProfileByID[event.friendID] {
                                     FriendActivityCard(
                                         friend: friend,
                                         event: event,
                                         likeCount: likeCountForEvent(event),
                                         likedByMe: likedByMeForEvent(event),
                                         likeLoading: likeLoadingForEvent(event),
-                                        canLike: true,
+                                        canLike: event.friendID != currentUserID,
                                         onToggleLike: {
                                             guard let journeyID = event.journeyID else { return }
                                             Task {
@@ -146,9 +200,11 @@ struct FriendsHubView: View {
                                             }
                                         },
                                         onOpenProfile: {
+                                            guard friend.id != currentUserID else { return }
                                             activeRoute = .profile(friend.id)
                                         },
                                         onOpenEvent: {
+                                            guard friend.id != currentUserID else { return }
                                             if let jid = event.journeyID {
                                                 activeRoute = .journey(friendID: friend.id, journeyID: jid)
                                             } else {
@@ -167,15 +223,8 @@ struct FriendsHubView: View {
                             }
                         }
 
-                        if !outgoingFriendRequests.isEmpty {
-                            friendRequestSectionTitle("已发送申请")
-                            ForEach(outgoingFriendRequests) { req in
-                                friendRequestCard(request: req, isIncoming: false)
-                            }
-                        }
-
                         if sortedFriends.isEmpty {
-                            if incomingFriendRequests.isEmpty && outgoingFriendRequests.isEmpty {
+                            if incomingFriendRequests.isEmpty {
                                 emptyState(L10n.t("friends_empty_all"))
                             }
                         } else {
@@ -207,9 +256,22 @@ struct FriendsHubView: View {
             destination(for: route)
         }
         .sheet(isPresented: $showAddFriendSheet) {
-            AddFriendSheet {
+            AddFriendSheet(
+                prefillInviteCode: addFriendPrefillInviteCode,
+                prefillHandle: addFriendPrefillHandle
+            ) {
                 await refreshRemoteFriends()
             }
+            .environmentObject(socialStore)
+            .environmentObject(sessionStore)
+        }
+        .sheet(isPresented: $showInviteFriendSheet) {
+            InviteFriendSheet(
+                displayName: resolvedDisplayNameForInvite(),
+                loadout: AvatarLoadoutStore.load().normalizedForCurrentAvatar(),
+                exclusiveID: resolvedExclusiveIDForInvite(),
+                inviteCode: resolvedInviteCodeForInvite()
+            )
             .environmentObject(socialStore)
             .environmentObject(sessionStore)
         }
@@ -231,6 +293,7 @@ struct FriendsHubView: View {
         }
         .task {
             await refreshRemoteFriends()
+            await refreshMyInviteIdentityIfNeeded()
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 25 * 1_000_000_000)
                 await refreshRemoteFriends()
@@ -246,10 +309,19 @@ struct FriendsHubView: View {
             Task {
                 await refreshSocialNotifications(showToastForLatestUnread: false)
                 await refreshFriendRequests()
+                await refreshMyInviteIdentityIfNeeded()
             }
         }
         .task(id: feedLikeSignature) {
             await loadFeedLikeStatsIfNeeded()
+        }
+        .onReceive(deepLinkStore.$pendingFriendInvite) { invite in
+            guard let invite else { return }
+            tab = .allFriends
+            addFriendPrefillInviteCode = invite.inviteCode
+            addFriendPrefillHandle = invite.handle
+            showAddFriendSheet = true
+            deepLinkStore.consumePendingFriendInvite()
         }
     }
 
@@ -277,7 +349,7 @@ struct FriendsHubView: View {
         } trailing: {
             if tab == .allFriends {
                 Button {
-                    showAddFriendSheet = true
+                    showInviteFriendSheet = true
                 } label: {
                     Image(systemName: "plus.circle.fill")
                         .font(.system(size: 24, weight: .bold))
@@ -287,9 +359,6 @@ struct FriendsHubView: View {
             } else {
                 Button {
                     showSocialNotificationsSheet = true
-                    Task {
-                        await markSocialNotificationsReadIfNeeded()
-                    }
                 } label: {
                     ZStack(alignment: .topTrailing) {
                         Image(systemName: "bell.badge.fill")
@@ -342,7 +411,7 @@ struct FriendsHubView: View {
 
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
-                RobotRendererView(size: 36, face: .front, loadout: profile.loadout ?? .defaultBoy)
+                RobotRendererView(size: 36, face: .front, loadout: (profile.loadout ?? .defaultBoy).normalizedForCurrentAvatar())
                     .frame(width: 56, height: 56)
                     .background(Color(red: 227.0 / 255.0, green: 239.0 / 255.0, blue: 235.0 / 255.0))
                     .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -410,6 +479,25 @@ struct FriendsHubView: View {
         if delta < 86400 { return "\(max(1, delta / 3600))h ago" }
         if delta < 7 * 86400 { return "\(max(1, delta / 86400))d ago" }
         return "\(max(1, delta / (7 * 86400)))w ago"
+    }
+
+    private func resolvedDisplayNameForInvite() -> String {
+        let value = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? "Explorer" : value
+    }
+
+    private func resolvedExclusiveIDForInvite() -> String {
+        let id = myExclusiveID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !id.isEmpty { return id }
+        let source = sessionStore.accountUserID ?? sessionStore.currentUserID
+        return SocialGraphStore.generateInviteCode(source: source)
+    }
+
+    private func resolvedInviteCodeForInvite() -> String {
+        let code = myInviteCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if !code.isEmpty { return code }
+        let source = sessionStore.accountUserID ?? resolvedExclusiveIDForInvite()
+        return SocialGraphStore.generateInviteCode(source: source)
     }
 
     private func buildFeedEvents(from friends: [FriendProfileSnapshot]) -> [FriendFeedEvent] {
@@ -540,6 +628,7 @@ struct FriendsHubView: View {
 
         let pairs = feedEvents.compactMap { event -> (friendID: String, journeyID: String)? in
             guard let journeyID = event.journeyID else { return nil }
+            guard event.friendID != currentUserID else { return nil }
             return (event.friendID, journeyID)
         }
         guard !pairs.isEmpty else {
@@ -630,8 +719,20 @@ struct FriendsHubView: View {
         do {
             let all = try await BackendAPIClient.shared.fetchNotifications(token: token, unreadOnly: false)
             let promptTypes: Set<String> = ["journey_like", "profile_stomp"]
-            let socialItems = all
+            let cutoff = Date().addingTimeInterval(-3 * 24 * 60 * 60)
+            let fetched = all
                 .filter({ promptTypes.contains($0.type) })
+                .filter({ $0.createdAt >= cutoff })
+                .sorted(by: { $0.createdAt > $1.createdAt })
+            var mergedByID: [String: BackendNotificationItem] = [:]
+            for item in socialNotifications where item.createdAt >= cutoff {
+                mergedByID[item.id] = item
+            }
+            for item in fetched {
+                mergedByID[item.id] = item
+            }
+            let socialItems = mergedByID.values
+                .filter { $0.createdAt >= cutoff }
                 .sorted(by: { $0.createdAt > $1.createdAt })
             socialNotifications = socialItems
 
@@ -646,6 +747,30 @@ struct FriendsHubView: View {
             }
         } catch {
             // Keep social feed resilient even if reminder endpoint fails.
+        }
+    }
+
+    @MainActor
+    private func refreshMyInviteIdentityIfNeeded() async {
+        guard BackendConfig.isEnabled,
+              let token = sessionStore.currentAccessToken,
+              !token.isEmpty else {
+            return
+        }
+        do {
+            let me = try await BackendAPIClient.shared.fetchMyProfile(token: token)
+            if let id = me.resolvedExclusiveID?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !id.isEmpty {
+                myExclusiveID = id
+            }
+            if let code = me.inviteCode?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !code.isEmpty {
+                myInviteCode = code.uppercased()
+            } else {
+                myInviteCode = SocialGraphStore.generateInviteCode(source: me.id)
+            }
+        } catch {
+            // Keep invite entry available with local fallback.
         }
     }
 
@@ -711,25 +836,37 @@ struct FriendsHubView: View {
     }
 
     @MainActor
-    private func markSocialNotificationsReadIfNeeded() async {
+    private func markSocialNotificationsRead(ids: [String]) async {
         guard BackendConfig.isEnabled,
               let token = sessionStore.currentAccessToken,
               !token.isEmpty else { return }
-        let unreadIDs = socialNotifications.filter { !$0.read }.map(\.id)
-        guard !unreadIDs.isEmpty else { return }
+        let targetIDs = Array(Set(ids))
+        guard !targetIDs.isEmpty else { return }
 
         do {
-            try await BackendAPIClient.shared.markNotificationsRead(token: token, ids: unreadIDs)
+            try await BackendAPIClient.shared.markNotificationsRead(token: token, ids: targetIDs)
             socialNotifications = socialNotifications.map { item in
-                guard unreadIDs.contains(item.id) else { return item }
+                guard targetIDs.contains(item.id) else { return item }
                 var copy = item
                 copy.read = true
                 return copy
             }
-            unreadSocialCount = 0
+            unreadSocialCount = socialNotifications.filter { !$0.read }.count
         } catch {
             // Keep feed page responsive even if read-mark fails.
         }
+    }
+
+    @MainActor
+    private func markSingleSocialNotificationRead(_ id: String) async {
+        guard let item = socialNotifications.first(where: { $0.id == id }), !item.read else { return }
+        await markSocialNotificationsRead(ids: [id])
+    }
+
+    @MainActor
+    private func markAllSocialNotificationsRead() async {
+        let unreadIDs = socialNotifications.filter { !$0.read }.map(\.id)
+        await markSocialNotificationsRead(ids: unreadIDs)
     }
 
     @ViewBuilder
@@ -772,9 +909,9 @@ struct FriendsHubView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("刷新") {
+                    Button("全部已读") {
                         Task {
-                            await refreshSocialNotifications(showToastForLatestUnread: false)
+                            await markAllSocialNotificationsRead()
                         }
                     }
                 }
@@ -796,10 +933,14 @@ struct FriendsHubView: View {
                 HStack(spacing: 8) {
                     Text(item.type == "journey_like" ? "收到点赞" : "主页被踩")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(item.type == "journey_like" ? Color.red : Color(red: 0.22, green: 0.45, blue: 0.89))
+                        .foregroundColor(
+                            item.read
+                            ? FigmaTheme.subtext
+                            : (item.type == "journey_like" ? Color.red : Color(red: 0.22, green: 0.45, blue: 0.89))
+                        )
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(Color.black.opacity(0.06))
+                        .background(item.read ? Color.black.opacity(0.03) : Color.black.opacity(0.06))
                         .clipShape(Capsule())
 
                     Text(relativeTimeText(item.createdAt))
@@ -809,16 +950,21 @@ struct FriendsHubView: View {
 
                 Text(item.message)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(FigmaTheme.text)
+                    .foregroundColor(item.read ? FigmaTheme.subtext : FigmaTheme.text)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white)
+        .background(item.read ? Color(white: 0.97) : Color.white)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .shadow(color: Color.black.opacity(0.04), radius: 14, x: 0, y: 5)
+        .onTapGesture {
+            Task {
+                await markSingleSocialNotificationRead(item.id)
+            }
+        }
     }
 
     private func relativeTimeText(_ date: Date) -> String {
@@ -1020,6 +1166,8 @@ private struct AddFriendSheet: View {
     @EnvironmentObject private var socialStore: SocialGraphStore
     @EnvironmentObject private var sessionStore: UserSessionStore
 
+    let prefillInviteCode: String?
+    let prefillHandle: String?
     let onAdded: () async -> Void
 
     @State private var method: AddFriendMethod = .exclusiveID
@@ -1028,6 +1176,24 @@ private struct AddFriendSheet: View {
     @State private var submitting = false
     @State private var message = ""
     @State private var showMessage = false
+    @State private var showScannerSheet = false
+
+    init(
+        prefillInviteCode: String? = nil,
+        prefillHandle: String? = nil,
+        onAdded: @escaping () async -> Void
+    ) {
+        self.prefillInviteCode = prefillInviteCode
+        self.prefillHandle = prefillHandle
+        self.onAdded = onAdded
+        if let code = prefillInviteCode, !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            _method = State(initialValue: .inviteCode)
+            _friendCode = State(initialValue: code)
+        } else if let handle = prefillHandle, !handle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            _method = State(initialValue: .exclusiveID)
+            _friendCode = State(initialValue: handle)
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -1046,6 +1212,14 @@ private struct AddFriendSheet: View {
 
                 TextField(L10n.t("friends_add_note_optional"), text: $friendNote)
                     .textFieldStyle(.roundedBorder)
+
+                Button {
+                    showScannerSheet = true
+                } label: {
+                    Label("扫描二维码", systemImage: "qrcode.viewfinder")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+                .buttonStyle(.bordered)
 
                 Button(submitting ? "发送中..." : "发送好友申请") {
                     Task {
@@ -1070,6 +1244,24 @@ private struct AddFriendSheet: View {
             } message: {
                 Text(message)
             }
+            .sheet(isPresented: $showScannerSheet) {
+                FriendInviteScannerSheet { text in
+                    guard let parsed = AppDeepLinkStore.parseInvite(from: text), !parsed.isEmpty else {
+                        message = "二维码内容无法识别，请确认对方分享的是 StreetStamps 邀请码/链接。"
+                        showMessage = true
+                        return
+                    }
+                    if let code = parsed.inviteCode, !code.isEmpty {
+                        method = .inviteCode
+                        friendCode = code
+                    } else if let handle = parsed.handle, !handle.isEmpty {
+                        method = .exclusiveID
+                        friendCode = handle
+                    }
+                    showMessage = true
+                    message = "已识别邀请信息，点击“发送好友申请”即可。"
+                }
+            }
         }
     }
 
@@ -1083,12 +1275,8 @@ private struct AddFriendSheet: View {
 
     private var canSubmit: Bool {
         if submitting { return false }
-        switch method {
-        case .exclusiveID:
-            return !normalizedHandleInput().isEmpty
-        case .inviteCode, .qrToken:
-            return normalizedInviteCode() != nil
-        }
+        let target = resolvedTargetInput()
+        return target.inviteCode != nil || target.handle != nil
     }
 
     private func normalizedInviteCode() -> String? {
@@ -1114,6 +1302,48 @@ private struct AddFriendSheet: View {
         return raw
     }
 
+    private func resolvedTargetInput() -> (inviteCode: String?, handle: String?) {
+        let raw = friendCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return (nil, nil) }
+
+        if let parsed = AppDeepLinkStore.parseInvite(from: raw), !parsed.isEmpty {
+            let code = parsed.inviteCode?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let handle = parsed.handle?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (
+                code?.isEmpty == false ? code : nil,
+                handle?.isEmpty == false ? handle : nil
+            )
+        }
+
+        let trimmedHandle = normalizedHandleInput()
+        switch method {
+        case .exclusiveID:
+            return (nil, trimmedHandle.isEmpty ? nil : trimmedHandle)
+        case .inviteCode:
+            if looksLikeHandle(trimmedHandle) && !looksLikeInviteCode(raw) {
+                return (nil, trimmedHandle)
+            }
+            return (raw.uppercased(), nil)
+        case .qrToken:
+            if looksLikeHandle(trimmedHandle) && !looksLikeInviteCode(raw) {
+                return (nil, trimmedHandle)
+            }
+            return (normalizedInviteCode(), nil)
+        }
+    }
+
+    private func looksLikeInviteCode(_ raw: String) -> Bool {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+            .range(of: #"^[A-Z0-9]{8}$"#, options: .regularExpression) != nil
+    }
+
+    private func looksLikeHandle(_ raw: String) -> Bool {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .range(of: #"^[a-z0-9_]{1,24}$"#, options: .regularExpression) != nil
+    }
+
     private func resolvedDisplayName() -> String {
         let note = friendNote.trimmingCharacters(in: .whitespacesAndNewlines)
         if !note.isEmpty { return note }
@@ -1125,10 +1355,11 @@ private struct AddFriendSheet: View {
         submitting = true
         defer { submitting = false }
         do {
+            let target = resolvedTargetInput()
             try await socialStore.addFriendSmart(
                 displayName: resolvedDisplayName(),
-                inviteCode: normalizedInviteCode(),
-                handle: method == .exclusiveID ? normalizedHandleInput() : nil,
+                inviteCode: target.inviteCode,
+                handle: target.handle,
                 accessToken: sessionStore.currentAccessToken
             )
             await onAdded()
@@ -1153,6 +1384,10 @@ private struct FriendProfileScreen: View {
     @State private var stompToastText = ""
     @State private var showStompToast = false
     @State private var sidebarHideToken = UUID().uuidString
+    @State private var showDeleteFriendConfirm = false
+    @State private var showDeleteFriendError = false
+    @State private var deleteFriendErrorText = ""
+    @State private var isDeletingFriend = false
 
     private var canStomp: Bool {
         (sessionStore.accountUserID ?? "") != friendID
@@ -1206,8 +1441,25 @@ private struct FriendProfileScreen: View {
 
                     Spacer()
 
-                    Color.clear
-                        .frame(width: 42, height: 42)
+                    if sessionStore.isLoggedIn {
+                        Menu {
+                            Button(role: .destructive) {
+                                showDeleteFriendConfirm = true
+                            } label: {
+                                Label("删除好友", systemImage: "person.crop.circle.badge.xmark")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .font(.system(size: 19, weight: .semibold))
+                                .foregroundColor(FigmaTheme.text)
+                                .frame(width: 42, height: 42)
+                                .contentShape(Circle())
+                        }
+                        .disabled(isDeletingFriend)
+                    } else {
+                        Color.clear
+                            .frame(width: 42, height: 42)
+                    }
                 }
                 .padding(.horizontal, 18)
                 .padding(.top, 8)
@@ -1369,20 +1621,6 @@ private struct FriendProfileScreen: View {
                             .buttonStyle(.plain)
                         }
 
-                        if sessionStore.isLoggedIn {
-                            Button(role: .destructive) {
-                                Task {
-                                    try? await socialStore.removeFriendSmart(friendID, accessToken: sessionStore.currentAccessToken)
-                                    dismiss()
-                                }
-                            } label: {
-                                Text(L10n.t("friends_delete"))
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 12)
-                            }
-                            .buttonStyle(.bordered)
-                        }
                     }
                     .frame(maxWidth: 430)
                     .frame(maxWidth: .infinity)
@@ -1420,6 +1658,25 @@ private struct FriendProfileScreen: View {
         }
         .onReceive(socialStore.$friends) { snapshots in
             friend = snapshots.first(where: { $0.id == friendID })
+        }
+        .confirmationDialog(
+            "确认删除好友？",
+            isPresented: $showDeleteFriendConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("删除好友", role: .destructive) {
+                Task {
+                    await removeFriend()
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("删除后将从好友列表移除，对方需要重新发起申请。")
+        }
+        .alert("删除失败", isPresented: $showDeleteFriendError) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text(deleteFriendErrorText)
         }
     }
 
@@ -1531,6 +1788,162 @@ private struct FriendProfileScreen: View {
                 showStompToast = false
             }
         }
+    }
+
+    @MainActor
+    private func removeFriend() async {
+        guard !isDeletingFriend else { return }
+        isDeletingFriend = true
+        defer { isDeletingFriend = false }
+
+        do {
+            try await socialStore.removeFriendSmart(friendID, accessToken: sessionStore.currentAccessToken)
+            dismiss()
+        } catch {
+            deleteFriendErrorText = error.localizedDescription
+            showDeleteFriendError = true
+        }
+    }
+}
+
+private struct FriendInviteScannerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let onScanned: (String) -> Void
+
+    @State private var scannerError: String?
+
+    var body: some View {
+        NavigationStack {
+            ZStack(alignment: .bottom) {
+                FriendInviteScannerRepresentable(
+                    onDetected: { code in
+                        dismiss()
+                        onScanned(code)
+                    },
+                    onFailure: { scannerError = $0 }
+                )
+                .ignoresSafeArea()
+
+                Text("将好友邀请码二维码放入框内")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.black.opacity(0.55))
+                    .clipShape(Capsule())
+                    .padding(.bottom, 24)
+            }
+            .navigationTitle("扫描二维码")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("关闭") { dismiss() }
+                }
+            }
+            .alert("扫描失败", isPresented: Binding(
+                get: { scannerError != nil },
+                set: { if !$0 { scannerError = nil } }
+            )) {
+                Button("知道了", role: .cancel) {}
+            } message: {
+                Text(scannerError ?? "")
+            }
+        }
+    }
+}
+
+private struct FriendInviteScannerRepresentable: UIViewControllerRepresentable {
+    let onDetected: (String) -> Void
+    let onFailure: (String) -> Void
+
+    func makeUIViewController(context: Context) -> FriendInviteScannerViewController {
+        let vc = FriendInviteScannerViewController()
+        vc.onDetected = onDetected
+        vc.onFailure = onFailure
+        return vc
+    }
+
+    func updateUIViewController(_ uiViewController: FriendInviteScannerViewController, context: Context) {}
+}
+
+private final class FriendInviteScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
+    var onDetected: ((String) -> Void)?
+    var onFailure: ((String) -> Void)?
+
+    private let session = AVCaptureSession()
+    private var previewLayer: AVCaptureVideoPreviewLayer?
+    private var didFinish = false
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black
+        configureCapture()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        previewLayer?.frame = view.bounds
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        if !session.isRunning {
+            session.startRunning()
+        }
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        if session.isRunning {
+            session.stopRunning()
+        }
+    }
+
+    private func configureCapture() {
+        guard let device = AVCaptureDevice.default(for: .video) else {
+            onFailure?("当前设备不支持摄像头扫描。")
+            return
+        }
+        do {
+            let input = try AVCaptureDeviceInput(device: device)
+            guard session.canAddInput(input) else {
+                onFailure?("无法访问摄像头输入。")
+                return
+            }
+            session.addInput(input)
+
+            let output = AVCaptureMetadataOutput()
+            guard session.canAddOutput(output) else {
+                onFailure?("无法配置扫描输出。")
+                return
+            }
+            session.addOutput(output)
+            output.setMetadataObjectsDelegate(self, queue: .main)
+            output.metadataObjectTypes = [.qr]
+
+            let preview = AVCaptureVideoPreviewLayer(session: session)
+            preview.videoGravity = .resizeAspectFill
+            view.layer.addSublayer(preview)
+            previewLayer = preview
+        } catch {
+            onFailure?("摄像头权限不可用，请在系统设置中允许访问。")
+        }
+    }
+
+    func metadataOutput(
+        _ output: AVCaptureMetadataOutput,
+        didOutput metadataObjects: [AVMetadataObject],
+        from connection: AVCaptureConnection
+    ) {
+        guard !didFinish else { return }
+        guard let first = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
+              let code = first.stringValue,
+              !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+        didFinish = true
+        session.stopRunning()
+        onDetected?(code)
     }
 }
 
@@ -1894,7 +2307,6 @@ private struct FriendEquipmentScreen: View {
 
                         VStack(alignment: .leading, spacing: 8) {
                             FriendEquipmentRow(title: "Hair", value: equippedName(categoryID: "hair", itemID: friend.loadout.hairId))
-                            FriendEquipmentRow(title: "Suit", value: equippedName(categoryID: "suit", itemID: friend.loadout.suitId))
                             FriendEquipmentRow(title: "Upper", value: equippedName(categoryID: "upper", itemID: friend.loadout.upperId))
                             FriendEquipmentRow(title: "Under", value: equippedName(categoryID: "under", itemID: friend.loadout.underId))
                             FriendEquipmentRow(title: "Accessory", value: equippedAccessoryNames(friend.loadout.accessoryIds))
