@@ -156,7 +156,7 @@ struct FriendProfileSnapshot: Identifiable, Codable, Hashable {
         id = try c.decode(String.self, forKey: .id)
         displayName = (try? c.decode(String.self, forKey: .displayName)) ?? "Explorer"
         bio = (try? c.decode(String.self, forKey: .bio)) ?? "Travel Enthusiastic"
-        loadout = (try? c.decode(RobotLoadout.self, forKey: .loadout)) ?? .defaultBoy
+        loadout = ((try? c.decode(RobotLoadout.self, forKey: .loadout)) ?? .defaultBoy).normalizedForCurrentAvatar()
         journeys = (try? c.decode([FriendSharedJourney].self, forKey: .journeys)) ?? []
         unlockedCityCards = (try? c.decode([FriendCityCard].self, forKey: .unlockedCityCards)) ?? []
         createdAt = (try? c.decode(Date.self, forKey: .createdAt)) ?? Date()
@@ -349,7 +349,7 @@ final class SocialGraphStore: ObservableObject {
             profileVisibility: dto.profileVisibility ?? .friendsOnly,
             displayName: dto.displayName,
             bio: dto.bio,
-            loadout: dto.loadout ?? RobotLoadout.defaultBoy,
+            loadout: (dto.loadout ?? RobotLoadout.defaultBoy).normalizedForCurrentAvatar(),
             stats: dto.stats ?? ProfileStatsSnapshot(
                 totalJourneys: dto.journeys.count,
                 totalDistance: dto.journeys.reduce(0) { $0 + $1.distance },

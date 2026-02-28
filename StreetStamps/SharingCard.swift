@@ -601,7 +601,7 @@ struct PopSharingCard: View {
                 }
 
                 let valueAttr: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.systemFont(ofSize: 56, weight: .bold),
+                    .font: UIFont.systemFont(ofSize: 48, weight: .bold),
                     .foregroundColor: textPrimary
                 ]
                 let labelAttr: [NSAttributedString.Key: Any] = [
@@ -715,7 +715,7 @@ struct PopSharingCard: View {
                             in: renderer.cgContext,
                             at: p,
                             face: face,
-                            size: AvatarMapMarkerStyle.visualSize
+                            size: 112
                         )
                         return
                     }
@@ -733,22 +733,13 @@ struct PopSharingCard: View {
                     if let last = drawCoords.last {
                         let endPoint = snap.point(for: last)
 
-                        let face: RobotFaceSnap = {
-                            if drawCoords.count >= 2 {
-                                let a = drawCoords[drawCoords.count - 2]
-                                let b = drawCoords[drawCoords.count - 1]
-                                let heading = bearingDegrees(from: a, to: b)
-                                return robotFaceFromHeadingSnap(heading)
-                            } else {
-                                return .front
-                            }
-                        }()
+                        let face: RobotFaceSnap = .front
 
                         drawRobotMarker(
                             in: renderer.cgContext,
                             at: endPoint,
                             face: face,
-                            size: AvatarMapMarkerStyle.visualSize
+                            size: 112
                         )
                     }
 
@@ -1044,7 +1035,7 @@ struct ShareCardGenerator {
                 }
 
                 let valueAttr: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.systemFont(ofSize: 56, weight: .bold),
+                    .font: UIFont.systemFont(ofSize: 48, weight: .bold),
                     .foregroundColor: textPrimary
                 ]
                 let labelAttr: [NSAttributedString.Key: Any] = [
@@ -1150,7 +1141,7 @@ struct ShareCardGenerator {
                             in: renderer.cgContext,
                             at: p,
                             face: face,
-                            size: AvatarMapMarkerStyle.visualSize
+                            size: 112
                         )
                         return
                     }
@@ -1167,22 +1158,13 @@ struct ShareCardGenerator {
                     if drawRobot, let last = drawCoords.last {
                         let endPoint = snap.point(for: last)
 
-                        let face: RobotFaceSnap = {
-                            if drawCoords.count >= 2 {
-                                let a = drawCoords[drawCoords.count - 2]
-                                let b = drawCoords[drawCoords.count - 1]
-                                let heading = bearingDegrees(from: a, to: b)
-                                return robotFaceFromHeadingSnap(heading)
-                            } else {
-                                return .front
-                            }
-                        }()
+                        let face: RobotFaceSnap = .front
 
                         drawRobotMarker(
                             in: renderer.cgContext,
                             at: endPoint,
                             face: face,
-                            size: AvatarMapMarkerStyle.visualSize
+                            size: 112
                         )
                     }
                 }
@@ -1434,24 +1416,46 @@ private func toRobotFace(_ face: RobotFaceSnap) -> RobotFace {
 }
 
 private func avatarImageForFace(_ face: RobotFaceSnap, size: CGFloat) -> UIImage? {
-    let view = RobotRendererView(
-        size: size,
-        face: toRobotFace(face),
-        loadout: AvatarLoadoutStore.load()
-    )
-    let host = UIHostingController(rootView: view)
-    let rect = CGRect(x: 0, y: 0, width: size, height: size)
-    host.view.frame = rect
-    host.view.backgroundColor = .clear
-    host.view.isOpaque = false
+    let render: () -> UIImage? = {
+        let view = RobotRendererView(
+            size: size,
+            face: toRobotFace(face),
+            loadout: AvatarLoadoutStore.load()
+        )
+        let host = UIHostingController(rootView: view)
+        let rect = CGRect(x: 0, y: 0, width: size, height: size)
+        host.view.frame = rect
+        host.view.backgroundColor = .clear
+        host.view.isOpaque = false
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
 
-    let format = UIGraphicsImageRendererFormat.default()
-    format.opaque = false
-    format.scale = UIScreen.main.scale
+        let format = UIGraphicsImageRendererFormat.default()
+        format.opaque = false
+        format.scale = UIScreen.main.scale
 
-    return UIGraphicsImageRenderer(size: rect.size, format: format).image { renderer in
-        host.view.layer.render(in: renderer.cgContext)
+        return UIGraphicsImageRenderer(size: rect.size, format: format).image { renderer in
+            // Prefer drawHierarchy for SwiftUI-backed views; fallback to layer.render.
+            let drewHierarchy = host.view.drawHierarchy(in: rect, afterScreenUpdates: true)
+            if !drewHierarchy {
+                host.view.layer.render(in: renderer.cgContext)
+            }
+        }
     }
+
+    // UIKit/SwiftUI view tree rendering must run on main thread.
+    if Thread.isMainThread {
+        return render()
+    }
+
+    var output: UIImage?
+    let semaphore = DispatchSemaphore(value: 0)
+    DispatchQueue.main.async {
+        output = render()
+        semaphore.signal()
+    }
+    _ = semaphore.wait(timeout: .now() + 3.0)
+    return output
 }
 
 private func drawRobotMarker(

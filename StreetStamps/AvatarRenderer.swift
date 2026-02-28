@@ -157,6 +157,19 @@ struct RobotLoadout: Codable, Equatable, Hashable {
         )
     }
 
+    func normalizedForCurrentAvatar() -> RobotLoadout {
+        var next = self
+        // Retire legacy full-body suit layer globally; keep only upper/under pipeline.
+        next.suitId = nil
+        if next.upperId == "none" {
+            next.upperId = next.savedUpperIdForSuit == "none" ? "upper_0001" : next.savedUpperIdForSuit
+        }
+        if next.underId == "none" {
+            next.underId = next.savedUnderIdForSuit == "none" ? "under_0001" : next.savedUnderIdForSuit
+        }
+        return next
+    }
+
 }
 
 // MARK: - Renderer
@@ -448,7 +461,6 @@ var body: some View {
             headLayer
             expressionLayer
             hairLayer
-            suitLayer
             accessoryLayer
 
             if face == .back {
@@ -529,7 +541,7 @@ private struct PixelExpressionView: View {
 // MARK: - Persist loadout
 
 enum AvatarLoadoutStore {
-    private static let key = "avatar.loadout.v1"
+    private static let key = "avatar.loadout.v2"
 
     static func load() -> RobotLoadout {
         guard
@@ -538,11 +550,11 @@ enum AvatarLoadoutStore {
         else {
             return .defaultBoy
         }
-        return decoded
+        return decoded.normalizedForCurrentAvatar()
     }
 
     static func save(_ loadout: RobotLoadout) {
-        guard let data = try? JSONEncoder().encode(loadout) else { return }
+        guard let data = try? JSONEncoder().encode(loadout.normalizedForCurrentAvatar()) else { return }
         UserDefaults.standard.set(data, forKey: key)
     }
 

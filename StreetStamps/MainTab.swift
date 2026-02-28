@@ -111,6 +111,11 @@ struct MainTabView: View {
                 onboardingGuide.advance(.openMemory)
             }
         }
+        .onReceive(flow.$requestedTab) { tab in
+            guard let tab else { return }
+            selectedTab = tab
+            flow.clearRequestedTab()
+        }
         .alert(L10n.t("resume_prompt_title"), isPresented: Binding(
             get: { pendingResumeJourney != nil },
             set: { if !$0 { pendingResumeJourney = nil } }

@@ -3011,10 +3011,11 @@ private struct JourneyMKMapView: UIViewRepresentable {
 
         private func configureRobotAnnotationView(
             _ view: MKAnnotationView,
-            face: RobotFace,
+            face _: RobotFace,
             worldHeading: Double,
             cameraHeading: Double
         ) {
+            let fixedFace: RobotFace = .front
             view.canShowCallout = false
             view.bounds = CGRect(
                 x: 0,
@@ -3033,7 +3034,7 @@ private struct JourneyMKMapView: UIViewRepresentable {
             let displayHeading = normalizedHeading(worldHeading - cameraHeading)
             let hosting = UIHostingController(
                 rootView: RobotMapMarkerView(
-                    face: face,
+                    face: fixedFace,
                     headingDegrees: displayHeading,
                     showsHeadlight: parent.headlightEnabled
                 )
@@ -3281,17 +3282,11 @@ if let ann = annotation as? MemoryGroupAnnotation {
 
         func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
     if let ann = view.annotation as? RobotAnnotation {
-        // cycle 90° per tap: front -> right -> back -> left -> front
-        switch ann.face {
-        case .front: ann.face = .right
-        case .right: ann.face = .back
-        case .back: ann.face = .left
-        case .left: ann.face = .front
-        }
-
+        // Keep avatar always front-facing on map.
+        ann.face = .front
         configureRobotAnnotationView(
             view,
-            face: ann.face,
+            face: .front,
             worldHeading: ann.headingDegrees,
             cameraHeading: mapView.camera.heading
         )

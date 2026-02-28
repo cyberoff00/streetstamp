@@ -125,25 +125,6 @@ final class AvatarCatalogStore: ObservableObject {
                     ]
                 ),
                 .init(
-                    id: "suit",
-                    titleKey: "equipment_suit",
-                    selectionKey: "suitId",
-                    items: [
-                        .init(
-                            id: "none",
-                            nameKey: "equipment_item_none",
-                            layer: "suit",
-                            images: .init(front: nil, right: nil, back: nil, left: nil)
-                        ),
-                        .init(
-                            id: "suit_0001",
-                            nameKey: "Suit 0001",
-                            layer: "suit",
-                            images: .init(front: "front_suit001", right: nil, back: nil, left: nil)
-                        )
-                    ]
-                ),
-                .init(
                     id: "upper",
                     titleKey: "equipment_upper",
                     selectionKey: "upperId",

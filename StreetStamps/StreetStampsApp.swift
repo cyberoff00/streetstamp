@@ -11,6 +11,7 @@ struct StreetStampsApp: App {
     @StateObject private var lifelogStore: LifelogStore
     @StateObject private var socialStore: SocialGraphStore
     @StateObject private var flow = AppFlowCoordinator()
+    @StateObject private var deepLinkStore = AppDeepLinkStore()
     @StateObject private var onboardingGuide = OnboardingGuideStore()
     @State private var showAuthEntry = false
 
@@ -53,6 +54,7 @@ struct StreetStampsApp: App {
                 .environmentObject(lifelogStore)
                 .environmentObject(socialStore)
                 .environmentObject(flow)
+                .environmentObject(deepLinkStore)
                 .environmentObject(onboardingGuide)
                 .task {
                     BackendAPIClient.shared.bindSessionStore(sessionStore)
@@ -110,6 +112,15 @@ struct StreetStampsApp: App {
                     if phase == .active {
                         ensurePassiveLocationTrackingIfNeeded()
                     }
+                }
+                .onOpenURL { url in
+                    guard deepLinkStore.handleIncomingURL(url) != nil else { return }
+                    flow.requestSelectTab(.friends)
+                }
+                .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+                    guard let url = activity.webpageURL else { return }
+                    guard deepLinkStore.handleIncomingURL(url) != nil else { return }
+                    flow.requestSelectTab(.friends)
                 }
         }
     }

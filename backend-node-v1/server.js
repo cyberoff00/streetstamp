@@ -35,6 +35,7 @@ const R2_REGION = (process.env.R2_REGION || "auto").trim();
 const R2_PUBLIC_BASE = (process.env.R2_PUBLIC_BASE || "").trim();
 const GOOGLE_CLIENT_ID = (process.env.GOOGLE_CLIENT_ID || "").trim();
 const APPLE_AUDIENCES = (process.env.APPLE_AUDIENCES || process.env.APPLE_BUNDLE_ID || "").trim();
+const APPSTORE_FALLBACK_URL = (process.env.APPSTORE_FALLBACK_URL || "https://apps.apple.com/us/search?term=StreetStamps").trim();
 
 const visibilityPrivate = "private";
 const visibilityFriendsOnly = "friendsOnly";
@@ -90,6 +91,15 @@ function parseTruthy(raw) {
   if (typeof raw === "boolean") return raw;
   const value = String(raw || "").trim().toLowerCase();
   return value === "true" || value === "1";
+}
+
+function escapeHTML(raw) {
+  return String(raw || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 async function verifyGoogleIdentity(idToken) {
@@ -274,11 +284,87 @@ function defaultLoadout() {
   return {
     bodyId: "body",
     headId: "head",
-    skinId: "skin_default",
-    hairId: "hair_boy_default",
-    outfitId: "outfit_boy_suit",
-    accessoryIds: ["acc_headphone"],
-    expressionId: "expr_default"
+    hairId: "hair_0001",
+    suitId: null,
+    upperId: "upper_0001",
+    underId: "under_0001",
+    savedUpperIdForSuit: "upper_0001",
+    savedUnderIdForSuit: "under_0001",
+    accessoryIds: [],
+    expressionId: "expr_0001",
+    hairColorHex: "#2B2A28",
+    bodyColorHex: "#E8BE9C"
+  };
+}
+
+function normalizeLoadout(raw, fallbackRaw) {
+  const fallback = fallbackRaw ? normalizeLoadout(fallbackRaw) : defaultLoadout();
+  const src = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+
+  const firstString = (...values) => {
+    for (const value of values) {
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (trimmed) return trimmed;
+      }
+    }
+    return "";
+  };
+
+  const normalizeLegacyHairId = (hairId) => {
+    if (hairId === "hair_boy_default" || hairId === "hair_girl_default") return "hair_0001";
+    return hairId;
+  };
+
+  const normalizeLegacyExpressionId = (expressionId) => {
+    if (expressionId === "expr_default") return "expr_0001";
+    return expressionId;
+  };
+
+  const legacyOutfitToUpper = {
+    outfit_boy_suit: "upper_0001",
+    outfit_girl_suit: "upper_0001"
+  };
+  const mapLegacyOutfit = (outfitId) => legacyOutfitToUpper[outfitId] || "";
+
+  let accessoryIds = fallback.accessoryIds;
+  if (Array.isArray(src.accessoryIds)) {
+    accessoryIds = src.accessoryIds
+      .map((item) => String(item || "").trim())
+      .filter((item) => item && item !== "none");
+  } else if (src.accessoryId === null) {
+    accessoryIds = [];
+  } else if (Object.prototype.hasOwnProperty.call(src, "accessoryId")) {
+    const legacy = firstString(src.accessoryId);
+    accessoryIds = legacy && legacy !== "none" ? [legacy] : [];
+  }
+
+  const upperFromLegacyOutfit = mapLegacyOutfit(firstString(src.outfitId));
+  const hairId = normalizeLegacyHairId(
+    firstString(src.hairId, fallback.hairId, "hair_0001")
+  );
+  const expressionId = normalizeLegacyExpressionId(
+    firstString(src.expressionId, fallback.expressionId, "expr_0001")
+  );
+  const upperId = firstString(src.upperId, upperFromLegacyOutfit, fallback.upperId, "upper_0001");
+  const underId = firstString(src.underId, fallback.underId, "under_0001");
+  const savedUpperIdForSuit = firstString(src.savedUpperIdForSuit, upperId, fallback.savedUpperIdForSuit, "upper_0001");
+  const savedUnderIdForSuit = firstString(src.savedUnderIdForSuit, underId, fallback.savedUnderIdForSuit, "under_0001");
+  const suitId = src.suitId == null ? null : firstString(src.suitId);
+
+  return {
+    bodyId: firstString(src.bodyId, fallback.bodyId, "body"),
+    headId: firstString(src.headId, fallback.headId, "head"),
+    hairId,
+    suitId,
+    upperId,
+    underId,
+    savedUpperIdForSuit,
+    savedUnderIdForSuit,
+    accessoryIds,
+    expressionId,
+    hairColorHex: firstString(src.hairColorHex, fallback.hairColorHex, "#2B2A28"),
+    bodyColorHex: firstString(src.bodyColorHex, fallback.bodyColorHex, "#E8BE9C")
   };
 }
 
@@ -570,7 +656,7 @@ function friendRequestUserDTO(user) {
     displayName: user.displayName,
     handle: user.handle || null,
     exclusiveID: user.handle || null,
-    loadout: user.loadout || defaultLoadout()
+    loadout: normalizeLoadout(user.loadout)
   };
 }
 
@@ -633,7 +719,7 @@ function profileDTOForViewer(target, isSelf, isFriend) {
     displayName: target.displayName,
     email: isSelf ? (target.email || null) : null,
     bio: target.bio,
-    loadout: target.loadout,
+    loadout: normalizeLoadout(target.loadout),
     handleChangeUsed: Boolean(target.handleChangeUsed),
     canUpdateHandleOneTime: !target.handleChangeUsed,
     stats: profileStatsFrom(target),
@@ -680,6 +766,7 @@ async function main() {
     if (typeof user.handleChangeUsed !== "boolean") {
       user.handleChangeUsed = false;
     }
+    user.loadout = normalizeLoadout(user.loadout);
     ensureUserNotifications(user);
   }
   for (const req of allFriendRequests()) {
@@ -695,6 +782,76 @@ async function main() {
   app.use(cors({ origin: "*" }));
   app.use(express.json({ limit: "20mb" }));
   app.use("/media", express.static(MEDIA_DIR));
+
+  app.get("/open/invite", (req, res) => {
+    const inviteCode = String(req.query?.code || "").trim().toUpperCase();
+    const handle = String(req.query?.handle || "").trim().replace(/^@+/, "");
+
+    if (!inviteCode && !handle) {
+      return res.status(400).send("missing invite code or handle");
+    }
+
+    const params = new URLSearchParams();
+    if (inviteCode) params.set("code", inviteCode);
+    if (handle) params.set("handle", handle);
+    const appURL = `streetstamps://add-friend?${params.toString()}`;
+
+    const safeAppURL = JSON.stringify(appURL);
+    const safeFallbackURL = JSON.stringify(APPSTORE_FALLBACK_URL);
+    const safeInviteCode = escapeHTML(inviteCode ? inviteCode : "");
+    const safeHandle = escapeHTML(handle ? `@${handle}` : "");
+
+    return res
+      .status(200)
+      .type("html")
+      .send(`<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>StreetStamps 邀请</title>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Helvetica Neue",Arial,sans-serif;background:#f5f6fb;margin:0;padding:0}
+    .card{max-width:520px;margin:36px auto;padding:24px;background:#fff;border-radius:18px;box-shadow:0 10px 28px rgba(0,0,0,.08)}
+    h1{margin:0 0 10px;font-size:28px}
+    p{margin:6px 0;color:#424242;line-height:1.6}
+    .meta{margin-top:14px;padding:12px;border-radius:12px;background:#f7f8fb}
+    .btn{display:inline-block;margin-top:16px;padding:12px 18px;border-radius:12px;text-decoration:none;font-weight:700}
+    .btn-open{background:#1f8f45;color:#fff}
+    .btn-store{margin-left:10px;background:#eceff5;color:#111}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>StreetStamps 好友邀请</h1>
+    <p>正在打开 App 并跳转到“加好友”页面。</p>
+    <div class="meta">
+      <p>邀请码：${safeInviteCode || "（未提供）"}</p>
+      <p>专属ID：${safeHandle || "（未提供）"}</p>
+    </div>
+    <a class="btn btn-open" href="${appURL}">立即打开 App</a>
+    <a class="btn btn-store" href="${APPSTORE_FALLBACK_URL}">没有 App？去下载</a>
+  </div>
+  <script>
+    (function() {
+      var appURL = ${safeAppURL};
+      var fallbackURL = ${safeFallbackURL};
+      var redirected = false;
+      function toStore() {
+        if (redirected) return;
+        redirected = true;
+        window.location.replace(fallbackURL);
+      }
+      var timer = setTimeout(toStore, 1500);
+      window.location.href = appURL;
+      document.addEventListener("visibilitychange", function() {
+        if (document.hidden) clearTimeout(timer);
+      });
+    })();
+  </script>
+</body>
+</html>`);
+  });
 
   app.get("/v1/health", (_req, res) => res.status(200).json({ status: "ok" }));
 
@@ -1336,14 +1493,7 @@ async function main() {
         return res.status(400).json({ message: "invalid loadout" });
       }
 
-      me.loadout = {
-        bodyId: String(incoming.bodyId || me.loadout?.bodyId || "body"),
-        headId: String(incoming.headId || me.loadout?.headId || "head"),
-        hairId: String(incoming.hairId || me.loadout?.hairId || "hair_boy_default"),
-        outfitId: String(incoming.outfitId || me.loadout?.outfitId || "outfit_boy_suit"),
-        accessoryId: incoming.accessoryId == null ? null : String(incoming.accessoryId),
-        expressionId: String(incoming.expressionId || me.loadout?.expressionId || "expr_default")
-      };
+      me.loadout = normalizeLoadout(incoming, me.loadout);
       await saveDB();
       return res.status(200).json(profileDTOForViewer(me, true, true));
     } catch {

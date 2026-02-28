@@ -22,6 +22,16 @@
 				<string>com.googleusercontent.apps.731829514501-t0hm8gg4rj83b8slf5cgodfb1adiohjq</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>streetstamps-deeplink</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>streetstamps</string>
+			</array>
+		</dict>
 	</array>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>我们需要保存旅程照片到您的相册</string>
