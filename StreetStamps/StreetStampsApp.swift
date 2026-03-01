@@ -10,6 +10,7 @@ struct StreetStampsApp: App {
     @StateObject private var cityCache: CityCache
     @StateObject private var lifelogStore: LifelogStore
     @StateObject private var socialStore: SocialGraphStore
+    @StateObject private var postcardCenter: PostcardCenter
     @StateObject private var flow = AppFlowCoordinator()
     @StateObject private var deepLinkStore = AppDeepLinkStore()
     @StateObject private var onboardingGuide = OnboardingGuideStore()
@@ -19,6 +20,17 @@ struct StreetStampsApp: App {
     private func ensurePassiveLocationTrackingIfNeeded() {
         if !TrackingService.shared.isTracking {
             locationHub.startLowPower()
+        }
+    }
+
+    @MainActor
+    private func maybeShowFirstAuthPromptIfNeeded() {
+        let firstPromptKey = "streetstamps.auth_entry_shown.v1"
+        if hasSeenIntroSlides &&
+            !sessionStore.isLoggedIn &&
+            !UserDefaults.standard.bool(forKey: firstPromptKey) {
+            UserDefaults.standard.set(true, forKey: firstPromptKey)
+            showAuthEntry = true
         }
     }
 
@@ -32,6 +44,7 @@ struct StreetStampsApp: App {
         _cityCache = StateObject(wrappedValue: CityCache(paths: paths, journeyStore: jStore))
         _lifelogStore = StateObject(wrappedValue: LifelogStore(paths: paths))
         _socialStore = StateObject(wrappedValue: SocialGraphStore(userID: session.currentUserID))
+        _postcardCenter = StateObject(wrappedValue: PostcardCenter(userID: session.currentUserID))
 
         configureGlobalTabBarAppearance()
     }
@@ -53,34 +66,33 @@ struct StreetStampsApp: App {
                 .environmentObject(cityCache)
                 .environmentObject(lifelogStore)
                 .environmentObject(socialStore)
+                .environmentObject(postcardCenter)
                 .environmentObject(flow)
                 .environmentObject(deepLinkStore)
                 .environmentObject(onboardingGuide)
                 .task {
                     BackendAPIClient.shared.bindSessionStore(sessionStore)
                     sessionStore.bootstrapFileSystem()
-                    VoiceBroadcastService.shared.start()
                     journeyStore.load()
                     lifelogStore.load()
                     lifelogStore.bind(to: locationHub)
-                    locationHub.requestPermissionIfNeeded()
-                    ensurePassiveLocationTrackingIfNeeded()
-                    onboardingGuide.startIfNeeded()
-                    let firstPromptKey = "streetstamps.auth_entry_shown.v1"
-                    if hasSeenIntroSlides &&
-                        !sessionStore.isLoggedIn &&
-                        !UserDefaults.standard.bool(forKey: firstPromptKey) {
-                        UserDefaults.standard.set(true, forKey: firstPromptKey)
-                        showAuthEntry = true
+
+                    Task { @MainActor in
+                        await Task.yield()
+                        VoiceBroadcastService.shared.start()
+                        onboardingGuide.startIfNeeded()
+                        maybeShowFirstAuthPromptIfNeeded()
+                    }
+
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 800_000_000)
+                        locationHub.requestPermissionIfNeeded()
+                        ensurePassiveLocationTrackingIfNeeded()
                     }
                 }
                 .onChange(of: hasSeenIntroSlides) { _, seen in
                     guard seen else { return }
-                    let firstPromptKey = "streetstamps.auth_entry_shown.v1"
-                    if !sessionStore.isLoggedIn && !UserDefaults.standard.bool(forKey: firstPromptKey) {
-                        UserDefaults.standard.set(true, forKey: firstPromptKey)
-                        showAuthEntry = true
-                    }
+                    maybeShowFirstAuthPromptIfNeeded()
                 }
                 .onChange(of: sessionStore.currentUserID) { _, uid in
                     let paths = StoragePath(userID: uid)
@@ -93,6 +105,7 @@ struct StreetStampsApp: App {
                     lifelogStore.bind(to: locationHub)
                     ensurePassiveLocationTrackingIfNeeded()
                     socialStore.switchUser(uid)
+                    postcardCenter.switchUser(uid)
                 }
                 .fullScreenCover(isPresented: $showAuthEntry) {
                     AuthEntryView(
@@ -103,6 +116,7 @@ struct StreetStampsApp: App {
                         .environmentObject(journeyStore)
                         .environmentObject(cityCache)
                         .environmentObject(socialStore)
+                        .environmentObject(postcardCenter)
                 }
                 .onChange(of: scenePhase) { phase in
                     // Best-effort: reduce data loss when the app is backgrounded or suspended.
