@@ -4,7 +4,9 @@
   "private": true,
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test tests/postcard-rules.test.mjs",
+    "test:api-contract": "node tests/postcard-api.contract.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.758.0",
