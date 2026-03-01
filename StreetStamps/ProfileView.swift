@@ -349,6 +349,13 @@ struct ProfileView: View {
                 inviteFriendTile
             }
             .buttonStyle(.plain)
+
+            NavigationLink {
+                PostcardInboxView()
+            } label: {
+                postcardTile
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -475,6 +482,38 @@ struct ProfileView: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(FigmaTheme.text.opacity(0.62))
                     .lineLimit(1)
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(FigmaTheme.subtext)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity)
+        .profileFeatureCardStyle()
+    }
+
+    private var postcardTile: some View {
+        HStack(spacing: 14) {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color(red: 0.96, green: 0.94, blue: 1.0))
+                .frame(width: 56, height: 56)
+                .overlay {
+                    Image(systemName: "envelope.fill")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundColor(Color(red: 0.39, green: 0.29, blue: 0.74))
+                }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("明信片")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(FigmaTheme.text)
+                Text("我寄出的 · 我收到的")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(FigmaTheme.subtext)
             }
 
             Spacer()
