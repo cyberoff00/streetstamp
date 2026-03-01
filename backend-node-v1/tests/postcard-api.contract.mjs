@@ -119,6 +119,15 @@ async function run() {
     assert.equal(received.status, 200);
     assert.equal(Array.isArray(received.data.items), true);
 
+    const notifications = await requestJSON(port, 'GET', '/v1/notifications?unreadOnly=0', u2.accessToken);
+    assert.equal(notifications.status, 200);
+    const postcardNotice = (notifications.data.items || []).find((x) => x.type === 'postcard_received');
+    assert.ok(postcardNotice, 'expected postcard_received notification');
+    assert.equal(postcardNotice.cityID, 'paris');
+    assert.equal(postcardNotice.cityName, 'Paris');
+    assert.equal(postcardNotice.messageText, 'hello postcard');
+    assert.equal(postcardNotice.photoURL, 'http://127.0.0.1/fake.jpg');
+
     const duplicate = await requestJSON(port, 'POST', '/v1/postcards/send', u1.accessToken, {
       clientDraftID: 'd2',
       toUserID: u2.userId,

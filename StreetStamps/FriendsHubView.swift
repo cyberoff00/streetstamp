@@ -103,6 +103,8 @@ struct FriendsHubView: View {
     @State private var addFriendPrefillInviteCode: String?
     @State private var addFriendPrefillHandle: String?
     @State private var showInviteFriendSheet = false
+    @State private var showPostcardInboxSheet = false
+    @State private var postcardInboxIntent = PostcardInboxIntent(box: "received", messageID: nil)
     @State private var myExclusiveID = ""
     @State private var myInviteCode = ""
 
@@ -278,6 +280,14 @@ struct FriendsHubView: View {
         .sheet(isPresented: $showSocialNotificationsSheet) {
             socialNotificationsSheet
         }
+        .sheet(isPresented: $showPostcardInboxSheet) {
+            NavigationStack {
+                PostcardInboxView(
+                    initialBox: postcardInboxIntent.box == "sent" ? .sent : .received,
+                    focusMessageID: postcardInboxIntent.messageID
+                )
+            }
+        }
         .overlay(alignment: .top) {
             if showToast {
                 Text(toastText)
@@ -322,6 +332,12 @@ struct FriendsHubView: View {
             addFriendPrefillHandle = invite.handle
             showAddFriendSheet = true
             deepLinkStore.consumePendingFriendInvite()
+        }
+        .onReceive(deepLinkStore.$pendingPostcardInbox) { intent in
+            guard let intent else { return }
+            postcardInboxIntent = intent
+            showPostcardInboxSheet = true
+            deepLinkStore.consumePendingPostcardInbox()
         }
     }
 
@@ -718,7 +734,8 @@ struct FriendsHubView: View {
 
         do {
             let all = try await BackendAPIClient.shared.fetchNotifications(token: token, unreadOnly: false)
-            let promptTypes: Set<String> = ["journey_like", "profile_stomp"]
+            PostcardNotificationBridge.shared.surfaceUnreadPostcardNotifications(all)
+            let promptTypes: Set<String> = ["journey_like", "profile_stomp", "postcard_received"]
             let cutoff = Date().addingTimeInterval(-3 * 24 * 60 * 60)
             let fetched = all
                 .filter({ promptTypes.contains($0.type) })
@@ -923,7 +940,14 @@ struct FriendsHubView: View {
     }
 
     private func socialNotificationRow(_ item: BackendNotificationItem) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        let isLike = item.type == "journey_like"
+        let isPostcard = item.type == "postcard_received"
+        let badgeTitle = isPostcard ? L10n.t("postcard_notification_badge") : (isLike ? L10n.t("social_notice_like") : L10n.t("social_notice_stomp"))
+        let badgeColor = isPostcard
+            ? Color(red: 0.35, green: 0.40, blue: 0.88)
+            : (isLike ? Color.red : Color(red: 0.22, green: 0.45, blue: 0.89))
+
+        return HStack(alignment: .top, spacing: 10) {
             Circle()
                 .fill(item.read ? Color.clear : Color(red: 0.22, green: 0.45, blue: 0.89))
                 .frame(width: 8, height: 8)
@@ -931,12 +955,12 @@ struct FriendsHubView: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
-                    Text(item.type == "journey_like" ? "收到点赞" : "主页被踩")
+                    Text(badgeTitle)
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(
                             item.read
                             ? FigmaTheme.subtext
-                            : (item.type == "journey_like" ? Color.red : Color(red: 0.22, green: 0.45, blue: 0.89))
+                            : badgeColor
                         )
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)

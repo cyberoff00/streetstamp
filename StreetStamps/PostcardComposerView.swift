@@ -63,7 +63,7 @@ struct PostcardComposerView: View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 18) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Send to")
+                    Text(L10n.t("postcard_send_to"))
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(FigmaTheme.subtext)
                     Text(friendName)
@@ -75,11 +75,11 @@ struct PostcardComposerView: View {
                 .postcardFeatureCardStyle()
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("City")
+                    Text(L10n.t("postcard_city"))
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(FigmaTheme.subtext)
 
-                    Picker("City", selection: $selectedCityID) {
+                    Picker(L10n.t("postcard_city"), selection: $selectedCityID) {
                         ForEach(cityOptions, id: \.id) { option in
                             Text(option.name).tag(option.id)
                         }
@@ -94,7 +94,7 @@ struct PostcardComposerView: View {
                 .postcardFeatureCardStyle()
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Photo (1)")
+                    Text(L10n.t("postcard_photo_limit"))
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(FigmaTheme.subtext)
 
@@ -108,7 +108,7 @@ struct PostcardComposerView: View {
                     }
 
                     PhotosPicker(selection: $pickedItem, matching: .images, photoLibrary: .shared()) {
-                        Text(selectedImage == nil ? "Upload local photo" : "Replace photo")
+                        Text(selectedImage == nil ? L10n.t("postcard_upload_local_photo") : L10n.t("postcard_replace_photo"))
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(.white)
                             .frame(maxWidth: .infinity)
@@ -123,7 +123,7 @@ struct PostcardComposerView: View {
                 .postcardFeatureCardStyle()
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Message")
+                    Text(L10n.t("postcard_message"))
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(FigmaTheme.subtext)
 
@@ -168,7 +168,7 @@ struct PostcardComposerView: View {
                 Button {
                     showPreview = true
                 } label: {
-                    Text("Preview")
+                    Text(L10n.t("postcard_preview"))
                         .font(.system(size: 15, weight: .bold))
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
@@ -182,7 +182,7 @@ struct PostcardComposerView: View {
             .padding(20)
         }
         .background(FigmaTheme.background.ignoresSafeArea())
-        .navigationTitle("NEW POSTCARD")
+        .navigationTitle(L10n.t("postcard_new_title"))
         .navigationBarTitleDisplayMode(.inline)
         .task {
             if selectedCityID.isEmpty, let first = cityOptions.first {

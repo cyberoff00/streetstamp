@@ -2,21 +2,34 @@ import SwiftUI
 
 struct PostcardInboxView: View {
     enum Box: String, CaseIterable, Identifiable {
-        case sent = "Sent"
-        case received = "Received"
+        case sent = "sent"
+        case received = "received"
         var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .sent: return L10n.t("postcard_box_sent")
+            case .received: return L10n.t("postcard_box_received")
+            }
+        }
     }
 
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var postcardCenter: PostcardCenter
 
-    @State private var selectedBox: Box = .sent
+    @State private var selectedBox: Box
+    private let focusMessageID: String?
+
+    init(initialBox: Box = .sent, focusMessageID: String? = nil) {
+        _selectedBox = State(initialValue: initialBox)
+        self.focusMessageID = focusMessageID
+    }
 
     var body: some View {
         VStack(spacing: 12) {
             Picker("Postcards", selection: $selectedBox) {
                 ForEach(Box.allCases) { box in
-                    Text(box.rawValue).tag(box)
+                    Text(box.title).tag(box)
                 }
             }
             .pickerStyle(.segmented)
@@ -36,17 +49,20 @@ struct PostcardInboxView: View {
         .padding(.horizontal, 16)
         .padding(.top, 12)
         .background(FigmaTheme.background.ignoresSafeArea())
-        .navigationTitle("Postcards")
+        .navigationTitle(L10n.t("postcard_nav_title"))
         .navigationBarTitleDisplayMode(.inline)
         .task {
             await postcardCenter.refreshFromBackend(token: sessionStore.currentAccessToken)
+            if focusMessageID != nil {
+                selectedBox = .received
+            }
         }
     }
 
     @ViewBuilder
     private var sentSection: some View {
         if postcardCenter.drafts.isEmpty {
-            emptyState(text: "No sent postcards yet")
+            emptyState(text: L10n.t("postcard_sent_empty"))
         } else {
             ForEach(postcardCenter.drafts) { draft in
                 VStack(alignment: .leading, spacing: 8) {
@@ -74,7 +90,7 @@ struct PostcardInboxView: View {
                                 )
                             }
                         } label: {
-                            Text("Retry")
+                            Text(L10n.t("postcard_retry"))
                                 .font(.system(size: 12, weight: .bold))
                                 .foregroundColor(.white)
                                 .padding(.horizontal, 10)
@@ -97,7 +113,7 @@ struct PostcardInboxView: View {
     @ViewBuilder
     private var receivedSection: some View {
         if postcardCenter.receivedItems.isEmpty {
-            emptyState(text: "No received postcards yet")
+            emptyState(text: L10n.t("postcard_received_empty"))
         } else {
             ForEach(postcardCenter.receivedItems) { item in
                 VStack(alignment: .leading, spacing: 8) {
@@ -115,7 +131,7 @@ struct PostcardInboxView: View {
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(FigmaTheme.subtext)
 
-                    Text("From: \(item.fromDisplayName ?? item.fromUserID)")
+                    Text("\(L10n.t("postcard_from_prefix"))\(item.fromDisplayName ?? item.fromUserID)")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(FigmaTheme.text)
                 }

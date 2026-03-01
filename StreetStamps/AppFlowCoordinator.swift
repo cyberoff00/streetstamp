@@ -53,19 +53,35 @@ struct FriendInviteIntent: Equatable {
     }
 }
 
+struct PostcardInboxIntent: Equatable {
+    var box: String
+    var messageID: String?
+}
+
 @MainActor
 final class AppDeepLinkStore: ObservableObject {
     @Published private(set) var pendingFriendInvite: FriendInviteIntent?
+    @Published private(set) var pendingPostcardInbox: PostcardInboxIntent?
 
-    func handleIncomingURL(_ url: URL) -> FriendInviteIntent? {
-        guard let intent = Self.parseInvite(from: url) else { return nil }
-        guard !intent.isEmpty else { return nil }
-        pendingFriendInvite = intent
-        return intent
+    @discardableResult
+    func handleIncomingURL(_ url: URL) -> Bool {
+        if let inviteIntent = Self.parseInvite(from: url), !inviteIntent.isEmpty {
+            pendingFriendInvite = inviteIntent
+            return true
+        }
+        if let postcardIntent = Self.parsePostcardInbox(from: url) {
+            pendingPostcardInbox = postcardIntent
+            return true
+        }
+        return false
     }
 
     func consumePendingFriendInvite() {
         pendingFriendInvite = nil
+    }
+
+    func consumePendingPostcardInbox() {
+        pendingPostcardInbox = nil
     }
 
     static func parseInvite(from rawText: String) -> FriendInviteIntent? {
@@ -138,5 +154,20 @@ final class AppDeepLinkStore: ObservableObject {
         }
         if value.isEmpty { return nil }
         return value
+    }
+
+    private static func parsePostcardInbox(from url: URL) -> PostcardInboxIntent? {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: true) else { return nil }
+        let scheme = (components.scheme ?? "").lowercased()
+        guard scheme == "streetstamps" || scheme == "https" || scheme == "http" else { return nil }
+
+        let host = (components.host ?? "").lowercased()
+        guard host == "postcards" || host == "postcard" else { return nil }
+
+        let queryItems = components.queryItems ?? []
+        let rawBox = firstNonEmptyValue(in: queryItems, keys: ["box"])?.lowercased() ?? "received"
+        let box = rawBox == "sent" ? "sent" : "received"
+        let messageID = firstNonEmptyValue(in: queryItems, keys: ["messageID", "messageId", "mid"])
+        return PostcardInboxIntent(box: box, messageID: messageID)
     }
 }

@@ -32,7 +32,7 @@ struct PostcardPreviewView: View {
                     await sendNow()
                 }
             } label: {
-                Text(isSending ? "Sending..." : "Send")
+                Text(isSending ? L10n.t("postcard_sending") : L10n.t("postcard_send"))
                     .font(.system(size: 15, weight: .bold))
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
@@ -47,7 +47,7 @@ struct PostcardPreviewView: View {
         }
         .padding(20)
         .background(FigmaTheme.background.ignoresSafeArea())
-        .navigationTitle("PREVIEW")
+        .navigationTitle(L10n.t("postcard_preview_title"))
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -70,7 +70,7 @@ struct PostcardPreviewView: View {
                 Text(selectedCityName)
                     .font(.system(size: 22, weight: .bold))
                     .foregroundColor(FigmaTheme.text)
-                Text("To: \(friendName)")
+                Text("\(L10n.t("postcard_to_prefix"))\(friendName)")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(FigmaTheme.subtext)
                 Text(messageText)
@@ -112,9 +112,9 @@ struct PostcardPreviewView: View {
         }
 
         if let latest = postcardCenter.drafts.first(where: { $0.draftID == draft.draftID }) {
-            errorText = latest.lastError ?? "Send failed"
+            errorText = latest.lastError ?? L10n.t("postcard_send_failed")
         } else {
-            errorText = "Send failed"
+            errorText = L10n.t("postcard_send_failed")
         }
     }
 }

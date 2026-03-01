@@ -33,6 +33,7 @@ struct ProfileView: View {
     @State private var unreadSocialCount = 0
     @State private var showNotificationsSheet = false
     @State private var notificationsLoading = false
+    @State private var showPostcardInboxFromNotification = false
     @State private var showInviteFriendSheet = false
     @State private var myExclusiveID = ""
     @State private var myInviteCode = ""
@@ -119,6 +120,11 @@ struct ProfileView: View {
         }
         .sheet(isPresented: $showNotificationsSheet) {
             socialNotificationsSheet
+        }
+        .sheet(isPresented: $showPostcardInboxFromNotification) {
+            NavigationStack {
+                PostcardInboxView(initialBox: .received)
+            }
         }
         .sheet(isPresented: $showInviteFriendSheet) {
             InviteFriendSheet(
@@ -508,10 +514,10 @@ struct ProfileView: View {
                 }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("明信片")
+                Text(L10n.t("postcard_profile_title"))
                     .font(.system(size: 15, weight: .bold))
                     .foregroundColor(FigmaTheme.text)
-                Text("我寄出的 · 我收到的")
+                Text(L10n.t("postcard_profile_subtitle"))
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(FigmaTheme.subtext)
             }
@@ -582,7 +588,14 @@ struct ProfileView: View {
     }
 
     private func socialNotificationRow(_ item: BackendNotificationItem) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        let isLike = item.type == "journey_like"
+        let isPostcard = item.type == "postcard_received"
+        let badgeTitle = isPostcard ? L10n.t("postcard_notification_badge") : (isLike ? L10n.t("social_notice_like") : L10n.t("social_notice_stomp"))
+        let badgeColor = isPostcard
+            ? Color(red: 0.35, green: 0.40, blue: 0.88)
+            : (isLike ? Color.red : Color(red: 0.22, green: 0.45, blue: 0.89))
+
+        return HStack(alignment: .top, spacing: 10) {
             Circle()
                 .fill(item.read ? Color.clear : Color(red: 0.22, green: 0.45, blue: 0.89))
                 .frame(width: 8, height: 8)
@@ -590,9 +603,9 @@ struct ProfileView: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
-                    Text(item.type == "journey_like" ? "收到点赞" : "主页被踩")
+                    Text(badgeTitle)
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(item.type == "journey_like" ? Color.red : Color(red: 0.22, green: 0.45, blue: 0.89))
+                        .foregroundColor(badgeColor)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(Color.black.opacity(0.06))
@@ -615,6 +628,12 @@ struct ProfileView: View {
         .background(Color.white)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .shadow(color: Color.black.opacity(0.04), radius: 14, x: 0, y: 5)
+        .onTapGesture {
+            if item.type == "postcard_received" {
+                showNotificationsSheet = false
+                showPostcardInboxFromNotification = true
+            }
+        }
     }
 
     private func rotateLeft() {
@@ -790,7 +809,8 @@ struct ProfileView: View {
 
         do {
             let all = try await BackendAPIClient.shared.fetchNotifications(token: token, unreadOnly: false)
-            let supportedTypes: Set<String> = ["journey_like", "profile_stomp"]
+            PostcardNotificationBridge.shared.surfaceUnreadPostcardNotifications(all)
+            let supportedTypes: Set<String> = ["journey_like", "profile_stomp", "postcard_received"]
             let socialItems = all
                 .filter { supportedTypes.contains($0.type) }
                 .sorted(by: { $0.createdAt > $1.createdAt })

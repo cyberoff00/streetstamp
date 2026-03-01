@@ -77,6 +77,11 @@ struct BackendNotificationItem: Codable, Identifiable {
     var message: String
     var createdAt: Date
     var read: Bool
+    var postcardMessageID: String?
+    var cityID: String?
+    var cityName: String?
+    var photoURL: String?
+    var messageText: String?
 }
 
 struct BackendNotificationsResponse: Codable {

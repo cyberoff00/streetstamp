@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 @main
 struct StreetStampsApp: App {
+    @UIApplicationDelegateAdaptor(AppNotificationDelegate.self) private var appDelegate
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("streetstamps.intro_slides_shown.v1") private var hasSeenIntroSlides = false
     @StateObject private var locationHub = LocationHub.shared
@@ -128,12 +129,12 @@ struct StreetStampsApp: App {
                     }
                 }
                 .onOpenURL { url in
-                    guard deepLinkStore.handleIncomingURL(url) != nil else { return }
+                    guard deepLinkStore.handleIncomingURL(url) else { return }
                     flow.requestSelectTab(.friends)
                 }
                 .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
                     guard let url = activity.webpageURL else { return }
-                    guard deepLinkStore.handleIncomingURL(url) != nil else { return }
+                    guard deepLinkStore.handleIncomingURL(url) else { return }
                     flow.requestSelectTab(.friends)
                 }
         }

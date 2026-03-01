@@ -674,7 +674,9 @@ function pushPostcardReceivedNotification(owner, fromUser, postcard) {
     read: false,
     postcardMessageID: postcard.messageID,
     cityID: postcard.cityID,
-    cityName: postcard.cityName || postcard.cityID
+    cityName: postcard.cityName || postcard.cityID,
+    photoURL: postcard.photoURL || null,
+    messageText: postcard.messageText || ""
   });
   if (owner.notifications.length > 400) {
     owner.notifications = owner.notifications.slice(0, 400);
