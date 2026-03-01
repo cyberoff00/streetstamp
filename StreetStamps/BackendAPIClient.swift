@@ -588,6 +588,25 @@ final class BackendAPIClient {
         let body = try encoder.encode(req)
         _ = try await request(path: "/v1/notifications/read", method: "POST", token: token, jsonBody: body)
     }
+
+    func sendPostcard(token: String, req: SendPostcardRequest) async throws -> BackendSendPostcardResponse {
+        let body = try encoder.encode(req)
+        let (data, _) = try await request(path: "/v1/postcards/send", method: "POST", token: token, jsonBody: body)
+        return try decoder.decode(BackendSendPostcardResponse.self, from: data)
+    }
+
+    func fetchPostcards(token: String, box: String, cursor: String? = nil) async throws -> BackendPostcardsResponse {
+        let normalized = box.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let resolvedBox = (normalized == "received") ? "received" : "sent"
+
+        var path = "/v1/postcards?box=\(resolvedBox)"
+        if let cursor, !cursor.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let encodedCursor = cursor.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? cursor
+            path += "&cursor=\(encodedCursor)"
+        }
+        let (data, _) = try await request(path: path, method: "GET", token: token)
+        return try decoder.decode(BackendPostcardsResponse.self, from: data)
+    }
 }
 
 private extension ISO8601DateFormatter {
