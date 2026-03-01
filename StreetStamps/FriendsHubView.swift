@@ -1595,28 +1595,65 @@ private struct FriendProfileScreen: View {
                         .frame(maxWidth: .infinity)
                         .friendAvatarCardStyle()
 
-                        HStack(spacing: 14) {
-                            NavigationLink {
-                                FriendCitiesScreen(friendID: friendID)
-                            } label: {
-                                friendProfileMenuTile(
-                                    icon: "books.vertical",
-                                    iconColor: FigmaTheme.primary,
-                                    iconBg: FigmaTheme.primary.opacity(0.14),
-                                    title: "CITY LIBRARY"
-                                )
+                        VStack(spacing: 14) {
+                            HStack(spacing: 14) {
+                                NavigationLink {
+                                    FriendCitiesScreen(friendID: friendID)
+                                } label: {
+                                    friendProfileMenuTile(
+                                        icon: "books.vertical",
+                                        iconColor: FigmaTheme.primary,
+                                        iconBg: FigmaTheme.primary.opacity(0.14),
+                                        title: "CITY LIBRARY"
+                                    )
+                                }
+                                .buttonStyle(.plain)
+
+                                NavigationLink {
+                                    FriendPublicMemoriesScreen(friendID: friendID)
+                                } label: {
+                                    friendProfileMenuTile(
+                                        icon: "book.pages",
+                                        iconColor: Color(red: 184 / 255, green: 148 / 255, blue: 125 / 255),
+                                        iconBg: Color(red: 184 / 255, green: 148 / 255, blue: 125 / 255).opacity(0.14),
+                                        title: "JOURNEY MEMORY"
+                                    )
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
 
                             NavigationLink {
-                                FriendPublicMemoriesScreen(friendID: friendID)
-                            } label: {
-                                friendProfileMenuTile(
-                                    icon: "book.pages",
-                                    iconColor: Color(red: 184 / 255, green: 148 / 255, blue: 125 / 255),
-                                    iconBg: Color(red: 184 / 255, green: 148 / 255, blue: 125 / 255).opacity(0.14),
-                                    title: "JOURNEY MEMORY"
+                                PostcardComposerView(
+                                    friendID: friendID,
+                                    friendName: f.displayName
                                 )
+                            } label: {
+                                HStack(spacing: 12) {
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                        .fill(FigmaTheme.primary.opacity(0.14))
+                                        .frame(width: 46, height: 46)
+                                        .overlay {
+                                            Image(systemName: "envelope.fill")
+                                                .font(.system(size: 18, weight: .semibold))
+                                                .foregroundColor(FigmaTheme.primary)
+                                        }
+
+                                    Text("SEND POSTCARD")
+                                        .font(.system(size: 14, weight: .bold))
+                                        .foregroundColor(FigmaTheme.text)
+
+                                    Spacer()
+
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundColor(FigmaTheme.subtext)
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 14)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+                                .shadow(color: Color.black.opacity(0.04), radius: 20, x: 0, y: 8)
                             }
                             .buttonStyle(.plain)
                         }
