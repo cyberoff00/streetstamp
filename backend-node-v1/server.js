@@ -6,10 +6,16 @@ const express = require("express");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
-const { Pool } = require("pg");
+let Pool = null;
+try {
+  ({ Pool } = require("pg"));
+} catch {
+  Pool = null;
+}
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const { OAuth2Client } = require("google-auth-library");
 const { createRemoteJWKSet, jwtVerify } = require("jose");
+const { canSendPostcard } = require("./postcard-rules");
 
 const PORT = Number(process.env.PORT || 18080);
 const JWT_SECRET = (process.env.JWT_SECRET || "change-me-in-production").trim();
@@ -47,6 +53,9 @@ const pgEnabled = Boolean(DATABASE_URL || (PGHOST && PGUSER && PGDATABASE));
 let pgPool = null;
 let pgSchemaReady = false;
 if (pgEnabled) {
+  if (!Pool) {
+    throw new Error("pg module not installed but PostgreSQL config is enabled");
+  }
   const poolConfig = {
     max: Number.isFinite(PG_MAX_CLIENTS) && PG_MAX_CLIENTS > 0 ? PG_MAX_CLIENTS : 10
   };
@@ -574,6 +583,11 @@ function ensureUserNotifications(user) {
   if (!Array.isArray(user.notifications)) user.notifications = [];
 }
 
+function ensurePostcardCollections(user) {
+  if (!Array.isArray(user.sentPostcards)) user.sentPostcards = [];
+  if (!Array.isArray(user.receivedPostcards)) user.receivedPostcards = [];
+}
+
 function pushJourneyLikeNotification(owner, fromUser, journey) {
   ensureUserNotifications(owner);
   owner.notifications.unshift({
@@ -640,6 +654,27 @@ function pushFriendRequestAcceptedNotification(owner, fromUser) {
     message: `${fromUser.displayName} 通过了你的好友申请`,
     createdAt: new Date().toISOString(),
     read: false
+  });
+  if (owner.notifications.length > 400) {
+    owner.notifications = owner.notifications.slice(0, 400);
+  }
+}
+
+function pushPostcardReceivedNotification(owner, fromUser, postcard) {
+  ensureUserNotifications(owner);
+  owner.notifications.unshift({
+    id: `n_${randHex(10)}`,
+    type: "postcard_received",
+    fromUserID: fromUser.id,
+    fromDisplayName: fromUser.displayName,
+    journeyID: null,
+    journeyTitle: null,
+    message: `${fromUser.displayName} 给你寄来了一张来自 ${postcard.cityName || postcard.cityID} 的明信片`,
+    createdAt: new Date().toISOString(),
+    read: false,
+    postcardMessageID: postcard.messageID,
+    cityID: postcard.cityID,
+    cityName: postcard.cityName || postcard.cityID
   });
   if (owner.notifications.length > 400) {
     owner.notifications = owner.notifications.slice(0, 400);
@@ -768,6 +803,7 @@ async function main() {
     }
     user.loadout = normalizeLoadout(user.loadout);
     ensureUserNotifications(user);
+    ensurePostcardCollections(user);
   }
   for (const req of allFriendRequests()) {
     const from = db.users[req.fromUserID];
@@ -880,6 +916,8 @@ async function main() {
         cityCards: [],
         friendIDs: [],
         notifications: [],
+        sentPostcards: [],
+        receivedPostcards: [],
         createdAt: nowUnix()
       };
       db.users[uid] = user;
@@ -943,6 +981,8 @@ async function main() {
           cityCards: [],
           friendIDs: [],
           notifications: [],
+          sentPostcards: [],
+          receivedPostcards: [],
           createdAt: nowUnix()
         };
         setUserHandle(uid, null, { strict: false });
@@ -1312,6 +1352,115 @@ async function main() {
         likes: (record.likerIDs || []).length,
         likedByMe: false
       });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.post("/v1/postcards/send", async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = db.users[uid];
+      if (!me) return res.status(404).json({ message: "user not found" });
+
+      const toUserID = String(req.body?.toUserID || "").trim();
+      const cityID = String(req.body?.cityID || "").trim();
+      const cityNameRaw = String(req.body?.cityName || "").trim();
+      const cityName = cityNameRaw || cityID;
+      const messageText = String(req.body?.messageText || "").trim();
+      const photoURL = String(req.body?.photoURL || "").trim();
+      const clientDraftID = String(req.body?.clientDraftID || "").trim();
+      const allowedCityIDs = Array.isArray(req.body?.allowedCityIDs)
+        ? req.body.allowedCityIDs.map((x) => String(x || "").trim()).filter(Boolean)
+        : [];
+
+      if (!toUserID || !cityID || !clientDraftID) {
+        return res.status(400).json({ message: "toUserID, cityID and clientDraftID are required" });
+      }
+      if (!photoURL) {
+        return res.status(400).json({ message: "photoURL required" });
+      }
+      if (messageText.length > 80) {
+        return res.status(400).json({ code: "message_too_long", message: "messageText must be <= 80 chars" });
+      }
+
+      const target = db.users[toUserID];
+      if (!target) return res.status(404).json({ message: "target user not found" });
+      if (uid === toUserID) return res.status(400).json({ message: "cannot send postcard to yourself" });
+      if (!isFriendOf(me, toUserID)) return res.status(403).json({ message: "friends only" });
+
+      ensurePostcardCollections(me);
+      ensurePostcardCollections(target);
+
+      const rule = canSendPostcard({
+        sentPostcards: me.sentPostcards,
+        toUserID,
+        cityID,
+        clientDraftID,
+        allowedCityIDs
+      });
+
+      if (rule.idempotentHit) {
+        const hit = rule.idempotentHit;
+        return res.status(200).json({
+          messageID: hit.messageID,
+          sentAt: hit.sentAt,
+          idempotent: true
+        });
+      }
+
+      if (!rule.ok) {
+        if (rule.reason === "city_not_allowed") {
+          return res.status(400).json({ code: rule.reason, message: "city not allowed" });
+        }
+        return res.status(409).json({ code: rule.reason, message: "postcard quota exceeded" });
+      }
+
+      const nowISO = new Date().toISOString();
+      const message = {
+        messageID: `pm_${randHex(12)}`,
+        type: "postcard",
+        fromUserID: me.id,
+        fromDisplayName: me.displayName,
+        toUserID: target.id,
+        cityID,
+        cityName,
+        photoURL,
+        messageText,
+        sentAt: nowISO,
+        clientDraftID,
+        status: "sent"
+      };
+
+      me.sentPostcards.unshift(message);
+      target.receivedPostcards.unshift(message);
+      if (me.sentPostcards.length > 1000) me.sentPostcards = me.sentPostcards.slice(0, 1000);
+      if (target.receivedPostcards.length > 1000) target.receivedPostcards = target.receivedPostcards.slice(0, 1000);
+
+      pushPostcardReceivedNotification(target, me, message);
+      await saveDB();
+
+      return res.status(200).json({
+        messageID: message.messageID,
+        sentAt: message.sentAt
+      });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.get("/v1/postcards", (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = db.users[uid];
+      if (!me) return res.status(404).json({ message: "user not found" });
+      ensurePostcardCollections(me);
+
+      const boxRaw = String(req.query?.box || "sent").trim().toLowerCase();
+      const box = boxRaw === "received" ? "received" : "sent";
+      const items = box === "received" ? me.receivedPostcards : me.sentPostcards;
+
+      return res.status(200).json({ items, cursor: null });
     } catch {
       return res.status(401).json({ message: "unauthorized" });
     }
