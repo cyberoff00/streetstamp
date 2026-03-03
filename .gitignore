@@ -2,3 +2,4 @@
 DerivedData/
 **/DerivedData/
 build/DerivedData*/
+.worktrees/
