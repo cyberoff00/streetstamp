@@ -22,15 +22,17 @@ struct GlobeViewScreen: View {
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var lifelogStore: LifelogStore
+    @EnvironmentObject private var trackTileStore: TrackTileStore
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
 
     @State private var dummyPresented: Bool = true
     @State private var shareItem: GlobeShareImageItem? = nil
+    @State private var journeysForRender: [JourneyRoute] = []
+    @State private var visitedCountries: [String] = []
+    @State private var isPreparingData = false
     @State private var didKickoffLifelogBackfill = false
 
     var body: some View {
-        let journeysForRender = routesForGlobe()
-        let visitedCountries = visitedCountryISO2()
         ZStack {
             MapboxGlobeView(
                 isPresented: $dummyPresented,
@@ -52,6 +54,19 @@ struct GlobeViewScreen: View {
         .sheet(item: $shareItem) { item in
             ShareSheet(activityItems: [item.image])
         }
+        .overlay {
+            if isPreparingData {
+                ProgressView()
+                    .tint(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color.black.opacity(0.45), in: Capsule())
+            }
+        }
+        .task {
+            guard journeysForRender.isEmpty else { return }
+            refreshGlobeData()
+        }
         .onAppear {
             kickOffLifelogBackfillIfNeeded()
         }
@@ -59,6 +74,15 @@ struct GlobeViewScreen: View {
             if loaded {
                 kickOffLifelogBackfillIfNeeded()
             }
+        }
+        .onChange(of: store.trackTileRevision) { _ in
+            refreshGlobeData()
+        }
+        .onChange(of: lifelogStore.trackTileRevision) { _ in
+            refreshGlobeData()
+        }
+        .onChange(of: cityCache.cachedCities.count) { _ in
+            refreshGlobeData()
         }
     }
 
@@ -71,7 +95,10 @@ struct GlobeViewScreen: View {
             Text(L10n.t("globe_view_title"))
                 .appHeaderStyle()
                 .foregroundColor(.white)
-                .shadow(color: .black.opacity(0.25), radius: 6, x: 0, y: 2)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color.black.opacity(0.45), in: Capsule())
+                .shadow(color: .black.opacity(0.45), radius: 6, x: 0, y: 2)
 
             Spacer()
 
@@ -89,17 +116,10 @@ struct GlobeViewScreen: View {
     }
 
     private var bottomSummaryCard: some View {
-        let journeys = summaryJourneys()
-        let totalJourneys = journeys.count
-        let totalMemories = journeys.reduce(0) { $0 + $1.memories.count }
-        let totalDistanceMeters = journeys.reduce(0.0) { partial, journey in
-            let d = journey.distance
-            return partial + ((d.isFinite && d > 0) ? d : 0)
-        }
-        let totalDistanceKm = totalDistanceMeters / 1000.0
-        let distanceKmDisplay = max(0, Int(totalDistanceKm.rounded(.down)))
-        let cityCount = cityCache.cachedCities.filter { !($0.isTemporary ?? false) }.count
-        let levelProgress = UserLevelProgress.from(journeys: journeys)
+        let nonTemporaryCities = cityCache.cachedCities.filter { !($0.isTemporary ?? false) }
+        let cityCount = nonTemporaryCities.count
+        let totalMemories = nonTemporaryCities.reduce(0) { $0 + max(0, $1.memories) }
+        let levelProgress = UserLevelProgress.from(journeys: store.journeys)
 
         return HStack(spacing: 14) {
             ZStack {
@@ -141,7 +161,7 @@ struct GlobeViewScreen: View {
                 }
                 .frame(height: 6)
 
-                Text(String(format: L10n.t("summary_stats_line"), cityCount, totalJourneys, totalMemories, distanceKmDisplay))
+                Text("\(cityCount) CITIES · \(totalMemories) MEMORIES")
                     .appFootnoteStyle()
                     .foregroundColor(.black.opacity(0.56))
                     .lineLimit(1)
@@ -180,32 +200,95 @@ struct GlobeViewScreen: View {
         return value.isEmpty ? L10n.t("explorer_fallback") : value
     }
 
-    private func summaryJourneys() -> [JourneyRoute] {
-        externalJourneys ?? store.journeys
+    private func refreshGlobeData() {
+        if isPreparingData { return }
+        isPreparingData = true
+
+        let countryISO2 = lifelogStore.countryISO2
+        let tileSegments = trackTileStore.tiles(for: nil, zoom: TrackRenderAdapter.unifiedRenderZoom)
+        let external = externalJourneys
+        let summary = store.journeys
+        let journeyEvents = store.trackRenderEvents()
+        let passiveEvents = lifelogStore.trackRenderEvents()
+        let lifelogRoutes = lifelogStore.globeJourneys()
+        let cityISO2 = cityCache.cachedCities
+            .filter { $0.isTemporary != true }
+            .compactMap { $0.countryISO2?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
+            .filter { $0.count == 2 }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let routes = Self.resolveRoutesForGlobe(
+                tileSegments: tileSegments,
+                externalJourneys: external,
+                summaryJourneys: summary,
+                journeyEvents: journeyEvents,
+                passiveEvents: passiveEvents,
+                lifelogRoutes: lifelogRoutes,
+                countryISO2: countryISO2
+            )
+            let countries = Self.resolveVisitedCountries(routes: routes, cityISO2: cityISO2)
+
+            DispatchQueue.main.async {
+                journeysForRender = routes
+                visitedCountries = countries
+                isPreparingData = false
+            }
+        }
     }
 
-    private func routesForGlobe() -> [JourneyRoute] {
-        if let external = externalJourneys, !external.isEmpty {
-            if external.count == 1, external[0].id == "lifelog.route.synthetic" {
-                let lifelogRoutes = lifelogStore.globeJourneys()
-                if !lifelogRoutes.isEmpty { return lifelogRoutes }
-            }
-            return external
+    private static func resolveRoutesForGlobe(
+        tileSegments: [TrackTileSegment],
+        externalJourneys: [JourneyRoute]?,
+        summaryJourneys: [JourneyRoute],
+        journeyEvents: [TrackRenderEvent],
+        passiveEvents: [TrackRenderEvent],
+        lifelogRoutes: [JourneyRoute],
+        countryISO2: String?
+    ) -> [JourneyRoute] {
+        let tileRoutes = TrackRenderAdapter.globeJourneys(
+            from: tileSegments,
+            countryISO2: countryISO2
+        )
+        if !tileRoutes.isEmpty {
+            return tileRoutes
         }
 
-        let lifelogRoutes = lifelogStore.globeJourneys()
+        if let externalJourneys, !externalJourneys.isEmpty {
+            return externalJourneys
+        }
+
+        let liveEvents = journeyEvents + passiveEvents
+        let liveTiles = TrackTileBuilder.build(
+            events: liveEvents,
+            zoom: TrackRenderAdapter.unifiedRenderZoom
+        ).tiles
+        let liveSegments = liveTiles.values.flatMap(\.segments).sorted {
+            if $0.startTimestamp != $1.startTimestamp {
+                return $0.startTimestamp < $1.startTimestamp
+            }
+            if $0.endTimestamp != $1.endTimestamp {
+                return $0.endTimestamp < $1.endTimestamp
+            }
+            return $0.sourceType.rawValue < $1.sourceType.rawValue
+        }
+        let liveRoutes = TrackRenderAdapter.globeJourneys(
+            from: liveSegments,
+            countryISO2: countryISO2
+        )
+        if !liveRoutes.isEmpty {
+            return liveRoutes
+        }
+
         if !lifelogRoutes.isEmpty {
             return lifelogRoutes
         }
 
-        // Fallback before first backfill completes.
-        return summaryJourneys()
+        return summaryJourneys
     }
 
-    private func visitedCountryISO2() -> [String] {
-        let base = routesForGlobe()
+    private static func resolveVisitedCountries(routes: [JourneyRoute], cityISO2: [String]) -> [String] {
         var set = Set<String>()
-        for j in base {
+        for j in routes {
             if let iso = j.countryISO2?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
                iso.count == 2 {
                 set.insert(iso)
@@ -221,16 +304,13 @@ struct GlobeViewScreen: View {
             }
         }
 
-        for city in cityCache.cachedCities where city.isTemporary != true {
-            if let iso = city.countryISO2?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
-               iso.count == 2 {
-                set.insert(iso)
-            }
+        for iso in cityISO2 {
+            set.insert(iso)
         }
         return Array(set).sorted()
     }
 
-    private func isoFromCityKey(_ cityKey: String?) -> String? {
+    private static func isoFromCityKey(_ cityKey: String?) -> String? {
         guard let cityKey else { return nil }
         let parts = cityKey.split(separator: "|", omittingEmptySubsequences: false)
         guard let raw = parts.last else { return nil }

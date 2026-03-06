@@ -339,8 +339,7 @@ struct EquipmentView: View {
                             }
                         }
                     } label: {
-                        Image(systemName: categorySymbol(for: cat.id))
-                            .font(.system(size: 19, weight: .semibold))
+                        categoryIcon(for: cat.id)
                             .foregroundColor(selected ? FigmaTheme.primary : FigmaTheme.subtext)
                             .frame(width: 44, height: 36)
                             .background(
@@ -414,6 +413,39 @@ struct EquipmentView: View {
             return "eyeglasses"
         default:
             return "circle.grid.2x2"
+        }
+    }
+
+    @ViewBuilder
+    private func categoryIcon(for categoryId: String) -> some View {
+        if let assetName = categoryIconAssetName(for: categoryId) {
+            Image(assetName)
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 24, height: 24)
+        } else {
+            Image(systemName: categorySymbol(for: categoryId))
+                .font(.system(size: 19, weight: .semibold))
+        }
+    }
+
+    private func categoryIconAssetName(for categoryId: String) -> String? {
+        switch categoryId {
+        case "expression":
+            return "equipment_icon_expression"
+        case "hair":
+            return "equipment_icon_hair"
+        case "suit":
+            return "equipment_icon_suit"
+        case "upper":
+            return "equipment_icon_upper"
+        case "under":
+            return "equipment_icon_under"
+        case "accessory":
+            return "equipment_icon_accessory"
+        default:
+            return nil
         }
     }
 

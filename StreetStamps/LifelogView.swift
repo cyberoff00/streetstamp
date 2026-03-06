@@ -8,9 +8,73 @@ private struct LifelogShareImageItem: Identifiable {
     let image: UIImage
 }
 
+enum LifelogFootprintSampler {
+    static func sample(
+        route coords: [CLLocationCoordinate2D],
+        stepMeters: CLLocationDistance,
+        gapBreakMeters: CLLocationDistance
+    ) -> [CLLocationCoordinate2D] {
+        guard coords.count > 1 else { return coords }
+        guard stepMeters > 0 else { return coords }
+
+        var result: [CLLocationCoordinate2D] = [coords[0]]
+        var distanceFromLastSample: CLLocationDistance = 0
+
+        for idx in 1..<coords.count {
+            let start = coords[idx - 1]
+            let end = coords[idx]
+            let startLoc = CLLocation(latitude: start.latitude, longitude: start.longitude)
+            let endLoc = CLLocation(latitude: end.latitude, longitude: end.longitude)
+            let segmentLength = endLoc.distance(from: startLoc)
+
+            if segmentLength <= 0.001 { continue }
+            if segmentLength > gapBreakMeters {
+                if !sameCoordinate(result.last, end) {
+                    result.append(end)
+                }
+                distanceFromLastSample = 0
+                continue
+            }
+
+            var consumedOnSegment: CLLocationDistance = 0
+            while distanceFromLastSample + (segmentLength - consumedOnSegment) >= stepMeters {
+                let needed = stepMeters - distanceFromLastSample
+                let t = (consumedOnSegment + needed) / segmentLength
+                result.append(interpolateCoordinate(from: start, to: end, t: t))
+                consumedOnSegment += needed
+                distanceFromLastSample = 0
+            }
+
+            distanceFromLastSample += max(0, segmentLength - consumedOnSegment)
+        }
+
+        if let last = coords.last, !sameCoordinate(result.last, last) {
+            result.append(last)
+        }
+        return result
+    }
+
+    private static func interpolateCoordinate(
+        from a: CLLocationCoordinate2D,
+        to b: CLLocationCoordinate2D,
+        t: Double
+    ) -> CLLocationCoordinate2D {
+        let clamped = min(max(t, 0), 1)
+        let lat = a.latitude + (b.latitude - a.latitude) * clamped
+        let lon = a.longitude + (b.longitude - a.longitude) * clamped
+        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+    }
+
+    private static func sameCoordinate(_ a: CLLocationCoordinate2D?, _ b: CLLocationCoordinate2D) -> Bool {
+        guard let a else { return false }
+        return abs(a.latitude - b.latitude) < 0.000_000_1 && abs(a.longitude - b.longitude) < 0.000_000_1
+    }
+}
+
 struct LifelogView: View {
     @ObservedObject private var tracking = TrackingService.shared
     @EnvironmentObject private var lifelogStore: LifelogStore
+    @EnvironmentObject private var trackTileStore: TrackTileStore
     @EnvironmentObject private var locationHub: LocationHub
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var cityCache: CityCache
@@ -19,7 +83,6 @@ struct LifelogView: View {
 
     @State private var position: MapCameraPosition = .automatic
     @State private var showGlobe = false
-    @State private var globeJourneysSnapshot: [JourneyRoute] = []
     @State private var showEnableHint = false
     @State private var showDisableConfirm = false
     @State private var showPermissionSettingsPrompt = false
@@ -34,13 +97,14 @@ struct LifelogView: View {
     @State private var calendarDisplayMode: CalendarDisplayMode = .day
     @State private var visibleMonthAnchor: Date = Calendar.current.startOfDay(for: Date())
     @State private var isSheetExpanded = true
-    @State private var sheetDragOffset: CGFloat = 0
     @State private var bottomDockHeight: CGFloat = 0
     @State private var visibleRegion: MKCoordinateRegion? = nil
     @State private var cameraRegion: MKCoordinateRegion? = nil
+    @State private var cachedPathCoordsWGS84: [CLLocationCoordinate2D] = []
     @AppStorage(MapAppearanceSettings.storageKey) private var mapAppearanceRaw = MapAppearanceSettings.current.rawValue
-    @AppStorage("streetstamps.lifelog.health.steps.snapshot.day") private var stepSnapshotDay = ""
-    @AppStorage("streetstamps.lifelog.health.steps.snapshot.value") private var stepSnapshotValue = 0
+    @AppStorage("streetstamps.lifelog.health.steps.snapshot.byday") private var stepSnapshotByDayRaw = ""
+    @AppStorage("streetstamps.lifelog.health.steps.snapshot.day") private var legacyStepSnapshotDay = ""
+    @AppStorage("streetstamps.lifelog.health.steps.snapshot.value") private var legacyStepSnapshotValue = 0
     @AppStorage("streetstamps.lifelog.steps.popup.prompted.day") private var stepPopupPromptedDay = ""
     @AppStorage("streetstamps.lifelog.mood.prompted.day") private var moodPromptedDay = ""
 
@@ -50,25 +114,85 @@ struct LifelogView: View {
     private var isDarkAppearance: Bool { mapAppearance == .dark }
     private var panelBackground: Color { isDarkAppearance ? Color.black.opacity(0.80) : FigmaTheme.card.opacity(0.96) }
     private var panelText: Color { isDarkAppearance ? .white : .black }
+    private var isNearFootprintMode: Bool { renderLodLevel >= 2 }
+    private var nearModeMaxPoints: Int {
+        switch renderLodLevel {
+        case 3: return 2_400
+        case 2: return 1_600
+        default: return 1_100
+        }
+    }
+    private var nearModeFallbackMaxPoints: Int {
+        max(nearModeMaxPoints * 2, 1_800)
+    }
 
-    private var pathCoords: [CLLocationCoordinate2D] {
-        let wgs = lifelogStore.mapPolylineViewport(
+    private func buildPathCoordsWGS84() -> [CLLocationCoordinate2D] {
+        if isNearFootprintMode {
+            if let visibleRegion {
+                let viewport = TrackRenderAdapter.viewport(from: visibleRegion)
+                let tileZoom = TrackRenderAdapter.zoomForLifelogLOD(renderLodLevel)
+                let tileSegments = trackTileStore.tiles(
+                    for: viewport,
+                    zoom: tileZoom,
+                    day: selectedDay
+                )
+                let tileRaw = TrackRenderAdapter.rawCoordinates(from: tileSegments)
+                if !tileRaw.isEmpty {
+                    return tileRaw
+                }
+            }
+            return lifelogStore.mapPolyline(day: selectedDay, maxPoints: nearModeFallbackMaxPoints)
+        }
+
+        if let visibleRegion {
+            let viewport = TrackRenderAdapter.viewport(from: visibleRegion)
+            let tileZoom = TrackRenderAdapter.zoomForLifelogLOD(renderLodLevel)
+            let tileSegments = trackTileStore.tiles(
+                for: viewport,
+                zoom: tileZoom,
+                day: selectedDay
+            )
+            let tilePolyline = TrackRenderAdapter.polylineCoordinates(
+                from: tileSegments,
+                maxPoints: renderMaxPoints
+            )
+            if !tilePolyline.isEmpty {
+                return tilePolyline
+            }
+        }
+
+        return lifelogStore.mapPolylineViewport(
             day: selectedDay,
             region: visibleRegion,
             lodLevel: renderLodLevel,
             maxPoints: renderMaxPoints
         )
-        return mapCoordsForLifelog(wgs)
+    }
+
+    private var farRouteSegments: [RenderRouteSegment] {
+        let pathCoords = cachedPathCoordsWGS84
+        guard !isNearFootprintMode else { return [] }
+        guard pathCoords.count >= 2 else { return [] }
+
+        let input = RouteRenderingPipeline.Input(
+            coordsWGS84: pathCoords,
+            applyGCJForChina: false,
+            gapDistanceMeters: 8_000,
+            countryISO2: lifelogCountryISO2
+        )
+        return RouteRenderingPipeline.buildSegments(input, surface: .mapKit).segments
     }
 
     private var footprintCoords: [CLLocationCoordinate2D] {
-        let spaced = resampledFootprints(
-            from: pathCoords,
-            targetSpacingMeters: footprintStrideMeters
+        let pathCoords = cachedPathCoordsWGS84
+        guard isNearFootprintMode else { return [] }
+        guard pathCoords.count > 1 else { return [] }
+        let sampled = LifelogFootprintSampler.sample(
+            route: pathCoords,
+            stepMeters: 50,
+            gapBreakMeters: 8_000
         )
-        guard spaced.count > 2 else { return [] }
-        let chain = Array(spaced.dropLast())
-        return decimatedFootprintsForViewport(chain)
+        return mapCoordsForLifelog(sampled)
     }
 
     private var footprintRenderCoords: [CLLocationCoordinate2D] {
@@ -81,10 +205,6 @@ struct LifelogView: View {
             let point = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
             return point.distance(from: me) > threshold
         }
-    }
-
-    private var allJourneysForGlobe: [JourneyRoute] {
-        lifelogStore.hasTrack ? [lifelogStore.syntheticJourney] : []
     }
 
     private var currentDisplayLocation: CLLocation? {
@@ -143,17 +263,8 @@ struct LifelogView: View {
                     bottomDock
                         .offset(y: bottomSheetOffset())
                         .animation(.spring(response: 0.35, dampingFraction: 0.88), value: isSheetExpanded)
-                        .animation(.interactiveSpring(response: 0.26, dampingFraction: 0.84), value: sheetDragOffset)
                         .gesture(
                             DragGesture(minimumDistance: 8)
-                                .onChanged { value in
-                                    let dy = value.translation.height
-                                    if isSheetExpanded {
-                                        sheetDragOffset = max(0, dy)
-                                    } else {
-                                        sheetDragOffset = min(0, dy)
-                                    }
-                                }
                                 .onEnded { value in
                                     let threshold: CGFloat = 72
                                     let dy = value.translation.height
@@ -162,7 +273,6 @@ struct LifelogView: View {
                                     } else if !isSheetExpanded, dy < -threshold {
                                         isSheetExpanded = true
                                     }
-                                    sheetDragOffset = 0
                                 }
                         )
                 }
@@ -175,10 +285,11 @@ struct LifelogView: View {
             }
         }
         .fullScreenCover(isPresented: $showGlobe) {
-            GlobeViewScreen(showSidebar: .constant(false), externalJourneys: globeJourneysSnapshot)
+            GlobeViewScreen(showSidebar: .constant(false))
                 .environmentObject(store)
                 .environmentObject(cityCache)
                 .environmentObject(lifelogStore)
+                .environmentObject(trackTileStore)
         }
         .sheet(item: $shareItem) { item in
             ShareSheet(activityItems: [item.image])
@@ -202,15 +313,17 @@ struct LifelogView: View {
         .onAppear {
             didCenterOnEnter = false
             seedSelectedDayIfNeeded()
+            migrateLegacyStepSnapshotIfNeeded()
             visibleMonthAnchor = monthStart(for: selectedDay ?? Date())
             if locationHub.authorizationStatus != .authorizedAlways {
                 showEnableHint = true
             }
             centerOnCurrent(force: true)
+            refreshPathCache()
             Task {
                 await refreshHealthPermissionState()
                 await requestHealthPermissionIfNeeded()
-                await captureDailyStepSnapshotIfNeeded()
+                await captureStepSnapshotIfNeeded(for: Calendar.current.startOfDay(for: selectedDay ?? Date()))
                 if stepPopupPromptedDay != todayKey() {
                     stepPopupPromptedDay = todayKey()
                     isStepPopupVisible = true
@@ -218,7 +331,10 @@ struct LifelogView: View {
                 presentMoodPopupIfNeeded()
             }
         }
-        .onChange(of: lifelogStore.availableDays) { _ in seedSelectedDayIfNeeded() }
+        .onChange(of: lifelogStore.availableDays) { _ in
+            seedSelectedDayIfNeeded()
+            refreshPathCache()
+        }
         .onChange(of: lifelogStore.currentLocation?.coordinate.latitude) { _ in
             centerOnCurrent(force: false)
         }
@@ -231,10 +347,66 @@ struct LifelogView: View {
         .onChange(of: locationHub.currentLocation?.coordinate.longitude) { _ in
             centerOnCurrent(force: false)
         }
+        .onChange(of: lifelogStore.trackTileRevision) { _ in
+            refreshPathCache()
+        }
+        .onChange(of: trackTileStore.refreshRevision) { _ in
+            refreshPathCache()
+        }
+        .onChange(of: lifelogStore.countryISO2) { _ in
+            refreshPathCache()
+        }
+        .onChange(of: selectedDay) { day in
+            refreshPathCache()
+            guard isStepPopupVisible else { return }
+            guard let day else { return }
+            Task {
+                isRefreshingSteps = true
+                await captureStepSnapshotIfNeeded(for: Calendar.current.startOfDay(for: day), force: true)
+                isRefreshingSteps = false
+            }
+        }
     }
 
     private var mapLayer: some View {
         Map(position: $position) {
+            if !isNearFootprintMode {
+                ForEach(farRouteSegments) { seg in
+                    let base = Color(uiColor: MapAppearanceSettings.routeBaseColor)
+                    let dash = RouteRenderStyleTokens.dashLengths
+
+                    MapPolyline(coordinates: seg.coords)
+                        .stroke(
+                            base.opacity(seg.style == .dashed ? 0.08 : 0.12),
+                            style: StrokeStyle(
+                                lineWidth: seg.style == .dashed ? 2.0 : 3.0,
+                                lineCap: .round,
+                                lineJoin: .round,
+                                dash: seg.style == .dashed ? dash : []
+                            )
+                        )
+                    MapPolyline(coordinates: seg.coords)
+                        .stroke(
+                            base.opacity(seg.style == .dashed ? 0.0 : 0.08),
+                            style: StrokeStyle(
+                                lineWidth: seg.style == .dashed ? 0.0 : 2.2,
+                                lineCap: .round,
+                                lineJoin: .round
+                            )
+                        )
+                    MapPolyline(coordinates: seg.coords)
+                        .stroke(
+                            base.opacity(seg.style == .dashed ? 0.30 : 0.84),
+                            style: StrokeStyle(
+                                lineWidth: seg.style == .dashed ? 1.1 : 1.6,
+                                lineCap: .round,
+                                lineJoin: .round,
+                                dash: seg.style == .dashed ? dash : []
+                            )
+                        )
+                }
+            }
+
             ForEach(footprintRenderCoords.indices, id: \.self) { idx in
                 let style = footprintStyle(at: idx, in: footprintRenderCoords)
                 Annotation("", coordinate: footprintRenderCoords[idx]) {
@@ -295,7 +467,7 @@ struct LifelogView: View {
         .mapStyle(
             .standard(
                 elevation: .flat,
-                emphasis: .automatic,
+                emphasis: MapAppearanceSettings.usesMutedStandardMap(for: mapAppearance) ? .muted : .automatic,
                 pointsOfInterest: .excludingAll,
                 showsTraffic: false
             )
@@ -307,6 +479,7 @@ struct LifelogView: View {
             cameraRegion = incoming
             if shouldUpdateVisibleRegion(incoming) {
                 visibleRegion = incoming
+                refreshPathCache()
             }
         }
     }
@@ -320,7 +493,6 @@ struct LifelogView: View {
                 Spacer()
 
                 Button {
-                    globeJourneysSnapshot = allJourneysForGlobe
                     showGlobe = true
                 } label: {
                     Image(systemName: "globe.asia.australia.fill")
@@ -352,7 +524,7 @@ struct LifelogView: View {
     }
 
     private var canShowStepSnapshot: Bool {
-        hasHealthStepPermission && stepSnapshotDay == todayKey() && stepSnapshotValue > 0
+        hasHealthStepPermission && stepSnapshotValueForSelectedDay > 0
     }
 
     private var recenterButton: some View {
@@ -548,7 +720,6 @@ struct LifelogView: View {
                 .onTapGesture {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.88)) {
                         isSheetExpanded.toggle()
-                        sheetDragOffset = 0
                     }
                 }
 
@@ -563,8 +734,7 @@ struct LifelogView: View {
         .padding(.horizontal, 14)
         .padding(.top, 8)
         .padding(.bottom, 20)
-        .background(Color.white.opacity(0.94))
-        .clipShape(
+        .background(
             UnevenRoundedRectangle(
                 topLeadingRadius: 30,
                 bottomLeadingRadius: 0,
@@ -572,6 +742,8 @@ struct LifelogView: View {
                 topTrailingRadius: 30,
                 style: .continuous
             )
+            .fill(Color.white.opacity(0.94))
+            .ignoresSafeArea(edges: .bottom)  // ← 关键：白色延伸到底
         )
         .overlay(
             UnevenRoundedRectangle(
@@ -584,7 +756,6 @@ struct LifelogView: View {
                 .stroke(Color.black.opacity(0.04), lineWidth: 1)
         )
         .shadow(color: Color.black.opacity(0.14), radius: 22, x: 0, y: 10)
-        .ignoresSafeArea(edges: .bottom)
         .background(
             GeometryReader { proxy in
                 Color.clear
@@ -650,10 +821,8 @@ struct LifelogView: View {
     }
 
     private func bottomSheetOffset() -> CGFloat {
-        let expandedBase = max(0, sheetDragOffset)
         let collapsedOffset = max(0, bottomDockHeight - AvatarMapMarkerStyle.collapsedSheetPeekHeight)
-        let collapsedBase = max(0, collapsedOffset + sheetDragOffset)
-        return isSheetExpanded ? expandedBase : collapsedBase
+        return isSheetExpanded ? 0 : collapsedOffset
     }
 
     private var visibleBottomDockHeight: CGFloat {
@@ -724,10 +893,10 @@ struct LifelogView: View {
 
     private var renderMaxPoints: Int {
         switch renderLodLevel {
-        case 3: return 420
-        case 2: return 300
-        case 1: return 220
-        default: return 160
+        case 3: return 800
+        case 2: return 550
+        case 1: return 380
+        default: return 260
         }
     }
 
@@ -746,6 +915,16 @@ struct LifelogView: View {
         case 2: return 24
         case 1: return 38
         default: return 60
+        }
+    }
+
+    private var footprintMinSeparationMeters: CLLocationDistance {
+        // Stronger spacing when zoomed out to prevent dense-looking carpets.
+        switch renderLodLevel {
+        case 3: return 12
+        case 2: return 20
+        case 1: return 32
+        default: return 56
         }
     }
 
@@ -857,21 +1036,11 @@ struct LifelogView: View {
             return uniformSampledCoords(coords, maxPoints: footprintMaxMarkers)
         }
         let maxMarkers = max(2, min(footprintMaxMarkers, coords.count))
-        // Full-path uniform anchors (no recent-point compensation).
-        let reserveAnchors = maxMarkers
         let cell = max(0.010, footprintGridCellRatio)
 
         var selected = Set<Int>()
         selected.insert(0)
         selected.insert(coords.count - 1)
-
-        if reserveAnchors > 1 {
-            for i in 0..<reserveAnchors {
-                let t = Double(i) / Double(max(reserveAnchors - 1, 1))
-                let idx = Int((t * Double(coords.count - 1)).rounded(.toNearestOrAwayFromZero))
-                selected.insert(min(max(idx, 0), coords.count - 1))
-            }
-        }
 
         func cellKey(for index: Int) -> String? {
             guard let p = normalizedViewportPoint(coords[index], in: region) else { return nil }
@@ -881,6 +1050,42 @@ struct LifelogView: View {
             return "\(cx)|\(cy)"
         }
 
+        func localSpacingMeters(at index: Int) -> CLLocationDistance {
+            guard index > 0, index < coords.count - 1 else { return .greatestFiniteMagnitude }
+            let prev = CLLocation(latitude: coords[index - 1].latitude, longitude: coords[index - 1].longitude)
+            let cur = CLLocation(latitude: coords[index].latitude, longitude: coords[index].longitude)
+            let next = CLLocation(latitude: coords[index + 1].latitude, longitude: coords[index + 1].longitude)
+            return max(cur.distance(from: prev), next.distance(from: cur))
+        }
+
+        func isFarEnough(_ idx: Int, from picked: Set<Int>) -> Bool {
+            let minSep = footprintMinSeparationMeters
+            guard minSep > 0 else { return true }
+            let c = coords[idx]
+            for p in picked {
+                let d = CLLocation(latitude: c.latitude, longitude: c.longitude).distance(
+                    from: CLLocation(latitude: coords[p].latitude, longitude: coords[p].longitude)
+                )
+                if d < minSep { return false }
+            }
+            return true
+        }
+
+        // Preserve naturally sparse segments first; only dense areas should be compressed.
+        let sparseKeepThreshold = max(footprintStrideMeters * 1.2, 22)
+        for idx in 1..<(coords.count - 1) {
+            if localSpacingMeters(at: idx) >= sparseKeepThreshold, isFarEnough(idx, from: selected) {
+                selected.insert(idx)
+            }
+        }
+
+        if selected.count > maxMarkers {
+            let ranked = selected.sorted { localSpacingMeters(at: $0) > localSpacingMeters(at: $1) }
+            selected = Set(ranked.prefix(maxMarkers))
+            selected.insert(0)
+            selected.insert(coords.count - 1)
+        }
+
         var occupied = Set<String>()
         for idx in selected {
             if let key = cellKey(for: idx) {
@@ -888,9 +1093,11 @@ struct LifelogView: View {
             }
         }
 
+        // Fill remaining slots with one representative per viewport cell.
         if selected.count < maxMarkers {
             for idx in 0..<coords.count {
                 if selected.contains(idx) { continue }
+                if !isFarEnough(idx, from: selected) { continue }
                 guard let key = cellKey(for: idx) else { continue }
                 if occupied.contains(key) { continue }
                 selected.insert(idx)
@@ -899,20 +1106,14 @@ struct LifelogView: View {
             }
         }
 
+        // If still below budget, add the sparsest leftovers first.
         if selected.count < maxMarkers {
-            for idx in stride(from: coords.count - 1, through: 0, by: -1) {
+            let candidates = (0..<coords.count)
+                .filter { !selected.contains($0) }
+                .sorted { localSpacingMeters(at: $0) > localSpacingMeters(at: $1) }
+            for idx in candidates {
                 if selected.contains(idx) { continue }
-                guard let key = cellKey(for: idx) else { continue }
-                if occupied.contains(key) { continue }
-                selected.insert(idx)
-                occupied.insert(key)
-                if selected.count >= maxMarkers { break }
-            }
-        }
-
-        if selected.count < maxMarkers {
-            for idx in 0..<coords.count {
-                if selected.contains(idx) { continue }
+                if !isFarEnough(idx, from: selected) { continue }
                 selected.insert(idx)
                 if selected.count >= maxMarkers { break }
             }
@@ -1011,8 +1212,7 @@ struct LifelogView: View {
                                     .fill(dayCellBackground(day: day, forMonthMode: false))
                                     .frame(width: 40, height: 40)
                                 if let mood = lifelogStore.mood(for: day) {
-                                    Text(mood)
-                                        .font(.system(size: 18))
+                                    moodSymbolView(for: mood, imageSize: 26, fontSize: 20)
                                 } else {
                                     Text("\(Calendar.current.component(.day, from: day))")
                                         .font(.system(size: 16, weight: .bold))
@@ -1058,8 +1258,7 @@ struct LifelogView: View {
                                             .font(.system(size: 12, weight: .semibold))
                                             .foregroundColor(isSelectedDay(day) ? .white : .black)
                                         if let mood = lifelogStore.mood(for: day) {
-                                            Text(mood)
-                                                .font(.system(size: 16))
+                                            moodSymbolView(for: mood, imageSize: 22, fontSize: 18)
                                         }
                                     }
                                 }
@@ -1124,14 +1323,18 @@ struct LifelogView: View {
     }
 
     private func centerCoordinateForSelectedDay() -> CLLocationCoordinate2D? {
-        if let last = pathCoords.last {
-            return last
+        if let last = cachedPathCoordsWGS84.last {
+            return mapCoordForLifelog(last)
         }
         return currentCoordinateForCentering()
     }
 
+    private func refreshPathCache() {
+        cachedPathCoordsWGS84 = buildPathCoordsWGS84()
+    }
+
     private func centerCoordinate(for day: Date) -> CLLocationCoordinate2D? {
-        let coords = mapCoordsForLifelog(lifelogStore.mapPolyline(day: day, maxPoints: 900))
+        let coords = mapCoordsForLifelog(lifelogStore.mapPolyline(day: day, maxPoints: 220))
         return coords.last ?? currentCoordinateForCentering()
     }
 
@@ -1258,36 +1461,67 @@ struct LifelogView: View {
     private struct MoodOption {
         let id: String
         let moodValue: String
-        let placeholderEmoji: String
+        let imageAssetName: String
+        let fallbackEmoji: String
         let label: String
     }
 
     private static let moodOptions: [MoodOption] = [
-        .init(id: "awful", moodValue: "😭", placeholderEmoji: "😭", label: "崩溃"),
-        .init(id: "sad", moodValue: "😢", placeholderEmoji: "😢", label: "低落"),
-        .init(id: "normal", moodValue: "😐", placeholderEmoji: "😐", label: "一般"),
-        .init(id: "happy", moodValue: "😄", placeholderEmoji: "😄", label: "开心"),
-        .init(id: "great", moodValue: "🤩", placeholderEmoji: "🤩", label: "超棒")
+        .init(id: "sad", moodValue: "sad", imageAssetName: "Sad", fallbackEmoji: "😢", label: "低落"),
+        .init(id: "notbad", moodValue: "notbad2", imageAssetName: "notbad2", fallbackEmoji: "🙂", label: "一般"),
+        .init(id: "happy", moodValue: "happy", imageAssetName: "Happy", fallbackEmoji: "😄", label: "开心")
     ]
+
+    @ViewBuilder
+    private func moodSymbolView(for mood: String, imageSize: CGFloat, fontSize: CGFloat) -> some View {
+        if let option = moodOption(for: mood) {
+            moodImageView(option: option, size: imageSize, fallbackFontSize: fontSize)
+        } else {
+            Text(mood)
+                .font(.system(size: fontSize))
+        }
+    }
+
+    private func moodOption(for mood: String) -> MoodOption? {
+        switch mood {
+        case "Happy", "mood/Happy", "happy", "mood/happy", "😄", "🤩":
+            return Self.moodOptions.first { $0.id == "happy" }
+        case "notbad2", "mood/notbad2", "notbad", "normal", "😐", "🙂":
+            return Self.moodOptions.first { $0.id == "notbad" }
+        case "Sad", "mood/Sad", "sad", "mood/sad", "😢", "😭":
+            return Self.moodOptions.first { $0.id == "sad" }
+        default:
+            return nil
+        }
+    }
+
+    @ViewBuilder
+    private func moodImageView(option: MoodOption, size: CGFloat, fallbackFontSize: CGFloat) -> some View {
+        if UIImage(named: option.imageAssetName) != nil {
+            Image(option.imageAssetName)
+                .resizable()
+                .renderingMode(.original)
+                .scaledToFit()
+                .frame(width: size, height: size)
+        } else {
+            Text(option.fallbackEmoji)
+                .font(.system(size: fallbackFontSize))
+        }
+    }
 
     @ViewBuilder
     private var moodPickerPopup: some View {
         ZStack {
-            Color.black.opacity(0.45)
+            Color.black.opacity(0.35)
                 .ignoresSafeArea()
                 .onTapGesture {}
 
             VStack(spacing: 14) {
                 Text(L10n.t("lifelog_mood_title"))
-                    .font(.system(size: 24, weight: .heavy, design: .rounded))
-                    .foregroundColor(.white)
-                    .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+                    .font(.system(size: 21, weight: .bold, design: .rounded))
+                    .foregroundColor(FigmaTheme.text)
 
-                Text(L10n.t("lifelog_mood_subtitle"))
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.92))
-
-                HStack(spacing: 10) {
+                HStack(spacing: 12) {
                     ForEach(Self.moodOptions, id: \.id) { mood in
                         Button {
                             guard let day = moodPickerDay else { return }
@@ -1296,17 +1530,20 @@ struct LifelogView: View {
                             isMoodPopupVisible = false
                             moodPickerDay = nil
                         } label: {
-                            VStack(spacing: 8) {
-                                Text(mood.placeholderEmoji)
-                                    .font(.system(size: 34))
+                            VStack(spacing: 10) {
+                                moodImageView(option: mood, size: 56, fallbackFontSize: 42)
                                 Text(mood.label)
-                                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                                    .font(.system(size: 12, weight: .semibold, design: .rounded))
                             }
-                            .foregroundColor(Color(red: 0.18, green: 0.24, blue: 0.28))
+                            .foregroundColor(FigmaTheme.text)
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background(Color.white.opacity(0.94))
-                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .padding(.vertical, 12)
+                            .background(FigmaTheme.background)
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .stroke(FigmaTheme.border, lineWidth: 1)
+                            )
                         }
                         .buttonStyle(.plain)
                     }
@@ -1320,8 +1557,8 @@ struct LifelogView: View {
                         isMoodPopupVisible = false
                         moodPickerDay = nil
                     }
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.92))
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundColor(FigmaTheme.subtext)
 
                     Spacer()
 
@@ -1330,26 +1567,18 @@ struct LifelogView: View {
                         isMoodPopupVisible = false
                         moodPickerDay = nil
                     }
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.92))
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundColor(FigmaTheme.primary)
                 }
             }
-            .padding(18)
-            .background(
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.18, green: 0.57, blue: 0.91),
-                        Color(red: 0.16, green: 0.77, blue: 0.65)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .padding(20)
+            .background(FigmaTheme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(Color.white.opacity(0.22), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(FigmaTheme.border, lineWidth: 1)
             )
+            .shadow(color: Color.black.opacity(0.12), radius: 14, x: 0, y: 6)
             .padding(.horizontal, 18)
         }
     }
@@ -1378,7 +1607,7 @@ struct LifelogView: View {
 
     private var stepCompactText: String {
         if isRefreshingSteps { return "..." }
-        if canShowStepSnapshot { return "\(stepSnapshotValue)" }
+        if canShowStepSnapshot { return "\(stepSnapshotValueForSelectedDay)" }
         return "--"
     }
 
@@ -1405,7 +1634,8 @@ struct LifelogView: View {
         await refreshHealthPermissionState()
         await requestHealthPermissionIfNeeded()
         await refreshHealthPermissionState()
-        await captureDailyStepSnapshotIfNeeded()
+        let targetDay = Calendar.current.startOfDay(for: selectedDay ?? Date())
+        await captureStepSnapshotIfNeeded(for: targetDay)
         isRefreshingSteps = false
     }
 
@@ -1424,20 +1654,53 @@ struct LifelogView: View {
         }
     }
 
-    private func captureDailyStepSnapshotIfNeeded() async {
-        guard hasHealthStepPermission else { return }
-        let today = todayKey()
-        guard stepSnapshotDay != today else { return }
-        guard let count = try? await fetchTodayStepCount() else { return }
-        stepSnapshotValue = max(0, count)
-        stepSnapshotDay = today
+    private var selectedStepDayKey: String {
+        dayKey(for: Calendar.current.startOfDay(for: selectedDay ?? Date()))
     }
 
-    private func fetchTodayStepCount() async throws -> Int {
+    private var stepSnapshotValueForSelectedDay: Int {
+        let cache = LifelogStepSnapshotCache(rawValue: stepSnapshotByDayRaw)
+        return max(0, cache.value(forDayKey: selectedStepDayKey) ?? 0)
+    }
+
+    private func migrateLegacyStepSnapshotIfNeeded() {
+        guard !legacyStepSnapshotDay.isEmpty else { return }
+        guard legacyStepSnapshotValue > 0 else { return }
+        var cache = LifelogStepSnapshotCache(rawValue: stepSnapshotByDayRaw)
+        if cache.value(forDayKey: legacyStepSnapshotDay) == nil {
+            cache.setValue(max(0, legacyStepSnapshotValue), forDayKey: legacyStepSnapshotDay)
+            stepSnapshotByDayRaw = cache.rawValue
+        }
+    }
+
+    private func captureStepSnapshotIfNeeded(for day: Date, force: Bool = false) async {
+        guard hasHealthStepPermission else { return }
+        let dayStart = Calendar.current.startOfDay(for: day)
+        let key = dayKey(for: dayStart)
+        var cache = LifelogStepSnapshotCache(rawValue: stepSnapshotByDayRaw)
+        if !force, cache.value(forDayKey: key) != nil {
+            return
+        }
+        guard let count = try? await fetchStepCount(for: dayStart) else { return }
+        cache.setValue(max(0, count), forDayKey: key)
+        stepSnapshotByDayRaw = cache.rawValue
+    }
+
+    private func fetchStepCount(for day: Date) async throws -> Int {
         guard let stepType = HKQuantityType.quantityType(forIdentifier: .stepCount) else { return 0 }
         let calendar = Calendar.current
-        let startOfDay = calendar.startOfDay(for: Date())
-        let predicate = HKQuery.predicateForSamples(withStart: startOfDay, end: Date(), options: .strictStartDate)
+        let startOfDay = calendar.startOfDay(for: day)
+        let end: Date
+        if calendar.isDateInToday(startOfDay) {
+            end = Date()
+        } else {
+            end = calendar.date(byAdding: .day, value: 1, to: startOfDay) ?? startOfDay
+        }
+        let predicate = HKQuery.predicateForSamples(
+            withStart: startOfDay,
+            end: end,
+            options: [.strictStartDate]
+        )
 
         return try await withCheckedThrowingContinuation { continuation in
             let query = HKStatisticsQuery(
@@ -1457,17 +1720,50 @@ struct LifelogView: View {
     }
 
     private func todayKey() -> String {
+        dayKey(for: Date())
+    }
+
+    private func dayKey(for day: Date) -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.calendar = Calendar(identifier: .gregorian)
         f.timeZone = TimeZone.current
         f.dateFormat = "yyyy-MM-dd"
-        return f.string(from: Date())
+        return f.string(from: day)
     }
 
     private enum CalendarDisplayMode {
         case day
         case month
+    }
+}
+
+struct LifelogStepSnapshotCache {
+    private var byDay: [String: Int]
+
+    init(rawValue: String) {
+        if let data = rawValue.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode([String: Int].self, from: data) {
+            byDay = decoded
+        } else {
+            byDay = [:]
+        }
+    }
+
+    var rawValue: String {
+        guard let data = try? JSONEncoder().encode(byDay),
+              let raw = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return raw
+    }
+
+    func value(forDayKey key: String) -> Int? {
+        byDay[key]
+    }
+
+    mutating func setValue(_ value: Int, forDayKey key: String) {
+        byDay[key] = max(0, value)
     }
 }
 

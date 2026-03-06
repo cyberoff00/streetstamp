@@ -104,7 +104,7 @@ async function run() {
       cityID: 'paris',
       cityName: 'Paris',
       messageText: 'hello postcard',
-      photoURL: 'http://127.0.0.1/fake.jpg',
+      photoURL: '/media/fake.jpg',
       allowedCityIDs: ['paris']
     });
 
@@ -114,10 +114,16 @@ async function run() {
     const sent = await requestJSON(port, 'GET', '/v1/postcards?box=sent', u1.accessToken);
     assert.equal(sent.status, 200);
     assert.equal(Array.isArray(sent.data.items), true);
+    assert.equal(sent.data.items.length, 1);
+    assert.equal(sent.data.items[0].messageID, send.data.messageID);
+    assert.equal(sent.data.items[0].photoURL, `http://127.0.0.1:${port}/media/fake.jpg`);
 
     const received = await requestJSON(port, 'GET', '/v1/postcards?box=received', u2.accessToken);
     assert.equal(received.status, 200);
     assert.equal(Array.isArray(received.data.items), true);
+    assert.equal(received.data.items.length, 1);
+    assert.equal(received.data.items[0].messageID, send.data.messageID);
+    assert.equal(received.data.items[0].photoURL, `http://127.0.0.1:${port}/media/fake.jpg`);
 
     const notifications = await requestJSON(port, 'GET', '/v1/notifications?unreadOnly=0', u2.accessToken);
     assert.equal(notifications.status, 200);
@@ -126,7 +132,7 @@ async function run() {
     assert.equal(postcardNotice.cityID, 'paris');
     assert.equal(postcardNotice.cityName, 'Paris');
     assert.equal(postcardNotice.messageText, 'hello postcard');
-    assert.equal(postcardNotice.photoURL, 'http://127.0.0.1/fake.jpg');
+    assert.equal(postcardNotice.photoURL, `http://127.0.0.1:${port}/media/fake.jpg`);
 
     const duplicate = await requestJSON(port, 'POST', '/v1/postcards/send', u1.accessToken, {
       clientDraftID: 'd2',
@@ -134,7 +140,7 @@ async function run() {
       cityID: 'paris',
       cityName: 'Paris',
       messageText: 'duplicate',
-      photoURL: 'http://127.0.0.1/fake.jpg',
+      photoURL: '/media/fake.jpg',
       allowedCityIDs: ['paris']
     });
 

@@ -316,6 +316,7 @@
 "friends_empty_all" = "还没有好友，点击 + 添加";
 "friends_event_added_memories" = "新增 %d 条记忆";
 "friends_event_completed" = "完成了 %@";
+"friends_event_completed_journey" = "完成了一段旅程";
 "friends_event_visited" = "到访了 %@";
 "friends_tab_activity" = "动态";
 "friends_tab_all" = "好友";
@@ -377,6 +378,10 @@
 "settings_level_rules_4" = "Profile、Lifelog、Globe 会显示实时等级与进度。";
 "settings_level_rules_intro" = "当前等级规则";
 "settings_map_appearance_desc" = "应用到所有地图与路线渲染";
+"settings_lifelog_bg_mode_desc" = "仅影响 Lifelog 被动记录。高精度更连续但更耗电，低精度更省电但轨迹更稀疏。";
+"settings_lifelog_bg_mode_high" = "高精度";
+"settings_lifelog_bg_mode_low" = "低精度";
+"settings_lifelog_bg_mode_title" = "后台记录模式";
 "settings_stationary_reminder_desc" = "当 60 分钟内移动范围小于 100 米时提醒。";
 "settings_stationary_reminder_title" = "久坐提醒";
 "settings_title" = "设置";

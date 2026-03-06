@@ -386,6 +386,7 @@ final class CityCache: ObservableObject {
     private var migrationMarkerV4URL: URL
     private var paths: StoragePath
     private var cancellables: Set<AnyCancellable> = []
+    private var hasRebuiltForCurrentLoadedState = false
 
     init(paths: StoragePath, journeyStore: JourneyStore) {
         self.fileURL = paths.cityCacheURL
@@ -404,6 +405,13 @@ final class CityCache: ObservableObject {
         migrateInterCityRoutesToStartingCitiesIfNeeded()
         removeLegacyDiskThumbnailsIfNeeded()
         rebuildFromJourneyStore()
+
+        journeyStore.$hasLoaded
+            .receive(on: RunLoop.main)
+            .sink { [weak self] loaded in
+                self?.handleJourneyStoreLoadedState(loaded)
+            }
+            .store(in: &cancellables)
 
         NotificationCenter.default.publisher(for: .journeyStoreDidDiscardJourneys, object: journeyStore)
             .receive(on: RunLoop.main)
@@ -425,6 +433,17 @@ final class CityCache: ObservableObject {
         migrateThumbnailPathsIfNeeded()
         migrateInterCityRoutesToStartingCitiesIfNeeded()
         removeLegacyDiskThumbnailsIfNeeded()
+        rebuildFromJourneyStore()
+        handleJourneyStoreLoadedState(journeyStore.hasLoaded)
+    }
+
+    private func handleJourneyStoreLoadedState(_ loaded: Bool) {
+        if !loaded {
+            hasRebuiltForCurrentLoadedState = false
+            return
+        }
+        guard !hasRebuiltForCurrentLoadedState else { return }
+        hasRebuiltForCurrentLoadedState = true
         rebuildFromJourneyStore()
     }
     

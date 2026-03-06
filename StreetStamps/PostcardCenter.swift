@@ -5,6 +5,7 @@ final class PostcardCenter: ObservableObject {
     @Published private(set) var drafts: [PostcardDraft] = []
     @Published private(set) var sentItems: [BackendPostcardMessageDTO] = []
     @Published private(set) var receivedItems: [BackendPostcardMessageDTO] = []
+    @Published private(set) var lastSyncError: String? = nil
 
     private var activeUserID: String
 
@@ -19,6 +20,7 @@ final class PostcardCenter: ObservableObject {
         drafts = PostcardDraftStore.load(userID: userID)
         sentItems = []
         receivedItems = []
+        lastSyncError = nil
     }
 
     func createDraft(
@@ -87,8 +89,14 @@ final class PostcardCenter: ObservableObject {
             let received = try await BackendAPIClient.shared.fetchPostcards(token: token, box: "received")
             sentItems = sent.items.sorted(by: { $0.sentAt > $1.sentAt })
             receivedItems = received.items.sorted(by: { $0.sentAt > $1.sentAt })
+            lastSyncError = nil
         } catch {
-            // Keep local state stable; caller decides whether to surface error.
+            if Self.isCancellationError(error) {
+                return
+            }
+            // Keep local state stable but surface a concise sync error for UI diagnostics.
+            let msg = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+            lastSyncError = msg.isEmpty ? "明信片同步失败" : msg
         }
     }
 
@@ -114,19 +122,24 @@ final class PostcardCenter: ObservableObject {
         persist()
 
         do {
+            let remotePhotoURL = try await resolvePhotoURL(
+                source: draft.photoLocalPath,
+                token: token
+            )
             let payload = SendPostcardRequest(
                 clientDraftID: draft.clientDraftID,
                 toUserID: draft.toUserID,
                 cityID: draft.cityID,
                 cityName: draft.cityName,
                 messageText: String(draft.message.prefix(80)),
-                photoURL: draft.photoLocalPath,
+                photoURL: remotePhotoURL,
                 allowedCityIDs: allowedCityIDs
             )
             let response = try await BackendAPIClient.shared.sendPostcard(token: token, req: payload)
 
             guard let currentIndex = drafts.firstIndex(where: { $0.draftID == draftID }) else { return }
             var current = drafts[currentIndex]
+            current.photoLocalPath = remotePhotoURL
             current.status = .sent
             current.messageID = response.messageID
             current.sentAt = response.sentAt
@@ -158,5 +171,52 @@ final class PostcardCenter: ObservableObject {
 
     private func persist() {
         PostcardDraftStore.save(drafts, userID: activeUserID)
+    }
+
+    private func resolvePhotoURL(source: String, token: String) async throws -> String {
+        let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw BackendAPIError.server("postcard image missing")
+        }
+        if trimmed.lowercased().hasPrefix("http://") || trimmed.lowercased().hasPrefix("https://") {
+            return trimmed
+        }
+
+        let fileURL = URL(fileURLWithPath: trimmed)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            throw BackendAPIError.server("postcard image not found")
+        }
+
+        let data = try await Self.readFileDataAsync(from: fileURL)
+        let mime = mimeType(for: fileURL.pathExtension)
+        let upload = try await BackendAPIClient.shared.uploadMedia(
+            token: token,
+            data: data,
+            fileName: fileURL.lastPathComponent,
+            mimeType: mime
+        )
+        return upload.url
+    }
+
+    private func mimeType(for ext: String) -> String {
+        switch ext.lowercased() {
+        case "jpg", "jpeg": return "image/jpeg"
+        case "png": return "image/png"
+        case "webp": return "image/webp"
+        case "heic": return "image/heic"
+        default: return "application/octet-stream"
+        }
+    }
+
+    private nonisolated static func readFileDataAsync(from url: URL) async throws -> Data {
+        try await Task.detached(priority: .utility) {
+            try Data(contentsOf: url)
+        }.value
+    }
+
+    private static func isCancellationError(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        let nsError = error as NSError
+        return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
     }
 }

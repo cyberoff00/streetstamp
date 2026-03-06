@@ -18,6 +18,7 @@ struct SettingsView: View {
     @AppStorage(AppSettings.voiceBroadcastIntervalKMKey) private var voiceBroadcastIntervalKM = 1
     @AppStorage(AppSettings.longStationaryReminderEnabledKey) private var longStationaryReminderEnabled = true
     @AppStorage(AppSettings.avatarHeadlightEnabledKey) private var avatarHeadlightEnabled = true
+    @AppStorage(AppSettings.lifelogBackgroundModeKey) private var lifelogBackgroundModeRaw = LifelogBackgroundMode.defaultMode.rawValue
 
     @State private var showComingSoon = false
     @State private var comingSoonTitle = ""
@@ -58,6 +59,11 @@ struct SettingsView: View {
     private var appVersionText: String {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
         return "V\(version)"
+    }
+
+    private var lifelogBackgroundMode: LifelogBackgroundMode {
+        get { LifelogBackgroundMode(rawValue: lifelogBackgroundModeRaw) ?? .defaultMode }
+        nonmutating set { lifelogBackgroundModeRaw = newValue.rawValue }
     }
 
     var body: some View {
@@ -210,6 +216,35 @@ struct SettingsView: View {
             .padding(.vertical, 18)
             .figmaSurfaceCard(radius: 30)
 
+            VStack(alignment: .leading, spacing: 14) {
+                Text(L10n.t("settings_lifelog_bg_mode_title"))
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(FigmaTheme.text)
+
+                Text(L10n.t("settings_lifelog_bg_mode_desc"))
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundColor(FigmaTheme.subtext)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                segmentedContainer {
+                    segmentButton(
+                        title: L10n.t(LifelogBackgroundMode.highPrecision.titleKey),
+                        isSelected: lifelogBackgroundMode == .highPrecision
+                    ) {
+                        lifelogBackgroundMode = .highPrecision
+                    }
+                    segmentButton(
+                        title: L10n.t(LifelogBackgroundMode.lowPrecision.titleKey),
+                        isSelected: lifelogBackgroundMode == .lowPrecision
+                    ) {
+                        lifelogBackgroundMode = .lowPrecision
+                    }
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 18)
+            .figmaSurfaceCard(radius: 30)
+
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .top, spacing: 10) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -309,6 +344,18 @@ struct SettingsView: View {
                         authSheetMode = .signIn
                         showAuthSheet = true
                     }
+                    settingsRow(title: "REGISTER", icon: "person.crop.circle.badge.plus", iconColor: FigmaTheme.secondary) {
+                        authSheetMode = .register
+                        showAuthSheet = true
+                    }
+                } else {
+                    settingsRow(title: "LOG OUT", icon: "rectangle.portrait.and.arrow.right", iconColor: .red.opacity(0.88)) {
+                        sessionStore.logoutToGuest()
+                        accountEmail = ""
+                        exclusiveIDDraft = ""
+                        profileVisibility = ProfileSharingSettings.visibility
+                        toastAccount("已切回游客模式")
+                    }
                 }
 
                 settingsRow(title: "SUBSCRIPTION", icon: "creditcard", iconColor: FigmaTheme.primary) {
@@ -351,6 +398,7 @@ struct SettingsView: View {
                 .opacity(sessionStore.isLoggedIn ? 1 : 0.45)
             }
 
+            accountInfoRow(title: "登录状态", value: sessionStore.isLoggedIn ? "已登录" : "未登录")
             accountInfoRow(title: "专属ID", value: exclusiveIDDraft.isEmpty ? "--" : exclusiveIDDraft)
             accountInfoRow(title: "邮箱", value: accountEmail.isEmpty ? "未绑定" : accountEmail)
 

@@ -34,6 +34,7 @@ struct MainView: View {
     @State private var showStartButton = false
     @State private var didPlayStartIntro = false
     @State private var ripplePhase = false
+    @State private var didRebuildCityCacheForLoadedStore = false
     
     @StateObject private var cityLoc = CityLocationManager()
     
@@ -167,7 +168,7 @@ struct MainView: View {
             // ✅ 只有 store 加载完成才同步，否则等 onChange 触发
             if store.hasLoaded {
                 syncOngoingFromStore()
-                cityCache.rebuildFromJourneyStore()
+                rebuildCityCacheIfNeeded()
             }
             if tracking.isTracking && ongoingJourney.endTime == nil {
                 hasOngoingJourney = true
@@ -185,7 +186,9 @@ struct MainView: View {
         .onChange(of: store.hasLoaded) { loaded in
             if loaded {
                 syncOngoingFromStore()
-                cityCache.rebuildFromJourneyStore()
+                rebuildCityCacheIfNeeded()
+            } else {
+                didRebuildCityCacheForLoadedStore = false
             }
         }
         .onChange(of: trackingMode) { newMode in
@@ -301,6 +304,7 @@ struct MainView: View {
             
             private func startOrContinueJourneyAndOpenMap() {
                 onboardingGuide.advance(.startJourney)
+                locationHub.requestPermissionIfNeeded()
 
                 if !hasOngoingJourney {
                     ongoingJourney = JourneyRoute()
@@ -330,6 +334,12 @@ struct MainView: View {
             private var resolvedCanonicalCityForNewJourney: String {
                 let t = cityLoc.canonicalCity.trimmingCharacters(in: .whitespacesAndNewlines)
                 return t.isEmpty ? L10n.t("unknown") : t
+            }
+
+            private func rebuildCityCacheIfNeeded() {
+                guard !didRebuildCityCacheForLoadedStore else { return }
+                didRebuildCityCacheForLoadedStore = true
+                cityCache.rebuildFromJourneyStore()
             }
             
             // MARK: - Sync

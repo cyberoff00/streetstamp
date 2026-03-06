@@ -12,6 +12,7 @@ final class AppFlowCoordinator: ObservableObject {
     @Published private(set) var endOngoingSignal: Int = 0
     @Published private(set) var sidebarHiddenTokens: Set<String> = []
     @Published private(set) var requestedTab: NavigationTab?
+    @Published private(set) var currentTab: NavigationTab = .start
 
     func requestResumeOngoing() {
         resumeOngoingSignal += 1
@@ -27,6 +28,10 @@ final class AppFlowCoordinator: ObservableObject {
 
     func clearRequestedTab() {
         requestedTab = nil
+    }
+
+    func updateCurrentTab(_ tab: NavigationTab) {
+        currentTab = tab
     }
 
     var shouldShowSidebarButton: Bool {

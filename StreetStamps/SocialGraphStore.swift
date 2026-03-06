@@ -203,7 +203,7 @@ extension FriendSharedJourney {
                     title: $0.title,
                     notes: $0.notes,
                     timestamp: $0.timestamp,
-                    imageURLs: []
+                    imageURLs: $0.remoteImageURLs
                 )
             }
         )

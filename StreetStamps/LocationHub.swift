@@ -299,6 +299,24 @@ final class LocationHub: ObservableObject {
         }
     }
 
+    /// Passive Lifelog recording mode (only used when no active journey is running).
+    func startPassiveLifelog(mode passiveMode: LifelogBackgroundMode) {
+        #if DEBUG
+        if mode == .mock { return }
+        #endif
+
+        if current === systemSource {
+            switch passiveMode {
+            case .highPrecision:
+                systemSource.startPassiveHighPrecision()
+            case .lowPrecision:
+                systemSource.startPassiveLowPrecision()
+            }
+        } else {
+            current.start()
+        }
+    }
+
     /// ✅ Background Balanced: keep more turns with moderate battery usage.
     func enterBackgroundBalanced() {
         #if DEBUG

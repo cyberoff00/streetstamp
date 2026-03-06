@@ -31,10 +31,6 @@ struct MapboxGlobeView: View {
 
     @EnvironmentObject private var cityCache: CityCache
 
-    /// 0...1 → map to Mapbox zoom
-    /// default far view: 0
-    @State private var zoom01: Double = 0.0
-
     // ====== IDs ======
     private let countriesSourceId = "ss-countries-source"
     private let countriesLayerId  = "ss-countries-fill"
@@ -63,6 +59,19 @@ struct MapboxGlobeView: View {
         .joined(separator: "||")
     }
 
+    private var cityRefreshToken: String {
+        cityCache.cachedCities
+            .sorted { $0.id < $1.id }
+            .map { city in
+                let anchorLat = city.anchor?.lat ?? 0
+                let anchorLon = city.anchor?.lon ?? 0
+                let iso = (city.countryISO2 ?? "").uppercased()
+                let isTemporary = city.isTemporary == true ? "1" : "0"
+                return "\(city.id)|\(iso)|\(isTemporary)|\(anchorLat)|\(anchorLon)"
+            }
+            .joined(separator: "||")
+    }
+
     var body: some View {
         ZStack {
             MapboxViewContainer(mapView: mapHolder.mapView)
@@ -81,9 +90,10 @@ struct MapboxGlobeView: View {
                     refreshData()
                     updateCountryGlow()
                 }
-                .onChange(of: cityCache.cachedCities.count) { _ in
-                    print("📍 onChange: cachedCities.count changed")
+                .onChange(of: cityRefreshToken) { _ in
+                    print("📍 onChange: cachedCities token changed")
                     refreshData()
+                    updateCountryGlow()
                 }
 
             // Top bar
@@ -118,23 +128,6 @@ struct MapboxGlobeView: View {
                 Spacer()
             }
 
-            // Bottom zoom slider
-            VStack {
-                Spacer()
-                HStack(spacing: 10) {
-                    Image(systemName: "minus.magnifyingglass")
-                        .foregroundColor(.white.opacity(0.7))
-
-                    Slider(value: $zoom01, in: 0...1) { _ in
-                        applyZoom(animated: true)
-                    }
-
-                    Image(systemName: "plus.magnifyingglass")
-                        .foregroundColor(.white.opacity(0.7))
-                }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 18)
-            }
         }
         .background(Color.black)
     }
@@ -174,9 +167,6 @@ struct MapboxGlobeView: View {
             addSourcesAndLayers()
             refreshData()
             updateCountryGlow()
-
-            // default far zoom (zoom01 = 0)
-            applyZoom(animated: false)
 
             // if has data, fly to bounds (still keep far feel)
             flyToJourneysIfPossible()
@@ -666,6 +656,7 @@ struct MapboxGlobeView: View {
     private func refreshData() {
         guard mapView.mapboxMap.style.sourceExists(withId: footprintsSourceId),
               mapView.mapboxMap.style.sourceExists(withId: citiesSourceId) else { return }
+        let startedAt = CFAbsoluteTimeGetCurrent()
 
         let footprintsFC = makeFootprintsFC(journeys: journeys)
         let routesFC = makeRoutesFC(journeys: journeys)
@@ -678,6 +669,8 @@ struct MapboxGlobeView: View {
         updateGeoJSONSource(id: footprintsSourceId, fc: footprintsFC)
         updateGeoJSONSource(id: routesSourceId, fc: routesFC)
         updateGeoJSONSource(id: citiesSourceId, fc: citiesFC)
+        let elapsedMs = Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1000)
+        print("⏱️ globe refreshData \(elapsedMs)ms")
     }
 
     private func updateGeoJSONSource(id: String, fc: Turf.FeatureCollection) {
@@ -916,21 +909,6 @@ private func makeRoutesFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
         }
 
         return Turf.FeatureCollection(features: feats)
-    }
-
-
-
-    // MARK: - Zoom
-
-    private func applyZoom(animated: Bool) {
-        let z = 1.1 + zoom01 * 12.0
-        let opts = CameraOptions(zoom: z)
-
-        if animated {
-            mapView.camera.ease(to: opts, duration: 0.18)
-        } else {
-            mapView.mapboxMap.setCamera(to: opts)
-        }
     }
 
     // MARK: - Fit camera to journeys

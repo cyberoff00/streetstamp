@@ -8,6 +8,7 @@ struct PostcardComposerView: View {
 
     let friendID: String
     let friendName: String
+    let onSent: (() -> Void)? = nil
 
     @State private var selectedCityID: String = ""
     @State private var selectedCityName: String = ""
@@ -159,7 +160,11 @@ struct PostcardComposerView: View {
                         messageText: messageText,
                         localImagePath: localImagePath,
                         selectedImage: selectedImage,
-                        allowedCityIDs: cityOptions.map(\.id)
+                        allowedCityIDs: cityOptions.map(\.id),
+                        onSent: {
+                            onSent?()
+                            dismiss()
+                        }
                     )
                 } label: {
                     EmptyView()

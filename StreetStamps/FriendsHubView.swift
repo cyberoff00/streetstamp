@@ -59,15 +59,42 @@ private enum FriendsRoute: Hashable, Identifiable {
     }
 }
 
-private struct FriendFeedEvent: Identifiable {
-    enum Kind {
-        case journey
-        case memory
-        case city
+enum FriendFeedKind {
+    case journey
+    case memory
+    case city
+}
+
+enum FriendFeedLogic {
+    static let minDistanceMeters: Double = 2_000
+
+    static func isJourneyEligible(_ journey: FriendSharedJourney) -> Bool {
+        let isVisible = journey.visibility == .public || journey.visibility == .friendsOnly
+        guard isVisible else { return false }
+        return journey.distance >= minDistanceMeters || !journey.memories.isEmpty
     }
 
+    static func eventTitle(
+        kind: FriendFeedKind,
+        cityName: String,
+        memoryCount: Int,
+        journeyTitle: String,
+        localize: (String) -> String = { L10n.t($0) }
+    ) -> String {
+        switch kind {
+        case .city:
+            return String(format: localize("friends_event_visited"), cityName.isEmpty ? localize("unknown_city") : cityName)
+        case .memory:
+            return String(format: localize("friends_event_added_memories"), memoryCount)
+        case .journey:
+            return localize("friends_event_completed_journey")
+        }
+    }
+}
+
+private struct FriendFeedEvent: Identifiable {
     let id: String
-    let kind: Kind
+    let kind: FriendFeedKind
     let friendID: String
     let timestamp: Date
     let journeyID: String?
@@ -81,6 +108,7 @@ struct FriendsHubView: View {
     @EnvironmentObject private var socialStore: SocialGraphStore
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var deepLinkStore: AppDeepLinkStore
+    @EnvironmentObject private var flow: AppFlowCoordinator
     @EnvironmentObject private var journeyStore: JourneyStore
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
 
@@ -149,13 +177,13 @@ struct FriendsHubView: View {
 
     private var feedSourceProfiles: [FriendProfileSnapshot] {
         if let me = selfSnapshotForFeed {
-            return [me] + sortedFriends
+            return [me] + sortedFriends.filter { $0.id != currentUserID }
         }
         return sortedFriends
     }
 
     private var feedProfileByID: [String: FriendProfileSnapshot] {
-        Dictionary(uniqueKeysWithValues: feedSourceProfiles.map { ($0.id, $0) })
+        Dictionary(feedSourceProfiles.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
     private var feedEvents: [FriendFeedEvent] {
@@ -202,11 +230,11 @@ struct FriendsHubView: View {
                                             }
                                         },
                                         onOpenProfile: {
-                                            guard friend.id != currentUserID else { return }
+                                            guard !openSelfProfileIfNeeded(friendID: friend.id) else { return }
                                             activeRoute = .profile(friend.id)
                                         },
                                         onOpenEvent: {
-                                            guard friend.id != currentUserID else { return }
+                                            guard !openSelfProfileIfNeeded(friendID: friend.id) else { return }
                                             if let jid = event.journeyID {
                                                 activeRoute = .journey(friendID: friend.id, journeyID: jid)
                                             } else {
@@ -521,7 +549,7 @@ struct FriendsHubView: View {
 
         for friend in friends {
             let visibleJourneys = friend.journeys
-                .filter { $0.visibility == .public || $0.visibility == .friendsOnly }
+                .filter { FriendFeedLogic.isJourneyEligible($0) }
                 .sorted {
                     feedTimestamp(for: $0) > feedTimestamp(for: $1)
                 }
@@ -549,7 +577,7 @@ struct FriendsHubView: View {
                 let photoCount = journey.memories.reduce(0) { $0 + $1.imageURLs.count }
                 let unlockedNewCity = !cityKey.isEmpty && firstJourneyByCity[cityKey] == journey.id
 
-                let kind: FriendFeedEvent.Kind
+                let kind: FriendFeedKind
                 if unlockedNewCity {
                     kind = .city
                 } else if memoryCount > 0 {
@@ -558,17 +586,19 @@ struct FriendsHubView: View {
                     kind = .journey
                 }
 
-                let eventTitle: String
+                let eventTitle = FriendFeedLogic.eventTitle(
+                    kind: kind,
+                    cityName: cityName,
+                    memoryCount: memoryCount,
+                    journeyTitle: journey.title
+                )
                 let metaText: String
                 switch kind {
                 case .city:
-                    eventTitle = String(format: L10n.t("friends_event_visited"), cityName.isEmpty ? L10n.t("unknown_city") : cityName)
                     metaText = ""
                 case .memory:
-                    eventTitle = String(format: L10n.t("friends_event_added_memories"), memoryCount)
                     metaText = "\(max(photoCount, memoryCount)) photos"
                 case .journey:
-                    eventTitle = String(format: L10n.t("friends_event_completed"), journey.title)
                     metaText = "\(formatDistance(journey.distance))  \(formatDuration(start: journey.startTime, end: journey.endTime))"
                 }
 
@@ -616,6 +646,15 @@ struct FriendsHubView: View {
 
     private func feedLikeKey(friendID: String, journeyID: String) -> String {
         "\(friendID)|\(journeyID)"
+    }
+
+    @discardableResult
+    private func openSelfProfileIfNeeded(friendID: String) -> Bool {
+        let target = friendID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !target.isEmpty, target == currentUserID else { return false }
+        activeRoute = nil
+        flow.requestSelectTab(.profile)
+        return true
     }
 
     private func likeCountForEvent(_ event: FriendFeedEvent) -> Int {
@@ -987,6 +1026,14 @@ struct FriendsHubView: View {
         .onTapGesture {
             Task {
                 await markSingleSocialNotificationRead(item.id)
+                if item.type == "postcard_received" {
+                    postcardInboxIntent = PostcardInboxIntent(box: "received", messageID: item.postcardMessageID)
+                    showPostcardInboxSheet = true
+                } else if let fromUserID = item.fromUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                          !fromUserID.isEmpty {
+                    showSocialNotificationsSheet = false
+                    activeRoute = .profile(fromUserID)
+                }
             }
         }
     }
@@ -2176,6 +2223,7 @@ private final class FriendMirrorContext: ObservableObject {
                 notes: memory.notes,
                 imageData: nil,
                 imagePaths: [],
+                remoteImageURLs: memory.imageURLs,
                 cityKey: cityID,
                 cityName: cityName,
                 coordinate: (coord.lat, coord.lon),

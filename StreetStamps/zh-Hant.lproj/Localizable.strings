@@ -310,6 +310,7 @@
 "friends_empty_all" = "No friends yet, tap + to add";
 "friends_event_added_memories" = "Added %d new memories";
 "friends_event_completed" = "Completed %@";
+"friends_event_completed_journey" = "完成了一段旅程";
 "friends_event_visited" = "Visited %@";
 "friends_tab_activity" = "ACTIVITY FEED";
 "friends_tab_all" = "ALL FRIENDS";

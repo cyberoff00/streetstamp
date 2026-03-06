@@ -223,6 +223,19 @@ final class BackendAPIClient {
         return base.appendingPathComponent(normalizedPath)
     }
 
+    private func makeURL(path: String, queryItems: [URLQueryItem]) throws -> URL {
+        let baseURL = try makeURL(path: path)
+        guard !queryItems.isEmpty else { return baseURL }
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+            throw BackendAPIError.invalidResponse
+        }
+        components.queryItems = queryItems
+        guard let finalURL = components.url else {
+            throw BackendAPIError.invalidResponse
+        }
+        return finalURL
+    }
+
     private func encodePathSegment(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return trimmed }
@@ -291,7 +304,18 @@ final class BackendAPIClient {
         jsonBody: Data? = nil,
         contentType: String = "application/json"
     ) async throws -> (Data, HTTPURLResponse) {
-        let url = try makeURL(path: path)
+        return try await request(path: path, method: method, token: token, jsonBody: jsonBody, contentType: contentType, queryItems: [])
+    }
+
+    private func request(
+        path: String,
+        method: String,
+        token: String? = nil,
+        jsonBody: Data? = nil,
+        contentType: String = "application/json",
+        queryItems: [URLQueryItem]
+    ) async throws -> (Data, HTTPURLResponse) {
+        let url = try makeURL(path: path, queryItems: queryItems)
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.timeoutInterval = 45
@@ -582,8 +606,8 @@ final class BackendAPIClient {
     }
 
     func fetchNotifications(token: String, unreadOnly: Bool = true) async throws -> [BackendNotificationItem] {
-        let q = unreadOnly ? "?unreadOnly=1" : ""
-        let (data, _) = try await request(path: "/v1/notifications\(q)", method: "GET", token: token)
+        let queryItems = unreadOnly ? [URLQueryItem(name: "unreadOnly", value: "1")] : []
+        let (data, _) = try await request(path: "/v1/notifications", method: "GET", token: token, queryItems: queryItems)
         let resp = try decoder.decode(BackendNotificationsResponse.self, from: data)
         return resp.items
     }
@@ -603,13 +627,11 @@ final class BackendAPIClient {
     func fetchPostcards(token: String, box: String, cursor: String? = nil) async throws -> BackendPostcardsResponse {
         let normalized = box.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let resolvedBox = (normalized == "received") ? "received" : "sent"
-
-        var path = "/v1/postcards?box=\(resolvedBox)"
+        var queryItems: [URLQueryItem] = [URLQueryItem(name: "box", value: resolvedBox)]
         if let cursor, !cursor.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let encodedCursor = cursor.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? cursor
-            path += "&cursor=\(encodedCursor)"
+            queryItems.append(URLQueryItem(name: "cursor", value: cursor))
         }
-        let (data, _) = try await request(path: path, method: "GET", token: token)
+        let (data, _) = try await request(path: "/v1/postcards", method: "GET", token: token, queryItems: queryItems)
         return try decoder.decode(BackendPostcardsResponse.self, from: data)
     }
 }

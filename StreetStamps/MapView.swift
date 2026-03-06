@@ -50,6 +50,7 @@ struct JourneyMemory: Identifiable, Codable, Equatable {
     var notes: String
     var imageData: Data? = nil
     var imagePaths: [String] = []
+    var remoteImageURLs: [String] = []
 
     var cityKey: String? = nil
     var cityName: String? = nil
@@ -57,7 +58,7 @@ struct JourneyMemory: Identifiable, Codable, Equatable {
     var type: JourneyMemoryType
 
     enum CodingKeys: String, CodingKey {
-        case id, timestamp, title, notes, imageData, imagePaths, cityKey, cityName, coordinateLat, coordinateLon, type
+        case id, timestamp, title, notes, imageData, imagePaths, remoteImageURLs, cityKey, cityName, coordinateLat, coordinateLon, type
     }
 
     init(
@@ -67,6 +68,7 @@ struct JourneyMemory: Identifiable, Codable, Equatable {
         notes: String,
         imageData: Data?,
         imagePaths: [String] = [],
+        remoteImageURLs: [String] = [],
         cityKey: String? = nil,
         cityName: String? = nil,
         coordinate: (Double, Double),
@@ -78,6 +80,7 @@ struct JourneyMemory: Identifiable, Codable, Equatable {
         self.notes = notes
         self.imageData = imageData
         self.imagePaths = imagePaths
+        self.remoteImageURLs = remoteImageURLs
         self.cityKey = cityKey
         self.cityName = cityName
         self.coordinate = coordinate
@@ -92,6 +95,7 @@ struct JourneyMemory: Identifiable, Codable, Equatable {
         notes = try c.decode(String.self, forKey: .notes)
         imageData = try c.decodeIfPresent(Data.self, forKey: .imageData)
         imagePaths = (try? c.decode([String].self, forKey: .imagePaths)) ?? []
+        remoteImageURLs = (try? c.decode([String].self, forKey: .remoteImageURLs)) ?? []
         cityKey = try c.decodeIfPresent(String.self, forKey: .cityKey)
         cityName = try c.decodeIfPresent(String.self, forKey: .cityName)
         let lat = try c.decode(Double.self, forKey: .coordinateLat)
@@ -108,6 +112,7 @@ struct JourneyMemory: Identifiable, Codable, Equatable {
         try c.encode(notes, forKey: .notes)
         try c.encodeIfPresent(imageData, forKey: .imageData)
         if !imagePaths.isEmpty { try c.encode(imagePaths, forKey: .imagePaths) }
+        if !remoteImageURLs.isEmpty { try c.encode(remoteImageURLs, forKey: .remoteImageURLs) }
         if let cityKey, !cityKey.isEmpty { try c.encode(cityKey, forKey: .cityKey) }
         if let cityName, !cityName.isEmpty { try c.encode(cityName, forKey: .cityName) }
         try c.encode(coordinate.0, forKey: .coordinateLat)
@@ -122,6 +127,7 @@ struct JourneyMemory: Identifiable, Codable, Equatable {
         lhs.notes == rhs.notes &&
         lhs.imageData == rhs.imageData &&
         lhs.imagePaths == rhs.imagePaths &&
+        lhs.remoteImageURLs == rhs.remoteImageURLs &&
         lhs.cityKey == rhs.cityKey &&
         lhs.cityName == rhs.cityName &&
         lhs.coordinate.0 == rhs.coordinate.0 &&
@@ -644,7 +650,6 @@ struct MapView: View {
     @State private var showExitWarning = false
     @State private var showModeSelector = false
     @State private var exitToastMessage: String = ""
-    @State private var now: Date = Date()
 
     let cityName: String
     @Binding var isPresented: Bool
@@ -677,6 +682,7 @@ struct MapView: View {
     @State private var followUser = false
     @State private var isResolvingStartCity = false
     @State private var isProcessingHistoricalRoute = false
+    @State private var lastSyncedCoordCount = 0
 
     @State private var editingMemory: JourneyMemory? = nil
 
@@ -807,11 +813,6 @@ struct MapView: View {
             if journeyRoute.endTime == nil { flushSnapshot(.exitToHome) }
         }
         .onReceive(tracking.$coords) { onCoordsUpdated($0) }
-        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) {
-            now = $0
-            tracking.refreshDurations(now: $0)
-            syncTimingFields()
-        }
         .onReceive(tracking.$userLocation.compactMap { $0 }) { loc in
             if followUser, !isUserInteractingWithMap {
                 updateCamera(for: loc)
@@ -980,15 +981,11 @@ struct MapView: View {
     }
 
     private var distanceTimeChip: some View {
-        Text("\(distanceText) · \(elapsedText)")
-            .font(.system(size: 14, weight: .semibold))
-            .tracking(-0.5)
-            .foregroundColor(FigmaTheme.text)
-            .padding(.horizontal, 20)
-            .frame(height: 36)
-            .background(Color.white.opacity(0.78))
-            .clipShape(Capsule(style: .continuous))
-            .shadow(color: Color.black.opacity(0.10), radius: 8, x: 0, y: 2)
+        TrackingDistanceTimeChip(
+            distanceProvider: { max(0, tracking.totalDistance) },
+            movingDurationProvider: { date in currentMovingDuration(at: date) },
+            durationFormatter: formatDuration
+        )
     }
 
     private var gpsStatusChip: some View {
@@ -1050,17 +1047,6 @@ struct MapView: View {
         }
         .padding(.horizontal, 24)
         .padding(.bottom, 24)
-    }
-
-    private var elapsedText: String {
-        let seconds = max(0, Int(currentMovingDuration()))
-        return formatDuration(seconds)
-    }
-
-    private var distanceText: String {
-        let d = max(0, tracking.totalDistance)
-        if d < 1000 { return String(format: "%.0f m", d) }
-        return String(format: "%.2f km", d / 1000)
     }
 
     private var gpsStatusLabel: String {
@@ -1154,6 +1140,7 @@ struct MapView: View {
         tracking.activateMapRenderingSurface()
         tracking.requestRefresh()
         autoFitOnceOnEnter()
+        syncJourneyCoordinatesIncremental(from: tracking.coords)
 
         followUser = true
         if let loc = tracking.userLocation { updateCamera(for: loc) }
@@ -1280,13 +1267,40 @@ struct MapView: View {
     }
 
     private func onCoordsUpdated(_ coords: [CLLocationCoordinate2D]) {
-        journeyRoute.coordinates = coords.map { .init(lat: $0.latitude, lon: $0.longitude) }
+        syncJourneyCoordinatesIncremental(from: coords)
         journeyRoute.distance = tracking.totalDistance
         journeyRoute.elevationGain = tracking.totalAscent
         journeyRoute.elevationLoss = tracking.totalDescent
         syncTimingFields()
         guard journeyRoute.endTime == nil else { return }
         persistSnapshot(.coordsTick)
+    }
+
+    private func syncJourneyCoordinatesIncremental(from coords: [CLLocationCoordinate2D]) {
+        if coords.isEmpty {
+            journeyRoute.coordinates = []
+            lastSyncedCoordCount = 0
+            return
+        }
+
+        if lastSyncedCoordCount == 0 {
+            lastSyncedCoordCount = journeyRoute.coordinates.count
+        }
+
+        if coords.count < lastSyncedCoordCount || journeyRoute.coordinates.count > coords.count {
+            journeyRoute.coordinates = coords.map { .init(lat: $0.latitude, lon: $0.longitude) }
+            lastSyncedCoordCount = coords.count
+            return
+        }
+
+        if journeyRoute.coordinates.count != lastSyncedCoordCount {
+            lastSyncedCoordCount = journeyRoute.coordinates.count
+        }
+
+        guard coords.count > lastSyncedCoordCount else { return }
+        let appended = coords[lastSyncedCoordCount...].map { CoordinateCodable(lat: $0.latitude, lon: $0.longitude) }
+        journeyRoute.coordinates.append(contentsOf: appended)
+        lastSyncedCoordCount = coords.count
     }
 
     private func updateCamera(for location: CLLocation) {
@@ -1394,7 +1408,7 @@ struct MapView: View {
         }
     }
 
-    private func currentMovingDuration() -> TimeInterval {
+    private func currentMovingDuration(at now: Date = Date()) -> TimeInterval {
         if journeyRoute.endTime == nil {
             return tracking.movingDuration(at: now)
         }
@@ -1406,7 +1420,7 @@ struct MapView: View {
         return max(0, elapsed - max(0, journeyRoute.pausedDurationSeconds))
     }
 
-    private func syncTimingFields() {
+    private func syncTimingFields(at now: Date = Date()) {
         journeyRoute.pausedDurationSeconds = tracking.pausedDuration(at: now)
         journeyRoute.movingDurationSeconds = tracking.movingDuration(at: now)
     }
@@ -1527,6 +1541,33 @@ struct MapView: View {
 // MARK: - Modifiers
 // =======================
 
+private struct TrackingDistanceTimeChip: View {
+    let distanceProvider: () -> Double
+    let movingDurationProvider: (Date) -> TimeInterval
+    let durationFormatter: (Int) -> String
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1.0)) { context in
+            let distance = distanceProvider()
+            let movingSeconds = max(0, Int(movingDurationProvider(context.date)))
+            let distanceText: String = {
+                if distance < 1000 { return String(format: "%.0f m", distance) }
+                return String(format: "%.2f km", distance / 1000)
+            }()
+
+            Text("\(distanceText) · \(durationFormatter(movingSeconds))")
+                .font(.system(size: 14, weight: .semibold))
+                .tracking(-0.5)
+                .foregroundColor(FigmaTheme.text)
+                .padding(.horizontal, 20)
+                .frame(height: 36)
+                .background(Color.white.opacity(0.78))
+                .clipShape(Capsule(style: .continuous))
+                .shadow(color: Color.black.opacity(0.10), radius: 8, x: 0, y: 2)
+        }
+    }
+}
+
 private struct UserGestureDetection: ViewModifier {
     @Binding var isUserInteracting: Bool
     @Binding var followUser: Bool
@@ -1599,7 +1640,7 @@ struct MemoryClusterView: View {
                                 onOpenDetail(m)
                             } label: {
                                 HStack(spacing: 12) {
-                                    Image(systemName: m.imagePaths.isEmpty ? "note.text" : "photo")
+                                    Image(systemName: (m.imagePaths.isEmpty && m.remoteImageURLs.isEmpty) ? "note.text" : "photo")
                                         .foregroundColor(.blue)
                                         .frame(width: 24)
 
@@ -1687,7 +1728,7 @@ struct MemoryDetailPage: View {
                                 .foregroundColor(FigmaTheme.text.opacity(0.85))
                         }
 
-                        if !memory.imagePaths.isEmpty {
+                        if !memory.imagePaths.isEmpty || !memory.remoteImageURLs.isEmpty {
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 10) {
                                     ForEach(Array(memory.imagePaths.enumerated()), id: \.offset) { idx, p in
@@ -1708,6 +1749,35 @@ struct MemoryDetailPage: View {
                                         .onTapGesture {
                                             viewerIndex = idx
                                             showViewer = true
+                                        }
+                                    }
+                                    ForEach(memory.remoteImageURLs, id: \.self) { rawURL in
+                                        if let url = URL(string: rawURL) {
+                                            AsyncImage(url: url) { phase in
+                                                switch phase {
+                                                case .success(let image):
+                                                    image
+                                                        .resizable()
+                                                        .scaledToFill()
+                                                        .frame(width: 88, height: 88)
+                                                        .clipped()
+                                                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                                case .failure:
+                                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                        .fill(Color(UIColor(white: 0.92, alpha: 1)))
+                                                        .frame(width: 88, height: 88)
+                                                        .overlay {
+                                                            Image(systemName: "exclamationmark.triangle")
+                                                                .foregroundColor(.secondary)
+                                                        }
+                                                case .empty:
+                                                    ProgressView()
+                                                        .frame(width: 88, height: 88)
+                                                @unknown default:
+                                                    EmptyView()
+                                                        .frame(width: 88, height: 88)
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -2938,6 +3008,9 @@ private struct JourneyMKMapView: UIViewRepresentable {
         private var lastSegmentsSignature: String = ""
         private var lastTailSignature: String = ""
         private var isProgrammaticRegionChange = false
+        private var renderedSegments: [RenderRouteSegment] = []
+        private var routeOverlays: [WeightedRoutePolyline] = []
+        private var tailOverlay: MKPolyline?
 
         init(_ parent: JourneyMKMapView) {
             self.parent = parent
@@ -3053,7 +3126,7 @@ private struct JourneyMKMapView: UIViewRepresentable {
                     .map { m in
                         let t = m.title.trimmingCharacters(in: .whitespacesAndNewlines)
                         let n = m.notes.trimmingCharacters(in: .whitespacesAndNewlines)
-                        return "\(m.id)|t:\(t.count)|n:\(n.count)|p:\(m.imagePaths.count)"
+                        return "\(m.id)|t:\(t.count)|n:\(n.count)|p:\(m.imagePaths.count)|rp:\(m.remoteImageURLs.count)"
                     }
                     .joined(separator: ";")
             }
@@ -3132,41 +3205,77 @@ private struct JourneyMKMapView: UIViewRepresentable {
 
             guard needsSegUpdate || needsTailUpdate else { return }
 
-            // Remove old route overlays (keep any unrelated overlays)
-            let keep = map.overlays.filter { ov in
-                guard let shape = ov as? MKShape, let t = shape.title else { return true }
-                return !(t.hasPrefix("route_") || t == "tail")
-            }
-            map.removeOverlays(map.overlays)
-            map.addOverlays(keep)
-
-            var counts: [String: Int] = [:]
-            for seg in segments where seg.style != .dashed && seg.coords.count >= 2 {
-                let sig = segmentSignature(seg.coords)
-                counts[sig, default: 0] += 1
-            }
-            let p95 = max(1.0, quantile(Array(counts.values), p: 0.95))
-
-            for seg in segments where seg.coords.count > 1 {
-                let poly = WeightedRoutePolyline(coordinates: seg.coords, count: seg.coords.count)
-                poly.isGap = (seg.style == .dashed)
-                if let n = counts[segmentSignature(seg.coords)], !poly.isGap {
-                    poly.repeatWeight = min(1.0, log(1.0 + Double(n)) / log(1.0 + p95))
-                } else {
-                    poly.repeatWeight = 0.0
+            if needsSegUpdate {
+                var counts: [String: Int] = [:]
+                for seg in segments where seg.style != .dashed && seg.coords.count >= 2 {
+                    let sig = segmentSignature(seg.coords)
+                    counts[sig, default: 0] += 1
                 }
-                poly.title = poly.isGap ? "route_dashed" : "route_solid"
-                map.addOverlay(poly)
+                let p95 = max(1.0, quantile(Array(counts.values), p: 0.95))
+                let commonPrefixCount = sharedPrefixCount(lhs: renderedSegments, rhs: segments)
+
+                if commonPrefixCount < routeOverlays.count {
+                    let stale = Array(routeOverlays[commonPrefixCount...])
+                    map.removeOverlays(stale)
+                    routeOverlays.removeSubrange(commonPrefixCount..<routeOverlays.count)
+                }
+
+                if commonPrefixCount < segments.count {
+                    var appended: [WeightedRoutePolyline] = []
+                    appended.reserveCapacity(segments.count - commonPrefixCount)
+
+                    for seg in segments[commonPrefixCount...] where seg.coords.count > 1 {
+                        let poly = WeightedRoutePolyline(coordinates: seg.coords, count: seg.coords.count)
+                        poly.isGap = (seg.style == .dashed)
+                        if let n = counts[segmentSignature(seg.coords)], !poly.isGap {
+                            poly.repeatWeight = min(1.0, log(1.0 + Double(n)) / log(1.0 + p95))
+                        } else {
+                            poly.repeatWeight = 0.0
+                        }
+                        poly.title = poly.isGap ? "route_dashed" : "route_solid"
+                        appended.append(poly)
+                    }
+
+                    if !appended.isEmpty {
+                        map.addOverlays(appended)
+                        routeOverlays.append(contentsOf: appended)
+                    }
+                }
+
+                renderedSegments = segments
+
+                // Keep tail above newly-added route overlays when only segments changed.
+                if !needsTailUpdate, let tail = tailOverlay {
+                    map.removeOverlay(tail)
+                    map.addOverlay(tail)
+                }
             }
 
-            if liveTail.count == 2 {
-                let poly = MKPolyline(coordinates: liveTail, count: liveTail.count)
-                poly.title = "tail"
-                map.addOverlay(poly)
+            if needsTailUpdate {
+                if let oldTail = tailOverlay {
+                    map.removeOverlay(oldTail)
+                    tailOverlay = nil
+                }
+                if liveTail.count == 2 {
+                    let poly = MKPolyline(coordinates: liveTail, count: liveTail.count)
+                    poly.title = "tail"
+                    map.addOverlay(poly)
+                    tailOverlay = poly
+                }
             }
 
             lastSegmentsSignature = segSig
             lastTailSignature = tailSig
+        }
+
+        private func sharedPrefixCount(lhs: [RenderRouteSegment], rhs: [RenderRouteSegment]) -> Int {
+            let limit = min(lhs.count, rhs.count)
+            var index = 0
+            while index < limit {
+                if lhs[index] != rhs[index] { break }
+                index += 1
+            }
+            return index
         }
 
         // MARK: - MKMapViewDelegate
@@ -3195,8 +3304,8 @@ private struct JourneyMKMapView: UIViewRepresentable {
 
             if poly.title == "tail" {
                 let renderer = MKPolylineRenderer(polyline: poly)
-                renderer.strokeColor = MapAppearanceSettings.routeBaseColor.withAlphaComponent(0.35)
-                renderer.lineWidth = 3
+                renderer.strokeColor = MapAppearanceSettings.routeBaseColor.withAlphaComponent(0.72)
+                renderer.lineWidth = 3.6
                 renderer.lineCap = .round
                 renderer.lineJoin = .round
                 return renderer
@@ -3206,10 +3315,10 @@ private struct JourneyMKMapView: UIViewRepresentable {
             let coreWidth = widths(for: mapView.camera.altitude, mode: parent.travelMode)
             guard let styled = poly as? WeightedRoutePolyline else {
                 let renderer = MKPolylineRenderer(polyline: poly)
-                renderer.lineWidth = coreWidth
+                renderer.lineWidth = coreWidth * 0.90
                 renderer.lineCap = .round
                 renderer.lineJoin = .round
-                renderer.strokeColor = base.withAlphaComponent(0.50)
+                renderer.strokeColor = base.withAlphaComponent(0.88)
                 if poly.title == "route_dashed" {
                     renderer.lineDashPattern = RouteRenderStyleTokens.dashLengths.map { NSNumber(value: Double($0)) }
                 }
@@ -3220,25 +3329,25 @@ private struct JourneyMKMapView: UIViewRepresentable {
             let weight = CGFloat(max(0, min(1, styled.repeatWeight)))
 
             let halo = MKPolylineRenderer(polyline: styled)
-            halo.lineWidth = isGap ? max(1.2, coreWidth * 0.6) : (coreWidth * 0.95 + weight * 1.1)
+            halo.lineWidth = isGap ? max(1.0, coreWidth * 0.45) : (coreWidth * 1.04 + weight * 0.50)
             halo.lineCap = CGLineCap.round
             halo.lineJoin = CGLineJoin.round
-            halo.strokeColor = base.withAlphaComponent(isGap ? 0.08 : 0.12)
+            halo.strokeColor = base.withAlphaComponent(isGap ? 0.06 : 0.08)
             if isGap {
                 halo.lineDashPattern = RouteRenderStyleTokens.dashLengths.map { NSNumber(value: Double($0)) }
             }
 
             let freq = MKPolylineRenderer(polyline: styled)
-            freq.lineWidth = isGap ? 0 : (coreWidth * 0.82 + weight * 0.95)
+            freq.lineWidth = isGap ? 0 : (coreWidth * 0.96 + weight * 0.55)
             freq.lineCap = CGLineCap.round
             freq.lineJoin = CGLineJoin.round
-            freq.strokeColor = base.withAlphaComponent(isGap ? 0 : (0.05 + 0.15 * weight))
+            freq.strokeColor = base.withAlphaComponent(isGap ? 0 : (0.08 + 0.10 * weight))
 
             let core = MKPolylineRenderer(polyline: styled)
-            core.lineWidth = isGap ? max(0.9, coreWidth * 0.46) : (coreWidth * 0.64 + weight * 0.52)
+            core.lineWidth = isGap ? max(1.1, coreWidth * 0.62) : (coreWidth * 0.88 + weight * 0.36)
             core.lineCap = CGLineCap.round
             core.lineJoin = CGLineJoin.round
-            core.strokeColor = base.withAlphaComponent(isGap ? 0.30 : 0.84)
+            core.strokeColor = base.withAlphaComponent(isGap ? 0.46 : 0.97)
             if isGap {
                 core.lineDashPattern = RouteRenderStyleTokens.dashLengths.map { NSNumber(value: Double($0)) }
             }

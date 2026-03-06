@@ -314,6 +314,7 @@
 "friends_empty_all" = "No friends yet, tap + to add";
 "friends_event_added_memories" = "Added %d new memories";
 "friends_event_completed" = "Completed %@";
+"friends_event_completed_journey" = "Completed a journey";
 "friends_event_visited" = "Visited %@";
 "friends_tab_activity" = "ACTIVITY FEED";
 "friends_tab_all" = "ALL FRIENDS";
@@ -374,6 +375,10 @@
 "settings_level_rules_3" = "Journeys required per level increase gradually (Lv1→Lv2 needs 2, Lv2→Lv3 needs 3).";
 "settings_level_rules_4" = "Profile, Lifelog, and Globe show real-time level progress.";
 "settings_level_rules_intro" = "Current level rules";
+"settings_lifelog_bg_mode_desc" = "Affects passive Lifelog recording only. High precision is more continuous but uses more battery; low precision saves battery with sparser routes.";
+"settings_lifelog_bg_mode_high" = "High Precision";
+"settings_lifelog_bg_mode_low" = "Low Precision";
+"settings_lifelog_bg_mode_title" = "Background Recording Mode";
 "settings_map_appearance_desc" = "Apply to all maps and route rendering";
 "settings_stationary_reminder_desc" = "Alert when movement stays within 100 m for 60 minutes.";
 "settings_stationary_reminder_title" = "Long Stationary Reminder";

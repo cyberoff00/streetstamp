@@ -3,6 +3,7 @@ import Combine
 
 extension Notification.Name {
     static let journeyStoreDidDiscardJourneys = Notification.Name("journeyStoreDidDiscardJourneys")
+    static let journeyStoreTrackTilesDidChange = Notification.Name("journeyStoreTrackTilesDidChange")
 }
 
 /// Stores the ordered list of journey IDs.
@@ -27,6 +28,25 @@ final class JourneysIndexStore {
         guard fm.fileExists(atPath: url.path) else { return [] }
         let data = try Data(contentsOf: url)
         return try JSONDecoder().decode([String].self, from: data)
+    }
+
+    func loadJourneyIDsAsync() async -> [String] {
+        let fileURL = url
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                    continuation.resume(returning: [])
+                    return
+                }
+                do {
+                    let data = try Data(contentsOf: fileURL)
+                    let ids = try JSONDecoder().decode([String].self, from: data)
+                    continuation.resume(returning: ids)
+                } catch {
+                    continuation.resume(returning: [])
+                }
+            }
+        }
     }
 
     func replaceIDs(_ ids: [String]) throws {
@@ -56,6 +76,7 @@ final class JourneyStore: ObservableObject {
     @Published private(set) var journeys: [JourneyRoute] = []
     @Published var latestOngoing: JourneyRoute? = nil
     @Published private(set) var hasLoaded: Bool = false
+    @Published private(set) var trackTileRevision: Int = 0
 
     private var fileStore: JourneysFileStore
     private var indexStore: JourneysIndexStore
@@ -96,27 +117,32 @@ final class JourneyStore: ObservableObject {
         latestOngoing = nil
         journeys = []
         hasLoaded = false
+        trackTileRevision = 0
 
         fileStore = JourneysFileStore(baseURL: paths.journeysDir)
         indexStore = JourneysIndexStore(baseURL: paths.journeysDir)
+        bumpTrackTileRevision()
     }
 
     /// Load journeys from file-backed store.
     func load() {
-        let ids = (try? indexStore.loadJourneyIDs()) ?? []
-        guard !ids.isEmpty else {
-            self.journeys = []
-            self.latestOngoing = nil
-            self.hasLoaded = true
-            return
-        }
         Task {
+            self.hasLoaded = false
+            let ids = await indexStore.loadJourneyIDsAsync()
+            guard !ids.isEmpty else {
+                self.journeys = []
+                self.latestOngoing = nil
+                self.hasLoaded = true
+                self.bumpTrackTileRevision()
+                return
+            }
             let loaded = await fileStore.loadJourneys(ids: ids)
             self.journeys = loaded
 
             // Best-effort: restore "ongoing" journey pointer after a cold start.
             self.latestOngoing = loaded.first(where: { $0.endTime == nil })
             self.hasLoaded = true
+            self.bumpTrackTileRevision()
         }
     }
 
@@ -138,6 +164,7 @@ final class JourneyStore: ObservableObject {
         } else {
             self.journeys.insert(j, at: 0)
         }
+        bumpTrackTileRevision()
 
         // 2) reset counters if we switched to a different journey id
         if currentPersistJourneyId != j.id {
@@ -319,6 +346,7 @@ final class JourneyStore: ObservableObject {
         } else {
             journeys.insert(journey, at: 0)
         }
+        bumpTrackTileRevision()
         flushPersist(journey: journey, force: true)
     }
 
@@ -335,6 +363,7 @@ final class JourneyStore: ObservableObject {
         }
 
         let snapshots = journeys
+        bumpTrackTileRevision()
 
         ioQueue.async { [weak self] in
             guard let self else { return }
@@ -377,6 +406,7 @@ final class JourneyStore: ObservableObject {
             lastDeltaPersistCoordCount = 0
             lastDeltaPersistAt = .distantPast
         }
+        bumpTrackTileRevision()
 
         NotificationCenter.default.post(
             name: .journeyStoreDidDiscardJourneys,
@@ -395,6 +425,68 @@ final class JourneyStore: ObservableObject {
                 print("❌ discard journeys failed:", error)
             }
         }
+    }
+
+    func trackRenderEvents() -> [TrackRenderEvent] {
+        Self.makeTrackRenderEvents(from: journeys)
+    }
+
+    func trackRenderEventsAsync() async -> [TrackRenderEvent] {
+        let snapshot = journeys
+        return await Task.detached(priority: .utility) {
+            Self.makeTrackRenderEvents(from: snapshot)
+        }.value
+    }
+
+    private nonisolated static func makeTrackRenderEvents(from journeys: [JourneyRoute]) -> [TrackRenderEvent] {
+        var out: [TrackRenderEvent] = []
+        out.reserveCapacity(journeys.reduce(0) { $0 + $1.coordinates.count })
+
+        for journey in journeys {
+            let coords = journey.coordinates
+            guard !coords.isEmpty else { continue }
+            guard let (start, end) = Self.resolveRenderRange(for: journey) else { continue }
+            let span = max(0, end.timeIntervalSince(start))
+            let denom = max(1, coords.count - 1)
+
+            for (index, coord) in coords.enumerated() {
+                let ts = start.addingTimeInterval(span * Double(index) / Double(denom))
+                out.append(
+                    TrackRenderEvent(
+                        sourceType: .journey,
+                        timestamp: ts,
+                        coordinate: coord
+                    )
+                )
+            }
+        }
+        return out
+    }
+
+    nonisolated static func resolveRenderRange(for journey: JourneyRoute) -> (Date, Date)? {
+        if let start = journey.startTime, let end = journey.endTime {
+            return start <= end ? (start, end) : (end, start)
+        }
+        if let start = journey.startTime {
+            return (start, start)
+        }
+        if let end = journey.endTime {
+            return (end, end)
+        }
+        if let earliest = journey.memories.map(\.timestamp).min(),
+           let latest = journey.memories.map(\.timestamp).max() {
+            return earliest <= latest ? (earliest, latest) : (latest, earliest)
+        }
+        return nil
+    }
+
+    private func bumpTrackTileRevision() {
+        trackTileRevision &+= 1
+        NotificationCenter.default.post(
+            name: .journeyStoreTrackTilesDidChange,
+            object: self,
+            userInfo: ["revision": trackTileRevision]
+        )
     }
 }
 

@@ -1182,7 +1182,7 @@ struct JourneyMemoryDetailView: View {
                     .font(.system(size: 14))
                     .foregroundColor(Color(red: 0.21, green: 0.26, blue: 0.32))
                     .padding(12)
-                    .background(Color.white.opacity(0.88))
+                    .background(FigmaTheme.background)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             } else {
                 Text(draftOverallMemory)
@@ -1191,7 +1191,7 @@ struct JourneyMemoryDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .frame(minHeight: 52, alignment: .topLeading)
                     .padding(12)
-                    .background(Color.white.opacity(0.88))
+                    .background(FigmaTheme.background)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
@@ -1205,10 +1205,8 @@ struct JourneyMemoryDetailView: View {
         snapshotBeforeEdit = draftMemories
         snapshotOverallMemoryBeforeEdit = draftOverallMemory
         isEditing = true
-        // Put focus on the first memory by default, and ensure scroll follows.
-        if focusedMemoryID == nil {
-            focusedMemoryID = draftMemories.first?.id
-        }
+        // Enter edit mode without auto-focusing any field; user controls scroll position.
+        focusedMemoryID = nil
     }
 
     private func cancelEditing() {
@@ -1369,8 +1367,12 @@ private struct ExportMemoryTimelineItem: View {
                 .tracking(1.2)
                 .foregroundColor(Color(red: 0.60, green: 0.63, blue: 0.69))
 
-            if !memory.imagePaths.isEmpty {
-                MemoryImagesView(imagePaths: memory.imagePaths, userID: userID)
+            if !memory.imagePaths.isEmpty || !memory.remoteImageURLs.isEmpty {
+                MemoryImagesView(
+                    imagePaths: memory.imagePaths,
+                    remoteImageURLs: memory.remoteImageURLs,
+                    userID: userID
+                )
             }
 
             // ✅ 导出用纯 SwiftUI Text，ImageRenderer 能渲出来
@@ -1410,9 +1412,10 @@ struct ReadOnlyMemoryTimelineItem: View {
                 .foregroundColor(Color(red: 0.60, green: 0.63, blue: 0.69))
 
             // Images（只读态现在也完整展示）
-            if !memory.imagePaths.isEmpty {
+            if !memory.imagePaths.isEmpty || !memory.remoteImageURLs.isEmpty {
                 MemoryImagesView(
                     imagePaths: memory.imagePaths,
+                    remoteImageURLs: memory.remoteImageURLs,
                     userID: userID
                 )
             }
@@ -1451,6 +1454,7 @@ private struct PlainGrowingEditor: View {
 
 private struct MemoryImagesView: View {
     let imagePaths: [String]
+    let remoteImageURLs: [String]
     let userID: String
 
     var body: some View {
@@ -1469,6 +1473,42 @@ private struct MemoryImagesView: View {
                                     lineWidth: 0.5
                                 )
                         )
+                }
+            }
+            ForEach(remoteImageURLs, id: \.self) { rawURL in
+                if let url = URL(string: rawURL) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxWidth: .infinity)
+                                .overlay(
+                                    Rectangle()
+                                        .inset(by: 0.5)
+                                        .stroke(
+                                            Color(red: 0.90, green: 0.91, blue: 0.92),
+                                            lineWidth: 0.5
+                                        )
+                                )
+                        case .failure:
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(Color(red: 0.95, green: 0.95, blue: 0.95))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 140)
+                                .overlay {
+                                    Image(systemName: "exclamationmark.triangle")
+                                        .foregroundColor(.secondary)
+                                }
+                        case .empty:
+                            ProgressView()
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 140)
+                        @unknown default:
+                            EmptyView()
+                        }
+                    }
                 }
             }
         }

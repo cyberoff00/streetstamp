@@ -34,6 +34,7 @@ struct ProfileView: View {
     @State private var showNotificationsSheet = false
     @State private var notificationsLoading = false
     @State private var showPostcardInboxFromNotification = false
+    @State private var postcardInboxIntent = PostcardInboxIntent(box: "received", messageID: nil)
     @State private var showInviteFriendSheet = false
     @State private var myExclusiveID = ""
     @State private var myInviteCode = ""
@@ -123,7 +124,10 @@ struct ProfileView: View {
         }
         .sheet(isPresented: $showPostcardInboxFromNotification) {
             NavigationStack {
-                PostcardInboxView(initialBox: .received)
+                PostcardInboxView(
+                    initialBox: postcardInboxIntent.box == "sent" ? .sent : .received,
+                    focusMessageID: postcardInboxIntent.messageID
+                )
             }
         }
         .sheet(isPresented: $showInviteFriendSheet) {
@@ -630,6 +634,7 @@ struct ProfileView: View {
         .shadow(color: Color.black.opacity(0.04), radius: 14, x: 0, y: 5)
         .onTapGesture {
             if item.type == "postcard_received" {
+                postcardInboxIntent = PostcardInboxIntent(box: "received", messageID: item.postcardMessageID)
                 showNotificationsSheet = false
                 showPostcardInboxFromNotification = true
             }

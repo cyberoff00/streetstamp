@@ -161,6 +161,18 @@ final class UserSessionStore: ObservableObject {
         }
     }
 
+    func bootstrapFileSystemAsync() async {
+        let context = BootstrapContext(
+            guestScopedUserID: currentGuestScopedUserID,
+            currentUserID: currentUserID,
+            guestID: guestID,
+            accountUserID: accountUserID,
+            sourceDevice: sourceDevice(),
+            legacyUserIDs: discoverLegacyUserIDs()
+        )
+        await Self.bootstrapFileSystemWorker(context: context)
+    }
+
     func registerWithEmail(email: String, password: String) async throws {
         let auth = try await BackendAPIClient.shared.emailRegister(email: email, password: password)
         applyAuth(auth)
@@ -508,5 +520,200 @@ final class UserSessionStore: ObservableObject {
         var map = loadAutoRecoveredGuestSources()
         map.removeValue(forKey: targetUserID)
         saveAutoRecoveredGuestSources(map)
+    }
+
+    private struct BootstrapContext {
+        let guestScopedUserID: String
+        let currentUserID: String
+        let guestID: String
+        let accountUserID: String?
+        let sourceDevice: String
+        let legacyUserIDs: [String]
+    }
+
+    nonisolated private static func bootstrapFileSystemWorker(context: BootstrapContext) async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                do {
+                    let guestPaths = StoragePath(userID: context.guestScopedUserID)
+                    try guestPaths.ensureBaseDirectoriesExist()
+                    try DataMigrator.migrateLegacyIfNeeded(paths: guestPaths)
+                    try DataMigrator.migrateLegacyUsersIfNeeded(
+                        paths: guestPaths,
+                        legacyUserIDs: context.legacyUserIDs,
+                        skipUserIDs: Set([context.guestScopedUserID, context.currentUserID])
+                    )
+                    recordLegacyBindingsWorker(
+                        context.legacyUserIDs,
+                        guestID: context.guestID,
+                        sourceDevice: context.sourceDevice
+                    )
+
+                    let activePaths = StoragePath(userID: context.currentUserID)
+                    try activePaths.ensureBaseDirectoriesExist()
+
+                    autoRecoverGuestSourcesIfNeededWorker(
+                        targetUserID: context.guestScopedUserID,
+                        accountUserID: nil,
+                        sourceDevice: context.sourceDevice
+                    )
+
+                    if let account = context.accountUserID, !account.isEmpty {
+                        let targetAccountUserID = "account_\(account)"
+                        do {
+                            _ = try GuestDataRecoveryService.recover(
+                                from: context.guestScopedUserID,
+                                to: targetAccountUserID
+                            )
+                        } catch {
+                            print("⚠️ bootstrap guest -> account archive failed: \(error)")
+                        }
+                        bindGuestToAccountWorker(
+                            guestID: context.guestID,
+                            accountUserID: account,
+                            sourceDevice: context.sourceDevice
+                        )
+                        autoRecoverGuestSourcesIfNeededWorker(
+                            targetUserID: targetAccountUserID,
+                            accountUserID: account,
+                            sourceDevice: context.sourceDevice
+                        )
+                    }
+                } catch {
+                    assertionFailure("Failed to bootstrap filesystem: \(error)")
+                }
+                continuation.resume()
+            }
+        }
+    }
+
+    nonisolated private static func recordLegacyBindingsWorker(
+        _ legacyUserIDs: [String],
+        guestID: String,
+        sourceDevice: String
+    ) {
+        guard !legacyUserIDs.isEmpty else { return }
+        var existing = loadLegacyBindingsWorker()
+        let now = Date()
+
+        for legacy in legacyUserIDs {
+            if existing.contains(where: { $0.legacyUserID == legacy && $0.guestID == guestID }) {
+                continue
+            }
+            existing.append(
+                LegacyGuestBinding(
+                    legacyUserID: legacy,
+                    guestID: guestID,
+                    migratedAt: now,
+                    sourceDevice: sourceDevice
+                )
+            )
+        }
+        saveLegacyBindingsWorker(existing)
+    }
+
+    nonisolated private static func bindGuestToAccountWorker(
+        guestID: String,
+        accountUserID: String,
+        sourceDevice: String
+    ) {
+        var existing = loadGuestAccountBindingsWorker()
+        if existing.contains(where: { $0.guestID == guestID && $0.accountUserID == accountUserID }) {
+            return
+        }
+        existing.append(
+            GuestAccountBinding(
+                guestID: guestID,
+                accountUserID: accountUserID,
+                boundAt: Date(),
+                sourceDevice: sourceDevice
+            )
+        )
+        saveGuestAccountBindingsWorker(existing)
+    }
+
+    nonisolated private static func autoRecoverGuestSourcesIfNeededWorker(
+        targetUserID: String,
+        accountUserID: String?,
+        sourceDevice: String
+    ) {
+        let candidates = GuestDataRecoveryService.discoverCandidates(currentUserID: targetUserID)
+        guard !candidates.isEmpty else { return }
+
+        var recoveredByTarget = loadAutoRecoveredGuestSourcesWorker()
+        var recoveredSources = Set(recoveredByTarget[targetUserID] ?? [])
+        var changed = false
+
+        for candidate in candidates {
+            let sourceUserID = candidate.userID
+            if recoveredSources.contains(sourceUserID) { continue }
+            do {
+                _ = try GuestDataRecoveryService.recover(from: sourceUserID, to: targetUserID)
+                recoveredSources.insert(sourceUserID)
+                changed = true
+                if let accountUserID,
+                   let sourceGuestID = guestIDFromScopedID(sourceUserID) {
+                    bindGuestToAccountWorker(
+                        guestID: sourceGuestID,
+                        accountUserID: accountUserID,
+                        sourceDevice: sourceDevice
+                    )
+                }
+            } catch {
+                print("⚠️ auto recover \(sourceUserID) -> \(targetUserID) failed: \(error)")
+            }
+        }
+
+        guard changed else { return }
+        recoveredByTarget[targetUserID] = Array(recoveredSources).sorted()
+        saveAutoRecoveredGuestSourcesWorker(recoveredByTarget)
+    }
+
+    nonisolated private static func guestIDFromScopedID(_ userID: String) -> String? {
+        guard userID.hasPrefix("guest_") else { return nil }
+        let id = String(userID.dropFirst("guest_".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        return id.isEmpty ? nil : id
+    }
+
+    nonisolated private static func loadLegacyBindingsWorker() -> [LegacyGuestBinding] {
+        guard let data = UserDefaults.standard.data(forKey: Self.legacyGuestBindingsKey),
+              let decoded = try? JSONDecoder().decode([LegacyGuestBinding].self, from: data) else {
+            return []
+        }
+        return decoded
+    }
+
+    nonisolated private static func saveLegacyBindingsWorker(_ bindings: [LegacyGuestBinding]) {
+        if let data = try? JSONEncoder().encode(bindings) {
+            UserDefaults.standard.set(data, forKey: Self.legacyGuestBindingsKey)
+        }
+    }
+
+    nonisolated private static func loadGuestAccountBindingsWorker() -> [GuestAccountBinding] {
+        guard let data = UserDefaults.standard.data(forKey: Self.guestAccountBindingsKey),
+              let decoded = try? JSONDecoder().decode([GuestAccountBinding].self, from: data) else {
+            return []
+        }
+        return decoded
+    }
+
+    nonisolated private static func saveGuestAccountBindingsWorker(_ bindings: [GuestAccountBinding]) {
+        if let data = try? JSONEncoder().encode(bindings) {
+            UserDefaults.standard.set(data, forKey: Self.guestAccountBindingsKey)
+        }
+    }
+
+    nonisolated private static func loadAutoRecoveredGuestSourcesWorker() -> [String: [String]] {
+        guard let data = UserDefaults.standard.data(forKey: Self.autoRecoveredGuestSourcesKey),
+              let decoded = try? JSONDecoder().decode([String: [String]].self, from: data) else {
+            return [:]
+        }
+        return decoded
+    }
+
+    nonisolated private static func saveAutoRecoveredGuestSourcesWorker(_ value: [String: [String]]) {
+        if let data = try? JSONEncoder().encode(value) {
+            UserDefaults.standard.set(data, forKey: Self.autoRecoveredGuestSourcesKey)
+        }
     }
 }

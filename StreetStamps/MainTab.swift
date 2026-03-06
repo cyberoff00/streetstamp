@@ -12,6 +12,7 @@ private enum MainSidebarDestination: String, Identifiable {
 @MainActor
 struct MainTabView: View {
     @State private var selectedTab: NavigationTab = .start
+    @State private var loadedTabs: Set<NavigationTab> = [.start]
     @State private var showSidebar = false
     @State private var sidebarDestination: MainSidebarDestination? = nil
 
@@ -104,12 +105,17 @@ struct MainTabView: View {
             maybePromptResumeIfNeeded()
         }
         .onChange(of: selectedTab) { tab in
+            loadedTabs.insert(tab)
+            flow.updateCurrentTab(tab)
             if tab == .cities {
                 onboardingGuide.advance(.openCityCards)
             }
             if tab == .memory {
                 onboardingGuide.advance(.openMemory)
             }
+        }
+        .onAppear {
+            flow.updateCurrentTab(selectedTab)
         }
         .onReceive(flow.$requestedTab) { tab in
             guard let tab else { return }
@@ -147,7 +153,11 @@ struct MainTabView: View {
             }
 
             NavigationStack {
-                FriendsHubView()
+                if shouldRenderTab(.friends) {
+                    FriendsHubView()
+                } else {
+                    Color.clear
+                }
             }
             .tag(NavigationTab.friends)
             .tabItem {
@@ -155,7 +165,11 @@ struct MainTabView: View {
             }
 
             NavigationStack {
-                CollectionTabView()
+                if shouldRenderTab(.cities) {
+                    CollectionTabView()
+                } else {
+                    Color.clear
+                }
             }
             .tag(NavigationTab.cities)
             .tabItem {
@@ -163,18 +177,28 @@ struct MainTabView: View {
             }
 
             NavigationStack {
-                JourneyMemoryMainView(
-                    showSidebar: .constant(false),
-                    usesSidebarHeader: false,
-                    hideLeadingControl: true
-                )
+                if shouldRenderTab(.memory) {
+                    JourneyMemoryMainView(
+                        showSidebar: .constant(false),
+                        usesSidebarHeader: false,
+                        hideLeadingControl: true
+                    )
+                } else {
+                    Color.clear
+                }
             }
             .tag(NavigationTab.memory)
             .tabItem {
                 Label("Memory", systemImage: "heart.fill")
             }
 
-            LifelogView()
+            Group {
+                if shouldRenderTab(.lifelog) {
+                    LifelogView()
+                } else {
+                    Color.clear
+                }
+            }
                 .tag(NavigationTab.lifelog)
                 .tabItem {
                     Label(L10n.t("tab_lifelog"), systemImage: "point.bottomleft.forward.to.point.topright.scurvepath")
@@ -187,6 +211,13 @@ struct MainTabView: View {
     }
 
     private var canSwipeSidebar: Bool { true }
+    private func shouldRenderTab(_ tab: NavigationTab) -> Bool {
+        TabRenderPolicy.shouldRender(
+            tab: tab,
+            selectedTab: selectedTab,
+            loadedTabs: loadedTabs
+        )
+    }
 
     private var globalGuideStep: OnboardingGuideStore.Step? {
         guard onboardingGuide.isActive, let step = onboardingGuide.currentStep else { return nil }
@@ -237,6 +268,27 @@ struct MainTabView: View {
             pendingResumeJourney = j
             return
         }
+    }
+}
+
+enum TabRenderPolicy {
+    static func shouldRender(
+        tab: NavigationTab,
+        selectedTab: NavigationTab,
+        loadedTabs: Set<NavigationTab>
+    ) -> Bool {
+        if tab == selectedTab {
+            return true
+        }
+        guard keepsViewAliveAfterSelection(tab) else {
+            return false
+        }
+        return loadedTabs.contains(tab)
+    }
+
+    static func keepsViewAliveAfterSelection(_ tab: NavigationTab) -> Bool {
+        // Lifelog hosts a heavy map stack; keep it off-tree when not active.
+        tab != .lifelog
     }
 }
 

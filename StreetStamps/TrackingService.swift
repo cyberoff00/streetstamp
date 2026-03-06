@@ -16,7 +16,7 @@ final class TrackingService: ObservableObject {
     
 
     /// Raw recorded points (WGS84) used for storage & internal segment building.
-    @Published var coords: [CLLocationCoordinate2D] = []
+    @Published private(set) var coords: [CLLocationCoordinate2D] = []
 
     @Published var totalDistance: Double = 0
     /// Total horizontal (2D) distance in meters.
@@ -101,6 +101,7 @@ final class TrackingService: ObservableObject {
     // MARK: - Internal state
 
     private var lastLocation: CLLocation?
+    private var rawCoords: [CLLocationCoordinate2D] = []
     private var acceptedLocations: [CLLocation] = []
     private let smoothingWindow: Int = 5
 
@@ -226,6 +227,11 @@ final class TrackingService: ObservableObject {
     private var pendingRenderWork: DispatchWorkItem?
     private var lastRenderCoordCount: Int = 0
     private var lastRenderSegPointCount: Int = 0
+    private let publishDebounceInterval: TimeInterval = 0.2
+    private var pendingPublishWork: DispatchWorkItem?
+    private var latestRenderSegmentsForMap: [RouteSegment] = []
+    private var latestRenderUnifiedSegmentsForMap: [RenderRouteSegment] = []
+    private var latestRenderLiveTailForMap: [CLLocationCoordinate2D] = []
     /// Dynamic debounce to reduce CPU/GPU wakeups without changing live-tracking UX.
     /// - While actively tracking (and not paused): keep original 10Hz.
     /// - Otherwise: relax updates; also respect iOS Low Power Mode.
@@ -244,10 +250,12 @@ final class TrackingService: ObservableObject {
         return t
     }
 
-    // MARK: - ✅ One Euro Filter (foreground walk/run only)
+    // MARK: - ✅ One Euro Filter (enabled by mode config; used for walk/run/bike)
 
     private var oneEuroLat = OneEuro1D()
     private var oneEuroLon = OneEuro1D()
+    private var oneEuroEnabled: Bool = false
+    private var oneEuroBaseMinCutoff: Double = 1.2
 
     private struct OneEuro1D {
         var prevX: Double?
@@ -306,8 +314,11 @@ final class TrackingService: ObservableObject {
     private func oneEuroFilteredCoord(_ loc: CLLocation) -> CLLocationCoordinate2D {
         // Adaptive minCutoff from accuracy: worse accuracy => stronger smoothing
         let acc = max(5.0, loc.horizontalAccuracy)
-        // 10m -> ~1.25, 30m -> ~0.95, clamp
-        let minCut = max(0.85, min(1.35, 1.35 - (acc - 10.0) / 50.0))
+        // Keep mode/base tuning, then adapt by current GPS accuracy.
+        let base = oneEuroBaseMinCutoff
+        let minBound = max(0.65, base - 0.35)
+        let maxBound = base + 0.25
+        let minCut = max(minBound, min(maxBound, base - (acc - 10.0) / 50.0))
         oneEuroLat.minCutoff = minCut
         oneEuroLon.minCutoff = minCut
 
@@ -387,6 +398,7 @@ final class TrackingService: ObservableObject {
         let config = TrackingModeConfig.config(for: mode)
         applyModeConfig(config)
         
+        rawCoords.removeAll()
         coords.removeAll()
         totalDistance = 0
         totalAscent = 0
@@ -413,12 +425,16 @@ final class TrackingService: ObservableObject {
         internalSegmentsForMap.removeAll()
         resetSegmentSwitchState()
 
+        latestRenderSegmentsForMap.removeAll()
+        latestRenderUnifiedSegmentsForMap.removeAll()
+        latestRenderLiveTailForMap.removeAll()
         renderSegmentsForMap.removeAll()
         renderUnifiedSegmentsForMap.removeAll()
         renderLiveTailForMap.removeAll()
         lastRenderCoordCount = 0
         lastRenderSegPointCount = 0
         pendingRenderWork?.cancel()
+        pendingPublishWork?.cancel()
 
         needsRefreshAfterBackground = false
         isRealtimeRenderingEnabled = true
@@ -434,6 +450,7 @@ final class TrackingService: ObservableObject {
         resetOneEuro()
         resetLongStationaryReminderState()
         requestLongStationaryNotificationPermissionIfNeeded()
+        flushPublishedState(force: true)
 
         // ✅ 根据模式选择启动方式
         if mode == .sport {
@@ -498,11 +515,15 @@ final class TrackingService: ObservableObject {
         applyTurnKeepAngles(baseTurnAngle: config.turnKeepAngle)
         
         // OneEuro配置
-        if config.enableOneEuroFilter {
+        oneEuroEnabled = config.enableOneEuroFilter
+        oneEuroBaseMinCutoff = config.oneEuroMinCutoff
+        if oneEuroEnabled {
             oneEuroLat.minCutoff = config.oneEuroMinCutoff
             oneEuroLat.beta = config.oneEuroBeta
             oneEuroLon.minCutoff = config.oneEuroMinCutoff
             oneEuroLon.beta = config.oneEuroBeta
+        } else {
+            resetOneEuro()
         }
     }
 
@@ -640,7 +661,7 @@ final class TrackingService: ObservableObject {
     func setRealtimeRenderingEnabled(_ enabled: Bool) {
         if isRealtimeRenderingEnabled == enabled { return }
         isRealtimeRenderingEnabled = enabled
-        if enabled { segments = internalSegments }
+        if enabled { flushPublishedState(force: true) }
     }
 
     func syncFromJourneyIfNeeded(_ journey: JourneyRoute) {
@@ -648,7 +669,7 @@ final class TrackingService: ObservableObject {
         guard !ext.isEmpty else { return }
 
         // ✅ key fix: if TrackingService already has a live route, NEVER overwrite it with stale journeyRoute.
-        let hasLiveInMemory = (!coords.isEmpty) || (!internalSegments.isEmpty)
+        let hasLiveInMemory = (!rawCoords.isEmpty) || (!internalSegments.isEmpty)
         if isTracking && journey.endTime == nil && hasLiveInMemory {
             rebuildRenderCache(force: true)
             return
@@ -656,9 +677,9 @@ final class TrackingService: ObservableObject {
 
         // For historical/ended journeys we want deterministic playback from snapshot.
         if !isTracking || journey.endTime != nil {
-            coords = ext
-        } else if coords.isEmpty {
-            coords = ext
+            rawCoords = ext
+        } else if rawCoords.isEmpty {
+            rawCoords = ext
         }
         if totalDistance <= 0, journey.distance > 0 { totalDistance = journey.distance }
         if totalAscent <= 0, journey.elevationGain > 0 { totalAscent = journey.elevationGain }
@@ -672,7 +693,7 @@ final class TrackingService: ObservableObject {
 
         internalSegments = [RouteSegment(id: UUID().uuidString, style: .solid, coords: ext)]
         rebuildInternalSegmentsForMapFromInternal()
-        if isRealtimeRenderingEnabled { segments = internalSegments }
+        flushPublishedState(force: true)
 
         // ✅ do not reuse old filter state for playback
         resetOneEuro()
@@ -707,7 +728,7 @@ final class TrackingService: ObservableObject {
     private func rebuildRenderCache(force: Bool) {
         guard shouldUpdateRenderCache(force: force) else { return }
 
-        let coordCount = coords.count
+        let coordCount = rawCoords.count
         let segPointCount = internalSegments.reduce(0) { $0 + $1.coords.count }
 
         if !force, coordCount == lastRenderCoordCount, segPointCount == lastRenderSegPointCount {
@@ -717,7 +738,7 @@ final class TrackingService: ObservableObject {
         pendingRenderWork?.cancel()
 
         let segsForMapSnapshot = internalSegmentsForMap
-        let lastWGS = coords.last
+        let lastWGS = rawCoords.last
         let userWGS = userLocation?.coordinate
         let convert = self.convertForMap
 
@@ -738,9 +759,10 @@ final class TrackingService: ObservableObject {
 
             Task { @MainActor in
                 guard self.shouldUpdateRenderCache(force: force) else { return }
-                self.renderSegmentsForMap = segsForMap
-                self.renderUnifiedSegmentsForMap = unifiedSegsForMap
-                self.renderLiveTailForMap = tailForMap
+                self.latestRenderSegmentsForMap = segsForMap
+                self.latestRenderUnifiedSegmentsForMap = unifiedSegsForMap
+                self.latestRenderLiveTailForMap = tailForMap
+                self.flushPublishedState(force: force)
                 self.lastRenderCoordCount = coordCount
                 self.lastRenderSegPointCount = segPointCount
             }
@@ -835,7 +857,7 @@ final class TrackingService: ObservableObject {
             lastLocation = loc
             resetOneEuro() // start filter fresh at lock
 
-            coords.append(loc.coordinate)
+            rawCoords.append(loc.coordinate)
             appendPointToInternalSegments(coord: loc.coordinate, at: loc.timestamp, preferredStyle: .solid)
             lastRecordedLocationForStationary = loc
             stationarySince = nil
@@ -850,7 +872,7 @@ final class TrackingService: ObservableObject {
         guard let last = lastLocation else {
             lastLocation = loc
             resetOneEuro()
-            coords.append(loc.coordinate)
+            rawCoords.append(loc.coordinate)
             appendPointToInternalSegments(coord: loc.coordinate, at: loc.timestamp, preferredStyle: .solid)
             lastRecordedLocationForStationary = loc
             stationarySince = nil
@@ -927,9 +949,9 @@ final class TrackingService: ObservableObject {
             : (turnKeepAngleBackground[mode] ?? 16)
 
         var keepBecauseTurn = false
-        if turnThreshold < 180, coords.count >= 2 {
-            let last2 = coords[coords.count - 2]
-            let last1 = coords[coords.count - 1]
+        if turnThreshold < 180, rawCoords.count >= 2 {
+            let last2 = rawCoords[rawCoords.count - 2]
+            let last1 = rawCoords[rawCoords.count - 1]
             keepBecauseTurn = isTurn(last2: last2, last1: last1, new: loc.coordinate, thresholdDeg: turnThreshold)
         }
 
@@ -990,7 +1012,7 @@ final class TrackingService: ObservableObject {
         isMissingSegment = (d2d >= missingGapDistanceThreshold) || isMigrationCandidate
         if isMissingSegment {
             isGapLike = true
-            missingFromCoord = coords.last
+            missingFromCoord = rawCoords.last
             missingSegmentCount += 1
         }
 
@@ -1030,18 +1052,18 @@ final class TrackingService: ObservableObject {
         }
 
         // =========================================================
-        // 6) Filtering (foreground walk/run only) — NEVER on turns
+        // 6) Filtering (enabled by mode config) — NEVER on turns
         // =========================================================
         let shouldFilter: Bool = {
             if !isActive { return false }
             if keepBecauseTurn { return false }
-            
-            if trackingMode == .sport {
-                // 运动模式: walk/run都启用
-                return mode == .walk || mode == .run
-            } else {
-                // 日常模式: 只有跑步启用
-                return mode == .run
+
+            guard oneEuroEnabled else { return false }
+            switch mode {
+            case .walk, .run, .bike:
+                return true
+            default:
+                return false
             }
         }()
 
@@ -1063,7 +1085,7 @@ final class TrackingService: ObservableObject {
         // =========================================================
         // 8) Append point / segment
         // =========================================================
-        coords.append(outCoord)
+        rawCoords.append(outCoord)
 
         if isMissingSegment, let from = missingFromCoord {
             appendMissingConnectionSegment(from: from, to: outCoord, at: loc.timestamp)
@@ -1181,8 +1203,27 @@ final class TrackingService: ObservableObject {
     private func publishIfNeeded() {
         // ✅ 更新 Live Activity（锁屏追踪卡片）
         updateLiveActivity(memoriesCount: 0)
-        guard isRealtimeRenderingEnabled else { return }
-        segments = internalSegments
+        flushPublishedState(force: false)
+    }
+
+    private func flushPublishedState(force: Bool) {
+        pendingPublishWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.coords = self.rawCoords
+            if self.isRealtimeRenderingEnabled {
+                self.segments = self.internalSegments
+            }
+            self.renderSegmentsForMap = self.latestRenderSegmentsForMap
+            self.renderUnifiedSegmentsForMap = self.latestRenderUnifiedSegmentsForMap
+            self.renderLiveTailForMap = self.latestRenderLiveTailForMap
+        }
+        pendingPublishWork = work
+        if force {
+            DispatchQueue.main.async(execute: work)
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + publishDebounceInterval, execute: work)
+        }
     }
 
     // MARK: - Turn helpers

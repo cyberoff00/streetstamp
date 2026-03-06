@@ -3,6 +3,10 @@ import CoreLocation
 import Combine
 import MapKit
 
+extension Notification.Name {
+    static let lifelogStoreTrackTilesDidChange = Notification.Name("lifelogStoreTrackTilesDidChange")
+}
+
 @MainActor
 final class LifelogStore: ObservableObject {
     @Published private(set) var coordinates: [CoordinateCodable] = []
@@ -10,6 +14,7 @@ final class LifelogStore: ObservableObject {
     @Published private(set) var isEnabled: Bool = true
     @Published private(set) var availableDays: [Date] = []
     @Published private(set) var countryISO2: String? = nil
+    @Published private(set) var trackTileRevision: Int = 0
 
     private struct PersistedPayload: Codable {
         var points: [LifelogTrackPoint]?
@@ -42,13 +47,27 @@ final class LifelogStore: ObservableObject {
         }
     }
 
-    private let minDistanceMeters: CLLocationDistance = 25
-    private let minIntervalSeconds: TimeInterval = 30
+    private struct LoadedState {
+        let points: [LifelogTrackPoint]
+        let coordinates: [CoordinateCodable]
+        let isEnabled: Bool
+        let archivedJourneyIDs: Set<String>
+        let moodByDay: [String: String]
+        let hasBackfilledHistoricalJourneys: Bool
+        let cachedDistanceMeters: Double
+        let availableDays: [Date]
+        let countryISO2: String?
+    }
 
+    // Keep passive lifelog dense enough for continuous fog-of-world coverage.
+    private let minDistanceMeters: CLLocationDistance = 10
+
+    private var userID: String
     private var persistURL: URL
+    private var deltaURL: URL
+    private var moodPersistURL: URL
     private var bag = Set<AnyCancellable>()
     private var lastAccepted: CLLocation?
-    private var lastAcceptedAt: Date = .distantPast
     private var cachedDistanceMeters: Double = 0
     private var cachedGlobePolyline: [CoordinateCodable] = []
     private var cachedGlobePolylineSourceCount: Int = -1
@@ -65,6 +84,13 @@ final class LifelogStore: ObservableObject {
     private var moodByDay: [String: String] = [:]
     private var hasBackfilledHistoricalJourneys = false
     private let syntheticMaxPoints = 320
+    private var pendingSnapshotPersist: DispatchWorkItem?
+    private let snapshotPersistDebounce: TimeInterval = 4.0
+    private var pendingTrackTileRevisionBump: DispatchWorkItem?
+    private let trackTileRevisionDebounce: TimeInterval
+    private let recentWindowDays = 7
+    private var pendingDayIndexBuild: DispatchWorkItem?
+    private var dayIndexBuildGeneration: Int = 0
 
     private struct IndexedCoord {
         let idx: Int
@@ -77,17 +103,33 @@ final class LifelogStore: ObservableObject {
         let y: Int
     }
 
-    init(paths: StoragePath) {
+    init(paths: StoragePath, trackTileRevisionDebounce: TimeInterval = 1.5) {
+        self.userID = paths.userID
         self.persistURL = paths.lifelogRouteURL
+        self.deltaURL = paths.lifelogRouteURL
+            .deletingPathExtension()
+            .appendingPathExtension("delta.jsonl")
+        self.moodPersistURL = paths.cachesDir.appendingPathComponent("lifelog_mood.json", isDirectory: false)
+        self.trackTileRevisionDebounce = max(0, trackTileRevisionDebounce)
     }
 
     func rebind(paths: StoragePath) {
+        userID = paths.userID
         persistURL = paths.lifelogRouteURL
+        deltaURL = paths.lifelogRouteURL
+            .deletingPathExtension()
+            .appendingPathExtension("delta.jsonl")
+        moodPersistURL = paths.cachesDir.appendingPathComponent("lifelog_mood.json", isDirectory: false)
+        pendingSnapshotPersist?.cancel()
+        pendingSnapshotPersist = nil
+        pendingTrackTileRevisionBump?.cancel()
+        pendingTrackTileRevisionBump = nil
+        pendingDayIndexBuild?.cancel()
+        pendingDayIndexBuild = nil
         bag.removeAll()
         coordinates = []
         currentLocation = nil
         lastAccepted = nil
-        lastAcceptedAt = .distantPast
         cachedDistanceMeters = 0
         cachedGlobePolyline = []
         cachedGlobePolylineSourceCount = -1
@@ -105,50 +147,30 @@ final class LifelogStore: ObservableObject {
         hasBackfilledHistoricalJourneys = false
         availableDays = []
         countryISO2 = nil
+        trackTileRevision = 0
+        bumpTrackTileRevision()
     }
 
     func load() {
-        guard
-            let data = try? Data(contentsOf: persistURL),
-            let payload = try? JSONDecoder().decode(PersistedPayload.self, from: data)
-        else {
-            points = []
-            coordinates = []
-            isEnabled = true
-            cachedDistanceMeters = 0
-            cachedGlobePolyline = []
-            cachedGlobePolylineSourceCount = 0
-            downsampleCache = [:]
-            downsampleCacheSourceCount = 0
-            dayCoordsCache = [:]
-            dayDownsampleCache = [:]
-            dayTileIndexCache = [:]
-            dayTileIndexSourceCount = 0
-            previewPolylineCache = [:]
-            previewCacheSourceCount = 0
-            archivedJourneyIDs = []
-            moodByDay = [:]
-            hasBackfilledHistoricalJourneys = false
-            availableDays = []
-            countryISO2 = nil
-            return
+        let url = persistURL
+        let delta = deltaURL
+        let moodURL = moodPersistURL
+        Task {
+            let loaded = await Self.loadState(from: url, deltaURL: delta, moodURL: moodURL)
+            applyLoadedState(loaded)
+            scheduleBackgroundDayIndexBuild()
+            bumpTrackTileRevision()
         }
+    }
 
-        let loadedPoints: [LifelogTrackPoint]
-        if let payloadPoints = payload.points, !payloadPoints.isEmpty {
-            loadedPoints = payloadPoints
-        } else {
-            // Legacy fallback: old payload has only coordinates.
-            let fallbackTS = Date()
-            loadedPoints = payload.coordinates.map { LifelogTrackPoint($0, timestamp: fallbackTS) }
-        }
-        points = loadedPoints
-        coordinates = loadedPoints.map(\.coord)
-        isEnabled = payload.isEnabled
-        archivedJourneyIDs = Set(payload.archivedJourneyIDs ?? [])
-        moodByDay = payload.moodByDay ?? [:]
-        hasBackfilledHistoricalJourneys = payload.hasBackfilledHistoricalJourneys ?? false
-        cachedDistanceMeters = totalDistanceMeters(coords: coordinates)
+    private func applyLoadedState(_ loaded: LoadedState) {
+        points = loaded.points
+        coordinates = recentCoordinates(from: loaded.points)
+        isEnabled = loaded.isEnabled
+        archivedJourneyIDs = loaded.archivedJourneyIDs
+        moodByDay = loaded.moodByDay
+        hasBackfilledHistoricalJourneys = loaded.hasBackfilledHistoricalJourneys
+        cachedDistanceMeters = loaded.cachedDistanceMeters
         cachedGlobePolyline = []
         cachedGlobePolylineSourceCount = -1
         downsampleCache = [:]
@@ -159,12 +181,168 @@ final class LifelogStore: ObservableObject {
         dayTileIndexSourceCount = -1
         previewPolylineCache = [:]
         previewCacheSourceCount = -1
-        refreshAvailableDays()
+        availableDays = loaded.availableDays
+        countryISO2 = loaded.countryISO2
 
-        if let last = coordinates.last {
+        if let last = points.last?.coord {
             lastAccepted = CLLocation(latitude: last.lat, longitude: last.lon)
-            lastAcceptedAt = Date()
+        } else {
+            lastAccepted = nil
         }
+    }
+
+    private func scheduleBackgroundDayIndexBuild() {
+        pendingDayIndexBuild?.cancel()
+        dayIndexBuildGeneration &+= 1
+        let generation = dayIndexBuildGeneration
+        let snapshot = points
+        let work = DispatchWorkItem {
+            var grouped: [String: [CoordinateCodable]] = [:]
+            grouped.reserveCapacity(32)
+            for point in snapshot {
+                let key = Self.dayKeyString(for: point.timestamp)
+                grouped[key, default: []].append(point.coord)
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                guard generation == self.dayIndexBuildGeneration else { return }
+                self.dayCoordsCache = grouped
+            }
+        }
+        pendingDayIndexBuild = work
+        DispatchQueue.global(qos: .utility).async(execute: work)
+    }
+
+    private func recentCoordinates(from points: [LifelogTrackPoint]) -> [CoordinateCodable] {
+        guard !points.isEmpty else { return [] }
+        let cutoff = recentWindowStartDate()
+        return points
+            .filter { $0.timestamp >= cutoff }
+            .map(\.coord)
+    }
+
+    private func recentWindowStartDate() -> Date {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        return cal.date(byAdding: .day, value: -(recentWindowDays - 1), to: today) ?? today
+    }
+
+    private nonisolated static func loadState(from persistURL: URL, deltaURL: URL, moodURL: URL) async -> LoadedState {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                let moodFallback = loadMoodState(from: moodURL)
+                let legacyFallbackTS = unknownHistoricalTimestamp()
+                guard
+                    let data = try? Data(contentsOf: persistURL),
+                    let payload = try? JSONDecoder().decode(PersistedPayload.self, from: data)
+                else {
+                    let replayed = replayDelta(base: [], deltaURL: deltaURL, fallbackTimestamp: legacyFallbackTS)
+                    let replayedCoords = replayed.map(\.coord)
+                    continuation.resume(returning: LoadedState(
+                        points: replayed,
+                        coordinates: replayedCoords,
+                        isEnabled: true,
+                        archivedJourneyIDs: [],
+                        moodByDay: moodFallback,
+                        hasBackfilledHistoricalJourneys: false,
+                        cachedDistanceMeters: computeTotalDistanceMeters(coords: replayedCoords),
+                        availableDays: computeAvailableDays(from: replayed),
+                        countryISO2: nil
+                    ))
+                    return
+                }
+
+                let loadedPoints: [LifelogTrackPoint]
+                if let payloadPoints = payload.points, !payloadPoints.isEmpty {
+                    loadedPoints = payloadPoints
+                } else {
+                    let fallbackTS = legacyFallbackTS
+                    loadedPoints = payload.coordinates.map { LifelogTrackPoint($0, timestamp: fallbackTS) }
+                }
+
+                let mergedPoints = replayDelta(base: loadedPoints, deltaURL: deltaURL, fallbackTimestamp: legacyFallbackTS)
+                let loadedCoordinates = mergedPoints.map(\.coord)
+                continuation.resume(returning: LoadedState(
+                    points: mergedPoints,
+                    coordinates: loadedCoordinates,
+                    isEnabled: payload.isEnabled,
+                    archivedJourneyIDs: Set(payload.archivedJourneyIDs ?? []),
+                    moodByDay: payload.moodByDay ?? moodFallback,
+                    hasBackfilledHistoricalJourneys: payload.hasBackfilledHistoricalJourneys ?? false,
+                    cachedDistanceMeters: computeTotalDistanceMeters(coords: loadedCoordinates),
+                    availableDays: computeAvailableDays(from: mergedPoints),
+                    countryISO2: nil
+                ))
+            }
+        }
+    }
+
+    private nonisolated static func replayDelta(
+        base: [LifelogTrackPoint],
+        deltaURL: URL,
+        fallbackTimestamp: Date
+    ) -> [LifelogTrackPoint] {
+        guard let raw = try? String(contentsOf: deltaURL, encoding: .utf8), !raw.isEmpty else {
+            return base
+        }
+
+        var out = base
+        let decoder = JSONDecoder()
+        let lines = raw.split(separator: "\n")
+        for line in lines {
+            guard !line.isEmpty else { continue }
+            guard let lineData = line.data(using: .utf8) else { continue }
+
+            if let chunk = try? decoder.decode([LifelogTrackPoint].self, from: lineData) {
+                appendDeltaChunk(chunk, into: &out)
+                continue
+            }
+            if let coords = try? decoder.decode([CoordinateCodable].self, from: lineData) {
+                let fallbackTS = out.last?.timestamp ?? fallbackTimestamp
+                let chunk = coords.map { LifelogTrackPoint($0, timestamp: fallbackTS) }
+                appendDeltaChunk(chunk, into: &out)
+            }
+        }
+        return out
+    }
+
+    private nonisolated static func appendDeltaChunk(_ chunk: [LifelogTrackPoint], into out: inout [LifelogTrackPoint]) {
+        for point in chunk {
+            if let last = out.last,
+               last.lat == point.lat,
+               last.lon == point.lon,
+               last.timestamp == point.timestamp {
+                continue
+            }
+            out.append(point)
+        }
+    }
+
+    private nonisolated static func loadMoodState(from moodURL: URL) -> [String: String] {
+        guard let data = try? Data(contentsOf: moodURL) else { return [:] }
+        return (try? JSONDecoder().decode([String: String].self, from: data)) ?? [:]
+    }
+
+    private nonisolated static func computeTotalDistanceMeters(coords: [CoordinateCodable]) -> Double {
+        guard coords.count >= 2 else { return 0 }
+        var total: Double = 0
+        for i in 1..<coords.count {
+            let a = CLLocation(latitude: coords[i - 1].lat, longitude: coords[i - 1].lon)
+            let b = CLLocation(latitude: coords[i].lat, longitude: coords[i].lon)
+            total += b.distance(from: a)
+        }
+        return total
+    }
+
+    private nonisolated static func computeAvailableDays(from points: [LifelogTrackPoint]) -> [Date] {
+        let cal = Calendar.current
+        let uniq = Set(points.map { cal.startOfDay(for: $0.timestamp) })
+        return uniq.sorted(by: >)
+    }
+
+    private nonisolated static func unknownHistoricalTimestamp() -> Date {
+        // Legacy records without timestamps should never be treated as "today".
+        Date(timeIntervalSince1970: 0)
     }
 
     func bind(to hub: LocationHub) {
@@ -220,32 +398,36 @@ final class LifelogStore: ObservableObject {
 
         if let last = lastAccepted {
             let moved = loc.distance(from: last)
-            let dt = loc.timestamp.timeIntervalSince(lastAcceptedAt)
-            if moved < minDistanceMeters && dt < minIntervalSeconds {
+            if moved < minDistanceMeters {
                 return
             }
         }
 
         let c = CoordinateCodable(lat: loc.coordinate.latitude, lon: loc.coordinate.longitude)
-        if let prev = coordinates.last,
+        if let prev = points.last?.coord,
            abs(prev.lat - c.lat) < 0.0000005,
            abs(prev.lon - c.lon) < 0.0000005 {
             return
         }
 
-        if let prev = coordinates.last {
+        if let prev = points.last?.coord {
             let a = CLLocation(latitude: prev.lat, longitude: prev.lon)
             let b = CLLocation(latitude: c.lat, longitude: c.lon)
             cachedDistanceMeters += b.distance(from: a)
         }
 
-        coordinates.append(c)
-        points.append(LifelogTrackPoint(c, timestamp: loc.timestamp))
+        let appendedPoint = LifelogTrackPoint(c, timestamp: loc.timestamp)
+        points.append(appendedPoint)
+        if loc.timestamp >= recentWindowStartDate() {
+            coordinates.append(c)
+        }
         invalidatePolylineCaches()
         lastAccepted = loc
-        lastAcceptedAt = loc.timestamp
         refreshAvailableDays()
+        scheduleBackgroundDayIndexBuild()
+        appendDelta(points: [appendedPoint])
         persistAsync()
+        scheduleTrackTileRevisionBump()
     }
 
     func archiveJourneyPointsIfNeeded(_ journey: JourneyRoute) {
@@ -257,85 +439,60 @@ final class LifelogStore: ObservableObject {
         let journeyID = journey.id.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !journeyID.isEmpty else { return false }
         guard !archivedJourneyIDs.contains(journeyID) else { return false }
-
         let coords = journey.coordinates
-        guard !coords.isEmpty else {
-            archivedJourneyIDs.insert(journeyID)
-            if persistAfter {
-                persistAsync()
-            }
-            return true
+
+        if !coords.isEmpty {
+            let timeline = timestampsForJourney(journey, count: coords.count)
+            let imported = zip(coords, timeline).map { (coord: $0.0, timestamp: $0.1) }
+            importExternalTrack(points: imported)
         }
 
-        let timeline = timestampsForJourney(journey, count: coords.count)
-        for (idx, coord) in coords.enumerated() {
-            let point = LifelogTrackPoint(coord, timestamp: timeline[idx])
-            points.append(point)
-            coordinates.append(point.coord)
-        }
-
-        cachedDistanceMeters = totalDistanceMeters(coords: coordinates)
-        invalidatePolylineCaches()
         archivedJourneyIDs.insert(journeyID)
-        refreshAvailableDays()
-        if persistAfter {
-            persistAsync()
-        }
+        if persistAfter { persistAsync() }
         return true
     }
 
     func importExternalTrack(points imported: [(coord: CoordinateCodable, timestamp: Date)]) {
         guard !imported.isEmpty else { return }
+        var appended: [LifelogTrackPoint] = []
+        let recentStart = recentWindowStartDate()
 
         for item in imported {
             let coord = item.coord
             let timestamp = item.timestamp
 
-            if let prev = coordinates.last,
+            if let prev = points.last?.coord,
                abs(prev.lat - coord.lat) < 0.0000005,
                abs(prev.lon - coord.lon) < 0.0000005 {
                 continue
             }
 
-            if let prev = coordinates.last {
+            if let prev = points.last?.coord {
                 let a = CLLocation(latitude: prev.lat, longitude: prev.lon)
                 let b = CLLocation(latitude: coord.lat, longitude: coord.lon)
                 cachedDistanceMeters += b.distance(from: a)
             }
 
-            coordinates.append(coord)
-            points.append(LifelogTrackPoint(coord, timestamp: timestamp))
+            let appendedPoint = LifelogTrackPoint(coord, timestamp: timestamp)
+            points.append(appendedPoint)
+            appended.append(appendedPoint)
+            if timestamp >= recentStart {
+                coordinates.append(coord)
+            }
         }
 
+        guard !appended.isEmpty else { return }
         invalidatePolylineCaches()
         refreshAvailableDays()
+        appendDelta(points: appended)
         persistAsync()
+        scheduleBackgroundDayIndexBuild()
+        scheduleTrackTileRevisionBump()
     }
 
     func backfillHistoricalJourneysIfNeeded(from journeys: [JourneyRoute]) async {
         guard !hasBackfilledHistoricalJourneys else { return }
-
-        let completed = journeys
-            .filter { $0.endTime != nil }
-            .sorted { lhs, rhs in
-                let lStart = lhs.startTime ?? lhs.endTime ?? .distantPast
-                let rStart = rhs.startTime ?? rhs.endTime ?? .distantPast
-                if lStart != rStart { return lStart < rStart }
-                let lEnd = lhs.endTime ?? lhs.startTime ?? .distantPast
-                let rEnd = rhs.endTime ?? rhs.startTime ?? .distantPast
-                if lEnd != rEnd { return lEnd < rEnd }
-                return lhs.id < rhs.id
-            }
-
-        var processed = 0
-        for journey in completed {
-            if Task.isCancelled { return }
-            _ = archiveJourneyPointsIfNeeded(journey, persistAfter: false)
-            processed += 1
-            if processed % 12 == 0 {
-                await Task.yield()
-            }
-        }
+        _ = journeys
 
         hasBackfilledHistoricalJourneys = true
         persistAsync()
@@ -418,7 +575,10 @@ final class LifelogStore: ObservableObject {
         } else {
             moodByDay.removeValue(forKey: key)
         }
-        persistAsync()
+        persistMoodSnapshotNow()
+        pendingSnapshotPersist?.cancel()
+        pendingSnapshotPersist = nil
+        persistSnapshotNow()
     }
 
     func sampledCoordinates(day: Date?, maxPoints: Int) -> [CoordinateCodable] {
@@ -498,6 +658,39 @@ final class LifelogStore: ObservableObject {
     }
 
     private func persistAsync() {
+        pendingSnapshotPersist?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.persistSnapshotNow()
+        }
+        pendingSnapshotPersist = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + snapshotPersistDebounce, execute: work)
+    }
+
+    private func appendDelta(points appended: [LifelogTrackPoint]) {
+        guard !appended.isEmpty else { return }
+        let target = deltaURL
+        let baseDir = target.deletingLastPathComponent()
+        let chunk = appended
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                try FileManager.default.createDirectory(at: baseDir, withIntermediateDirectories: true)
+                var data = try JSONEncoder().encode(chunk)
+                data.append(0x0A)
+                if FileManager.default.fileExists(atPath: target.path) {
+                    let handle = try FileHandle(forWritingTo: target)
+                    handle.seekToEndOfFile()
+                    handle.write(data)
+                    handle.closeFile()
+                } else {
+                    try data.write(to: target, options: .atomic)
+                }
+            } catch {
+                print("❌ lifelog delta append failed:", error)
+            }
+        }
+    }
+
+    private func persistSnapshotNow() {
         let payload = PersistedPayload(
             points: points,
             coordinates: coordinates,
@@ -507,6 +700,9 @@ final class LifelogStore: ObservableObject {
             hasBackfilledHistoricalJourneys: hasBackfilledHistoricalJourneys
         )
         let url = persistURL
+        let delta = deltaURL
+        let moodURL = moodPersistURL
+        let moodSnapshot = moodByDay
         DispatchQueue.global(qos: .utility).async {
             do {
                 let data = try JSONEncoder().encode(payload)
@@ -515,10 +711,38 @@ final class LifelogStore: ObservableObject {
                     withIntermediateDirectories: true
                 )
                 try data.write(to: url, options: .atomic)
+                if FileManager.default.fileExists(atPath: delta.path) {
+                    try? FileManager.default.removeItem(at: delta)
+                }
             } catch {
                 print("❌ lifelog save failed:", error)
             }
+            Self.persistMoodSnapshot(moodSnapshot, to: moodURL)
         }
+    }
+
+    private func persistMoodSnapshotNow() {
+        let snapshot = moodByDay
+        Self.persistMoodSnapshot(snapshot, to: moodPersistURL)
+    }
+
+    private nonisolated static func persistMoodSnapshot(_ moodSnapshot: [String: String], to moodURL: URL) {
+        do {
+            try FileManager.default.createDirectory(
+                at: moodURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let moodData = try JSONEncoder().encode(moodSnapshot)
+            try moodData.write(to: moodURL, options: .atomic)
+        } catch {
+            print("❌ lifelog mood save failed:", error)
+        }
+    }
+
+    func flushPersistNow() {
+        pendingSnapshotPersist?.cancel()
+        pendingSnapshotPersist = nil
+        persistSnapshotNow()
     }
 
     private func totalDistanceMeters(coords: [CoordinateCodable]) -> Double {
@@ -650,30 +874,101 @@ final class LifelogStore: ObservableObject {
     }
 
     private func dayKey(_ day: Date) -> String {
-        let start = Calendar.current.startOfDay(for: day)
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd"
-        f.timeZone = TimeZone.current
-        return f.string(from: start)
+        Self.dayKeyString(for: day)
+    }
+
+    private nonisolated static func dayKeyString(for day: Date) -> String {
+        let cal = Calendar.current
+        let parts = cal.dateComponents([.year, .month, .day], from: cal.startOfDay(for: day))
+        let y = parts.year ?? 1970
+        let m = parts.month ?? 1
+        let d = parts.day ?? 1
+        return String(format: "%04d-%02d-%02d", y, m, d)
     }
 
     private func downsample(coords: [CoordinateCodable], maxPoints: Int) -> [CoordinateCodable] {
-        guard coords.count > maxPoints else { return coords }
+        guard coords.count > maxPoints, maxPoints >= 2 else { return coords }
 
-        let n = coords.count
-        var out: [CoordinateCodable] = []
-        out.reserveCapacity(maxPoints)
+        // --- Ramer-Douglas-Peucker (shape-preserving simplification) ---
 
-        for i in 0..<maxPoints {
-            let t = Double(i) / Double(maxPoints - 1)
-            let idx = Int((t * Double(n - 1)).rounded(.toNearestOrAwayFromZero))
-            out.append(coords[min(max(idx, 0), n - 1)])
+        // Perpendicular distance from point C to line segment A-B, in approximate meters.
+        func perpendicularDistance(_ c: CoordinateCodable, _ a: CoordinateCodable, _ b: CoordinateCodable) -> Double {
+            let dLat = b.lat - a.lat
+            let dLon = b.lon - a.lon
+            let lenSq = dLat * dLat + dLon * dLon
+            guard lenSq > 1e-20 else {
+                let dx = (c.lat - a.lat) * 111_320
+                let dy = (c.lon - a.lon) * 111_320 * cos(a.lat * .pi / 180)
+                return sqrt(dx * dx + dy * dy)
+            }
+            let t = max(0, min(1, ((c.lat - a.lat) * dLat + (c.lon - a.lon) * dLon) / lenSq))
+            let projLat = a.lat + t * dLat
+            let projLon = a.lon + t * dLon
+            let dx = (c.lat - projLat) * 111_320
+            let dy = (c.lon - projLon) * 111_320 * cos(c.lat * .pi / 180)
+            return sqrt(dx * dx + dy * dy)
         }
 
+        // Iterative RDP using explicit stack (avoids stack overflow on large inputs).
+        func rdp(_ points: [CoordinateCodable], epsilon: Double) -> [CoordinateCodable] {
+            guard points.count > 2 else { return points }
+            var keep = [Bool](repeating: false, count: points.count)
+            keep[0] = true
+            keep[points.count - 1] = true
+
+            var stack: [(Int, Int)] = [(0, points.count - 1)]
+            while let (startIdx, endIdx) = stack.popLast() {
+                guard endIdx - startIdx > 1 else { continue }
+                var maxDist: Double = 0
+                var farthest = startIdx
+                for i in (startIdx + 1)..<endIdx {
+                    let d = perpendicularDistance(points[i], points[startIdx], points[endIdx])
+                    if d > maxDist {
+                        maxDist = d
+                        farthest = i
+                    }
+                }
+                if maxDist > epsilon {
+                    keep[farthest] = true
+                    stack.append((startIdx, farthest))
+                    stack.append((farthest, endIdx))
+                }
+            }
+            return (0..<points.count).compactMap { keep[$0] ? points[$0] : nil }
+        }
+
+        // Binary search for an epsilon that yields ≤ maxPoints.
+        var lo: Double = 0.1    // ~0.1 meter
+        var hi: Double = 5000.0 // ~5 km
+        var bestResult = coords
+        for _ in 0..<16 {
+            let mid = (lo + hi) / 2.0
+            let result = rdp(coords, epsilon: mid)
+            if result.count <= maxPoints {
+                bestResult = result
+                hi = mid
+            } else {
+                lo = mid
+            }
+        }
+
+        // If RDP still exceeds budget (shouldn't normally happen), uniform fallback.
+        if bestResult.count > maxPoints {
+            let n = bestResult.count
+            var uniform: [CoordinateCodable] = []
+            uniform.reserveCapacity(maxPoints)
+            for i in 0..<maxPoints {
+                let t = Double(i) / Double(maxPoints - 1)
+                let idx = Int((t * Double(n - 1)).rounded(.toNearestOrAwayFromZero))
+                uniform.append(bestResult[min(max(idx, 0), n - 1)])
+            }
+            bestResult = uniform
+        }
+
+        // Deduplicate consecutive identical points.
         var compact: [CoordinateCodable] = []
-        compact.reserveCapacity(out.count)
-        for c in out {
+        compact.reserveCapacity(bestResult.count)
+        for c in bestResult {
             if let last = compact.last, last.lat == c.lat, last.lon == c.lon {
                 continue
             }
@@ -811,5 +1106,48 @@ final class LifelogStore: ObservableObject {
         guard let raw else { return nil }
         let iso = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         return iso.count == 2 ? iso : nil
+    }
+
+    func trackRenderEvents() -> [TrackRenderEvent] {
+        Self.makeTrackRenderEvents(from: points)
+    }
+
+    func trackRenderEventsAsync() async -> [TrackRenderEvent] {
+        let snapshot = points
+        return await Task.detached(priority: .utility) {
+            Self.makeTrackRenderEvents(from: snapshot)
+        }.value
+    }
+
+    private nonisolated static func makeTrackRenderEvents(from points: [LifelogTrackPoint]) -> [TrackRenderEvent] {
+        points.map {
+            TrackRenderEvent(
+                sourceType: .passive,
+                timestamp: $0.timestamp,
+                coordinate: $0.coord
+            )
+        }
+    }
+
+    private func bumpTrackTileRevision() {
+        trackTileRevision &+= 1
+        NotificationCenter.default.post(
+            name: .lifelogStoreTrackTilesDidChange,
+            object: self,
+            userInfo: ["revision": trackTileRevision]
+        )
+    }
+
+    private func scheduleTrackTileRevisionBump() {
+        if trackTileRevisionDebounce <= 0 {
+            bumpTrackTileRevision()
+            return
+        }
+        pendingTrackTileRevisionBump?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.bumpTrackTileRevision()
+        }
+        pendingTrackTileRevisionBump = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + trackTileRevisionDebounce, execute: work)
     }
 }

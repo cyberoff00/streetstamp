@@ -159,13 +159,23 @@ struct RobotLoadout: Codable, Equatable, Hashable {
 
     func normalizedForCurrentAvatar() -> RobotLoadout {
         var next = self
-        // Retire legacy full-body suit layer globally; keep only upper/under pipeline.
-        next.suitId = nil
-        if next.upperId == "none" {
-            next.upperId = next.savedUpperIdForSuit == "none" ? "upper_0001" : next.savedUpperIdForSuit
-        }
-        if next.underId == "none" {
-            next.underId = next.savedUnderIdForSuit == "none" ? "under_0001" : next.savedUnderIdForSuit
+        // Keep suit support. When suit is equipped, hide upper/under.
+        if next.suitId != nil {
+            if next.upperId != "none" {
+                next.savedUpperIdForSuit = next.upperId
+            }
+            if next.underId != "none" {
+                next.savedUnderIdForSuit = next.underId
+            }
+            next.upperId = "none"
+            next.underId = "none"
+        } else {
+            if next.upperId == "none" {
+                next.upperId = next.savedUpperIdForSuit == "none" ? "upper_0001" : next.savedUpperIdForSuit
+            }
+            if next.underId == "none" {
+                next.underId = next.savedUnderIdForSuit == "none" ? "under_0001" : next.savedUnderIdForSuit
+            }
         }
         return next
     }
@@ -456,11 +466,12 @@ private var hairLayer: some View {
 var body: some View {
         ZStack {
             bodyLayer
-            underLayer
-            upperLayer
             headLayer
             expressionLayer
             hairLayer
+            underLayer
+            upperLayer
+            suitLayer
             accessoryLayer
 
             if face == .back {

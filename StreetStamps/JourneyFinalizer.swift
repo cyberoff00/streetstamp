@@ -43,7 +43,9 @@ enum JourneyFinalizer {
             Task { @MainActor in
                 journeyStore.upsertSnapshotThrottled(updated, coordCount: updated.coordinates.count)
                 journeyStore.flushPersist()
-                lifelogStore.archiveJourneyPointsIfNeeded(updated)
+                if updated.endTime != nil {
+                    lifelogStore.archiveJourneyPointsIfNeeded(updated)
+                }
                 notify?()
                 completion(updated)
             }

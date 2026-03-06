@@ -445,7 +445,16 @@ function parseRefreshToken(rawToken) {
 }
 
 function emptyDB() {
-  return { users: {}, emailIndex: {}, inviteIndex: {}, oauthIndex: {}, handleIndex: {}, likesIndex: {}, friendRequestsIndex: {} };
+  return {
+    users: {},
+    emailIndex: {},
+    inviteIndex: {},
+    oauthIndex: {},
+    handleIndex: {},
+    likesIndex: {},
+    friendRequestsIndex: {},
+    postcardsIndex: {}
+  };
 }
 
 function normalizeDBShape(parsed) {
@@ -456,13 +465,14 @@ function normalizeDBShape(parsed) {
     oauthIndex: parsed?.oauthIndex || {},
     handleIndex: parsed?.handleIndex || {},
     likesIndex: parsed?.likesIndex || {},
-    friendRequestsIndex: parsed?.friendRequestsIndex || {}
+    friendRequestsIndex: parsed?.friendRequestsIndex || {},
+    postcardsIndex: parsed?.postcardsIndex || {}
   };
 }
 
 function hasPersistedData(parsed) {
   const src = parsed || {};
-  const keys = ["users", "emailIndex", "inviteIndex", "oauthIndex", "handleIndex", "likesIndex", "friendRequestsIndex"];
+  const keys = ["users", "emailIndex", "inviteIndex", "oauthIndex", "handleIndex", "likesIndex", "friendRequestsIndex", "postcardsIndex"];
   return keys.some((k) => src[k] && Object.keys(src[k]).length > 0);
 }
 
@@ -588,6 +598,96 @@ function ensurePostcardCollections(user) {
   if (!Array.isArray(user.receivedPostcards)) user.receivedPostcards = [];
 }
 
+function ensurePostcardIndex() {
+  if (!db.postcardsIndex || typeof db.postcardsIndex !== "object") {
+    db.postcardsIndex = {};
+  }
+}
+
+function derivePublicBase(req) {
+  const xfProto = String(req?.headers?.["x-forwarded-proto"] || "").split(",")[0].trim();
+  const xfHost = String(req?.headers?.["x-forwarded-host"] || "").split(",")[0].trim();
+  const host = xfHost || String(req?.headers?.host || "").split(",")[0].trim();
+  const proto = xfProto || req?.protocol || "";
+  if (host && proto) return `${proto}://${host}`.replace(/\/$/, "");
+  if (MEDIA_PUBLIC_BASE) return MEDIA_PUBLIC_BASE.replace(/\/$/, "");
+  return "";
+}
+
+function absolutizePostcardPhotoURL(rawURL, req) {
+  const value = String(rawURL || "").trim();
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value)) return value;
+  if (!value.startsWith("/")) return value;
+  const base = derivePublicBase(req);
+  if (!base) return value;
+  return `${base}${value}`;
+}
+
+function normalizePostcardMessage(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const messageID = String(raw.messageID || "").trim();
+  const fromUserID = String(raw.fromUserID || "").trim();
+  const toUserID = String(raw.toUserID || "").trim();
+  if (!messageID || !fromUserID || !toUserID) return null;
+
+  return {
+    messageID,
+    type: "postcard",
+    fromUserID,
+    fromDisplayName: raw.fromDisplayName == null ? null : String(raw.fromDisplayName),
+    toUserID,
+    cityID: String(raw.cityID || "").trim(),
+    cityName: String(raw.cityName || raw.cityID || "").trim(),
+    photoURL: raw.photoURL == null ? null : String(raw.photoURL),
+    messageText: String(raw.messageText || "").slice(0, 2000),
+    sentAt: normalizeISOTime(raw.sentAt) || new Date().toISOString(),
+    clientDraftID: String(raw.clientDraftID || "").trim(),
+    status: raw.status == null ? "sent" : String(raw.status)
+  };
+}
+
+function upsertPostcard(raw) {
+  const normalized = normalizePostcardMessage(raw);
+  if (!normalized) return null;
+  ensurePostcardIndex();
+  db.postcardsIndex[normalized.messageID] = normalized;
+  return normalized;
+}
+
+function postcardsForUser(uid, box) {
+  ensurePostcardIndex();
+  const out = Object.values(db.postcardsIndex || {}).filter((item) => {
+    if (!item || typeof item !== "object") return false;
+    if (box === "received") return item.toUserID === uid;
+    return item.fromUserID === uid;
+  });
+  out.sort((a, b) => Date.parse(b.sentAt || "") - Date.parse(a.sentAt || ""));
+  return out;
+}
+
+function reconcilePostcardsForUser(user, uid) {
+  ensurePostcardCollections(user);
+  const expectedSent = postcardsForUser(uid, "sent");
+  const expectedReceived = postcardsForUser(uid, "received");
+
+  const currentSentIDs = (user.sentPostcards || []).map((x) => String(x?.messageID || ""));
+  const currentReceivedIDs = (user.receivedPostcards || []).map((x) => String(x?.messageID || ""));
+  const nextSentIDs = expectedSent.map((x) => x.messageID);
+  const nextReceivedIDs = expectedReceived.map((x) => x.messageID);
+
+  let changed = false;
+  if (JSON.stringify(currentSentIDs) !== JSON.stringify(nextSentIDs)) {
+    user.sentPostcards = expectedSent;
+    changed = true;
+  }
+  if (JSON.stringify(currentReceivedIDs) !== JSON.stringify(nextReceivedIDs)) {
+    user.receivedPostcards = expectedReceived;
+    changed = true;
+  }
+  return changed;
+}
+
 function pushJourneyLikeNotification(owner, fromUser, journey) {
   ensureUserNotifications(owner);
   owner.notifications.unshift({
@@ -685,6 +785,20 @@ function pushPostcardReceivedNotification(owner, fromUser, postcard) {
 
 function isFriendOf(viewer, targetID) {
   return (viewer.friendIDs || []).includes(targetID);
+}
+
+function resolveUserByAnyID(rawID) {
+  const candidate = String(rawID || "").trim();
+  if (!candidate) return null;
+  if (db.users[candidate]) return db.users[candidate];
+  if (candidate.startsWith("account_")) {
+    const stripped = candidate.slice("account_".length);
+    if (db.users[stripped]) return db.users[stripped];
+  } else {
+    const prefixed = `account_${candidate}`;
+    if (db.users[prefixed]) return db.users[prefixed];
+  }
+  return null;
 }
 
 function friendRequestUserDTO(user) {
@@ -797,6 +911,7 @@ async function main() {
   if (!db.friendRequestsIndex || typeof db.friendRequestsIndex !== "object") {
     db.friendRequestsIndex = {};
   }
+  ensurePostcardIndex();
   for (const [uid, user] of Object.entries(db.users || {})) {
     setUserHandle(uid, user.handle || user.displayName || uid, { strict: false });
     if (!user.profileVisibility) user.profileVisibility = visibilityFriendsOnly;
@@ -806,6 +921,11 @@ async function main() {
     user.loadout = normalizeLoadout(user.loadout);
     ensureUserNotifications(user);
     ensurePostcardCollections(user);
+    for (const item of user.sentPostcards) upsertPostcard(item);
+    for (const item of user.receivedPostcards) upsertPostcard(item);
+  }
+  for (const [uid, user] of Object.entries(db.users || {})) {
+    reconcilePostcardsForUser(user, uid);
   }
   for (const req of allFriendRequests()) {
     const from = db.users[req.fromUserID];
@@ -817,6 +937,7 @@ async function main() {
   await fsp.mkdir(MEDIA_DIR, { recursive: true });
 
   const app = express();
+  app.set("trust proxy", true);
   app.use(cors({ origin: "*" }));
   app.use(express.json({ limit: "20mb" }));
   app.use("/media", express.static(MEDIA_DIR));
@@ -1370,7 +1491,7 @@ async function main() {
       const cityNameRaw = String(req.body?.cityName || "").trim();
       const cityName = cityNameRaw || cityID;
       const messageText = String(req.body?.messageText || "").trim();
-      const photoURL = String(req.body?.photoURL || "").trim();
+      const photoURL = absolutizePostcardPhotoURL(req.body?.photoURL, req);
       const clientDraftID = String(req.body?.clientDraftID || "").trim();
       const allowedCityIDs = Array.isArray(req.body?.allowedCityIDs)
         ? req.body.allowedCityIDs.map((x) => String(x || "").trim()).filter(Boolean)
@@ -1386,10 +1507,10 @@ async function main() {
         return res.status(400).json({ code: "message_too_long", message: "messageText must be <= 80 chars" });
       }
 
-      const target = db.users[toUserID];
+      const target = resolveUserByAnyID(toUserID);
       if (!target) return res.status(404).json({ message: "target user not found" });
-      if (uid === toUserID) return res.status(400).json({ message: "cannot send postcard to yourself" });
-      if (!isFriendOf(me, toUserID)) return res.status(403).json({ message: "friends only" });
+      if (uid === target.id) return res.status(400).json({ message: "cannot send postcard to yourself" });
+      if (!isFriendOf(me, target.id)) return res.status(403).json({ message: "friends only" });
 
       ensurePostcardCollections(me);
       ensurePostcardCollections(target);
@@ -1433,18 +1554,19 @@ async function main() {
         clientDraftID,
         status: "sent"
       };
+      const canonicalMessage = upsertPostcard(message) || message;
 
-      me.sentPostcards.unshift(message);
-      target.receivedPostcards.unshift(message);
+      me.sentPostcards.unshift(canonicalMessage);
+      target.receivedPostcards.unshift(canonicalMessage);
       if (me.sentPostcards.length > 1000) me.sentPostcards = me.sentPostcards.slice(0, 1000);
       if (target.receivedPostcards.length > 1000) target.receivedPostcards = target.receivedPostcards.slice(0, 1000);
 
-      pushPostcardReceivedNotification(target, me, message);
+      pushPostcardReceivedNotification(target, me, canonicalMessage);
       await saveDB();
 
       return res.status(200).json({
-        messageID: message.messageID,
-        sentAt: message.sentAt
+        messageID: canonicalMessage.messageID,
+        sentAt: canonicalMessage.sentAt
       });
     } catch {
       return res.status(401).json({ message: "unauthorized" });
@@ -1460,8 +1582,16 @@ async function main() {
 
       const boxRaw = String(req.query?.box || "sent").trim().toLowerCase();
       const box = boxRaw === "received" ? "received" : "sent";
-      const items = box === "received" ? me.receivedPostcards : me.sentPostcards;
-
+      const source = box === "received" ? (me.receivedPostcards || []) : (me.sentPostcards || []);
+      const items = source
+        .map((item) => normalizePostcardMessage(item))
+        .filter(Boolean)
+        .filter((item) => String(item.photoURL || "").trim().length > 0)
+        .map((item) => ({
+          ...item,
+          photoURL: absolutizePostcardPhotoURL(item.photoURL, req)
+        }))
+        .sort((a, b) => Date.parse(b.sentAt || "") - Date.parse(a.sentAt || ""));
       return res.status(200).json({ items, cursor: null });
     } catch {
       return res.status(401).json({ message: "unauthorized" });
@@ -1477,7 +1607,14 @@ async function main() {
       const unreadOnlyRaw = String(req.query.unreadOnly || "1").trim().toLowerCase();
       const unreadOnly = !(unreadOnlyRaw === "0" || unreadOnlyRaw === "false" || unreadOnlyRaw === "no");
       const source = me.notifications || [];
-      const items = unreadOnly ? source.filter((x) => !x.read) : source;
+      const filtered = unreadOnly ? source.filter((x) => !x.read) : source;
+      const items = filtered.map((item) => {
+        if (!item || item.type !== "postcard_received") return item;
+        return {
+          ...item,
+          photoURL: absolutizePostcardPhotoURL(item.photoURL, req)
+        };
+      });
       return res.status(200).json({ items });
     } catch {
       return res.status(401).json({ message: "unauthorized" });
@@ -1696,7 +1833,8 @@ async function main() {
       const fullPath = path.join(MEDIA_DIR, objectKey);
       await fsp.mkdir(path.dirname(fullPath), { recursive: true });
       await fsp.writeFile(fullPath, req.file.buffer);
-      const url = MEDIA_PUBLIC_BASE ? `${MEDIA_PUBLIC_BASE.replace(/\/$/, "")}/media/${objectKey}` : `/media/${objectKey}`;
+      const base = derivePublicBase(req);
+      const url = base ? `${base}/media/${objectKey}` : `/media/${objectKey}`;
       return res.status(200).json({ objectKey, url });
     } catch {
       return res.status(401).json({ message: "unauthorized" });
