@@ -69,7 +69,7 @@ enum JourneyCloudMigrationService {
 
         for route in journeys {
             let title = route.customTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let finalTitle = (title?.isEmpty == false) ? title! : route.displayCityName
+            let finalTitle = (title?.isEmpty == false) ? (title ?? route.displayCityName) : route.displayCityName
             let routeCoordinates = route.coordinates.isEmpty ? route.thumbnailCoordinates : route.coordinates
 
             var memories: [BackendMemoryUploadDTO] = []
@@ -138,6 +138,116 @@ enum JourneyCloudMigrationService {
 
         return uploaded
     }
+
+    // MARK: - Download & Merge (Cloud → Local)
+
+    /// Fetches the user's own profile from the backend (which includes uploaded journeys)
+    /// and merges any cloud-only journeys into the local JourneyStore.
+    /// Returns the number of newly imported journeys.
+    @MainActor
+    static func downloadAndMerge(
+        sessionStore: UserSessionStore,
+        journeyStore: JourneyStore,
+        cityCache: CityCache
+    ) async throws -> Int {
+        guard BackendConfig.isEnabled else { return 0 }
+
+        guard let token = sessionStore.currentAccessToken, !token.isEmpty else {
+            return 0
+        }
+
+        let profile = try await BackendAPIClient.shared.fetchMyProfile(token: token)
+
+        let localIDs = Set(journeyStore.journeys.map(\.id))
+        let cloudOnly = profile.journeys.filter { !localIDs.contains($0.id) }
+        guard !cloudOnly.isEmpty else { return 0 }
+
+        let cards = profile.unlockedCityCards
+        let imported = cloudOnly.map { cloudJourneyToRoute($0, cards: cards) }
+
+        for route in imported {
+            journeyStore.addCompletedJourney(route)
+        }
+
+        cityCache.rebuildFromJourneyStore()
+
+        return imported.count
+    }
+
+    /// Converts a cloud FriendSharedJourney into a local JourneyRoute.
+    private static func cloudJourneyToRoute(_ journey: FriendSharedJourney, cards: [FriendCityCard]) -> JourneyRoute {
+        let routeCoords = journey.routeCoordinates
+        let cityID = resolveCityID(for: journey, cards: cards)
+        let cityCard = cards.first(where: { $0.id == cityID })
+        let cityName = cityCard?.name ?? journey.title
+
+        let fallbackCoordinate = routeCoords.first ?? CoordinateCodable(lat: 0, lon: 0)
+        let memories: [JourneyMemory] = journey.memories.enumerated().map { idx, memory in
+            let coord = routeCoords.isEmpty ? fallbackCoordinate : routeCoords[min(idx, routeCoords.count - 1)]
+            return JourneyMemory(
+                id: memory.id,
+                timestamp: memory.timestamp,
+                title: memory.title,
+                notes: memory.notes,
+                imageData: nil,
+                imagePaths: [],
+                remoteImageURLs: memory.imageURLs,
+                cityKey: cityID,
+                cityName: cityName,
+                coordinate: (coord.lat, coord.lon),
+                type: .memory
+            )
+        }
+
+        return JourneyRoute(
+            id: journey.id,
+            startTime: journey.startTime,
+            endTime: journey.endTime,
+            distance: max(0, journey.distance),
+            elevationGain: 0,
+            elevationLoss: 0,
+            isTooShort: false,
+            cityKey: cityID,
+            canonicalCity: cityName,
+            coordinates: routeCoords,
+            memories: memories,
+            thumbnailCoordinates: routeCoords,
+            countryISO2: cityCard?.countryISO2,
+            currentCity: cityName,
+            cityName: cityName,
+            startCityKey: cityID,
+            endCityKey: cityID,
+            exploreMode: .city,
+            trackingMode: .daily,
+            visibility: journey.visibility,
+            customTitle: journey.title,
+            activityTag: journey.activityTag,
+            overallMemory: journey.overallMemory
+        )
+    }
+
+    private static func resolveCityID(for journey: FriendSharedJourney, cards: [FriendCityCard]) -> String {
+        guard !cards.isEmpty else { return "Unknown|" }
+        let normalizedTitle = journey.title
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+        if let hit = cards.first(where: {
+            $0.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current) == normalizedTitle
+        }) {
+            return hit.id
+        }
+        if let fuzzy = cards.first(where: {
+            let k = $0.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            return !k.isEmpty && !normalizedTitle.isEmpty && (normalizedTitle.contains(k) || k.contains(normalizedTitle))
+        }) {
+            return fuzzy.id
+        }
+        return cards[0].id
+    }
+
+    // MARK: - Helpers
 
     private static func mimeType(for ext: String) -> String {
         switch ext.lowercased() {

@@ -57,10 +57,10 @@ struct JourneyMemoryMainView: View {
     }
 
     private var filteredMemoryJourneys: [JourneyRoute] {
-        guard selectedStartDate != nil else { return allMemoryJourneys }
+        guard let startDate = selectedStartDate else { return allMemoryJourneys }
         let cal = Calendar.current
-        let start = cal.startOfDay(for: selectedStartDate!)
-        let upperBase = selectedEndDate ?? selectedStartDate!
+        let start = cal.startOfDay(for: startDate)
+        let upperBase = selectedEndDate ?? startDate
         let endExclusive = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: upperBase)) ?? upperBase
 
         return allMemoryJourneys.filter { j in

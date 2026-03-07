@@ -230,11 +230,11 @@ struct FriendsHubView: View {
                                             }
                                         },
                                         onOpenProfile: {
-                                            guard !openSelfProfileIfNeeded(friendID: friend.id) else { return }
+                                            ensureSelfSnapshotInSocialStoreIfNeeded(friendID: friend.id)
                                             activeRoute = .profile(friend.id)
                                         },
                                         onOpenEvent: {
-                                            guard !openSelfProfileIfNeeded(friendID: friend.id) else { return }
+                                            ensureSelfSnapshotInSocialStoreIfNeeded(friendID: friend.id)
                                             if let jid = event.journeyID {
                                                 activeRoute = .journey(friendID: friend.id, journeyID: jid)
                                             } else {
@@ -648,13 +648,14 @@ struct FriendsHubView: View {
         "\(friendID)|\(journeyID)"
     }
 
-    @discardableResult
-    private func openSelfProfileIfNeeded(friendID: String) -> Bool {
+    /// When tapping on own post in the feed, ensure the self-snapshot is available
+    /// in socialStore so that FriendProfileScreen / FriendJourneyRouteScreen can find it.
+    private func ensureSelfSnapshotInSocialStoreIfNeeded(friendID: String) {
         let target = friendID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !target.isEmpty, target == currentUserID else { return false }
-        activeRoute = nil
-        flow.requestSelectTab(.profile)
-        return true
+        guard !target.isEmpty, target == currentUserID else { return }
+        if let snapshot = selfSnapshotForFeed {
+            socialStore.importFriendSnapshot(snapshot)
+        }
     }
 
     private func likeCountForEvent(_ event: FriendFeedEvent) -> Int {
@@ -1512,7 +1513,7 @@ private struct FriendProfileScreen: View {
 
                     Spacer()
 
-                    if sessionStore.isLoggedIn {
+                    if sessionStore.isLoggedIn && (sessionStore.accountUserID ?? "") != friendID {
                         Menu {
                             Button(role: .destructive) {
                                 showDeleteFriendConfirm = true

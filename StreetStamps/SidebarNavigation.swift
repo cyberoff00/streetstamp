@@ -9,7 +9,6 @@ enum NavigationTab: Int, CaseIterable, Identifiable {
     case memory = 3
     case profile = 4
     case lifelog = 5
-    case global = 6
     case settings = 7
 
     var id: Int { rawValue }
@@ -22,7 +21,6 @@ enum NavigationTab: Int, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .start: return "START"
-        case .global: return "GLOBE VIEW"
         case .cities: return "CITIES"
         case .friends: return "FRIENDS"
         case .memory: return "MEMORY"
@@ -39,7 +37,6 @@ enum NavigationTab: Int, CaseIterable, Identifiable {
         case .cities: return "CITIES"
         case .profile: return "PROFILE"
         case .settings: return "SETTINGS"
-        case .global: return "GLOBE VIEW"
         case .friends: return "FRIENDS"
         case .lifelog: return "LIFELOG"
         }
@@ -48,7 +45,6 @@ enum NavigationTab: Int, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .start: return "house"
-        case .global: return "globe.europe.africa"
         case .cities: return "mappin.and.ellipse"
         case .friends: return "person.2"
         case .memory: return "heart"

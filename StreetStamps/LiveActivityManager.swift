@@ -56,13 +56,14 @@ final class LiveActivityManager: ObservableObject {
             endActivity()
         }
         
-        trackingStartTime = Date()
+        let startTime = Date()
+        trackingStartTime = startTime
         accumulatedPausedDuration = 0
         currentPauseStartedAt = nil
-        
+
         let attributes = TrackingActivityAttributes(
             trackingMode: mode == .sport ? "sport" : "daily",
-            startTime: trackingStartTime!
+            startTime: startTime
         )
         
         let initialState = TrackingActivityAttributes.ContentState(

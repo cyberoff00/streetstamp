@@ -3,6 +3,55 @@ import MapKit
 import UIKit
 import HealthKit
 
+enum LifelogRenderModeSelector {
+    static let nearModeDistanceThresholdMeters: CLLocationDistance = 2_000
+    static let footprintStepMeters: CLLocationDistance = 50
+
+    static func isNearMode(viewportMaxSpanMeters: CLLocationDistance?) -> Bool {
+        guard let viewportMaxSpanMeters else { return false }
+        return viewportMaxSpanMeters <= nearModeDistanceThresholdMeters
+    }
+
+    static func viewportMaxSpanMeters(for region: MKCoordinateRegion) -> CLLocationDistance {
+        let centerLat = clampLatitude(region.center.latitude)
+        let centerLon = normalizeLongitude(region.center.longitude)
+        let halfLat = abs(region.span.latitudeDelta) / 2.0
+        let halfLon = abs(region.span.longitudeDelta) / 2.0
+
+        let north = CLLocation(
+            latitude: clampLatitude(centerLat + halfLat),
+            longitude: centerLon
+        )
+        let south = CLLocation(
+            latitude: clampLatitude(centerLat - halfLat),
+            longitude: centerLon
+        )
+        let east = CLLocation(
+            latitude: centerLat,
+            longitude: normalizeLongitude(centerLon + halfLon)
+        )
+        let west = CLLocation(
+            latitude: centerLat,
+            longitude: normalizeLongitude(centerLon - halfLon)
+        )
+
+        let verticalMeters = north.distance(from: south)
+        let horizontalMeters = east.distance(from: west)
+        return max(verticalMeters, horizontalMeters)
+    }
+
+    private static func clampLatitude(_ value: CLLocationDegrees) -> CLLocationDegrees {
+        min(max(value, -89.999_999), 89.999_999)
+    }
+
+    private static func normalizeLongitude(_ value: CLLocationDegrees) -> CLLocationDegrees {
+        var out = value.truncatingRemainder(dividingBy: 360)
+        if out > 180 { out -= 360 }
+        if out < -180 { out += 360 }
+        return out
+    }
+}
+
 private struct LifelogShareImageItem: Identifiable {
     let id = UUID()
     let image: UIImage
@@ -71,6 +120,58 @@ enum LifelogFootprintSampler {
     }
 }
 
+enum LifelogFootprintProjector {
+    static func projectRuns(
+        from routeRuns: [[CLLocationCoordinate2D]],
+        stepMeters: CLLocationDistance,
+        gapBreakMeters: CLLocationDistance,
+        countryISO2: String?,
+        cityKey: String?
+    ) -> [[CLLocationCoordinate2D]] {
+        routeRuns.flatMap { run -> [[CLLocationCoordinate2D]] in
+            guard !run.isEmpty else { return [] }
+
+            let segments = RouteRenderingPipeline.buildSegments(
+                .init(
+                    coordsWGS84: run,
+                    applyGCJForChina: false,
+                    gapDistanceMeters: gapBreakMeters,
+                    countryISO2: countryISO2,
+                    cityKey: cityKey
+                ),
+                surface: .canvas
+            ).segments
+
+            let solidSegments = segments.filter { $0.style == .solid && !$0.coords.isEmpty }
+            if !solidSegments.isEmpty {
+                return solidSegments.compactMap { segment in
+                    let sampled = LifelogFootprintSampler.sample(
+                        route: segment.coords,
+                        stepMeters: stepMeters,
+                        gapBreakMeters: gapBreakMeters
+                    )
+                    return sampled.isEmpty ? nil : sampled
+                }
+            }
+
+            // If a run is only a dashed jump, keep isolated endpoints but never sample across it.
+            var isolated: [[CLLocationCoordinate2D]] = []
+            for segment in segments where segment.style == .dashed {
+                guard let first = segment.coords.first else { continue }
+                isolated.append([first])
+                if let last = segment.coords.last, !sameCoordinate(first, last) {
+                    isolated.append([last])
+                }
+            }
+            return isolated
+        }
+    }
+
+    private static func sameCoordinate(_ a: CLLocationCoordinate2D, _ b: CLLocationCoordinate2D) -> Bool {
+        abs(a.latitude - b.latitude) < 0.000_000_1 &&
+        abs(a.longitude - b.longitude) < 0.000_000_1
+    }
+}
 struct LifelogView: View {
     @ObservedObject private var tracking = TrackingService.shared
     @EnvironmentObject private var lifelogStore: LifelogStore
@@ -78,6 +179,7 @@ struct LifelogView: View {
     @EnvironmentObject private var locationHub: LocationHub
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var cityCache: CityCache
+    @EnvironmentObject private var lifelogRenderCache: LifelogRenderCacheCoordinator
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
     @AppStorage(AppSettings.avatarHeadlightEnabledKey) private var avatarHeadlightEnabled = true
 
@@ -100,7 +202,10 @@ struct LifelogView: View {
     @State private var bottomDockHeight: CGFloat = 0
     @State private var visibleRegion: MKCoordinateRegion? = nil
     @State private var cameraRegion: MKCoordinateRegion? = nil
-    @State private var cachedPathCoordsWGS84: [CLLocationCoordinate2D] = []
+    @State private var renderSnapshot: LifelogRenderSnapshot = .empty
+    @State private var renderTask: Task<Void, Never>? = nil
+    @State private var renderGenerationState = LifelogRenderGenerationState()
+    @State private var pendingRecenterDay: Date? = nil
     @AppStorage(MapAppearanceSettings.storageKey) private var mapAppearanceRaw = MapAppearanceSettings.current.rawValue
     @AppStorage("streetstamps.lifelog.health.steps.snapshot.byday") private var stepSnapshotByDayRaw = ""
     @AppStorage("streetstamps.lifelog.health.steps.snapshot.day") private var legacyStepSnapshotDay = ""
@@ -114,7 +219,13 @@ struct LifelogView: View {
     private var isDarkAppearance: Bool { mapAppearance == .dark }
     private var panelBackground: Color { isDarkAppearance ? Color.black.opacity(0.80) : FigmaTheme.card.opacity(0.96) }
     private var panelText: Color { isDarkAppearance ? .white : .black }
-    private var isNearFootprintMode: Bool { renderLodLevel >= 2 }
+    private var viewportMaxSpanMeters: CLLocationDistance? {
+        guard let region = cameraRegion ?? visibleRegion else { return nil }
+        return LifelogRenderModeSelector.viewportMaxSpanMeters(for: region)
+    }
+    private var isNearFootprintMode: Bool {
+        LifelogRenderModeSelector.isNearMode(viewportMaxSpanMeters: viewportMaxSpanMeters)
+    }
     private var nearModeMaxPoints: Int {
         switch renderLodLevel {
         case 3: return 2_400
@@ -126,84 +237,40 @@ struct LifelogView: View {
         max(nearModeMaxPoints * 2, 1_800)
     }
 
-    private func buildPathCoordsWGS84() -> [CLLocationCoordinate2D] {
-        if isNearFootprintMode {
-            if let visibleRegion {
-                let viewport = TrackRenderAdapter.viewport(from: visibleRegion)
-                let tileZoom = TrackRenderAdapter.zoomForLifelogLOD(renderLodLevel)
-                let tileSegments = trackTileStore.tiles(
-                    for: viewport,
-                    zoom: tileZoom,
-                    day: selectedDay
-                )
-                let tileRaw = TrackRenderAdapter.rawCoordinates(from: tileSegments)
-                if !tileRaw.isEmpty {
-                    return tileRaw
-                }
-            }
-            return lifelogStore.mapPolyline(day: selectedDay, maxPoints: nearModeFallbackMaxPoints)
-        }
-
-        if let visibleRegion {
-            let viewport = TrackRenderAdapter.viewport(from: visibleRegion)
-            let tileZoom = TrackRenderAdapter.zoomForLifelogLOD(renderLodLevel)
-            let tileSegments = trackTileStore.tiles(
-                for: viewport,
-                zoom: tileZoom,
-                day: selectedDay
-            )
-            let tilePolyline = TrackRenderAdapter.polylineCoordinates(
-                from: tileSegments,
-                maxPoints: renderMaxPoints
-            )
-            if !tilePolyline.isEmpty {
-                return tilePolyline
-            }
-        }
-
-        return lifelogStore.mapPolylineViewport(
-            day: selectedDay,
-            region: visibleRegion,
-            lodLevel: renderLodLevel,
-            maxPoints: renderMaxPoints
+    private var renderViewportRefreshKey: String {
+        guard let region = visibleRegion else { return "nil" }
+        return String(
+            format: "%.4f|%.4f|%.4f|%.4f|%d",
+            region.center.latitude,
+            region.center.longitude,
+            region.span.latitudeDelta,
+            region.span.longitudeDelta,
+            renderLodLevel
         )
     }
 
     private var farRouteSegments: [RenderRouteSegment] {
-        let pathCoords = cachedPathCoordsWGS84
         guard !isNearFootprintMode else { return [] }
-        guard pathCoords.count >= 2 else { return [] }
-
-        let input = RouteRenderingPipeline.Input(
-            coordsWGS84: pathCoords,
-            applyGCJForChina: false,
-            gapDistanceMeters: 8_000,
-            countryISO2: lifelogCountryISO2
-        )
-        return RouteRenderingPipeline.buildSegments(input, surface: .mapKit).segments
+        return renderSnapshot.farRouteSegments
     }
 
-    private var footprintCoords: [CLLocationCoordinate2D] {
-        let pathCoords = cachedPathCoordsWGS84
+    private var footprintRuns: [[CLLocationCoordinate2D]] {
         guard isNearFootprintMode else { return [] }
-        guard pathCoords.count > 1 else { return [] }
-        let sampled = LifelogFootprintSampler.sample(
-            route: pathCoords,
-            stepMeters: 50,
-            gapBreakMeters: 8_000
-        )
-        return mapCoordsForLifelog(sampled)
+        return renderSnapshot.footprintRuns
     }
 
-    private var footprintRenderCoords: [CLLocationCoordinate2D] {
+    private var footprintRenderRuns: [[CLLocationCoordinate2D]] {
         guard let current = currentDisplayLocation?.coordinate else {
-            return footprintCoords
+            return footprintRuns
         }
         let me = CLLocation(latitude: current.latitude, longitude: current.longitude)
         let threshold = avatarFootprintExclusionMeters
-        return footprintCoords.filter { coord in
-            let point = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
-            return point.distance(from: me) > threshold
+        return footprintRuns.compactMap { run in
+            let filtered = run.filter { coord in
+                let point = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+                return point.distance(from: me) > threshold
+            }
+            return filtered.isEmpty ? nil : filtered
         }
     }
 
@@ -319,7 +386,7 @@ struct LifelogView: View {
                 showEnableHint = true
             }
             centerOnCurrent(force: true)
-            refreshPathCache()
+            scheduleRenderSnapshotRefresh()
             Task {
                 await refreshHealthPermissionState()
                 await requestHealthPermissionIfNeeded()
@@ -331,9 +398,12 @@ struct LifelogView: View {
                 presentMoodPopupIfNeeded()
             }
         }
+        .onDisappear {
+            renderTask?.cancel()
+            renderTask = nil
+        }
         .onChange(of: lifelogStore.availableDays) { _ in
             seedSelectedDayIfNeeded()
-            refreshPathCache()
         }
         .onChange(of: lifelogStore.currentLocation?.coordinate.latitude) { _ in
             centerOnCurrent(force: false)
@@ -347,17 +417,26 @@ struct LifelogView: View {
         .onChange(of: locationHub.currentLocation?.coordinate.longitude) { _ in
             centerOnCurrent(force: false)
         }
+        .onChange(of: store.trackTileRevision) { _ in
+            scheduleRenderSnapshotRefresh()
+        }
         .onChange(of: lifelogStore.trackTileRevision) { _ in
-            refreshPathCache()
+            scheduleRenderSnapshotRefresh()
         }
         .onChange(of: trackTileStore.refreshRevision) { _ in
-            refreshPathCache()
+            scheduleRenderSnapshotRefresh()
         }
         .onChange(of: lifelogStore.countryISO2) { _ in
-            refreshPathCache()
+            scheduleRenderSnapshotRefresh()
+        }
+        .onChange(of: locationHub.countryISO2) { _ in
+            scheduleRenderSnapshotRefresh()
+        }
+        .onChange(of: renderViewportRefreshKey) { _ in
+            scheduleRenderSnapshotRefresh(debounceNanoseconds: 120_000_000)
         }
         .onChange(of: selectedDay) { day in
-            refreshPathCache()
+            scheduleRenderSnapshotRefresh()
             guard isStepPopupVisible else { return }
             guard let day else { return }
             Task {
@@ -407,16 +486,18 @@ struct LifelogView: View {
                 }
             }
 
-            ForEach(footprintRenderCoords.indices, id: \.self) { idx in
-                let style = footprintStyle(at: idx, in: footprintRenderCoords)
-                Annotation("", coordinate: footprintRenderCoords[idx]) {
-                    FootstepMarker(
-                        opacity: style.opacity,
-                        scale: style.scale,
-                        angle: style.angle,
-                        isDark: isDarkAppearance
-                    )
-                    .offset(x: style.lateralOffset)
+            ForEach(Array(footprintRenderRuns.enumerated()), id: \.offset) { _, run in
+                ForEach(run.indices, id: \.self) { idx in
+                    let style = footprintStyle(at: idx, in: run)
+                    Annotation("", coordinate: run[idx]) {
+                        FootstepMarker(
+                            opacity: style.opacity,
+                            scale: style.scale,
+                            angle: style.angle,
+                            isDark: isDarkAppearance
+                        )
+                        .offset(x: style.lateralOffset)
+                    }
                 }
             }
 
@@ -479,7 +560,6 @@ struct LifelogView: View {
             cameraRegion = incoming
             if shouldUpdateVisibleRegion(incoming) {
                 visibleRegion = incoming
-                refreshPathCache()
             }
         }
     }
@@ -1323,19 +1403,92 @@ struct LifelogView: View {
     }
 
     private func centerCoordinateForSelectedDay() -> CLLocationCoordinate2D? {
-        if let last = cachedPathCoordsWGS84.last {
-            return mapCoordForLifelog(last)
+        renderSnapshot.selectedDayCenterCoordinate ?? currentCoordinateForCentering()
+    }
+
+    private func applyRenderSnapshotIfCurrent(_ snapshot: LifelogRenderSnapshot, generation: Int) {
+        guard renderGenerationState.accepts(generation) else { return }
+        debugRenderLog(
+            "apply generation=\(generation) day=\(debugDayString(snapshot.selectedDay)) " +
+            "far=\(snapshot.farRouteSegments.count) footprints=\(snapshot.footprintRuns.count) high=\(snapshot.isHighQuality)"
+        )
+        renderSnapshot = snapshot
+
+        guard let pendingDay = pendingRecenterDay else { return }
+        guard let snapshotDay = snapshot.selectedDay else { return }
+        guard Calendar.current.isDate(snapshotDay, inSameDayAs: pendingDay) else { return }
+        guard let center = snapshot.selectedDayCenterCoordinate else { return }
+
+        position = .region(
+            MKCoordinateRegion(
+                center: center,
+                span: MKCoordinateSpan(latitudeDelta: 0.03, longitudeDelta: 0.03)
+            )
+        )
+        pendingRecenterDay = nil
+    }
+
+    private func scheduleRenderSnapshotRefresh(debounceNanoseconds: UInt64 = 0) {
+        renderTask?.cancel()
+
+        var generationState = renderGenerationState
+        let generation = generationState.issue()
+        renderGenerationState = generationState
+
+        let targetDay = Calendar.current.startOfDay(for: selectedDay ?? Date())
+        let viewport = TrackRenderAdapter.viewport(from: visibleRegion)
+        let countryISO2 = lifelogCountryISO2
+        debugRenderLog(
+            "schedule generation=\(generation) day=\(debugDayString(targetDay)) " +
+            "viewport=\(viewport != nil) country=\(countryISO2 ?? "nil")"
+        )
+        let isSwitchingDay: Bool = {
+            guard let currentDay = renderSnapshot.selectedDay else { return true }
+            return !Calendar.current.isDate(currentDay, inSameDayAs: targetDay)
+        }()
+        if let cached = lifelogRenderCache.cachedRenderSnapshot(
+            day: targetDay,
+            countryISO2: countryISO2,
+            viewport: viewport
+        ) {
+            applyRenderSnapshotIfCurrent(cached, generation: generation)
+        } else if isSwitchingDay {
+            applyRenderSnapshotIfCurrent(
+                LifelogRenderSnapshot(
+                    selectedDay: targetDay,
+                    cachedPathCoordsWGS84: [],
+                    farRouteSegments: [],
+                    footprintRuns: [],
+                    selectedDayCenterCoordinate: nil,
+                    isHighQuality: false
+                ),
+                generation: generation
+            )
         }
-        return currentCoordinateForCentering()
-    }
 
-    private func refreshPathCache() {
-        cachedPathCoordsWGS84 = buildPathCoordsWGS84()
-    }
+        renderTask = Task(priority: .userInitiated) {
+            if debounceNanoseconds > 0 {
+                try? await Task.sleep(nanoseconds: debounceNanoseconds)
+            }
+            guard !Task.isCancelled else { return }
 
-    private func centerCoordinate(for day: Date) -> CLLocationCoordinate2D? {
-        let coords = mapCoordsForLifelog(lifelogStore.mapPolyline(day: day, maxPoints: 220))
-        return coords.last ?? currentCoordinateForCentering()
+            let snapshot = await lifelogRenderCache.ensureRenderSnapshot(
+                day: targetDay,
+                countryISO2: countryISO2,
+                viewport: viewport
+            )
+            guard !Task.isCancelled else { return }
+            guard let snapshot else {
+                await MainActor.run {
+                    debugRenderLog("ensure returned nil day=\(debugDayString(targetDay)) generation=\(generation)")
+                }
+                return
+            }
+
+            await MainActor.run {
+                applyRenderSnapshotIfCurrent(snapshot, generation: generation)
+            }
+        }
     }
 
     private var lifelogCountryISO2: String? {
@@ -1344,16 +1497,6 @@ struct LifelogView: View {
 
     private func mapCoordForLifelog(_ coord: CLLocationCoordinate2D) -> CLLocationCoordinate2D {
         MapCoordAdapter.forMapKit(coord, countryISO2: lifelogCountryISO2)
-    }
-
-    private func mapCoordsForLifelog(_ coords: [CLLocationCoordinate2D]) -> [CLLocationCoordinate2D] {
-        MapCoordAdapter.forMapKit(coords, countryISO2: lifelogCountryISO2)
-    }
-
-    private func recenter(for day: Date) {
-        let regionCenter = centerCoordinate(for: day)
-        guard let center = regionCenter else { return }
-        position = .region(MKCoordinateRegion(center: center, span: MKCoordinateSpan(latitudeDelta: 0.03, longitudeDelta: 0.03)))
     }
 
     private func seedSelectedDayIfNeeded() {
@@ -1445,7 +1588,7 @@ struct LifelogView: View {
         }
         selectedDay = targetDay
         visibleMonthAnchor = monthStart(for: targetDay)
-        recenter(for: targetDay)
+        pendingRecenterDay = targetDay
     }
 
     private func dayCellBackground(day: Date, forMonthMode: Bool) -> Color {
@@ -1730,6 +1873,17 @@ struct LifelogView: View {
         f.timeZone = TimeZone.current
         f.dateFormat = "yyyy-MM-dd"
         return f.string(from: day)
+    }
+
+    private func debugRenderLog(_ message: String) {
+#if DEBUG
+        print("🗺️ [LifelogView] \(message)")
+#endif
+    }
+
+    private func debugDayString(_ day: Date?) -> String {
+        guard let day else { return "nil" }
+        return dayKey(for: day)
     }
 
     private enum CalendarDisplayMode {

@@ -8,6 +8,7 @@ typealias MBMapView = MapboxMaps.MapView
 
 private final class GlobeMapViewHolder: ObservableObject {
     let mapView: MBMapView
+    @Published var styleLoadRevision: Int = 0
     init() {
         self.mapView = MBMapView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
     }
@@ -95,6 +96,11 @@ struct MapboxGlobeView: View {
                     refreshData()
                     updateCountryGlow()
                 }
+                .onChange(of: mapHolder.styleLoadRevision) { _ in
+                    refreshData()
+                    updateCountryGlow()
+                    flyToJourneysIfPossible()
+                }
 
             // Top bar
             VStack {
@@ -144,32 +150,33 @@ struct MapboxGlobeView: View {
             print("✅ styleLoaded")
         }
 
+        let holder = mapHolder
         mapView.mapboxMap.loadStyleURI(.dark) { _ in
             // far view camera (globe)
-            mapView.mapboxMap.setCamera(
+            holder.mapView.mapboxMap.setCamera(
                 to: CameraOptions(center: CLLocationCoordinate2D(latitude: 20, longitude: 0), zoom: 1.1)
             )
 
             // globe projection (enable if available)
             do {
-                try mapView.mapboxMap.style.setProjection(StyleProjection(name: .globe))
+                try holder.mapView.mapboxMap.style.setProjection(StyleProjection(name: .globe))
             } catch {
                 print("⚠️ projection not available:", error)
             }
 
             // gestures
-            mapView.gestures.options.rotateEnabled = true
-            mapView.gestures.options.pinchEnabled = true
-            mapView.gestures.options.panEnabled = true
+            holder.mapView.gestures.options.rotateEnabled = true
+            holder.mapView.gestures.options.pinchEnabled = true
+            holder.mapView.gestures.options.panEnabled = true
 
             addFallbackBackground()
-
             addSourcesAndLayers()
-            refreshData()
-            updateCountryGlow()
 
-            // if has data, fly to bounds (still keep far feel)
-            flyToJourneysIfPossible()
+            // Signal style readiness via reference type — onChange will
+            // call refreshData() with the CURRENT (non-captured) journeys.
+            DispatchQueue.main.async {
+                holder.styleLoadRevision += 1
+            }
         }
     }
 
@@ -654,7 +661,8 @@ struct MapboxGlobeView: View {
     // MARK: - Data
 
     private func refreshData() {
-        guard mapView.mapboxMap.style.sourceExists(withId: footprintsSourceId),
+        guard mapHolder.styleLoadRevision > 0,
+              mapView.mapboxMap.style.sourceExists(withId: footprintsSourceId),
               mapView.mapboxMap.style.sourceExists(withId: citiesSourceId) else { return }
         let startedAt = CFAbsoluteTimeGetCurrent()
 

@@ -1,66 +1,28 @@
 import Foundation
+import CoreLocation
 
 enum TrackTileBuilder {
+    private static let maxSegmentTimeGap: TimeInterval = 30 * 60
+    private static let maxSegmentDistanceGapMeters: CLLocationDistance = 8_000
+
     static func build(events: [TrackRenderEvent], zoom: Int) -> TrackTileBuildOutput {
         guard !events.isEmpty else {
             return TrackTileBuildOutput(tiles: [:])
         }
 
+        let segments = buildSegments(events: events, zoom: zoom)
+        guard !segments.isEmpty else {
+            return TrackTileBuildOutput(tiles: [:])
+        }
+
         let z = max(0, min(zoom, 22))
-        let stride = simplificationStride(for: z)
-        let sortedEvents = events.sorted(by: stableEventOrdering)
-
         var tiles: [TrackTileKey: TrackTileBucket] = [:]
-        for source in TrackSourceType.allCases {
-            let sourceEvents = sortedEvents.filter { $0.sourceType == source }
-            guard !sourceEvents.isEmpty else { continue }
-
-            var currentTileKey: TrackTileKey?
-            var currentRun: [TrackRenderEvent] = []
-
-            func flushCurrentRun() {
-                guard
-                    let key = currentTileKey,
-                    !currentRun.isEmpty
-                else { return }
-
-                let coordinates = currentRun.map(\.coordinate)
-                let simplified = simplify(coordinates: coordinates, stride: stride)
-                guard !simplified.isEmpty else {
-                    currentRun.removeAll(keepingCapacity: true)
-                    return
-                }
-
-                let segment = TrackTileSegment(
-                    sourceType: source,
-                    coordinates: simplified,
-                    startTimestamp: currentRun.first?.timestamp ?? .distantPast,
-                    endTimestamp: currentRun.last?.timestamp ?? .distantPast
-                )
+        for segment in segments {
+            for key in tileKeys(for: segment.coordinates, z: z) {
                 var bucket = tiles[key] ?? TrackTileBucket(segments: [])
                 bucket.segments.append(segment)
                 tiles[key] = bucket
-                currentRun.removeAll(keepingCapacity: true)
             }
-
-            for event in sourceEvents {
-                let key = tileKey(for: event.coordinate, z: z)
-                if currentTileKey == nil {
-                    currentTileKey = key
-                    currentRun = [event]
-                    continue
-                }
-
-                if key == currentTileKey {
-                    currentRun.append(event)
-                } else {
-                    flushCurrentRun()
-                    currentTileKey = key
-                    currentRun = [event]
-                }
-            }
-
-            flushCurrentRun()
         }
 
         for key in tiles.keys {
@@ -78,6 +40,35 @@ enum TrackTileBuilder {
         }
 
         return TrackTileBuildOutput(tiles: tiles)
+    }
+
+    static func buildSegments(events: [TrackRenderEvent], zoom: Int) -> [TrackTileSegment] {
+        guard !events.isEmpty else { return [] }
+
+        let z = max(0, min(zoom, 22))
+        return buildEventRuns(events: events).compactMap { run in
+            guard let first = run.first, let last = run.last else { return nil }
+            let coordinates = run.map(\.coordinate)
+            let simplified = simplify(coordinates: coordinates, zoom: z)
+            guard !simplified.isEmpty else { return nil }
+
+            return TrackTileSegment(
+                id: segmentID(
+                    source: first.sourceType,
+                    startTimestamp: first.timestamp,
+                    endTimestamp: last.timestamp,
+                    coordinates: simplified
+                ),
+                sourceType: first.sourceType,
+                coordinates: simplified,
+                startTimestamp: first.timestamp,
+                endTimestamp: last.timestamp
+            )
+        }
+    }
+
+    static func tailEvents(events: [TrackRenderEvent]) -> [TrackRenderEvent] {
+        buildEventRuns(events: events).last ?? []
     }
 
     private static func tileKey(for coord: CoordinateCodable, z: Int) -> TrackTileKey {
@@ -99,13 +90,14 @@ enum TrackTileBuilder {
         case 6...8:
             return 4
         case 9...11:
-            return 2
+            return 1
         default:
             return 1
         }
     }
 
-    private static func simplify(coordinates: [CoordinateCodable], stride: Int) -> [CoordinateCodable] {
+    private static func simplify(coordinates: [CoordinateCodable], zoom: Int) -> [CoordinateCodable] {
+        let stride = simplificationStride(for: zoom)
         guard stride > 1, coordinates.count > 2 else {
             return coordinates
         }
@@ -125,6 +117,76 @@ enum TrackTileBuilder {
         }
 
         return out
+    }
+
+    private static func shouldStartNewSegment(after previous: TrackRenderEvent, before next: TrackRenderEvent) -> Bool {
+        if previous.sourceType != next.sourceType {
+            return true
+        }
+        if next.timestamp.timeIntervalSince(previous.timestamp) > maxSegmentTimeGap {
+            return true
+        }
+
+        let previousLocation = CLLocation(latitude: previous.coordinate.lat, longitude: previous.coordinate.lon)
+        let nextLocation = CLLocation(latitude: next.coordinate.lat, longitude: next.coordinate.lon)
+        return nextLocation.distance(from: previousLocation) > maxSegmentDistanceGapMeters
+    }
+
+    private static func buildEventRuns(events: [TrackRenderEvent]) -> [[TrackRenderEvent]] {
+        guard !events.isEmpty else { return [] }
+
+        let sortedEvents = events.sorted(by: stableEventOrdering)
+        var built: [[TrackRenderEvent]] = []
+        var currentRun: [TrackRenderEvent] = []
+
+        func flushCurrentRun() {
+            guard !currentRun.isEmpty else { return }
+            built.append(currentRun)
+            currentRun.removeAll(keepingCapacity: true)
+        }
+
+        for event in sortedEvents {
+            guard let previous = currentRun.last else {
+                currentRun = [event]
+                continue
+            }
+
+            if shouldStartNewSegment(after: previous, before: event) {
+                flushCurrentRun()
+                currentRun = [event]
+                continue
+            }
+
+            currentRun.append(event)
+        }
+
+        flushCurrentRun()
+        return built
+    }
+
+    private static func tileKeys(for coordinates: [CoordinateCodable], z: Int) -> Set<TrackTileKey> {
+        guard !coordinates.isEmpty else { return [] }
+        return Set(coordinates.map { tileKey(for: $0, z: z) })
+    }
+
+    private static func segmentID(
+        source: TrackSourceType,
+        startTimestamp: Date,
+        endTimestamp: Date,
+        coordinates: [CoordinateCodable]
+    ) -> String {
+        let first = coordinates.first ?? CoordinateCodable(lat: 0, lon: 0)
+        let last = coordinates.last ?? first
+        return [
+            source.rawValue,
+            String(Int(startTimestamp.timeIntervalSince1970)),
+            String(Int(endTimestamp.timeIntervalSince1970)),
+            String(coordinates.count),
+            String(format: "%.6f", first.lat),
+            String(format: "%.6f", first.lon),
+            String(format: "%.6f", last.lat),
+            String(format: "%.6f", last.lon)
+        ].joined(separator: "|")
     }
 
     private static func stableEventOrdering(_ lhs: TrackRenderEvent, _ rhs: TrackRenderEvent) -> Bool {

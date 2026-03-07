@@ -3,7 +3,7 @@ import CoreLocation
 import Combine
 
 final class TrackTileStore: ObservableObject {
-    private static let currentSchemaVersion = 3
+    private static let currentSchemaVersion = 5
     private var paths: StoragePath
     private let fm: FileManager
     private let encoder: JSONEncoder
@@ -78,58 +78,35 @@ final class TrackTileStore: ObservableObject {
                 }
 
                 let previousTiles = bucketsByZoom[z] ?? [:]
-                var merged: [TrackTileKey: TrackTileBucket]
-                var dayIndex: [String: [IndexedSegment]]
+                let merged: [TrackTileKey: TrackTileBucket]
 
                 if let manifest,
                    manifest.zoom == z,
                    manifest.schemaVersion == Self.currentSchemaVersion,
                    bucketsByZoom[z] != nil {
-                    merged = bucketsByZoom[z] ?? [:]
-                    dayIndex = dayIndexByZoom[z] ?? [:]
-
-                    if manifest.journeyRevision != journeyRevision {
-                        let appended = appendedEventsIfPossible(
-                            events: journeyEvents,
-                            previousCount: manifest.journeyEventCount,
-                            previousLastTimestamp: manifest.journeyLastEventTimestamp,
-                            previousLastCoord: manifest.journeyLastEventCoord
-                        )
-                        if let appended, !appended.isEmpty {
-                            let overlay = TrackTileBuilder.build(events: appended, zoom: z).tiles
-                            merged = merging(into: merged, with: overlay)
-                            dayIndex = mergingDayIndex(base: dayIndex, overlayTiles: overlay)
-                        } else {
-                            merged = removing(source: .journey, from: merged)
-                            let rebuiltJourney = TrackTileBuilder.build(events: journeyEvents, zoom: z).tiles
-                            merged = merging(into: merged, with: rebuiltJourney)
-                            dayIndex = buildDayIndex(for: merged)
-                        }
-                    }
-
-                    if manifest.passiveRevision != passiveRevision {
-                        let appended = appendedEventsIfPossible(
-                            events: passiveEvents,
-                            previousCount: manifest.passiveEventCount,
-                            previousLastTimestamp: manifest.passiveLastEventTimestamp,
-                            previousLastCoord: manifest.passiveLastEventCoord
-                        )
-                        if let appended, !appended.isEmpty {
-                            let overlay = TrackTileBuilder.build(events: appended, zoom: z).tiles
-                            merged = merging(into: merged, with: overlay)
-                            dayIndex = mergingDayIndex(base: dayIndex, overlayTiles: overlay)
-                        } else {
-                            merged = removing(source: .passive, from: merged)
-                            let rebuiltPassive = TrackTileBuilder.build(events: passiveEvents, zoom: z).tiles
-                            merged = merging(into: merged, with: rebuiltPassive)
-                            dayIndex = buildDayIndex(for: merged)
-                        }
-                    }
+                    var updated = bucketsByZoom[z] ?? [:]
+                    updated = try refreshSource(
+                        .journey,
+                        events: journeyEvents,
+                        revision: journeyRevision,
+                        manifest: manifest,
+                        zoom: z,
+                        tiles: updated
+                    )
+                    updated = try refreshSource(
+                        .passive,
+                        events: passiveEvents,
+                        revision: passiveRevision,
+                        manifest: manifest,
+                        zoom: z,
+                        tiles: updated
+                    )
+                    merged = updated
                 } else {
                     let all = journeyEvents + passiveEvents
                     merged = TrackTileBuilder.build(events: all, zoom: z).tiles
-                    dayIndex = buildDayIndex(for: merged)
                 }
+                let dayIndex = buildDayIndex(for: merged)
 
                 bucketsByZoom[z] = merged
                 dayIndexByZoom[z] = dayIndex
@@ -144,6 +121,8 @@ final class TrackTileStore: ObservableObject {
                     passiveLastEventTimestamp: passiveEvents.last?.timestamp,
                     journeyLastEventCoord: journeyEvents.last?.coordinate,
                     passiveLastEventCoord: passiveEvents.last?.coordinate,
+                    journeyTailEvents: TrackTileBuilder.tailEvents(events: journeyEvents),
+                    passiveTailEvents: TrackTileBuilder.tailEvents(events: passiveEvents),
                     updatedAt: Date()
                 )
                 _currentManifest = nextManifest
@@ -186,6 +165,7 @@ final class TrackTileStore: ObservableObject {
             }
 
             var out: [TrackTileSegment] = []
+            var seenSegmentIDs = Set<String>()
             if let day,
                let dayMap = dayIndexByZoom[z],
                let entries = dayMap[dayKey(for: day)] {
@@ -196,7 +176,38 @@ final class TrackTileStore: ObservableObject {
                     if let sourceFilter, !sourceFilter.contains(entry.segment.sourceType) {
                         continue
                     }
+                    if !seenSegmentIDs.insert(entry.segment.id).inserted {
+                        continue
+                    }
                     out.append(entry.segment)
+                }
+            } else if let day {
+                // Day index not yet built — fallback to timestamp range filter.
+                let cal = Calendar.current
+                let dayStart = cal.startOfDay(for: day)
+                let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
+
+                let keys: [TrackTileKey]
+                if let xs, let ys {
+                    keys = buckets.keys.filter { xs.contains($0.x) && ys.contains($0.y) }
+                } else {
+                    keys = Array(buckets.keys)
+                }
+
+                for key in keys {
+                    guard let bucket = buckets[key] else { continue }
+                    for segment in bucket.segments {
+                        if segment.startTimestamp >= dayEnd || segment.endTimestamp < dayStart {
+                            continue
+                        }
+                        if let sourceFilter, !sourceFilter.contains(segment.sourceType) {
+                            continue
+                        }
+                        if !seenSegmentIDs.insert(segment.id).inserted {
+                            continue
+                        }
+                        out.append(segment)
+                    }
                 }
             } else {
                 let keys: [TrackTileKey]
@@ -208,10 +219,17 @@ final class TrackTileStore: ObservableObject {
 
                 for key in keys {
                     guard let bucket = buckets[key] else { continue }
+                    let segments: [TrackTileSegment]
                     if let sourceFilter {
-                        out.append(contentsOf: bucket.segments.filter { sourceFilter.contains($0.sourceType) })
+                        segments = bucket.segments.filter { sourceFilter.contains($0.sourceType) }
                     } else {
-                        out.append(contentsOf: bucket.segments)
+                        segments = bucket.segments
+                    }
+                    for segment in segments {
+                        if !seenSegmentIDs.insert(segment.id).inserted {
+                            continue
+                        }
+                        out.append(segment)
                     }
                 }
             }
@@ -295,10 +313,104 @@ final class TrackTileStore: ObservableObject {
         return TrackTileKey(z: z, x: x, y: y)
     }
 
-    private func removing(source: TrackSourceType, from input: [TrackTileKey: TrackTileBucket]) -> [TrackTileKey: TrackTileBucket] {
+    private func buildDayIndex(for tiles: [TrackTileKey: TrackTileBucket]) -> [String: [IndexedSegment]] {
+        var index: [String: [IndexedSegment]] = [:]
+        for (key, bucket) in tiles {
+            for segment in bucket.segments {
+                for day in dayKeys(for: segment) {
+                    index[day, default: []].append(IndexedSegment(key: key, segment: segment))
+                }
+            }
+        }
+        return index
+    }
+
+    private func refreshSource(
+        _ source: TrackSourceType,
+        events: [TrackRenderEvent],
+        revision: Int,
+        manifest: TrackTileManifest,
+        zoom: Int,
+        tiles: [TrackTileKey: TrackTileBucket]
+    ) throws -> [TrackTileKey: TrackTileBucket] {
+        let currentRevision: Int = {
+            switch source {
+            case .journey: return manifest.journeyRevision
+            case .passive: return manifest.passiveRevision
+            }
+        }()
+        guard currentRevision != revision else { return tiles }
+
+        let previousCount: Int = {
+            switch source {
+            case .journey: return manifest.journeyEventCount
+            case .passive: return manifest.passiveEventCount
+            }
+        }()
+        let previousLastTimestamp: Date? = {
+            switch source {
+            case .journey: return manifest.journeyLastEventTimestamp
+            case .passive: return manifest.passiveLastEventTimestamp
+            }
+        }()
+        let previousLastCoord: CoordinateCodable? = {
+            switch source {
+            case .journey: return manifest.journeyLastEventCoord
+            case .passive: return manifest.passiveLastEventCoord
+            }
+        }()
+        let tailEvents: [TrackRenderEvent] = {
+            switch source {
+            case .journey: return manifest.journeyTailEvents ?? []
+            case .passive: return manifest.passiveTailEvents ?? []
+            }
+        }()
+
+        if let appended = appendedEventsIfPossible(
+            events: events,
+            previousCount: previousCount,
+            previousLastTimestamp: previousLastTimestamp,
+            previousLastCoord: previousLastCoord
+        ) {
+            guard !appended.isEmpty else { return tiles }
+            guard let dirtyStart = tailEvents.first?.timestamp else {
+                return rebuildingWholeSource(source, events: events, zoom: zoom, tiles: tiles)
+            }
+
+            var updated = removing(source: source, overlappingOrAfter: dirtyStart, from: tiles)
+            let rebuiltTail = tailEvents + appended
+            let overlay = TrackTileBuilder.build(events: rebuiltTail, zoom: zoom).tiles
+            updated = merging(into: updated, with: overlay)
+            return updated
+        }
+
+        return rebuildingWholeSource(source, events: events, zoom: zoom, tiles: tiles)
+    }
+
+    private func rebuildingWholeSource(
+        _ source: TrackSourceType,
+        events: [TrackRenderEvent],
+        zoom: Int,
+        tiles: [TrackTileKey: TrackTileBucket]
+    ) -> [TrackTileKey: TrackTileBucket] {
+        var updated = removing(source: source, overlappingOrAfter: nil, from: tiles)
+        let overlay = TrackTileBuilder.build(events: events, zoom: zoom).tiles
+        updated = merging(into: updated, with: overlay)
+        return updated
+    }
+
+    private func removing(
+        source: TrackSourceType,
+        overlappingOrAfter dirtyStart: Date?,
+        from input: [TrackTileKey: TrackTileBucket]
+    ) -> [TrackTileKey: TrackTileBucket] {
         var out: [TrackTileKey: TrackTileBucket] = [:]
         for (key, bucket) in input {
-            let kept = bucket.segments.filter { $0.sourceType != source }
+            let kept = bucket.segments.filter { segment in
+                guard segment.sourceType == source else { return true }
+                guard let dirtyStart else { return false }
+                return segment.endTimestamp < dirtyStart
+            }
             if !kept.isEmpty {
                 out[key] = TrackTileBucket(segments: kept)
             }
@@ -339,33 +451,6 @@ final class TrackTileStore: ObservableObject {
             return []
         }
         return Array(events.dropFirst(previousCount))
-    }
-
-    private func buildDayIndex(for tiles: [TrackTileKey: TrackTileBucket]) -> [String: [IndexedSegment]] {
-        var index: [String: [IndexedSegment]] = [:]
-        for (key, bucket) in tiles {
-            for segment in bucket.segments {
-                for day in dayKeys(for: segment) {
-                    index[day, default: []].append(IndexedSegment(key: key, segment: segment))
-                }
-            }
-        }
-        return index
-    }
-
-    private func mergingDayIndex(
-        base: [String: [IndexedSegment]],
-        overlayTiles: [TrackTileKey: TrackTileBucket]
-    ) -> [String: [IndexedSegment]] {
-        var out = base
-        for (key, bucket) in overlayTiles {
-            for segment in bucket.segments {
-                for day in dayKeys(for: segment) {
-                    out[day, default: []].append(IndexedSegment(key: key, segment: segment))
-                }
-            }
-        }
-        return out
     }
 
     private func dayKeys(for segment: TrackTileSegment) -> [String] {

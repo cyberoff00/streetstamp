@@ -30,7 +30,7 @@ struct GlobeViewScreen: View {
     @State private var journeysForRender: [JourneyRoute] = []
     @State private var visitedCountries: [String] = []
     @State private var isPreparingData = false
-    @State private var didKickoffLifelogBackfill = false
+    @State private var refreshGate = GlobeRefreshGate()
 
     var body: some View {
         ZStack {
@@ -67,14 +67,6 @@ struct GlobeViewScreen: View {
             guard journeysForRender.isEmpty else { return }
             refreshGlobeData()
         }
-        .onAppear {
-            kickOffLifelogBackfillIfNeeded()
-        }
-        .onChange(of: store.hasLoaded) { loaded in
-            if loaded {
-                kickOffLifelogBackfillIfNeeded()
-            }
-        }
         .onChange(of: store.trackTileRevision) { _ in
             refreshGlobeData()
         }
@@ -82,6 +74,15 @@ struct GlobeViewScreen: View {
             refreshGlobeData()
         }
         .onChange(of: cityCache.cachedCities.count) { _ in
+            refreshGlobeData()
+        }
+        .onChange(of: trackTileStore.refreshRevision) { _ in
+            refreshGlobeData()
+        }
+        .onChange(of: store.hasLoaded) { _ in
+            refreshGlobeData()
+        }
+        .onChange(of: lifelogStore.hasLoaded) { _ in
             refreshGlobeData()
         }
     }
@@ -201,89 +202,74 @@ struct GlobeViewScreen: View {
     }
 
     private func refreshGlobeData() {
-        if isPreparingData { return }
+        var gate = refreshGate
+        guard gate.startOrQueue() else {
+            refreshGate = gate
+            return
+        }
+        refreshGate = gate
         isPreparingData = true
 
         let countryISO2 = lifelogStore.countryISO2
-        let tileSegments = trackTileStore.tiles(for: nil, zoom: TrackRenderAdapter.unifiedRenderZoom)
         let external = externalJourneys
         let summary = store.journeys
-        let journeyEvents = store.trackRenderEvents()
-        let passiveEvents = lifelogStore.trackRenderEvents()
-        let lifelogRoutes = lifelogStore.globeJourneys()
+        let tileSegments = trackTileStore.tiles(
+            for: nil,
+            zoom: TrackRenderAdapter.unifiedRenderZoom
+        )
         let cityISO2 = cityCache.cachedCities
             .filter { $0.isTemporary != true }
             .compactMap { $0.countryISO2?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
             .filter { $0.count == 2 }
+        let previewRoutes = GlobeRouteResolver.resolve(
+            externalJourneys: external,
+            summaryJourneys: summary,
+            segments: tileSegments,
+            countryISO2: countryISO2
+        )
+        let previewCountries = Self.resolveVisitedCountries(routes: previewRoutes, cityISO2: cityISO2)
+        journeysForRender = previewRoutes
+        visitedCountries = previewCountries
 
-        DispatchQueue.global(qos: .userInitiated).async {
-            let routes = Self.resolveRoutesForGlobe(
-                tileSegments: tileSegments,
+        let shouldFetchUnifiedSegments = GlobeRouteResolver.shouldFetchUnifiedSegments(tileSegments: tileSegments)
+        guard shouldFetchUnifiedSegments else {
+            var gate = refreshGate
+            let shouldRefreshAgain = gate.finish()
+            refreshGate = gate
+            isPreparingData = false
+            if shouldRefreshAgain {
+                refreshGlobeData()
+            }
+            return
+        }
+
+        Task(priority: .userInitiated) {
+            let segments = await UnifiedLifelogRenderProvider.segmentsAsync(
+                journeyStore: store,
+                lifelogStore: lifelogStore,
+                zoom: TrackRenderAdapter.unifiedRenderZoom
+            )
+            let routes = GlobeRouteResolver.resolve(
                 externalJourneys: external,
                 summaryJourneys: summary,
-                journeyEvents: journeyEvents,
-                passiveEvents: passiveEvents,
-                lifelogRoutes: lifelogRoutes,
+                segments: segments,
                 countryISO2: countryISO2
             )
             let countries = Self.resolveVisitedCountries(routes: routes, cityISO2: cityISO2)
 
-            DispatchQueue.main.async {
+            await MainActor.run {
                 journeysForRender = routes
                 visitedCountries = countries
+
+                var gate = refreshGate
+                let shouldRefreshAgain = gate.finish()
+                refreshGate = gate
                 isPreparingData = false
+                if shouldRefreshAgain {
+                    refreshGlobeData()
+                }
             }
         }
-    }
-
-    private static func resolveRoutesForGlobe(
-        tileSegments: [TrackTileSegment],
-        externalJourneys: [JourneyRoute]?,
-        summaryJourneys: [JourneyRoute],
-        journeyEvents: [TrackRenderEvent],
-        passiveEvents: [TrackRenderEvent],
-        lifelogRoutes: [JourneyRoute],
-        countryISO2: String?
-    ) -> [JourneyRoute] {
-        let tileRoutes = TrackRenderAdapter.globeJourneys(
-            from: tileSegments,
-            countryISO2: countryISO2
-        )
-        if !tileRoutes.isEmpty {
-            return tileRoutes
-        }
-
-        if let externalJourneys, !externalJourneys.isEmpty {
-            return externalJourneys
-        }
-
-        let liveEvents = journeyEvents + passiveEvents
-        let liveTiles = TrackTileBuilder.build(
-            events: liveEvents,
-            zoom: TrackRenderAdapter.unifiedRenderZoom
-        ).tiles
-        let liveSegments = liveTiles.values.flatMap(\.segments).sorted {
-            if $0.startTimestamp != $1.startTimestamp {
-                return $0.startTimestamp < $1.startTimestamp
-            }
-            if $0.endTimestamp != $1.endTimestamp {
-                return $0.endTimestamp < $1.endTimestamp
-            }
-            return $0.sourceType.rawValue < $1.sourceType.rawValue
-        }
-        let liveRoutes = TrackRenderAdapter.globeJourneys(
-            from: liveSegments,
-            countryISO2: countryISO2
-        )
-        if !liveRoutes.isEmpty {
-            return liveRoutes
-        }
-
-        if !lifelogRoutes.isEmpty {
-            return lifelogRoutes
-        }
-
-        return summaryJourneys
     }
 
     private static func resolveVisitedCountries(routes: [JourneyRoute], cityISO2: [String]) -> [String] {
@@ -316,17 +302,6 @@ struct GlobeViewScreen: View {
         guard let raw = parts.last else { return nil }
         let iso = String(raw).trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         return iso.count == 2 ? iso : nil
-    }
-
-    private func kickOffLifelogBackfillIfNeeded() {
-        guard !didKickoffLifelogBackfill else { return }
-        guard store.hasLoaded else { return }
-        didKickoffLifelogBackfill = true
-
-        let snapshot = store.journeys
-        Task(priority: .utility) {
-            await lifelogStore.backfillHistoricalJourneysIfNeeded(from: snapshot)
-        }
     }
 
     private func captureCurrentPageImage() -> UIImage? {

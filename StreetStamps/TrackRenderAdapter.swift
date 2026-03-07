@@ -2,8 +2,137 @@ import Foundation
 import CoreLocation
 import MapKit
 
+enum UnifiedLifelogRenderProvider {
+    @MainActor
+    static func trackRenderEvents(journeyStore: JourneyStore, lifelogStore: LifelogStore) -> [TrackRenderEvent] {
+        trackRenderEvents(
+            journeyEvents: journeyStore.trackRenderEvents(),
+            passiveEvents: lifelogStore.trackRenderEvents()
+        )
+    }
+
+    static func trackRenderEvents(
+        journeyEvents: [TrackRenderEvent],
+        passiveEvents: [TrackRenderEvent]
+    ) -> [TrackRenderEvent] {
+        let merged = journeyEvents + passiveEvents
+        return merged.sorted(by: stableEventOrdering)
+    }
+
+    static func trackRenderEventsAsync(
+        journeyStore: JourneyStore,
+        lifelogStore: LifelogStore
+    ) async -> [TrackRenderEvent] {
+        async let journeyEvents = journeyStore.trackRenderEventsAsync()
+        async let passiveEvents = lifelogStore.trackRenderEventsAsync()
+        let resolvedJourneyEvents = await journeyEvents
+        let resolvedPassiveEvents = await passiveEvents
+        return await Task.detached(priority: .utility) {
+            trackRenderEvents(
+                journeyEvents: resolvedJourneyEvents,
+                passiveEvents: resolvedPassiveEvents
+            )
+        }.value
+    }
+
+    @MainActor
+    static func segments(
+        journeyStore: JourneyStore,
+        lifelogStore: LifelogStore,
+        zoom: Int = TrackRenderAdapter.unifiedRenderZoom,
+        day: Date? = nil,
+        sourceFilter: Set<TrackSourceType>? = nil
+    ) -> [TrackTileSegment] {
+        segments(
+            journeyEvents: journeyStore.trackRenderEvents(),
+            passiveEvents: lifelogStore.trackRenderEvents(),
+            zoom: zoom,
+            day: day,
+            sourceFilter: sourceFilter
+        )
+    }
+
+    static func segments(
+        journeyEvents: [TrackRenderEvent],
+        passiveEvents: [TrackRenderEvent],
+        zoom: Int = TrackRenderAdapter.unifiedRenderZoom,
+        day: Date? = nil,
+        sourceFilter: Set<TrackSourceType>? = nil
+    ) -> [TrackTileSegment] {
+        let segments = TrackTileBuilder.buildSegments(
+            events: trackRenderEvents(journeyEvents: journeyEvents, passiveEvents: passiveEvents),
+            zoom: zoom
+        )
+        return TrackRenderAdapter.filteredSegments(from: segments, source: sourceFilter, day: day)
+    }
+
+    static func segmentsAsync(
+        journeyStore: JourneyStore,
+        lifelogStore: LifelogStore,
+        zoom: Int = TrackRenderAdapter.unifiedRenderZoom,
+        day: Date? = nil,
+        sourceFilter: Set<TrackSourceType>? = nil
+    ) async -> [TrackTileSegment] {
+        async let journeyEvents = journeyStore.trackRenderEventsAsync()
+        async let passiveEvents = lifelogStore.trackRenderEventsAsync()
+        let resolvedJourneyEvents = await journeyEvents
+        let resolvedPassiveEvents = await passiveEvents
+        return await Task.detached(priority: .utility) {
+            segments(
+                journeyEvents: resolvedJourneyEvents,
+                passiveEvents: resolvedPassiveEvents,
+                zoom: zoom,
+                day: day,
+                sourceFilter: sourceFilter
+            )
+        }.value
+    }
+
+    private static func stableEventOrdering(_ lhs: TrackRenderEvent, _ rhs: TrackRenderEvent) -> Bool {
+        if lhs.timestamp != rhs.timestamp {
+            return lhs.timestamp < rhs.timestamp
+        }
+        if lhs.sourceType != rhs.sourceType {
+            return lhs.sourceType.rawValue < rhs.sourceType.rawValue
+        }
+        if lhs.coordinate.lat != rhs.coordinate.lat {
+            return lhs.coordinate.lat < rhs.coordinate.lat
+        }
+        return lhs.coordinate.lon < rhs.coordinate.lon
+    }
+}
+
 enum TrackRenderAdapter {
     static let unifiedRenderZoom = 10
+
+    static func globeSegments(
+        from events: [TrackRenderEvent],
+        zoom: Int = unifiedRenderZoom,
+        sourceFilter: Set<TrackSourceType>? = nil
+    ) -> [TrackTileSegment] {
+        filteredSegments(
+            from: TrackTileBuilder.buildSegments(events: events, zoom: zoom),
+            source: sourceFilter,
+            day: nil
+        )
+        .filter { $0.coordinates.count >= 2 }
+        .sorted {
+            if $0.startTimestamp != $1.startTimestamp {
+                return $0.startTimestamp < $1.startTimestamp
+            }
+            if $0.endTimestamp != $1.endTimestamp {
+                return $0.endTimestamp < $1.endTimestamp
+            }
+            return $0.sourceType.rawValue < $1.sourceType.rawValue
+        }
+    }
+
+    static func globePassiveSegments(
+        from events: [TrackRenderEvent],
+        zoom: Int = unifiedRenderZoom
+    ) -> [TrackTileSegment] {
+        globeSegments(from: events, zoom: zoom, sourceFilter: [.passive])
+    }
 
     static func globeJourneys(from segments: [TrackTileSegment], countryISO2: String?) -> [JourneyRoute] {
         let filtered = segments.filter { $0.coordinates.count >= 2 }
@@ -63,6 +192,37 @@ enum TrackRenderAdapter {
         return merged.map { CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon) }
     }
 
+    static func rawCoordinateRuns(
+        from segments: [TrackTileSegment],
+        source: TrackSourceType? = nil,
+        day: Date? = nil
+    ) -> [[CLLocationCoordinate2D]] {
+        let filteredByDay = filter(segments: segments, for: day)
+        let filteredBySource: [TrackTileSegment]
+        if let source {
+            filteredBySource = filteredByDay.filter { $0.sourceType == source }
+        } else {
+            filteredBySource = filteredByDay
+        }
+
+        return filteredBySource.compactMap { segment in
+            let coords = segment.coordinates.map {
+                CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon)
+            }
+            return coords.isEmpty ? nil : coords
+        }
+    }
+
+    static func filteredSegments(
+        from segments: [TrackTileSegment],
+        source: Set<TrackSourceType>? = nil,
+        day: Date? = nil
+    ) -> [TrackTileSegment] {
+        let filteredByDay = filter(segments: segments, for: day)
+        guard let source else { return filteredByDay }
+        return filteredByDay.filter { source.contains($0.sourceType) }
+    }
+
     static func viewport(from region: MKCoordinateRegion?) -> TrackTileViewport? {
         guard let region else { return nil }
         let halfLat = region.span.latitudeDelta / 2.0
@@ -73,6 +233,27 @@ enum TrackRenderAdapter {
             minLon: region.center.longitude - halfLon,
             maxLon: region.center.longitude + halfLon
         )
+    }
+
+    static func segmentIntersectsViewport(_ segment: TrackTileSegment, viewport: TrackTileViewport) -> Bool {
+        guard !segment.coordinates.isEmpty else { return false }
+
+        var minLat = Double.greatestFiniteMagnitude
+        var maxLat = -Double.greatestFiniteMagnitude
+        var minLon = Double.greatestFiniteMagnitude
+        var maxLon = -Double.greatestFiniteMagnitude
+
+        for coord in segment.coordinates {
+            minLat = min(minLat, coord.lat)
+            maxLat = max(maxLat, coord.lat)
+            minLon = min(minLon, coord.lon)
+            maxLon = max(maxLon, coord.lon)
+        }
+
+        return !(maxLat < viewport.minLat ||
+                 minLat > viewport.maxLat ||
+                 maxLon < viewport.minLon ||
+                 minLon > viewport.maxLon)
     }
 
     static func zoomForLifelogLOD(_ lodLevel: Int) -> Int {
@@ -119,6 +300,7 @@ enum TrackRenderAdapter {
         let clippedStart = max(start, segment.startTimestamp)
         let clippedEnd = min(end, segment.endTimestamp)
         return TrackTileSegment(
+            id: segment.id,
             sourceType: segment.sourceType,
             coordinates: kept,
             startTimestamp: clippedStart,

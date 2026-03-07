@@ -770,7 +770,7 @@ struct PopSharingCard: View {
 
         guard let minLat = lats.min(), let maxLat = lats.max(),
               let minLon = lons.min(), let maxLon = lons.max() else {
-            let center = drawCoords.last ?? fallbackCenter ?? drawCoords[0]
+            let center = drawCoords.last ?? fallbackCenter ?? CLLocationCoordinate2D(latitude: 0, longitude: 0)
             let region = MKCoordinateRegion(center: center, span: .init(latitudeDelta: stillSpan, longitudeDelta: stillSpan))
             snapshot(region: region, drawRoute: false)
             return
@@ -1194,7 +1194,7 @@ struct ShareCardGenerator {
 
         guard let minLat = lats.min(), let maxLat = lats.max(),
               let minLon = lons.min(), let maxLon = lons.max() else {
-            let center = drawCoords.last ?? fallbackCenter ?? drawCoords[0]
+            let center = drawCoords.last ?? fallbackCenter ?? CLLocationCoordinate2D(latitude: 0, longitude: 0)
             let region = MKCoordinateRegion(center: center, span: .init(latitudeDelta: stillSpan, longitudeDelta: stillSpan))
             snapshot(region: region, drawRoute: false)
             return

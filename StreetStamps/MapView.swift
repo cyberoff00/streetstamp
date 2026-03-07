@@ -14,7 +14,7 @@ import PhotosUI
 
 // MARK: - Models
 
-struct CoordinateCodable: Codable, Hashable {
+struct CoordinateCodable: Codable, Hashable, Sendable {
     var lat: Double
     var lon: Double
 }

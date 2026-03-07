@@ -41,7 +41,7 @@ enum DataMigrator {
         }
 
         let fm = FileManager.default
-        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first!
+        guard let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
 
         // 1) Journeys
         // legacy: Documents/Journeys/<userID>/...
@@ -84,7 +84,7 @@ enum DataMigrator {
     ) throws {
         try paths.ensureBaseDirectoriesExist()
         let fm = FileManager.default
-        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first!
+        guard let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
 
         let normalized = Array(Set(legacyUserIDs.map {
             $0.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -126,6 +126,11 @@ enum DataMigrator {
             try moveFileIfExists(
                 from: legacyCachesRootInAppSupport.appendingPathComponent("route_cache.json", isDirectory: false),
                 to: paths.routeCacheURL,
+                fm: fm
+            )
+            try moveFileIfExists(
+                from: legacyCachesRootInAppSupport.appendingPathComponent("lifelog_mood.json", isDirectory: false),
+                to: paths.cachesDir.appendingPathComponent("lifelog_mood.json", isDirectory: false),
                 fm: fm
             )
 

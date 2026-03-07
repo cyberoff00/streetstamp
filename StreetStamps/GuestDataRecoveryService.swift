@@ -18,6 +18,7 @@ struct GuestRecoveryResult {
     let copiedPhotos: Int
     let copiedThumbnails: Int
     let replacedLifelog: Bool
+    let mergedMood: Bool
 }
 
 enum GuestDataRecoveryError: LocalizedError {
@@ -91,6 +92,10 @@ enum GuestDataRecoveryService {
         let copiedPhotos = try copyMissingFiles(from: source.photosDir, to: target.photosDir)
         let copiedThumbnails = try copyMissingFiles(from: source.thumbnailsDir, to: target.thumbnailsDir)
         let replacedLifelog = try mergeLifelog(sourceURL: source.lifelogRouteURL, targetURL: target.lifelogRouteURL)
+        let mergedMood = try mergeMood(
+            sourceURL: source.cachesDir.appendingPathComponent("lifelog_mood.json", isDirectory: false),
+            targetURL: target.cachesDir.appendingPathComponent("lifelog_mood.json", isDirectory: false)
+        )
 
         let mergedJourneyCount = max(0, targetAfterIDs.count - targetBeforeIDs.count)
 
@@ -99,7 +104,8 @@ enum GuestDataRecoveryService {
             copiedJourneyFiles: copiedJourneyFiles,
             copiedPhotos: copiedPhotos,
             copiedThumbnails: copiedThumbnails,
-            replacedLifelog: replacedLifelog
+            replacedLifelog: replacedLifelog,
+            mergedMood: mergedMood
         )
     }
 
@@ -382,6 +388,32 @@ enum GuestDataRecoveryService {
         }
         try fm.copyItem(at: sourceURL, to: targetURL)
         return true
+    }
+
+    private static func mergeMood(sourceURL: URL, targetURL: URL) throws -> Bool {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: sourceURL.path) else { return false }
+
+        let source = loadMood(url: sourceURL)
+        guard !source.isEmpty else { return false }
+
+        var merged = source
+        let existing = loadMood(url: targetURL)
+        for (key, value) in existing {
+            merged[key] = value
+        }
+
+        guard merged != existing else { return false }
+
+        try fm.createDirectory(at: targetURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let data = try JSONEncoder().encode(merged)
+        try data.write(to: targetURL, options: .atomic)
+        return true
+    }
+
+    private static func loadMood(url: URL) -> [String: String] {
+        guard let data = try? Data(contentsOf: url) else { return [:] }
+        return (try? JSONDecoder().decode([String: String].self, from: data)) ?? [:]
     }
 
     private static func lifelogCount(url: URL) -> Int {

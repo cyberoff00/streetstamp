@@ -50,10 +50,10 @@ struct MyJourneysView: View {
     }
 
     private var filteredJourneys: [JourneyRoute] {
-        guard selectedStartDate != nil else { return allJourneys }
+        guard let startDate = selectedStartDate else { return allJourneys }
         let cal = Calendar.current
-        let start = cal.startOfDay(for: selectedStartDate!)
-        let upperBase = selectedEndDate ?? selectedStartDate!
+        let start = cal.startOfDay(for: startDate)
+        let upperBase = selectedEndDate ?? startDate
         let endExclusive = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: upperBase)) ?? upperBase
 
         return allJourneys.filter { j in

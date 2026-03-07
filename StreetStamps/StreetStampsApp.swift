@@ -12,6 +12,7 @@ struct StreetStampsApp: App {
     @StateObject private var cityCache: CityCache
     @StateObject private var lifelogStore: LifelogStore
     @StateObject private var trackTileStore: TrackTileStore
+    @StateObject private var lifelogRenderCache: LifelogRenderCacheCoordinator
     @StateObject private var socialStore: SocialGraphStore
     @StateObject private var postcardCenter: PostcardCenter
     @StateObject private var flow = AppFlowCoordinator()
@@ -55,6 +56,7 @@ struct StreetStampsApp: App {
         let llStore = LifelogStore(paths: paths)
         _lifelogStore = StateObject(wrappedValue: llStore)
         _trackTileStore = StateObject(wrappedValue: TrackTileStore(paths: paths))
+        _lifelogRenderCache = StateObject(wrappedValue: LifelogRenderCacheCoordinator())
         _socialStore = StateObject(wrappedValue: SocialGraphStore(userID: session.currentUserID))
         _postcardCenter = StateObject(wrappedValue: PostcardCenter(userID: session.currentUserID))
 
@@ -86,6 +88,7 @@ struct StreetStampsApp: App {
             .environmentObject(cityCache)
             .environmentObject(lifelogStore)
             .environmentObject(trackTileStore)
+            .environmentObject(lifelogRenderCache)
             .environmentObject(socialStore)
             .environmentObject(postcardCenter)
             .environmentObject(flow)
@@ -134,7 +137,32 @@ struct StreetStampsApp: App {
                 journeyStore.load()
                 lifelogStore.load()
                 lifelogStore.bind(to: locationHub)
-                scheduleTrackTileRebuild(delay: 0.10, force: false)
+                lifelogRenderCache.reset()
+                lifelogRenderCache.bind(
+                    journeyStore: journeyStore,
+                    lifelogStore: lifelogStore,
+                    trackTileStore: trackTileStore
+                )
+                // Wait for lifelog data to finish loading before building
+                // tiles, otherwise the rebuild runs with empty points and
+                // overwrites good persisted tiles from the previous session.
+                await awaitLifelogLoadThenRebuildTiles()
+                lifelogRenderCache.scheduleWarmupRecentDays(
+                    countryISO2: lifelogStore.countryISO2 ?? locationHub.countryISO2
+                )
+
+                Task { @MainActor in
+                    if sessionStore.currentAccessToken != nil {
+                        let count = try? await JourneyCloudMigrationService.downloadAndMerge(
+                            sessionStore: sessionStore,
+                            journeyStore: journeyStore,
+                            cityCache: cityCache
+                        )
+                        if let count, count > 0 {
+                            scheduleTrackTileRebuild(delay: 0.10, force: true)
+                        }
+                    }
+                }
 
                 Task { @MainActor in
                     await Task.yield()
@@ -167,10 +195,30 @@ struct StreetStampsApp: App {
                     lifelogStore.load()
                     lifelogStore.bind(to: locationHub)
                     trackTileStore.rebind(paths: paths)
-                    scheduleTrackTileRebuild(delay: 0.10, force: false)
+                    lifelogRenderCache.reset()
+                    lifelogRenderCache.bind(
+                        journeyStore: journeyStore,
+                        lifelogStore: lifelogStore,
+                        trackTileStore: trackTileStore
+                    )
+                    await awaitLifelogLoadThenRebuildTiles()
+                    lifelogRenderCache.scheduleWarmupRecentDays(
+                        countryISO2: lifelogStore.countryISO2 ?? locationHub.countryISO2
+                    )
                     ensurePassiveLocationTrackingIfNeeded()
                     socialStore.switchUser(uid)
                     postcardCenter.switchUser(uid)
+
+                    if sessionStore.currentAccessToken != nil {
+                        let count = try? await JourneyCloudMigrationService.downloadAndMerge(
+                            sessionStore: sessionStore,
+                            journeyStore: journeyStore,
+                            cityCache: cityCache
+                        )
+                        if let count, count > 0 {
+                            scheduleTrackTileRebuild(delay: 0.10, force: false)
+                        }
+                    }
                 }
             }
             .onChange(of: scenePhase) { phase in
@@ -186,9 +234,15 @@ struct StreetStampsApp: App {
             }
             .onChange(of: journeyStore.trackTileRevision) { _, _ in
                 scheduleTrackTileRebuild(delay: 1.5, force: false)
+                lifelogRenderCache.scheduleWarmupRecentDays(
+                    countryISO2: lifelogStore.countryISO2 ?? locationHub.countryISO2
+                )
             }
             .onChange(of: lifelogStore.trackTileRevision) { _, _ in
                 scheduleTrackTileRebuild(delay: 1.5, force: false)
+                lifelogRenderCache.markTodayDirty(
+                    countryISO2: lifelogStore.countryISO2 ?? locationHub.countryISO2
+                )
             }
             .onChange(of: flow.currentTab) { _, tab in
                 if TrackTileRebuildPolicy.shouldRebuild(for: tab) {
@@ -198,6 +252,21 @@ struct StreetStampsApp: App {
             }
             .onChange(of: lifelogBackgroundModeRaw) { _, _ in
                 ensurePassiveLocationTrackingIfNeeded()
+            }
+            .onChange(of: trackTileStore.refreshRevision) { _, _ in
+                lifelogRenderCache.noteTrackTileRefresh(
+                    countryISO2: lifelogStore.countryISO2 ?? locationHub.countryISO2
+                )
+            }
+            .onChange(of: lifelogStore.countryISO2) { _, _ in
+                lifelogRenderCache.scheduleWarmupRecentDays(
+                    countryISO2: lifelogStore.countryISO2 ?? locationHub.countryISO2
+                )
+            }
+            .onChange(of: locationHub.countryISO2) { _, _ in
+                lifelogRenderCache.scheduleWarmupRecentDays(
+                    countryISO2: lifelogStore.countryISO2 ?? locationHub.countryISO2
+                )
             }
             .onOpenURL { url in
                 guard deepLinkStore.handleIncomingURL(url) else { return }
@@ -218,6 +287,16 @@ struct StreetStampsApp: App {
         let work = DispatchWorkItem { rebuildTrackTiles() }
         scheduledTileRebuild = work
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func awaitLifelogLoadThenRebuildTiles() async {
+        // Poll briefly until lifelogStore finishes its async load.
+        // Typically completes within a few hundred ms.
+        for _ in 0..<50 {
+            if lifelogStore.hasLoaded { break }
+            try? await Task.sleep(nanoseconds: 60_000_000) // 60ms
+        }
+        await rebuildTrackTilesAsync()
     }
 
     private func rebuildTrackTiles(zoom: Int = TrackRenderAdapter.unifiedRenderZoom) {
@@ -248,6 +327,11 @@ struct StreetStampsApp: App {
                 print("⚠️ track tile refresh failed:", error)
             }
         }
+    }
+
+    private func rebuildTrackTilesAsync(zoom: Int = TrackRenderAdapter.unifiedRenderZoom) async {
+        rebuildTrackTiles(zoom: zoom)
+        await trackTileRebuildTask?.value
     }
 }
 

@@ -2,7 +2,7 @@ import XCTest
 @testable import StreetStamps
 
 final class TrackTileBuilderTests: XCTestCase {
-    func test_buildTiles_splitsByTileAndPreservesSourceType() {
+    func test_buildTiles_keepsSingleSegmentAcrossTileBoundaries_andPreservesSourceType() {
         let events: [TrackRenderEvent] = [
             TrackRenderEvent(
                 sourceType: .journey,
@@ -60,7 +60,7 @@ final class TrackTileBuilderTests: XCTestCase {
         XCTAssertEqual(first.tiles.keys.first, second.tiles.keys.first)
     }
 
-    func test_builder_keepsSeparateSegmentsWhenReenteringSameTile() {
+    func test_builder_keepsSingleSegmentWhenReenteringSameTile_withoutSyntheticBreaks() {
         let events: [TrackRenderEvent] = [
             TrackRenderEvent(
                 sourceType: .journey,
@@ -79,8 +79,65 @@ final class TrackTileBuilderTests: XCTestCase {
             )
         ]
 
-        let out = TrackTileBuilder.build(events: events, zoom: 12)
-        let journeySegments = out.tiles.values.flatMap(\.segments).filter { $0.sourceType == .journey }
-        XCTAssertEqual(journeySegments.count, 3)
+        let segments = TrackTileBuilder.buildSegments(events: events, zoom: 12)
+        let journeySegments = segments.filter { $0.sourceType == .journey }
+        XCTAssertEqual(journeySegments.count, 1)
+    }
+
+    func test_builder_splitsSegmentOnLargeTimeGap_evenWithinSameTile() {
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+        let events: [TrackRenderEvent] = [
+            TrackRenderEvent(
+                sourceType: .journey,
+                timestamp: base,
+                coordinate: CoordinateCodable(lat: 37.77490, lon: -122.41940)
+            ),
+            TrackRenderEvent(
+                sourceType: .journey,
+                timestamp: base.addingTimeInterval(20),
+                coordinate: CoordinateCodable(lat: 37.77500, lon: -122.41930)
+            ),
+            TrackRenderEvent(
+                sourceType: .journey,
+                timestamp: base.addingTimeInterval(2 * 60 * 60),
+                coordinate: CoordinateCodable(lat: 37.77510, lon: -122.41920)
+            )
+        ]
+
+        let journeySegments = TrackTileBuilder.buildSegments(events: events, zoom: 12)
+            .filter { $0.sourceType == .journey }
+
+        XCTAssertEqual(journeySegments.count, 2)
+    }
+
+    func test_builder_splitsSegmentOnSourceChange_evenWhenCoordinatesAreNearby() {
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+        let events: [TrackRenderEvent] = [
+            TrackRenderEvent(
+                sourceType: .journey,
+                timestamp: base,
+                coordinate: CoordinateCodable(lat: 37.77490, lon: -122.41940)
+            ),
+            TrackRenderEvent(
+                sourceType: .journey,
+                timestamp: base.addingTimeInterval(20),
+                coordinate: CoordinateCodable(lat: 37.77500, lon: -122.41930)
+            ),
+            TrackRenderEvent(
+                sourceType: .passive,
+                timestamp: base.addingTimeInterval(25),
+                coordinate: CoordinateCodable(lat: 37.77504, lon: -122.41926)
+            ),
+            TrackRenderEvent(
+                sourceType: .passive,
+                timestamp: base.addingTimeInterval(35),
+                coordinate: CoordinateCodable(lat: 37.77512, lon: -122.41918)
+            )
+        ]
+
+        let segments = TrackTileBuilder.buildSegments(events: events, zoom: 12)
+
+        XCTAssertEqual(segments.count, 2)
+        XCTAssertEqual(segments.map(\.sourceType), [.journey, .passive])
     }
 }
