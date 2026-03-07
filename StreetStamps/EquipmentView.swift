@@ -59,20 +59,24 @@ struct EquipmentView: View {
                     .padding(.horizontal, 20)
                     .padding(.top, 8)
                     .padding(.bottom, 10)
+                VStack(spacing: 18) {
+                    avatarPreviewCard
+                    categoryIconRow
+
+                    inlineColorFilterPanel
+                }
+                .frame(maxWidth: 430)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 24)
+                .padding(.top, 18)
+
                 ScrollView(.vertical, showsIndicators: true) {
-                    VStack(spacing: 18) {
-                        avatarPreviewCard
-                        categoryIconRow
-
-                        inlineColorFilterPanel
-
-                        itemGrid
-                    }
-                    .frame(maxWidth: 430)
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 24)
-                    .padding(.top, 18)
-                    .padding(.bottom, 24)
+                    itemGrid
+                        .frame(maxWidth: 430)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 10)
+                        .padding(.bottom, 24)
                 }
             }
 
@@ -100,7 +104,6 @@ struct EquipmentView: View {
             EquipmentEconomyStore.save(economy)
         }
         .onChange(of: loadout) { _, newValue in
-            AvatarLoadoutStore.save(newValue)
             economy.ensureCurrentLoadoutOwned(loadout: newValue)
         }
         .onChange(of: isTryOnMode) { _, enabled in
@@ -512,7 +515,24 @@ struct EquipmentView: View {
 
         switch ownership {
         case .equipped:
-            break
+            updateLoadout { target in
+                switch category.selectionKey {
+                case "suitId":
+                    target.suitId = nil
+                    if target.upperId == "none" { target.upperId = target.savedUpperIdForSuit }
+                    if target.underId == "none" { target.underId = target.savedUnderIdForSuit }
+                case "upperId":
+                    target.upperId = "none"
+                case "underId":
+                    target.underId = "none"
+                case "accessoryId":
+                    if let idx = target.accessoryIds.firstIndex(of: item.id) {
+                        target.accessoryIds.remove(at: idx)
+                    }
+                default:
+                    break
+                }
+            }
         case .owned:
             applySelection(category: category, item: item)
             showFeedback("Equipped")
@@ -839,7 +859,9 @@ private struct GearCard: View {
         VStack(spacing: 0) {
             ZStack {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color(red: 231.0 / 255.0, green: 245.0 / 255.0, blue: 236.0 / 255.0))
+                    .fill(isEquipped
+                        ? Color(red: 231.0 / 255.0, green: 245.0 / 255.0, blue: 236.0 / 255.0)
+                        : Color(red: 245.0 / 255.0, green: 245.0 / 255.0, blue: 247.0 / 255.0))
 
                 if let imageName {
                     Image(imageName)

@@ -18,9 +18,6 @@ struct ProfileView: View {
     @EnvironmentObject private var socialStore: SocialGraphStore
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
 
-    @State private var faceIndex: Int = 0
-    @State private var dragAccum: CGFloat = 0
-
     @State private var loadout: RobotLoadout
     @State private var showNameEditor = false
     @State private var nameDraft = ""
@@ -28,7 +25,7 @@ struct ProfileView: View {
     @State private var isSavingName = false
     @State private var toastText = ""
     @State private var showToast = false
-    @State private var showLevelProgressDialog = false
+    @State private var showLevelHelpBubble = false
     @State private var socialNotifications: [BackendNotificationItem] = []
     @State private var unreadSocialCount = 0
     @State private var showNotificationsSheet = false
@@ -39,6 +36,7 @@ struct ProfileView: View {
     @State private var myExclusiveID = ""
     @State private var myInviteCode = ""
     @State private var lastSyncedLoadout: RobotLoadout?
+    @State private var pendingLocalLoadout: RobotLoadout?
     @State private var loadoutSyncTask: Task<Void, Never>?
 
     init() {
@@ -66,14 +64,6 @@ struct ProfileView: View {
     private var displayName: String {
         let value = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
         return value.isEmpty ? L10n.t("explorer_fallback") : value
-    }
-
-    private var likeNotificationCount: Int {
-        socialNotifications.filter { $0.type == "journey_like" }.count
-    }
-
-    private var stompNotificationCount: Int {
-        socialNotifications.filter { $0.type == "profile_stomp" }.count
     }
 
     var body: some View {
@@ -113,7 +103,9 @@ struct ProfileView: View {
             }
         }
         .onChange(of: loadout) { _, newValue in
-            AvatarLoadoutStore.save(newValue)
+            UserScopedProfileStateStore.saveCurrentLoadout(newValue, for: sessionStore.currentUserID)
+            UserScopedProfileStateStore.markPendingLoadout(newValue, for: sessionStore.currentUserID)
+            pendingLocalLoadout = UserScopedProfileStateStore.pendingLoadout(for: sessionStore.currentUserID)
             scheduleLoadoutSync(newValue)
         }
         .sheet(isPresented: $showNameEditor) {
@@ -140,23 +132,33 @@ struct ProfileView: View {
             .environmentObject(socialStore)
             .environmentObject(sessionStore)
         }
-        .alert(L10n.t("level_dialog_title"), isPresented: $showLevelProgressDialog) {
-            Button(L10n.t("ok"), role: .cancel) {}
-        } message: {
-            Text(String(
-                format: L10n.t("level_dialog_message_format"),
-                levelProgress.journeysRemainingToNextLevel,
-                levelProgress.level + 1
-            ))
-        }
         .task {
+            pendingLocalLoadout = UserScopedProfileStateStore.pendingLoadout(for: sessionStore.currentUserID)
+            if let pendingLocalLoadout {
+                loadout = pendingLocalLoadout
+                scheduleLoadoutSync(pendingLocalLoadout)
+            }
             await refreshDisplayNameIfNeeded()
             await refreshSocialNotifications(showToastForLatestUnread: true)
         }
         .onChange(of: sessionStore.currentAccessToken) { _, _ in
             Task {
+                pendingLocalLoadout = UserScopedProfileStateStore.pendingLoadout(for: sessionStore.currentUserID)
+                if let pendingLocalLoadout {
+                    loadout = pendingLocalLoadout
+                    scheduleLoadoutSync(pendingLocalLoadout)
+                }
                 await refreshDisplayNameIfNeeded()
                 await refreshSocialNotifications(showToastForLatestUnread: false)
+            }
+        }
+        .onChange(of: sessionStore.currentUserID) { _, _ in
+            loadout = AvatarLoadoutStore.load()
+            lastSyncedLoadout = nil
+            pendingLocalLoadout = UserScopedProfileStateStore.pendingLoadout(for: sessionStore.currentUserID)
+            if let pendingLocalLoadout {
+                loadout = pendingLocalLoadout
+                scheduleLoadoutSync(pendingLocalLoadout)
             }
         }
     }
@@ -181,7 +183,7 @@ struct ProfileView: View {
             Spacer()
 
             NavigationLink {
-                SettingsView()
+                SettingsView(showsBackButton: true)
             } label: {
                 Image(systemName: "gearshape")
                     .font(.system(size: 18, weight: .semibold))
@@ -202,64 +204,73 @@ struct ProfileView: View {
     }
 
     private var avatarHeaderCard: some View {
-        VStack(spacing: 0) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 32, style: .continuous)
-                    .fill(FigmaTheme.primary.opacity(0.17))
-                    .blur(radius: 20)
-                    .frame(width: 132, height: 132)
+        let sceneState = ProfileSceneInteractionState.resolve(
+            mode: .myProfile,
+            isViewingOwnFriendProfile: false,
+            isVisitorSeated: false,
+            isInteractionInFlight: false
+        )
 
-                RoundedRectangle(cornerRadius: 32, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                FigmaTheme.primary.opacity(0.10),
-                                FigmaTheme.accent.opacity(0.20)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
+        return VStack(spacing: 0) {
+            ZStack(alignment: .topTrailing) {
+                ProfileHeroTopBackdrop(topCornerRadius: 36) {
+                    VStack {
+                        SofaProfileSceneView(
+                            state: sceneState,
+                            hostLoadout: loadout
                         )
-                    )
-                    .frame(width: 128, height: 128)
-                    .shadow(color: FigmaTheme.primary.opacity(0.12), radius: 24, x: 0, y: 4)
+                        .frame(maxWidth: 340)
+                        .padding(.horizontal, 18)
+                        .padding(.top, 22)
+                        .padding(.bottom, 14)
+                    }
+                }
+                .frame(height: 252)
 
-                RobotRendererView(
-                    size: 96,
-                    face: RobotFace.allCases[faceIndex],
-                    loadout: loadout
-                )
-                .contentShape(Rectangle())
-                .gesture(DragGesture(minimumDistance: 6)
-                    .onChanged { value in
-                        let delta = value.translation.width - dragAccum
-                        dragAccum = value.translation.width
-                        if delta > 12 {
-                            rotateLeft()
-                        } else if delta < -12 {
-                            rotateRight()
+                if ProfileHeaderPresentation.showsNotificationCloud(notificationCount: socialNotifications.count) {
+                    Button {
+                        showNotificationsSheet = true
+                    } label: {
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: "cloud.fill")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(Color(red: 0.22, green: 0.45, blue: 0.89))
+                                .frame(width: 30, height: 30)
+                                .background(Color.white.opacity(0.95))
+                                .clipShape(Circle())
+                                .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
+
+                            if unreadSocialCount > 0 {
+                                Text("\(min(unreadSocialCount, 99))")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 2)
+                                    .background(Color.red)
+                                    .clipShape(Capsule())
+                                    .offset(x: 10, y: -8)
+                            }
                         }
                     }
-                    .onEnded { _ in
-                        dragAccum = 0
-                    }
-                )
-                .overlay(alignment: .topTrailing) {
-                    NavigationLink {
-                        EquipmentView(loadout: $loadout)
-                    } label: {
-                        Image(systemName: "tshirt")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(FigmaTheme.primary)
-                            .frame(width: 30, height: 30)
-                            .background(Color.white.opacity(0.95))
-                            .clipShape(Circle())
-                            .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
-                    }
                     .buttonStyle(.plain)
-                    .offset(x: 8, y: -8)
+                    .padding(14)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
+
+                NavigationLink {
+                    EquipmentView(loadout: $loadout)
+                } label: {
+                    Image(systemName: "tshirt")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(FigmaTheme.primary)
+                        .frame(width: 30, height: 30)
+                        .background(Color.white.opacity(0.95))
+                        .clipShape(Circle())
+                        .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
+                }
+                .buttonStyle(.plain)
+                .padding(14)
             }
-            .padding(.top, 32)
 
             Button {
                 nameDraft = displayName == L10n.t("explorer_fallback") ? "" : displayName
@@ -268,36 +279,21 @@ struct ProfileView: View {
             } label: {
                 HStack(spacing: 6) {
                     Text(displayName)
-                        .font(.system(size: 20, weight: .bold))
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
                         .tracking(-0.4)
                         .foregroundColor(FigmaTheme.text)
+
                     Image(systemName: "pencil")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(FigmaTheme.text.opacity(0.45))
                 }
             }
             .buttonStyle(.plain)
-            .padding(.top, 24)
+            .padding(.top, 20)
 
-            Button {
-                showLevelProgressDialog = true
-            } label: {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        Text(String(format: L10n.t("level_format"), levelProgress.level))
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(FigmaTheme.text.opacity(0.8))
-
-                        Spacer(minLength: 6)
-
-                        Text(String(
-                            format: L10n.t("level_progress_counter_format"),
-                            levelProgress.journeysIntoCurrentLevel,
-                            levelProgress.journeysRequiredThisLevel
-                        ))
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(FigmaTheme.text.opacity(0.62))
-                    }
+            VStack(spacing: 10) {
+                HStack(spacing: 10) {
+                    ProfileHeroLevelPill(level: levelProgress.level)
 
                     GeometryReader { proxy in
                         ZStack(alignment: .leading) {
@@ -312,47 +308,61 @@ struct ProfileView: View {
                                 )
                         }
                     }
+                    .frame(maxWidth: 172)
                     .frame(height: 7)
+
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            showLevelHelpBubble.toggle()
+                        }
+                    } label: {
+                        Image(systemName: "questionmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(FigmaTheme.subtext)
+                            .frame(width: 22, height: 22)
+                            .background(Color.black.opacity(0.05))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
                 }
-                .padding(.top, 8)
-            }
-            .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .center)
 
-            Rectangle()
-                .fill(FigmaTheme.border)
-                .frame(height: 1)
-                .padding(.top, 22)
-
-            HStack(spacing: 0) {
-                embeddedStatItem(icon: "mappin.and.ellipse", value: "\(totalJourneys)", label: "TRIPS")
-                Rectangle()
-                    .fill(FigmaTheme.border)
-                    .frame(width: 1, height: 52)
-                embeddedStatItem(icon: "heart", value: "\(totalMemories)", label: "MEMORIES")
-                Rectangle()
-                    .fill(FigmaTheme.border)
-                    .frame(width: 1, height: 52)
-                embeddedStatItem(icon: "paperplane", value: "\(citiesVisited)", label: "CITIES")
+                if showLevelHelpBubble {
+                    Text(ProfileHeaderPresentation.levelHelpText(remainingJourneys: levelProgress.journeysRemainingToNextLevel))
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(FigmaTheme.text)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(Color.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .shadow(color: .black.opacity(0.10), radius: 10, x: 0, y: 4)
+                        .fixedSize()
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                        .zIndex(2)
+                }
             }
             .padding(.horizontal, 22)
-            .padding(.vertical, 16)
+            .padding(.top, 10)
+
+            ProfileHeroStatsCard(
+                items: [
+                    ProfileHeroStatItem(id: "trips", value: "\(totalJourneys)", title: "TRIPS"),
+                    ProfileHeroStatItem(id: "memories", value: "\(totalMemories)", title: "MEMORIES"),
+                    ProfileHeroStatItem(id: "cities", value: "\(citiesVisited)", title: "CITIES")
+                ]
+            )
+            .padding(.horizontal, 18)
+            .padding(.top, 18)
+            .padding(.bottom, 18)
         }
         .frame(maxWidth: .infinity)
-        .figmaAvatarCardStyle()
+        .background(Color.white)
+        .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
+        .shadow(color: Color.black.opacity(0.04), radius: 20, x: 0, y: 8)
     }
 
     private var topActionRow: some View {
         VStack(spacing: 14) {
-            Button {
-                showNotificationsSheet = true
-                Task {
-                    await markSocialNotificationsReadIfNeeded()
-                }
-            } label: {
-                socialNotificationTile
-            }
-            .buttonStyle(.plain)
-
             Button {
                 showInviteFriendSheet = true
             } label: {
@@ -419,58 +429,7 @@ struct ProfileView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private var socialNotificationTile: some View {
-        HStack(spacing: 14) {
-            ZStack(alignment: .topTrailing) {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(Color(red: 0.93, green: 0.96, blue: 1.0))
-                    .frame(width: 56, height: 56)
-
-                Image(systemName: "bell.badge.fill")
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundColor(Color(red: 0.22, green: 0.45, blue: 0.89))
-
-                if unreadSocialCount > 0 {
-                    Text("\(min(unreadSocialCount, 99))")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(Color.red)
-                        .clipShape(Capsule())
-                        .offset(x: 11, y: -9)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("互动通知")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(FigmaTheme.text)
-                Text("收到赞 \(likeNotificationCount) · 被踩 \(stompNotificationCount)")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(FigmaTheme.subtext)
-                if unreadSocialCount > 0 {
-                    Text("未读 \(unreadSocialCount) 条")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(Color(red: 0.22, green: 0.45, blue: 0.89))
-                }
-            }
-
-            Spacer()
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(FigmaTheme.subtext)
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 16)
-        .frame(maxWidth: .infinity)
-        .profileFeatureCardStyle()
-    }
-
     private var inviteFriendTile: some View {
-        let idText = resolvedExclusiveIDForInvite()
-        let codeText = resolvedInviteCodeForInvite()
         return HStack(spacing: 14) {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(Color(red: 0.95, green: 0.98, blue: 0.92))
@@ -485,12 +444,6 @@ struct ProfileView: View {
                 Text("邀请好友")
                     .font(.system(size: 15, weight: .bold))
                     .foregroundColor(FigmaTheme.text)
-                Text("扫码添加 · 也可搜索ID/邀请码")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(FigmaTheme.subtext)
-                Text("@\(idText)  ·  \(codeText)")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(FigmaTheme.text.opacity(0.62))
                     .lineLimit(1)
             }
 
@@ -578,9 +531,9 @@ struct ProfileView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("刷新") {
+                    Button("全部已读") {
                         Task {
-                            await refreshSocialNotifications(showToastForLatestUnread: false)
+                            await markSocialNotificationsReadIfNeeded()
                         }
                     }
                 }
@@ -609,10 +562,14 @@ struct ProfileView: View {
                 HStack(spacing: 8) {
                     Text(badgeTitle)
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(badgeColor)
+                        .foregroundColor(
+                            item.read
+                            ? FigmaTheme.subtext
+                            : badgeColor
+                        )
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(Color.black.opacity(0.06))
+                        .background(item.read ? Color.black.opacity(0.03) : Color.black.opacity(0.06))
                         .clipShape(Capsule())
 
                     Text(relativeTimeText(item.createdAt))
@@ -622,33 +579,26 @@ struct ProfileView: View {
 
                 Text(item.message)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(FigmaTheme.text)
+                    .foregroundColor(item.read ? FigmaTheme.subtext : FigmaTheme.text)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white)
+        .background(item.read ? Color(white: 0.97) : Color.white)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .shadow(color: Color.black.opacity(0.04), radius: 14, x: 0, y: 5)
         .onTapGesture {
-            if item.type == "postcard_received" {
-                postcardInboxIntent = PostcardInboxIntent(box: "received", messageID: item.postcardMessageID)
-                showNotificationsSheet = false
-                showPostcardInboxFromNotification = true
+            Task {
+                await markSingleSocialNotificationRead(item.id)
+                if item.type == "postcard_received" {
+                    postcardInboxIntent = PostcardInboxIntent(box: "received", messageID: item.postcardMessageID)
+                    showNotificationsSheet = false
+                    showPostcardInboxFromNotification = true
+                }
             }
         }
-    }
-
-    private func rotateLeft() {
-        faceIndex = (faceIndex - 1 + RobotFace.allCases.count) % RobotFace.allCases.count
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-    }
-
-    private func rotateRight() {
-        faceIndex = (faceIndex + 1) % RobotFace.allCases.count
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
     @ViewBuilder
@@ -753,9 +703,22 @@ struct ProfileView: View {
         }
         do {
             let me = try await BackendAPIClient.shared.fetchMyProfile(token: token)
+            pendingLocalLoadout = UserScopedProfileStateStore.pendingLoadout(for: sessionStore.currentUserID)
             if let remoteLoadout = me.loadout?.normalizedForCurrentAvatar() {
-                lastSyncedLoadout = remoteLoadout
-                loadout = remoteLoadout
+                let merge = ProfileLoadoutRemoteMerge.resolve(
+                    remoteLoadout: remoteLoadout,
+                    currentLocal: loadout,
+                    lastSynced: lastSyncedLoadout,
+                    pendingLocal: pendingLocalLoadout
+                )
+                lastSyncedLoadout = merge.lastSyncedLoadout
+                pendingLocalLoadout = merge.pendingLocalLoadout
+                if merge.pendingLocalLoadout == nil {
+                    UserScopedProfileStateStore.clearPendingLoadout(for: sessionStore.currentUserID)
+                }
+                if let appliedLoadout = merge.appliedLoadout {
+                    loadout = appliedLoadout
+                }
             }
             if !me.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 profileName = me.displayName
@@ -794,7 +757,14 @@ struct ProfileView: View {
               !token.isEmpty else { return }
         do {
             let profile = try await BackendAPIClient.shared.updateLoadout(token: token, loadout: normalizedTarget)
-            lastSyncedLoadout = (profile.loadout ?? normalizedTarget).normalizedForCurrentAvatar()
+            let resolvedRemote = (profile.loadout ?? normalizedTarget).normalizedForCurrentAvatar()
+            lastSyncedLoadout = resolvedRemote
+            if pendingLocalLoadout?.normalizedForCurrentAvatar() == normalizedTarget ||
+                pendingLocalLoadout?.normalizedForCurrentAvatar() == resolvedRemote {
+                pendingLocalLoadout = nil
+                UserScopedProfileStateStore.clearPendingLoadout(for: sessionStore.currentUserID)
+            }
+            UserScopedProfileStateStore.saveCurrentLoadout(resolvedRemote, for: sessionStore.currentUserID)
         } catch {
             // Keep local loadout usable even when cloud sync fails temporarily.
         }
@@ -852,6 +822,27 @@ struct ProfileView: View {
                 return copy
             }
             unreadSocialCount = 0
+        } catch {
+            // Keep sheet usable even if mark-read fails.
+        }
+    }
+
+    @MainActor
+    private func markSingleSocialNotificationRead(_ id: String) async {
+        guard socialNotifications.contains(where: { $0.id == id && !$0.read }) else { return }
+        guard BackendConfig.isEnabled,
+              let token = sessionStore.currentAccessToken,
+              !token.isEmpty else { return }
+
+        do {
+            try await BackendAPIClient.shared.markNotificationsRead(token: token, ids: [id])
+            socialNotifications = socialNotifications.map { item in
+                guard item.id == id else { return item }
+                var copy = item
+                copy.read = true
+                return copy
+            }
+            unreadSocialCount = socialNotifications.filter { !$0.read }.count
         } catch {
             // Keep sheet usable even if mark-read fails.
         }

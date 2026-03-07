@@ -268,6 +268,13 @@
 "auth_fill_email_password" = "请先填写邮箱和密码";
 "auth_forgot_password" = "忘记密码？";
 "auth_forgot_password_hint" = "请在设置中使用修改密码功能。";
+"settings_map_dark_mode" = "地图深色模式";
+"settings_profile_visibility_friends" = "Profile 好友可见";
+"settings_profile_visibility_private" = "Profile 仅自己可见";
+"settings_logout" = "LOG OUT";
+"settings_logout_subtitle" = "退出当前账号并切回游客模式";
+"settings_logout_confirm_title" = "确认退出登录？";
+"settings_logout_confirm_message" = "退出后将切回游客模式，本地数据会保留在当前设备。";
 "auth_full_name" = "昵称";
 "auth_have_account" = "已有账号？";
 "auth_no_account" = "还没有账号？";

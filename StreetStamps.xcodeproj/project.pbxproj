@@ -14,6 +14,8 @@
 		C1A100012F30000100AA0001 /* StreetStampsWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = C1A100012F30000100AA0005 /* StreetStampsWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		CD3F63C12F47C9BD003DACD7 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = CD3F63C02F47C9BD003DACD7 /* GoogleService-Info.plist */; };
 		CD3F63C22F47D201003DACD7 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = CD3F63C32F47D201003DACD7 /* GoogleSignIn */; };
+		F9A100012F5A100000000001 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = F9A100022F5A100000000001 /* FirebaseAuth */; };
+		F9A100032F5A100000000001 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = F9A100042F5A100000000001 /* FirebaseCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -144,6 +146,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F9A100032F5A100000000001 /* FirebaseCore in Frameworks */,
+				F9A100012F5A100000000001 /* FirebaseAuth in Frameworks */,
 				CD3F63C22F47D201003DACD7 /* GoogleSignIn in Frameworks */,
 				B5C3188A2F14F27E00397BE9 /* MapboxMaps in Frameworks */,
 			);
@@ -240,6 +244,8 @@
 			packageProductDependencies = (
 				B5C318892F14F27E00397BE9 /* MapboxMaps */,
 				CD3F63C32F47D201003DACD7 /* GoogleSignIn */,
+				F9A100022F5A100000000001 /* FirebaseAuth */,
+				F9A100042F5A100000000001 /* FirebaseCore */,
 			);
 			productName = StreetStamps;
 			productReference = B5F75DB62F0D641D00FEF837 /* StreetStamps.app */;
@@ -676,7 +682,7 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 4;
-				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+				WATCHOS_DEPLOYMENT_TARGET = 10.6;
 			};
 			name = Debug;
 		};
@@ -701,7 +707,7 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 4;
-				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+				WATCHOS_DEPLOYMENT_TARGET = 10.6;
 			};
 			name = Release;
 		};
@@ -783,6 +789,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = CD3F63BD2F47C725003DACD7 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
 			productName = GoogleSignIn;
+		};
+		F9A100022F5A100000000001 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CD3F64AD2F47D024003DACD7 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		F9A100042F5A100000000001 /* FirebaseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CD3F64AD2F47D024003DACD7 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCore;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

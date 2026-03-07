@@ -268,6 +268,13 @@
 "auth_fill_email_password" = "Please enter email and password";
 "auth_forgot_password" = "Forgot password?";
 "auth_forgot_password_hint" = "Please use the change-password action in Settings.";
+"settings_map_dark_mode" = "Map dark mode";
+"settings_profile_visibility_friends" = "Profile visible to friends";
+"settings_profile_visibility_private" = "Profile visible only to me";
+"settings_logout" = "Log out";
+"settings_logout_subtitle" = "Sign out of this device";
+"settings_logout_confirm_title" = "Log out?";
+"settings_logout_confirm_message" = "You will switch back to guest mode on this device.";
 "auth_full_name" = "FULL NAME";
 "auth_have_account" = "Already have an account?";
 "auth_no_account" = "Don't have an account?";

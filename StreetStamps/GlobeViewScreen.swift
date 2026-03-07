@@ -121,6 +121,11 @@ struct GlobeViewScreen: View {
         let cityCount = nonTemporaryCities.count
         let totalMemories = nonTemporaryCities.reduce(0) { $0 + max(0, $1.memories) }
         let levelProgress = UserLevelProgress.from(journeys: store.journeys)
+        let cardContent = ProfileSummaryCardContent(
+            level: levelProgress.level,
+            cityCount: cityCount,
+            memoryCount: totalMemories
+        )
 
         return HStack(spacing: 14) {
             ZStack {
@@ -141,28 +146,12 @@ struct GlobeViewScreen: View {
                     .foregroundColor(.black)
                     .lineLimit(1)
 
-                HStack(spacing: 6) {
-                    Text(String(format: L10n.t("level_format"), levelProgress.level))
-                    Text("·")
-                    Text(String(format: L10n.t("level_remaining_short_format"), levelProgress.journeysRemainingToNextLevel))
-                }
+                Text(cardContent.levelText)
                     .appCaptionStyle()
                     .foregroundColor(.black.opacity(0.62))
                     .lineLimit(1)
 
-                GeometryReader { proxy in
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(Color.black.opacity(0.08))
-                            .frame(height: 6)
-                        Capsule()
-                            .fill(UITheme.accent)
-                            .frame(width: max(8, proxy.size.width * levelProgress.progress), height: 6)
-                    }
-                }
-                .frame(height: 6)
-
-                Text("\(cityCount) CITIES · \(totalMemories) MEMORIES")
+                Text(cardContent.statsText)
                     .appFootnoteStyle()
                     .foregroundColor(.black.opacity(0.56))
                     .lineLimit(1)

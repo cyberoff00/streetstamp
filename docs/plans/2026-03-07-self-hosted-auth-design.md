@@ -69,6 +69,22 @@ Third-party providers should only prove identity, not own the product account mo
 
 Firebase should remain configured for reference and potential future migration work, but production login and request authorization should no longer depend on it. Existing Firebase metadata may still be useful for audit, rollback planning, or future import jobs.
 
+### 5. Guest, Device, and Account Semantics Must Not Change
+
+This project changes authentication only. It does not redefine the relationship between:
+
+- the physical device or app install
+- the locally stable `guestID`
+- the cloud-backed `accountUserID`
+
+Approved invariant:
+
+- `guestID` continues to identify a local-only guest storage space on the device
+- `accountUserID` continues to identify the cloud-backed account
+- changing auth providers or token formats must not silently upload, merge, or migrate guest data
+
+If guest-to-account import is ever needed later, it must be designed and shipped as a separate explicit feature rather than a login side effect.
+
 ## Proposed Architecture
 
 ### 1. Backend-Owned Auth Model
@@ -121,6 +137,22 @@ Keep the Firebase project, iOS configuration, and historical auth records for re
 - no Firebase token verification in backend request middleware
 - no Firebase dependency for Apple sign-in completion
 - optional future maintenance scripts may still read Firebase data out of band
+
+### 6. Guest and Device Data Boundary
+
+The current guest/device boundary remains intact:
+
+- each device install keeps a stable local `guestID`
+- guest-scoped local files remain under guest-owned storage roots
+- account-scoped cloud data remains attached to backend-owned account IDs
+- sign-in only changes who the authenticated cloud account is
+
+Explicitly forbidden side effects during this auth migration:
+
+- auto-uploading guest data when the user registers or signs in
+- auto-merging guest local data into account cloud data
+- auto-restoring account data into the guest storage root
+- treating auth success as consent for cloud migration
 
 ## Data Model
 
@@ -297,6 +329,8 @@ The app session should return to a backend-token model:
 
 Guest behavior should remain local-only.
 
+The `guestID` field remains important even in authenticated sessions because it preserves the on-device guest namespace. It does not imply that guest data becomes part of the authenticated cloud account.
+
 ### 3. UI Behavior
 
 The app should still support:
@@ -308,6 +342,8 @@ The app should still support:
 - Apple sign in
 
 But the backing logic should no longer depend on Firebase runtime state.
+
+Login success must not trigger any hidden guest-data migration. The user should only see an auth state change.
 
 ## Backend Hosting Recommendation for 1000 DAU
 
@@ -349,6 +385,10 @@ The repo currently contains in-progress Firebase auth work. Transitioning away f
 ### 3. Session Security
 
 Refresh token storage, revocation, and password reset invalidation must be implemented cleanly. Weak token lifecycle handling would reintroduce the same class of security issues this migration is meant to solve.
+
+### 4. Data Ownership Confusion
+
+The easiest mistake in implementation is to conflate auth migration with data migration. If any task starts changing guest data upload, cloud merge, or guest/account storage semantics, it has exceeded the approved scope.
 
 ## Approved Summary
 

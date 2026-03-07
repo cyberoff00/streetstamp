@@ -42,6 +42,8 @@ struct MyJourneysView: View {
     @State private var journeyLikersByJourneyID: [String: [JourneyLiker]] = [:]
     @State private var likersLoadingJourneyID: String? = nil
     @State private var likersErrorByJourneyID: [String: String] = [:]
+    @State private var showMessage = false
+    @State private var messageText = ""
 
     private var allJourneys: [JourneyRoute] {
         store.journeys
@@ -160,6 +162,11 @@ struct MyJourneysView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
             }
+        }
+        .alert(L10n.t("prompt"), isPresented: $showMessage) {
+            Button(L10n.t("ok"), role: .cancel) {}
+        } message: {
+            Text(messageText)
         }
     }
 
@@ -284,7 +291,7 @@ struct MyJourneysView: View {
 
     private var listSection: some View {
         ScrollView(showsIndicators: false) {
-            LazyVStack(spacing: 14) {
+            LazyVStack(spacing: 24) {
                 ForEach(filteredJourneys, id: \.id) { j in
                     NavigationLink {
                         JourneyRouteDetailView(
@@ -312,9 +319,9 @@ struct MyJourneysView: View {
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 12)
-            .padding(.bottom, 40)
+            .padding(.horizontal, 18)
+            .padding(.top, 18)
+            .padding(.bottom, 52)
         }
     }
 
@@ -357,6 +364,14 @@ struct MyJourneysView: View {
 
     @MainActor
     private func presentVisibilitySheet(for journey: JourneyRoute) {
+        guard JourneyVisibilityPolicy.canEditVisibility(
+            current: journey.visibility,
+            target: journey.visibility,
+            isLoggedIn: sessionStore.isLoggedIn
+        ) else {
+            showLoginRequiredMessage()
+            return
+        }
         permissionJourneyID = journey.id
         pendingVisibility = journey.visibility
     }
@@ -373,6 +388,16 @@ struct MyJourneysView: View {
         guard !visibilityUpdatingIDs.contains(journey.id) else { return }
 
         let target = pendingVisibility
+        guard JourneyVisibilityPolicy.canEditVisibility(
+            current: journey.visibility,
+            target: target,
+            isLoggedIn: sessionStore.isLoggedIn
+        ) else {
+            permissionJourneyID = nil
+            showLoginRequiredMessage()
+            return
+        }
+
         var updated = journey
         updated.visibility = target
 
@@ -449,6 +474,12 @@ struct MyJourneysView: View {
                 }
             }
         }
+    }
+
+    @MainActor
+    private func showLoginRequiredMessage() {
+        messageText = "请先登录后再修改 Journey 权限"
+        showMessage = true
     }
 }
 
@@ -860,6 +891,7 @@ private struct JourneyCardRow: View {
             ZStack(alignment: .topLeading) {
                 JourneyRouteSnapshotThumbnail(journey: journey, appearanceRaw: mapAppearanceRaw)
                     .frame(height: 170)
+                    .background(Color.black.opacity(0.06))
 
                 Text(datePillText)
                     .font(.system(size: 14, weight: .heavy, design: .rounded))
@@ -871,7 +903,7 @@ private struct JourneyCardRow: View {
                     .padding(12)
             }
 
-            VStack(alignment: .leading, spacing: 9) {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .top, spacing: 8) {
                     Text(mergedTitle)
                         .font(.system(size: 17, weight: .bold, design: .rounded))
@@ -940,8 +972,8 @@ private struct JourneyCardRow: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.top, 12)
-            .padding(.bottom, 12)
+            .padding(.top, 14)
+            .padding(.bottom, 16)
             .background(Color.white)
         }
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
@@ -1018,6 +1050,7 @@ private struct JourneyRouteSnapshotThumbnail: View {
                     )
             }
         }
+        .clipped()
         .onAppear {
             loader.load(journey: journey, appearanceRaw: appearanceRaw)
         }
@@ -1056,8 +1089,7 @@ private final class JourneyRouteSnapshotLoader: ObservableObject {
 
                     let img = await JourneySnapshotInFlightStore.shared.image(for: key) {
                         await Task.detached(priority: .utility) {
-                            let renderJourney = snapshotJourney(from: journey)
-                            return makeSnapshot(journey: renderJourney, appearanceRaw: appearanceRaw)
+                            return makeSnapshot(journey: journey, appearanceRaw: appearanceRaw)
                         }.value
                     }
                     guard let img else { return }
@@ -1092,8 +1124,7 @@ private final class JourneyRouteSnapshotLoader: ObservableObject {
 
             let img = await JourneySnapshotInFlightStore.shared.image(for: key) {
                 await Task.detached(priority: .utility) {
-                    let renderJourney = Self.snapshotJourney(from: journey)
-                    return Self.makeSnapshot(journey: renderJourney, appearanceRaw: appearanceRaw)
+                    return Self.makeSnapshot(journey: journey, appearanceRaw: appearanceRaw)
                 }.value
             }
             await MainActor.run {
@@ -1147,21 +1178,13 @@ private final class JourneyRouteSnapshotLoader: ObservableObject {
         return MKCoordinateRegion(center: center, span: span)
     }
 
-    nonisolated private static func snapshotJourney(from journey: JourneyRoute) -> JourneyRoute {
-        guard !journey.thumbnailCoordinates.isEmpty else { return journey }
-        var compact = journey
-        compact.coordinates = journey.thumbnailCoordinates
-        return compact
-    }
-
     nonisolated private static func makeSnapshot(journey: JourneyRoute, appearanceRaw: String) -> UIImage? {
-        guard let rawRegion = CityDeepRenderEngine.fittedRegion(
-            cityKey: journey.cityKey,
+        let renderCoords = journey.allCLCoords.isEmpty ? journey.allCLThumbnailCoords : journey.allCLCoords
+        guard let rawRegion = JourneySnapshotFraming.region(
+            for: renderCoords,
             countryISO2: journey.countryISO2,
-            journeys: [journey],
-            anchorWGS: journey.allCLCoords.first,
-            effectiveBoundaryWGS: nil,
-            fetchedBoundaryWGS: nil
+            cityKey: journey.cityKey,
+            targetAspectRatio: 1.5
         ),
         let region = clampedRegion(rawRegion) else {
             return nil

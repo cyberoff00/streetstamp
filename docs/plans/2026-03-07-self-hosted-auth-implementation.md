@@ -8,6 +8,8 @@
 
 **Tech Stack:** Swift, SwiftUI, Node.js, PostgreSQL, Amazon SES, Sign in with Apple, XCTest, Node integration tests
 
+**Invariant:** This plan changes authentication only. It must not change `guestID` generation, device-local guest storage semantics, or the rule that guest data stays local-only unless a future explicit import feature is separately designed and approved.
+
 ---
 
 ### Task 1: Document the approved replacement direction and freeze Firebase as backup-only
@@ -88,6 +90,7 @@ Expected:
 
 - Add schema creation and data access helpers in `backend-node-v1/server.js`.
 - Keep changes scoped to auth storage only; do not refactor unrelated business tables yet.
+- Do not alter guest/account data ownership logic while introducing the auth schema.
 
 **Step 4: Run test to verify it passes**
 
@@ -396,6 +399,8 @@ git commit -m "feat: add backend-owned apple auth"
 - Remove runtime dependency on `FirebaseEmailAuthService` from email flows.
 - Return to backend token storage in `UserSessionStore`.
 - Teach `BackendAPIClient` to use backend tokens again for authenticated API traffic.
+- Preserve the existing `guestID` field and local guest namespace behavior.
+- Do not add any guest-to-account upload, merge, or migration side effects.
 
 **Step 4: Run checks to verify it passes**
 
@@ -461,6 +466,7 @@ git commit -m "refactor: remove google sign-in from production auth"
 - Gate Firebase setup behind backup-only or migration-only flags.
 - Remove Firebase bearer-token verification from the production request path.
 - Keep Firebase config only where historical inspection or offline migration utilities still need it.
+- Reconfirm that disabling Firebase from production auth does not reintroduce guest/account migration behavior.
 
 **Step 4: Run check to verify it passes**
 
@@ -489,6 +495,8 @@ git commit -m "refactor: demote firebase to backup-only"
   - Apple login with real email
   - Apple login with hidden email
   - logout
+  - guest data remains local after register and login
+  - account login does not auto-import guest data
 
 **Step 2: Run verification to surface gaps**
 

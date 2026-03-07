@@ -1,5 +1,7 @@
 # Firebase Auth Migration Implementation Plan
 
+> **Status Note (2026-03-07):** This plan records the earlier Firebase-first migration work. The approved production direction has since changed to backend-owned self-hosted auth because mainland-compatible runtime auth cannot depend on Google/Firebase network reachability. For new implementation work, follow [2026-03-07-self-hosted-auth-design.md](/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/docs/plans/2026-03-07-self-hosted-auth-design.md) and [2026-03-07-self-hosted-auth-implementation.md](/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/docs/plans/2026-03-07-self-hosted-auth-implementation.md).
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Replace custom app authentication with Firebase Auth, preserve the existing business account behind `yinterestingy@gmail.com`, and keep guest mode local-only.
@@ -303,3 +305,32 @@ Expected:
 **Step 5: Update implementation notes**
 
 - Record any remaining rollout risks, especially around Firebase console setup and the preserved-email binding.
+
+### Task 7 Verification Notes
+
+- `xcodebuild test -scheme StreetStamps -project StreetStamps.xcodeproj -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.3.1' -only-testing:StreetStampsTests/GuestDataRecoveryServiceTests` currently exits with `Scheme StreetStamps is not currently configured for the test action`, so focused Swift auth/session tests are still not executable from the shared scheme.
+- Backend verification completed with:
+  - `npm run test:api-contract`
+  - `node tests/firebase-auth.test.mjs`
+  - `node tests/firebase-auth-profile.contract.mjs`
+- iOS compile verification should be recorded from a fresh `xcodebuild build` run against the `StreetStamps` scheme after Firebase package resolution completes.
+
+### Remaining Manual Smoke / Rollout Risks
+
+- Manual Firebase smoke flows were not completed in this environment:
+  - email registration and verification-email delivery
+  - unverified sign-in blocking
+  - forgot-password email delivery
+  - Google sign-in
+  - Apple sign-in
+  - preserved legacy-email sign-in for `yinterestingy@gmail.com`
+  - guest data remaining local after account sign-in
+- These flows still require a real Firebase project setup with:
+  - valid iOS `GoogleService-Info.plist`
+  - matching Firebase bundle ID / URL scheme configuration
+  - enabled Email/Password, Google, and Apple providers in Firebase Auth
+  - backend Firebase Admin credentials configured for the same project
+- The preserved-email binding is intentionally high impact:
+  - `FIREBASE_LEGACY_EMAIL` and `FIREBASE_LEGACY_APP_USER_ID` must point at the real historical business account before production rollout
+  - if either value is wrong, the first real Firebase login for that email could bind to the wrong backend user or fail closed at startup
+- Guest mode is now local-only by implementation, but final confidence still depends on a manual on-device sign-in smoke pass because the current shared Xcode scheme cannot run the new XCTest coverage.

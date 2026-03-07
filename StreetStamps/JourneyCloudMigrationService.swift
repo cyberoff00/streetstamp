@@ -14,12 +14,13 @@ enum JourneyCloudMigrationService {
         journeyStore: JourneyStore,
         cityCache: CityCache
     ) async throws -> JourneyMigrationReport {
-        let snapshot = await MainActor.run { () -> (token: String?, uid: String, journeys: [JourneyRoute], cards: [CachedCity]) in
+        let snapshot = await MainActor.run { () -> (token: String?, uid: String, journeys: [JourneyRoute], cards: [CachedCity], hasLoaded: Bool) in
             (
                 token: sessionStore.currentAccessToken,
                 uid: sessionStore.currentUserID,
                 journeys: journeyStore.journeys,
-                cards: cityCache.cachedCities
+                cards: cityCache.cachedCities,
+                hasLoaded: journeyStore.hasLoaded
             )
         }
 
@@ -43,7 +44,18 @@ enum JourneyCloudMigrationService {
             .filter { !($0.isTemporary ?? false) }
             .map { FriendCityCard(id: $0.id, name: $0.name, countryISO2: $0.countryISO2) }
 
-        let payload = BackendMigrationRequest(journeys: payloadResult.journeys, unlockedCityCards: cards)
+        let removedJourneyIDs = try await removedRemoteJourneyIDsIfNeeded(
+            token: token,
+            hasLoaded: snapshot.hasLoaded,
+            localShareableJourneys: payloadResult.journeys
+        )
+
+        let payload = BackendMigrationRequest(
+            journeys: payloadResult.journeys,
+            unlockedCityCards: cards,
+            removedJourneyIDs: removedJourneyIDs.isEmpty ? nil : removedJourneyIDs,
+            snapshotComplete: false
+        )
         try await BackendAPIClient.shared.migrateJourneys(token: token, payload: payload)
 
         await MainActor.run {
@@ -56,6 +68,27 @@ enum JourneyCloudMigrationService {
             uploadedMediaFiles: payloadResult.uploadedMediaCount,
             localOnlyPrivateJourneys: privateJourneysCount
         )
+    }
+
+    private static func removedRemoteJourneyIDsIfNeeded(
+        token: String,
+        hasLoaded: Bool,
+        localShareableJourneys: [BackendJourneyUploadDTO]
+    ) async throws -> [String] {
+        guard hasLoaded else { return [] }
+
+        let remoteProfile: BackendProfileDTO
+        do {
+            remoteProfile = try await BackendAPIClient.shared.fetchMyProfile(token: token)
+        } catch {
+            // If the client cannot confirm the current remote snapshot, prefer
+            // a merge-only sync over a potentially destructive delete.
+            return []
+        }
+
+        let localIDs = Set(localShareableJourneys.map(\.id))
+        let remoteIDs = Set(remoteProfile.journeys.map(\.id))
+        return Array(remoteIDs.subtracting(localIDs)).sorted()
     }
 
     private static func buildJourneyPayloads(

@@ -212,6 +212,7 @@ struct LifelogView: View {
     @AppStorage("streetstamps.lifelog.health.steps.snapshot.value") private var legacyStepSnapshotValue = 0
     @AppStorage("streetstamps.lifelog.steps.popup.prompted.day") private var stepPopupPromptedDay = ""
     @AppStorage("streetstamps.lifelog.mood.prompted.day") private var moodPromptedDay = ""
+    @State private var footprintViewportCache = LifelogFootprintViewportCache()
 
     private var mapAppearance: MapAppearanceStyle {
         MapAppearanceStyle(rawValue: mapAppearanceRaw) ?? .dark
@@ -225,16 +226,6 @@ struct LifelogView: View {
     }
     private var isNearFootprintMode: Bool {
         LifelogRenderModeSelector.isNearMode(viewportMaxSpanMeters: viewportMaxSpanMeters)
-    }
-    private var nearModeMaxPoints: Int {
-        switch renderLodLevel {
-        case 3: return 2_400
-        case 2: return 1_600
-        default: return 1_100
-        }
-    }
-    private var nearModeFallbackMaxPoints: Int {
-        max(nearModeMaxPoints * 2, 1_800)
     }
 
     private var renderViewportRefreshKey: String {
@@ -259,18 +250,23 @@ struct LifelogView: View {
         return renderSnapshot.footprintRuns
     }
 
-    private var footprintRenderRuns: [[CLLocationCoordinate2D]] {
-        guard let current = currentDisplayLocation?.coordinate else {
-            return footprintRuns
-        }
-        let me = CLLocation(latitude: current.latitude, longitude: current.longitude)
-        let threshold = avatarFootprintExclusionMeters
-        return footprintRuns.compactMap { run in
-            let filtered = run.filter { coord in
-                let point = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
-                return point.distance(from: me) > threshold
-            }
-            return filtered.isEmpty ? nil : filtered
+    private var footprintMapMarkers: [LifelogFootprintProjectedMarker] {
+        guard isNearFootprintMode else { return [] }
+        guard let region = cameraRegion ?? visibleRegion else { return [] }
+
+        let key = LifelogFootprintViewportCache.Key(
+            lodLevel: renderLodLevel,
+            region: region,
+            runsSignature: LifelogFootprintRenderPlanner.runsSignature(footprintRuns),
+            exclusionCoordinate: currentDisplayLocation?.coordinate
+        )
+        return footprintViewportCache.value(for: key) {
+            LifelogFootprintRenderPlanner.plannedMarkers(
+                from: footprintRuns,
+                region: region,
+                lodLevel: renderLodLevel,
+                currentCoordinate: currentDisplayLocation?.coordinate
+            )
         }
     }
 
@@ -302,8 +298,8 @@ struct LifelogView: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack {
-            mapLayer
-                .ignoresSafeArea()
+                mapLayer
+                    .ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     VStack(spacing: 0) {
@@ -486,18 +482,10 @@ struct LifelogView: View {
                 }
             }
 
-            ForEach(Array(footprintRenderRuns.enumerated()), id: \.offset) { _, run in
-                ForEach(run.indices, id: \.self) { idx in
-                    let style = footprintStyle(at: idx, in: run)
-                    Annotation("", coordinate: run[idx]) {
-                        FootstepMarker(
-                            opacity: style.opacity,
-                            scale: style.scale,
-                            angle: style.angle,
-                            isDark: isDarkAppearance
-                        )
-                        .offset(x: style.lateralOffset)
-                    }
+            ForEach(Array(footprintMapMarkers.enumerated()), id: \.offset) { _, marker in
+                Annotation("", coordinate: marker.coordinate) {
+                    FootstepGlyph(isDark: isDarkAppearance)
+                        .rotationEffect(.degrees(marker.angleDegrees))
                 }
             }
 
@@ -647,13 +635,14 @@ struct LifelogView: View {
     }
 
     private var bottomCard: some View {
-        let totalJourneys = store.journeys.count
         let totalMemories = store.journeys.reduce(0) { $0 + $1.memories.count }
-        let totalDistanceMeters = max(0, lifelogStore.totalDistanceMeters)
-        let totalDistanceKm = totalDistanceMeters / 1000.0
-        let distanceKmDisplay = max(0, Int(totalDistanceKm.rounded(.down)))
         let cityCount = cityCache.cachedCities.filter { !($0.isTemporary ?? false) }.count
         let levelProgress = UserLevelProgress.from(journeys: store.journeys)
+        let cardContent = ProfileSummaryCardContent(
+            level: levelProgress.level,
+            cityCount: cityCount,
+            memoryCount: totalMemories
+        )
 
         return HStack(spacing: 14) {
             ZStack {
@@ -674,28 +663,12 @@ struct LifelogView: View {
                     .foregroundColor(FigmaTheme.text)
                     .lineLimit(1)
 
-                HStack(spacing: 6) {
-                    Text(String(format: L10n.t("level_format"), levelProgress.level))
-                    Text("·")
-                    Text(String(format: L10n.t("level_remaining_short_format"), levelProgress.journeysRemainingToNextLevel))
-                }
+                Text(cardContent.levelText)
                     .appCaptionStyle()
                     .foregroundColor(FigmaTheme.text.opacity(0.62))
                     .lineLimit(1)
 
-                GeometryReader { proxy in
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(Color.black.opacity(0.08))
-                            .frame(height: 6)
-                        Capsule()
-                            .fill(UITheme.accent)
-                            .frame(width: max(8, proxy.size.width * levelProgress.progress), height: 6)
-                    }
-                }
-                .frame(height: 6)
-
-                Text(String(format: L10n.t("summary_stats_line"), cityCount, totalJourneys, totalMemories, distanceKmDisplay))
+                Text(cardContent.statsText)
                     .appFootnoteStyle()
                     .foregroundColor(FigmaTheme.text.opacity(0.56))
                     .lineLimit(1)
@@ -805,9 +778,6 @@ struct LifelogView: View {
 
             bottomCard
 
-            Divider()
-                .overlay(Color.black.opacity(0.06))
-
             calendarPanel
         }
         .frame(maxWidth: .infinity)
@@ -850,7 +820,7 @@ struct LifelogView: View {
     }
 
     private var calendarPanel: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 14) {
             HStack(spacing: 8) {
                 if calendarDisplayMode == .month {
                     Button {
@@ -891,6 +861,7 @@ struct LifelogView: View {
                 }
                 .buttonStyle(.plain)
             }
+            .padding(.top, 2)
 
             if calendarDisplayMode == .day {
                 dayModeCalendar
@@ -971,73 +942,6 @@ struct LifelogView: View {
         }
     }
 
-    private var renderMaxPoints: Int {
-        switch renderLodLevel {
-        case 3: return 800
-        case 2: return 550
-        case 1: return 380
-        default: return 260
-        }
-    }
-
-    private var footprintMaxMarkers: Int {
-        switch renderLodLevel {
-        case 3: return 140
-        case 2: return 92
-        case 1: return 56
-        default: return 34
-        }
-    }
-
-    private var footprintStrideMeters: CLLocationDistance {
-        switch renderLodLevel {
-        case 3: return 14
-        case 2: return 24
-        case 1: return 38
-        default: return 60
-        }
-    }
-
-    private var footprintMinSeparationMeters: CLLocationDistance {
-        // Stronger spacing when zoomed out to prevent dense-looking carpets.
-        switch renderLodLevel {
-        case 3: return 12
-        case 2: return 20
-        case 1: return 32
-        default: return 56
-        }
-    }
-
-    private var footprintGridCellRatio: Double {
-        // Screen-space cell in normalized viewport units.
-        // Larger cell on zoomed-out levels to avoid dense clusters.
-        switch renderLodLevel {
-        case 3: return 0.020
-        case 2: return 0.036
-        case 1: return 0.056
-        default: return 0.090
-        }
-    }
-
-    private var footprintGapBreakMeters: CLLocationDistance {
-        // Break very long jumps so footprints don't form a fake straight "connection".
-        switch renderLodLevel {
-        case 3: return 180
-        case 2: return 260
-        case 1: return 380
-        default: return 520
-        }
-    }
-
-    private var avatarFootprintExclusionMeters: CLLocationDistance {
-        switch renderLodLevel {
-        case 3: return 26
-        case 2: return 34
-        case 1: return 44
-        default: return 56
-        }
-    }
-
     private func shouldUpdateVisibleRegion(_ incoming: MKCoordinateRegion) -> Bool {
         guard let old = visibleRegion else { return true }
         let oldCenter = CLLocation(latitude: old.center.latitude, longitude: old.center.longitude)
@@ -1050,230 +954,6 @@ struct LifelogView: View {
         return centerMove > 120 || spanRatio > 0.20
     }
 
-    private func resampledFootprints(
-        from coords: [CLLocationCoordinate2D],
-        targetSpacingMeters: CLLocationDistance
-    ) -> [CLLocationCoordinate2D] {
-        guard coords.count > 2 else { return coords }
-        guard targetSpacingMeters > 0 else { return coords }
-
-        var result: [CLLocationCoordinate2D] = [coords[0]]
-        var distanceFromLastSample: CLLocationDistance = 0
-
-        for i in 1..<coords.count {
-            let segmentStart = coords[i - 1]
-            let segmentEnd = coords[i]
-            let startLoc = CLLocation(latitude: segmentStart.latitude, longitude: segmentStart.longitude)
-            let endLoc = CLLocation(latitude: segmentEnd.latitude, longitude: segmentEnd.longitude)
-            let segmentLength = endLoc.distance(from: startLoc)
-            if segmentLength <= 0.001 { continue }
-            if segmentLength > footprintGapBreakMeters {
-                // Treat large gaps as a discontinuity: keep endpoint, but skip interpolation across the gap.
-                if !sameCoordinate(result.last, segmentEnd) {
-                    result.append(segmentEnd)
-                }
-                distanceFromLastSample = 0
-                continue
-            }
-
-            var consumedOnSegment: CLLocationDistance = 0
-            while distanceFromLastSample + (segmentLength - consumedOnSegment) >= targetSpacingMeters {
-                let needed = targetSpacingMeters - distanceFromLastSample
-                let t = (consumedOnSegment + needed) / segmentLength
-                result.append(interpolateCoordinate(from: segmentStart, to: segmentEnd, t: t))
-                consumedOnSegment += needed
-                distanceFromLastSample = 0
-            }
-
-            distanceFromLastSample += max(0, segmentLength - consumedOnSegment)
-        }
-
-        if let last = coords.last, !sameCoordinate(result.last, last) {
-            result.append(last)
-        }
-        return result
-    }
-
-    private func interpolateCoordinate(
-        from a: CLLocationCoordinate2D,
-        to b: CLLocationCoordinate2D,
-        t: Double
-    ) -> CLLocationCoordinate2D {
-        let clamped = min(max(t, 0), 1)
-        let lat = a.latitude + (b.latitude - a.latitude) * clamped
-        let lon = a.longitude + (b.longitude - a.longitude) * clamped
-        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
-    }
-
-    private func sameCoordinate(_ a: CLLocationCoordinate2D?, _ b: CLLocationCoordinate2D) -> Bool {
-        guard let a else { return false }
-        return abs(a.latitude - b.latitude) < 0.000_000_1 && abs(a.longitude - b.longitude) < 0.000_000_1
-    }
-
-    private func decimatedFootprintsForViewport(_ coords: [CLLocationCoordinate2D]) -> [CLLocationCoordinate2D] {
-        guard coords.count > 3 else { return coords }
-        guard let region = cameraRegion ?? visibleRegion else {
-            return uniformSampledCoords(coords, maxPoints: footprintMaxMarkers)
-        }
-        let maxMarkers = max(2, min(footprintMaxMarkers, coords.count))
-        let cell = max(0.010, footprintGridCellRatio)
-
-        var selected = Set<Int>()
-        selected.insert(0)
-        selected.insert(coords.count - 1)
-
-        func cellKey(for index: Int) -> String? {
-            guard let p = normalizedViewportPoint(coords[index], in: region) else { return nil }
-            guard p.x >= -0.2, p.x <= 1.2, p.y >= -0.2, p.y <= 1.2 else { return nil }
-            let cx = Int(floor(p.x / cell))
-            let cy = Int(floor(p.y / cell))
-            return "\(cx)|\(cy)"
-        }
-
-        func localSpacingMeters(at index: Int) -> CLLocationDistance {
-            guard index > 0, index < coords.count - 1 else { return .greatestFiniteMagnitude }
-            let prev = CLLocation(latitude: coords[index - 1].latitude, longitude: coords[index - 1].longitude)
-            let cur = CLLocation(latitude: coords[index].latitude, longitude: coords[index].longitude)
-            let next = CLLocation(latitude: coords[index + 1].latitude, longitude: coords[index + 1].longitude)
-            return max(cur.distance(from: prev), next.distance(from: cur))
-        }
-
-        func isFarEnough(_ idx: Int, from picked: Set<Int>) -> Bool {
-            let minSep = footprintMinSeparationMeters
-            guard minSep > 0 else { return true }
-            let c = coords[idx]
-            for p in picked {
-                let d = CLLocation(latitude: c.latitude, longitude: c.longitude).distance(
-                    from: CLLocation(latitude: coords[p].latitude, longitude: coords[p].longitude)
-                )
-                if d < minSep { return false }
-            }
-            return true
-        }
-
-        // Preserve naturally sparse segments first; only dense areas should be compressed.
-        let sparseKeepThreshold = max(footprintStrideMeters * 1.2, 22)
-        for idx in 1..<(coords.count - 1) {
-            if localSpacingMeters(at: idx) >= sparseKeepThreshold, isFarEnough(idx, from: selected) {
-                selected.insert(idx)
-            }
-        }
-
-        if selected.count > maxMarkers {
-            let ranked = selected.sorted { localSpacingMeters(at: $0) > localSpacingMeters(at: $1) }
-            selected = Set(ranked.prefix(maxMarkers))
-            selected.insert(0)
-            selected.insert(coords.count - 1)
-        }
-
-        var occupied = Set<String>()
-        for idx in selected {
-            if let key = cellKey(for: idx) {
-                occupied.insert(key)
-            }
-        }
-
-        // Fill remaining slots with one representative per viewport cell.
-        if selected.count < maxMarkers {
-            for idx in 0..<coords.count {
-                if selected.contains(idx) { continue }
-                if !isFarEnough(idx, from: selected) { continue }
-                guard let key = cellKey(for: idx) else { continue }
-                if occupied.contains(key) { continue }
-                selected.insert(idx)
-                occupied.insert(key)
-                if selected.count >= maxMarkers { break }
-            }
-        }
-
-        // If still below budget, add the sparsest leftovers first.
-        if selected.count < maxMarkers {
-            let candidates = (0..<coords.count)
-                .filter { !selected.contains($0) }
-                .sorted { localSpacingMeters(at: $0) > localSpacingMeters(at: $1) }
-            for idx in candidates {
-                if selected.contains(idx) { continue }
-                if !isFarEnough(idx, from: selected) { continue }
-                selected.insert(idx)
-                if selected.count >= maxMarkers { break }
-            }
-        }
-
-        return selected
-            .sorted()
-            .map { coords[$0] }
-    }
-
-    private func uniformSampledCoords(_ coords: [CLLocationCoordinate2D], maxPoints: Int) -> [CLLocationCoordinate2D] {
-        guard maxPoints >= 2 else { return coords }
-        guard coords.count > maxPoints else { return coords }
-        let n = coords.count
-        return (0..<maxPoints).map { i in
-            let t = Double(i) / Double(maxPoints - 1)
-            let idx = Int((t * Double(n - 1)).rounded(.toNearestOrAwayFromZero))
-            return coords[min(max(idx, 0), n - 1)]
-        }
-    }
-
-    private func footprintStyle(
-        at index: Int,
-        in coords: [CLLocationCoordinate2D]
-    ) -> (opacity: Double, scale: CGFloat, angle: Double, lateralOffset: CGFloat) {
-        let opacity = 0.80
-        let scale = CGFloat(0.90)
-        let heading = footprintHeadingDegrees(at: index, in: coords)
-
-        return (
-            opacity: opacity,
-            scale: scale,
-            angle: heading,
-            lateralOffset: 0
-        )
-    }
-
-    private func footprintHeadingDegrees(at index: Int, in coords: [CLLocationCoordinate2D]) -> Double {
-        guard coords.count >= 2 else { return -18 }
-        let from: CLLocationCoordinate2D
-        let to: CLLocationCoordinate2D
-        if index <= 0 {
-            from = coords[0]
-            to = coords[1]
-        } else {
-            from = coords[min(index - 1, coords.count - 1)]
-            to = coords[min(index, coords.count - 1)]
-        }
-        return bearingDegrees(from: from, to: to)
-    }
-
-    private func bearingDegrees(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D) -> Double {
-        let lat1 = from.latitude * .pi / 180
-        let lon1 = from.longitude * .pi / 180
-        let lat2 = to.latitude * .pi / 180
-        let lon2 = to.longitude * .pi / 180
-        let dLon = lon2 - lon1
-        let y = sin(dLon) * cos(lat2)
-        let x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon)
-        let raw = atan2(y, x) * 180 / .pi
-        if raw.isFinite {
-            return raw
-        }
-        return -18
-    }
-
-    private func normalizedViewportPoint(
-        _ coord: CLLocationCoordinate2D,
-        in region: MKCoordinateRegion
-    ) -> CGPoint? {
-        let latDelta = max(region.span.latitudeDelta, 0.000_001)
-        let lonDelta = max(region.span.longitudeDelta, 0.000_001)
-        let minLon = region.center.longitude - lonDelta / 2.0
-        let maxLat = region.center.latitude + latDelta / 2.0
-
-        let xRatio = (coord.longitude - minLon) / lonDelta
-        let yRatio = (maxLat - coord.latitude) / latDelta
-        guard xRatio.isFinite, yRatio.isFinite else { return nil }
-        return CGPoint(x: xRatio, y: yRatio)
-    }
 
     private var dayModeCalendar: some View {
         let days = recentSevenDays
@@ -1921,10 +1601,7 @@ struct LifelogStepSnapshotCache {
     }
 }
 
-private struct FootstepMarker: View {
-    let opacity: Double
-    let scale: CGFloat
-    let angle: Double
+private struct FootstepGlyph: View {
     let isDark: Bool
 
     var body: some View {
@@ -1933,10 +1610,9 @@ private struct FootstepMarker: View {
             .symbolRenderingMode(.monochrome)
             .foregroundStyle(markerColor)
             .frame(width: 22, height: 28)
-            .opacity(opacity)
             .shadow(color: markerColor.opacity(isDark ? 0.30 : 0.20), radius: isDark ? 3.2 : 1.6, x: 0, y: 0)
-            .scaleEffect(scale)
-            .rotationEffect(.degrees(angle))
+            .opacity(0.80)
+            .scaleEffect(0.90)
             .shadow(color: .black.opacity(isDark ? 0.18 : 0.12), radius: 0.9, y: 0.5)
     }
 

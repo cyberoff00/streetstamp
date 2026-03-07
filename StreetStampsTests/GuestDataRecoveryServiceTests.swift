@@ -2,6 +2,42 @@ import XCTest
 @testable import StreetStamps
 
 final class GuestDataRecoveryServiceTests: XCTestCase {
+    func test_recover_defaultPolicy_keepsExistingJourneyAndLifelog() throws {
+        let sourceUserID = "guest-recovery-source-\(UUID().uuidString)"
+        let targetUserID = "local-recovery-target-\(UUID().uuidString)"
+        let source = StoragePath(userID: sourceUserID)
+        let target = StoragePath(userID: targetUserID)
+        let fm = FileManager.default
+
+        try? fm.removeItem(at: source.userRoot)
+        try? fm.removeItem(at: target.userRoot)
+        try source.ensureBaseDirectoriesExist()
+        try target.ensureBaseDirectoriesExist()
+
+        let sharedJourneyID = "journey-\(UUID().uuidString)"
+        try writeJourney(
+            id: sharedJourneyID,
+            coordinatesCount: 3,
+            to: source,
+            modifiedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        try writeJourney(
+            id: sharedJourneyID,
+            coordinatesCount: 8,
+            to: target,
+            modifiedAt: Date(timeIntervalSince1970: 1_800_000_000)
+        )
+        try writeLifelog(points: 12, to: source)
+        try writeLifelog(points: 24, to: target)
+
+        let result = try GuestDataRecoveryService.recover(from: sourceUserID, to: targetUserID)
+
+        XCTAssertEqual(result.mergedJourneyCount, 0)
+        XCTAssertFalse(result.replacedLifelog)
+        XCTAssertEqual(loadJourneyCoordinatesCount(id: sharedJourneyID, from: target), 8)
+        XCTAssertEqual(loadLifelogPointsCount(from: target), 24)
+    }
+
     func test_recover_copiesLifelogMoodFileToTargetUser() throws {
         let sourceUserID = "guest-recovery-source-\(UUID().uuidString)"
         let targetUserID = "guest-recovery-target-\(UUID().uuidString)"
@@ -29,6 +65,235 @@ final class GuestDataRecoveryServiceTests: XCTestCase {
         XCTAssertEqual(restored[moodKey], "happy")
     }
 
+    @MainActor
+    func test_applyAuth_fromGuest_doesNotLeavePendingMigrationMarker() throws {
+        let store = UserSessionStore()
+        store.logoutToGuest()
+        store.clearPendingGuestMigrationMarker()
+
+        let guestUserID = store.currentGuestScopedUserID
+        let guestPaths = StoragePath(userID: guestUserID)
+        let accountPaths = StoragePath(userID: "account_task5_auth_\(UUID().uuidString)")
+        let fm = FileManager.default
+
+        try? fm.removeItem(at: guestPaths.userRoot)
+        try? fm.removeItem(at: accountPaths.userRoot)
+        try guestPaths.ensureBaseDirectoriesExist()
+        try writeMoodFile(value: "guest-only", to: guestPaths)
+
+        store.applyAuth(
+            BackendAuthResponse(
+                userId: String(accountPaths.userID.dropFirst("account_".count)),
+                provider: "email",
+                email: "task5@example.com",
+                accessToken: "token",
+                refreshToken: "refresh"
+            )
+        )
+
+        XCTAssertNil(store.pendingMigrationFromGuestUserID)
+        XCTAssertFalse(fm.fileExists(atPath: accountPaths.cachesDir.appendingPathComponent("lifelog_mood.json").path))
+
+        try? fm.removeItem(at: guestPaths.userRoot)
+        try? fm.removeItem(at: accountPaths.userRoot)
+    }
+
+    @MainActor
+    func test_logoutToGuest_preservesActiveLocalProfileID() {
+        let store = UserSessionStore()
+        let initialLocalProfileID = store.activeLocalProfileID
+
+        store.applyAuth(
+            BackendAuthResponse(
+                userId: "account-local-profile-\(UUID().uuidString)",
+                provider: "email",
+                email: "local@example.com",
+                accessToken: "token",
+                refreshToken: "refresh"
+            )
+        )
+        XCTAssertEqual(store.activeLocalProfileID, initialLocalProfileID)
+
+        store.logoutToGuest()
+
+        XCTAssertEqual(store.activeLocalProfileID, initialLocalProfileID)
+        XCTAssertNil(store.accountUserID)
+    }
+
+    @MainActor
+    func test_applyFirebaseAccountSession_preservesActiveLocalProfileID() {
+        let store = UserSessionStore()
+        let initialLocalProfileID = store.activeLocalProfileID
+
+        store.applyFirebaseAccountSession(
+            appUserID: "firebase-local-\(UUID().uuidString)",
+            firebaseUID: "firebase-\(UUID().uuidString)",
+            provider: "google",
+            email: "firebase-local@example.com",
+            emailVerified: true,
+            cachedIDToken: "firebase-token",
+            preserveGuestBoundary: false
+        )
+
+        XCTAssertEqual(store.activeLocalProfileID, initialLocalProfileID)
+        XCTAssertEqual(store.accountUserID?.hasPrefix("firebase-local-"), true)
+    }
+
+    @MainActor
+    func test_bootstrapFileSystemAsync_importsPreviouslyBoundAccountRootIntoActiveLocalProfile() async throws {
+        let store = UserSessionStore()
+        let localPaths = StoragePath(userID: store.activeLocalProfileID)
+        let accountUserID = "bootstrap-bound-\(UUID().uuidString)"
+        let accountPaths = StoragePath(userID: "account_\(accountUserID)")
+        let fm = FileManager.default
+
+        try? fm.removeItem(at: localPaths.userRoot)
+        try? fm.removeItem(at: accountPaths.userRoot)
+        try accountPaths.ensureBaseDirectoriesExist()
+        try writeMoodFile(value: "account-seeded", to: accountPaths)
+
+        store.applyAuth(
+            BackendAuthResponse(
+                userId: accountUserID,
+                provider: "email",
+                email: "bound@example.com",
+                accessToken: "token",
+                refreshToken: "refresh"
+            )
+        )
+        store.logoutToGuest()
+
+        await store.bootstrapFileSystemAsync()
+
+        let localMoodURL = localPaths.cachesDir.appendingPathComponent("lifelog_mood.json", isDirectory: false)
+        let data = try Data(contentsOf: localMoodURL)
+        let restored = try JSONDecoder().decode([String: String].self, from: data)
+        let moodKey = dayKey(Calendar.current.startOfDay(for: Date()))
+        XCTAssertEqual(restored[moodKey], "account-seeded")
+
+        try? fm.removeItem(at: localPaths.userRoot)
+        try? fm.removeItem(at: accountPaths.userRoot)
+    }
+
+    @MainActor
+    func test_bootstrapFileSystemAsync_doesNotImportUnboundAccountRootIntoActiveLocalProfile() async throws {
+        let store = UserSessionStore()
+        let localPaths = StoragePath(userID: store.activeLocalProfileID)
+        let accountPaths = StoragePath(userID: "account_unbound_\(UUID().uuidString)")
+        let fm = FileManager.default
+
+        try? fm.removeItem(at: localPaths.userRoot)
+        try? fm.removeItem(at: accountPaths.userRoot)
+        try accountPaths.ensureBaseDirectoriesExist()
+        try writeMoodFile(value: "unbound-account", to: accountPaths)
+
+        await store.bootstrapFileSystemAsync()
+
+        let localMoodURL = localPaths.cachesDir.appendingPathComponent("lifelog_mood.json", isDirectory: false)
+        XCTAssertFalse(fm.fileExists(atPath: localMoodURL.path))
+
+        try? fm.removeItem(at: localPaths.userRoot)
+        try? fm.removeItem(at: accountPaths.userRoot)
+    }
+
+    @MainActor
+    func test_bootstrapFileSystemAsync_forFirebaseAccount_doesNotArchiveGuestMoodIntoAccount() async throws {
+        let store = UserSessionStore()
+        store.logoutToGuest()
+        store.clearPendingGuestMigrationMarker()
+
+        let guestUserID = store.currentGuestScopedUserID
+        let guestPaths = StoragePath(userID: guestUserID)
+        let accountAppUserID = "task5_firebase_\(UUID().uuidString)"
+        let accountPaths = StoragePath(userID: "account_\(accountAppUserID)")
+        let fm = FileManager.default
+
+        try? fm.removeItem(at: guestPaths.userRoot)
+        try? fm.removeItem(at: accountPaths.userRoot)
+        try guestPaths.ensureBaseDirectoriesExist()
+        try writeMoodFile(value: "stay-local", to: guestPaths)
+
+        store.applyFirebaseAccountSession(
+            appUserID: accountAppUserID,
+            firebaseUID: "firebase-\(UUID().uuidString)",
+            provider: "google",
+            email: "firebase@example.com",
+            emailVerified: true,
+            cachedIDToken: "firebase-token",
+            preserveGuestBoundary: false
+        )
+
+        await store.bootstrapFileSystemAsync()
+
+        XCTAssertNil(store.pendingMigrationFromGuestUserID)
+        XCTAssertFalse(fm.fileExists(atPath: accountPaths.cachesDir.appendingPathComponent("lifelog_mood.json").path))
+
+        try? fm.removeItem(at: guestPaths.userRoot)
+        try? fm.removeItem(at: accountPaths.userRoot)
+    }
+
+    private func writeMoodFile(value: String, to paths: StoragePath) throws {
+        let moodKey = dayKey(Calendar.current.startOfDay(for: Date()))
+        let moodURL = paths.cachesDir.appendingPathComponent("lifelog_mood.json", isDirectory: false)
+        let data = try JSONEncoder().encode([moodKey: value])
+        try data.write(to: moodURL, options: .atomic)
+    }
+
+    private func writeLifelog(points: Int, to paths: StoragePath) throws {
+        let baseDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let payload = LifelogTestPayload(
+            points: (0..<points).map { index in
+                LifelogTestPayload.Point(
+                    lat: 51.5 + Double(index) * 0.0001,
+                    lon: -0.12 - Double(index) * 0.0001,
+                    timestamp: baseDate.addingTimeInterval(Double(index) * 60)
+                )
+            }
+        )
+        let data = try JSONEncoder().encode(payload)
+        try data.write(to: paths.lifelogRouteURL, options: .atomic)
+    }
+
+    private func loadLifelogPointsCount(from paths: StoragePath) -> Int {
+        guard let data = try? Data(contentsOf: paths.lifelogRouteURL),
+              let payload = try? JSONDecoder().decode(LifelogTestPayload.self, from: data) else {
+            return 0
+        }
+        return payload.points.count
+    }
+
+    private func writeJourney(id: String, coordinatesCount: Int, to paths: StoragePath, modifiedAt: Date) throws {
+        let route = JourneyRoute(
+            id: id,
+            startTime: modifiedAt,
+            endTime: modifiedAt.addingTimeInterval(600),
+            distance: Double(coordinatesCount) * 100,
+            coordinates: (0..<coordinatesCount).map { index in
+                CoordinateCodable(
+                    lat: 51.5 + Double(index) * 0.001,
+                    lon: -0.12 - Double(index) * 0.001
+                )
+            }
+        )
+        let data = try JSONEncoder().encode(route)
+        let journeyURL = paths.journeysDir.appendingPathComponent("\(id).json", isDirectory: false)
+        try data.write(to: journeyURL, options: .atomic)
+        try JSONEncoder().encode([id]).write(
+            to: paths.journeysDir.appendingPathComponent("index.json", isDirectory: false),
+            options: .atomic
+        )
+        try FileManager.default.setAttributes([.modificationDate: modifiedAt], ofItemAtPath: journeyURL.path)
+    }
+
+    private func loadJourneyCoordinatesCount(id: String, from paths: StoragePath) -> Int {
+        let journeyURL = paths.journeysDir.appendingPathComponent("\(id).json", isDirectory: false)
+        guard let data = try? Data(contentsOf: journeyURL),
+              let route = try? JSONDecoder().decode(JourneyRoute.self, from: data) else {
+            return 0
+        }
+        return route.coordinates.count
+    }
+
     private func dayKey(_ day: Date) -> String {
         let start = Calendar.current.startOfDay(for: day)
         let components = Calendar.current.dateComponents([.year, .month, .day], from: start)
@@ -39,4 +304,14 @@ final class GuestDataRecoveryServiceTests: XCTestCase {
             components.day ?? 1
         )
     }
+}
+
+private struct LifelogTestPayload: Codable {
+    struct Point: Codable {
+        let lat: Double
+        let lon: Double
+        let timestamp: Date
+    }
+
+    let points: [Point]
 }

@@ -258,6 +258,13 @@
 "auth_fill_email_password" = "Please enter email and password";
 "auth_forgot_password" = "Forgot password?";
 "auth_forgot_password_hint" = "Please use the change-password action in Settings.";
+"settings_map_dark_mode" = "地図ダークモード";
+"settings_profile_visibility_friends" = "プロフィールは友達に表示";
+"settings_profile_visibility_private" = "プロフィールは自分のみ表示";
+"settings_logout" = "ログアウト";
+"settings_logout_subtitle" = "このデバイスからサインアウト";
+"settings_logout_confirm_title" = "ログアウトしますか？";
+"settings_logout_confirm_message" = "このデバイスはゲストモードに戻ります。";
 "auth_full_name" = "FULL NAME";
 "auth_have_account" = "Already have an account?";
 "auth_no_account" = "Don't have an account?";

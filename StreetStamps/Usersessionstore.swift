@@ -23,6 +23,15 @@ struct LegacyMigrationReplayReport {
     let discoveredLegacyUserIDs: [String]
 }
 
+struct FirebaseAccountState: Codable, Equatable {
+    let appUserID: String
+    let firebaseUID: String
+    let provider: String
+    let email: String?
+    let emailVerified: Bool
+    var cachedIDToken: String?
+}
+
 @MainActor
 final class UserSessionStore: ObservableObject {
     enum Session: Equatable, Codable {
@@ -31,10 +40,14 @@ final class UserSessionStore: ObservableObject {
     }
 
     @Published private(set) var session: Session
+    @Published private(set) var firebaseAccountState: FirebaseAccountState?
     @Published private(set) var pendingMigrationFromGuestUserID: String?
+    @Published private(set) var activeLocalProfileID: String
 
     private static let guestIDKey = "streetstamps.guest_id.v1"
+    private static let activeLocalProfileIDKey = "streetstamps.active_local_profile_id.v1"
     private static let sessionDataKey = "streetstamps.session.v1"
+    private static let firebaseAccountStateKey = "streetstamps.firebase_account_state.v1"
     private static let pendingGuestMigrationKey = "streetstamps.pending_guest_migration.v1"
     private static let legacyGuestBindingsKey = "streetstamps.legacy_guest_bindings.v1"
     private static let guestAccountBindingsKey = "streetstamps.guest_account_bindings.v1"
@@ -42,8 +55,10 @@ final class UserSessionStore: ObservableObject {
 
     init() {
         let guestID = Self.loadOrCreateGuestID()
+        self.activeLocalProfileID = Self.loadOrCreateActiveLocalProfileID(guestID: guestID)
         let savedPending = UserDefaults.standard.string(forKey: Self.pendingGuestMigrationKey)
         self.pendingMigrationFromGuestUserID = savedPending
+        self.firebaseAccountState = Self.loadFirebaseAccountState()
 
         if let data = UserDefaults.standard.data(forKey: Self.sessionDataKey),
            let restored = try? JSONDecoder().decode(Session.self, from: data) {
@@ -67,14 +82,16 @@ final class UserSessionStore: ObservableObject {
     }
 
     var currentUserID: String {
-        if let account = accountUserID, !account.isEmpty {
-            return "account_\(account)"
-        }
-        return currentGuestScopedUserID
+        activeLocalProfileID
     }
 
     var currentGuestScopedUserID: String {
         "guest_\(guestID)"
+    }
+
+    var currentAccountScopedUserID: String? {
+        guard let account = accountUserID, !account.isEmpty else { return nil }
+        return "account_\(account)"
     }
 
     var guestID: String {
@@ -87,11 +104,17 @@ final class UserSessionStore: ObservableObject {
     var currentAccessToken: String? {
         switch session {
         case .guest: return nil
-        case .account(_, _, _, let accessToken, _, _): return accessToken
+        case .account(_, _, _, let accessToken, _, _):
+            if let firebaseToken = firebaseAccountState?.cachedIDToken,
+               !firebaseToken.isEmpty {
+                return firebaseToken
+            }
+            return accessToken
         }
     }
 
     var currentRefreshToken: String? {
+        if firebaseAccountState != nil { return nil }
         switch session {
         case .guest: return nil
         case .account(_, _, _, _, let refreshToken, _): return refreshToken
@@ -106,6 +129,9 @@ final class UserSessionStore: ObservableObject {
     }
 
     var currentProvider: String {
+        if let provider = firebaseAccountState?.provider, !provider.isEmpty {
+            return provider
+        }
         switch session {
         case .guest: return "guest"
         case .account(_, let provider, _, _, _, _): return provider
@@ -113,10 +139,21 @@ final class UserSessionStore: ObservableObject {
     }
 
     var currentEmail: String? {
+        if let email = firebaseAccountState?.email {
+            return email
+        }
         switch session {
         case .guest: return nil
         case .account(_, _, let email, _, _, _): return email
         }
+    }
+
+    var currentFirebaseUID: String? {
+        firebaseAccountState?.firebaseUID
+    }
+
+    var currentEmailVerified: Bool {
+        firebaseAccountState?.emailVerified ?? false
     }
 
     var isLoggedIn: Bool {
@@ -136,26 +173,11 @@ final class UserSessionStore: ObservableObject {
             )
             recordLegacyBindings(discoverLegacyUserIDs())
 
-            let activePaths = StoragePath(userID: currentUserID)
+            let activePaths = StoragePath(userID: activeLocalProfileID)
             try activePaths.ensureBaseDirectoriesExist()
 
-            // Guest-first restore: when reinstall/create-new-guest happens, pull data from any older guest_* roots on this device.
-            autoRecoverGuestSourcesIfNeeded(targetUserID: currentGuestScopedUserID, accountUserID: nil)
+            autoRecoverLegacySourcesIfNeeded(targetUserID: activeLocalProfileID)
 
-            // Backfill: if user is already logged in, ensure this device's guest data is also bound/archived to account.
-            if let account = accountUserID, !account.isEmpty {
-                let targetAccountUserID = "account_\(account)"
-                do {
-                    _ = try GuestDataRecoveryService.recover(
-                        from: currentGuestScopedUserID,
-                        to: targetAccountUserID
-                    )
-                } catch {
-                    print("⚠️ bootstrap guest -> account archive failed: \(error)")
-                }
-                bindGuestToAccount(guestID: guestID, accountUserID: account)
-                autoRecoverGuestSourcesIfNeeded(targetUserID: targetAccountUserID, accountUserID: account)
-            }
         } catch {
             assertionFailure("Failed to bootstrap filesystem: \(error)")
         }
@@ -164,7 +186,7 @@ final class UserSessionStore: ObservableObject {
     func bootstrapFileSystemAsync() async {
         let context = BootstrapContext(
             guestScopedUserID: currentGuestScopedUserID,
-            currentUserID: currentUserID,
+            activeLocalProfileID: activeLocalProfileID,
             guestID: guestID,
             accountUserID: accountUserID,
             sourceDevice: sourceDevice(),
@@ -173,37 +195,45 @@ final class UserSessionStore: ObservableObject {
         await Self.bootstrapFileSystemWorker(context: context)
     }
 
-    func registerWithEmail(email: String, password: String) async throws {
-        let auth = try await BackendAPIClient.shared.emailRegister(email: email, password: password)
-        applyAuth(auth)
+    func registerWithEmail(email: String, password: String, displayName: String) async throws -> BackendRegisterResponse {
+        try await BackendAPIClient.shared.register(email: email, password: password, displayName: displayName)
     }
 
     func loginWithEmail(email: String, password: String) async throws {
-        let auth = try await BackendAPIClient.shared.emailLogin(email: email, password: password)
+        let auth = try await BackendAPIClient.shared.login(email: email, password: password)
         applyAuth(auth)
     }
 
-    func loginWithOAuth(provider: String, idToken: String) async throws {
-        let auth = try await BackendAPIClient.shared.oauthLogin(provider: provider, idToken: idToken)
+    func loginWithApple(idToken: String) async throws {
+        let auth = try await BackendAPIClient.shared.loginWithApple(idToken: idToken)
         applyAuth(auth)
+    }
+
+    func resendVerificationEmail(email: String) async throws {
+        try await BackendAPIClient.shared.resendVerificationEmail(email: email)
+    }
+
+    func sendPasswordReset(email: String) async throws {
+        try await BackendAPIClient.shared.sendPasswordReset(email: email)
+    }
+
+    func completeFirebaseAuthentication(
+        _ firebaseSession: FirebaseAuthenticatedSession,
+        preserveGuestBoundary: Bool = false
+    ) async throws {
+        let profile = try await BackendAPIClient.shared.fetchMyProfile(token: firebaseSession.idToken)
+        applyFirebaseAccountSession(
+            appUserID: profile.id,
+            firebaseUID: firebaseSession.snapshot.uid,
+            provider: Self.appProvider(firebaseProviderID: firebaseSession.snapshot.providerID),
+            email: firebaseSession.snapshot.email ?? profile.email,
+            emailVerified: firebaseSession.snapshot.emailVerified,
+            cachedIDToken: firebaseSession.idToken,
+            preserveGuestBoundary: preserveGuestBoundary
+        )
     }
 
     func applyAuth(_ auth: BackendAuthResponse) {
-        let fromGuest = !isLoggedIn
-        let previousGuestUserID = currentGuestScopedUserID
-        let targetAccountUserID = "account_\(auth.userId)"
-
-        if fromGuest {
-            do {
-                _ = try GuestDataRecoveryService.recover(
-                    from: previousGuestUserID,
-                    to: targetAccountUserID
-                )
-            } catch {
-                print("⚠️ guest -> account local archive failed: \(error)")
-            }
-        }
-
         session = .account(
             userID: auth.userId,
             provider: auth.provider,
@@ -212,13 +242,84 @@ final class UserSessionStore: ObservableObject {
             refreshToken: auth.refreshToken,
             guestID: guestID
         )
+        firebaseAccountState = nil
+        bindGuestToAccount(guestID: guestID, accountUserID: auth.userId)
         persistSession()
+        persistFirebaseAccountState()
+        clearPendingGuestMigrationMarker()
+    }
 
-        if fromGuest {
-            pendingMigrationFromGuestUserID = previousGuestUserID
-            UserDefaults.standard.set(previousGuestUserID, forKey: Self.pendingGuestMigrationKey)
-            bindGuestToAccount(guestID: guestID, accountUserID: auth.userId)
+    func applyFirebaseAccountSession(
+        appUserID: String,
+        firebaseUID: String,
+        provider: String,
+        email: String?,
+        emailVerified: Bool,
+        cachedIDToken: String?,
+        preserveGuestBoundary: Bool = false
+    ) {
+        session = .account(
+            userID: appUserID,
+            provider: provider,
+            email: email,
+            accessToken: cachedIDToken ?? "",
+            refreshToken: "",
+            guestID: guestID
+        )
+        firebaseAccountState = FirebaseAccountState(
+            appUserID: appUserID,
+            firebaseUID: firebaseUID,
+            provider: provider,
+            email: email,
+            emailVerified: emailVerified,
+            cachedIDToken: cachedIDToken
+        )
+        bindGuestToAccount(guestID: guestID, accountUserID: appUserID)
+        persistSession()
+        persistFirebaseAccountState()
+        if !preserveGuestBoundary {
+            clearPendingGuestMigrationMarker()
         }
+    }
+
+    func updateCachedFirebaseIDToken(_ token: String?) {
+        guard var state = firebaseAccountState else { return }
+        state.cachedIDToken = token?.trimmingCharacters(in: .whitespacesAndNewlines)
+        firebaseAccountState = state
+        persistFirebaseAccountState()
+
+        guard case .account(let userID, let provider, let email, _, let refreshToken, let guestID) = session else {
+            return
+        }
+        session = .account(
+            userID: userID,
+            provider: provider,
+            email: state.email ?? email,
+            accessToken: state.cachedIDToken ?? "",
+            refreshToken: refreshToken,
+            guestID: guestID
+        )
+        persistSession()
+    }
+
+    func syncFirebaseAccountState(
+        firebaseUID: String,
+        provider: String,
+        email: String?,
+        emailVerified: Bool,
+        cachedIDToken: String?
+    ) {
+        guard let appUserID = accountUserID, !appUserID.isEmpty else { return }
+        firebaseAccountState = FirebaseAccountState(
+            appUserID: appUserID,
+            firebaseUID: firebaseUID,
+            provider: provider,
+            email: email,
+            emailVerified: emailVerified,
+            cachedIDToken: cachedIDToken
+        )
+        persistFirebaseAccountState()
+        updateCachedFirebaseIDToken(cachedIDToken)
     }
 
     @discardableResult
@@ -242,9 +343,26 @@ final class UserSessionStore: ObservableObject {
         return true
     }
 
+    func updateAccessToken(_ accessToken: String) {
+        guard case .account(let userID, let provider, let email, _, let refreshToken, let guestID) = session else {
+            return
+        }
+        session = .account(
+            userID: userID,
+            provider: provider,
+            email: email,
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+            guestID: guestID
+        )
+        persistSession()
+    }
+
     func logoutToGuest() {
         session = .guest(guestID: guestID)
+        firebaseAccountState = nil
         persistSession()
+        persistFirebaseAccountState()
     }
 
     func clearPendingGuestMigrationMarker() {
@@ -277,9 +395,7 @@ final class UserSessionStore: ObservableObject {
         }
 
         clearAutoRecoveryMarkers(for: currentGuestScopedUserID)
-        if let account = accountUserID, !account.isEmpty {
-            clearAutoRecoveryMarkers(for: "account_\(account)")
-        }
+        clearAutoRecoveryMarkers(for: activeLocalProfileID)
 
         let legacy = discoverLegacyUserIDs()
         bootstrapFileSystem()
@@ -295,6 +411,15 @@ final class UserSessionStore: ObservableObject {
         }
     }
 
+    private func persistFirebaseAccountState() {
+        if let firebaseAccountState,
+           let data = try? JSONEncoder().encode(firebaseAccountState) {
+            UserDefaults.standard.set(data, forKey: Self.firebaseAccountStateKey)
+            return
+        }
+        UserDefaults.standard.removeObject(forKey: Self.firebaseAccountStateKey)
+    }
+
     private static func loadOrCreateGuestID() -> String {
         if let stable = StableGuestIDStore.load(), !stable.isEmpty {
             UserDefaults.standard.set(stable, forKey: guestIDKey)
@@ -308,6 +433,39 @@ final class UserSessionStore: ObservableObject {
         UserDefaults.standard.set(id, forKey: guestIDKey)
         StableGuestIDStore.save(id)
         return id
+    }
+
+    private static func loadOrCreateActiveLocalProfileID(guestID: String) -> String {
+        if let existing = UserDefaults.standard.string(forKey: activeLocalProfileIDKey),
+           existing.hasPrefix("local_"),
+           !existing.isEmpty {
+            return existing
+        }
+
+        let id = "local_\(guestID)"
+        UserDefaults.standard.set(id, forKey: activeLocalProfileIDKey)
+        return id
+    }
+
+    private static func appProvider(firebaseProviderID: String) -> String {
+        switch firebaseProviderID {
+        case "password":
+            return "email"
+        case "google.com":
+            return "google"
+        case "apple.com":
+            return "apple"
+        default:
+            return firebaseProviderID.isEmpty ? "firebase" : firebaseProviderID
+        }
+    }
+
+    private static func loadFirebaseAccountState() -> FirebaseAccountState? {
+        guard let data = UserDefaults.standard.data(forKey: firebaseAccountStateKey),
+              let decoded = try? JSONDecoder().decode(FirebaseAccountState.self, from: data) else {
+            return nil
+        }
+        return decoded
     }
 
     private func discoverLegacyUserIDs() -> [String] {
@@ -467,25 +625,17 @@ final class UserSessionStore: ObservableObject {
         }
     }
 
-    private func autoRecoverGuestSourcesIfNeeded(targetUserID: String, accountUserID: String?) {
-        let candidates = GuestDataRecoveryService.discoverCandidates(currentUserID: targetUserID)
-        guard !candidates.isEmpty else { return }
-
+    private func autoRecoverLegacySourcesIfNeeded(targetUserID: String) {
         var recoveredByTarget = loadAutoRecoveredGuestSources()
         var recoveredSources = Set(recoveredByTarget[targetUserID] ?? [])
         var changed = false
 
-        for candidate in candidates {
-            let sourceUserID = candidate.userID
+        for sourceUserID in legacyRecoverySourceUserIDs(for: targetUserID) {
             if recoveredSources.contains(sourceUserID) { continue }
             do {
                 _ = try GuestDataRecoveryService.recover(from: sourceUserID, to: targetUserID)
                 recoveredSources.insert(sourceUserID)
                 changed = true
-                if let accountUserID,
-                   let sourceGuestID = guestID(fromGuestScopedUserID: sourceUserID) {
-                    bindGuestToAccount(guestID: sourceGuestID, accountUserID: accountUserID)
-                }
             } catch {
                 print("⚠️ auto recover \(sourceUserID) -> \(targetUserID) failed: \(error)")
             }
@@ -496,10 +646,30 @@ final class UserSessionStore: ObservableObject {
         saveAutoRecoveredGuestSources(recoveredByTarget)
     }
 
-    private func guestID(fromGuestScopedUserID userID: String) -> String? {
-        guard userID.hasPrefix("guest_") else { return nil }
-        let id = String(userID.dropFirst("guest_".count)).trimmingCharacters(in: .whitespacesAndNewlines)
-        return id.isEmpty ? nil : id
+    private func legacyRecoverySourceUserIDs(for targetUserID: String) -> [String] {
+        scopedRecoverySourceUserIDs(
+            targetUserID: targetUserID,
+            guestID: guestID,
+            sourceDevice: sourceDevice()
+        )
+    }
+
+    private func hasRecoverableData(at userID: String) -> Bool {
+        let fm = FileManager.default
+        let paths = StoragePath(userID: userID)
+
+        func dirHasEntries(_ url: URL) -> Bool {
+            guard fm.fileExists(atPath: url.path),
+                  let entries = try? fm.contentsOfDirectory(at: url, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else {
+                return false
+            }
+            return !entries.isEmpty
+        }
+
+        return dirHasEntries(paths.journeysDir)
+            || dirHasEntries(paths.photosDir)
+            || dirHasEntries(paths.thumbnailsDir)
+            || fm.fileExists(atPath: paths.lifelogRouteURL.path)
     }
 
     private func loadAutoRecoveredGuestSources() -> [String: [String]] {
@@ -524,7 +694,7 @@ final class UserSessionStore: ObservableObject {
 
     private struct BootstrapContext {
         let guestScopedUserID: String
-        let currentUserID: String
+        let activeLocalProfileID: String
         let guestID: String
         let accountUserID: String?
         let sourceDevice: String
@@ -541,7 +711,7 @@ final class UserSessionStore: ObservableObject {
                     try DataMigrator.migrateLegacyUsersIfNeeded(
                         paths: guestPaths,
                         legacyUserIDs: context.legacyUserIDs,
-                        skipUserIDs: Set([context.guestScopedUserID, context.currentUserID])
+                        skipUserIDs: Set([context.guestScopedUserID, context.activeLocalProfileID])
                     )
                     recordLegacyBindingsWorker(
                         context.legacyUserIDs,
@@ -549,36 +719,13 @@ final class UserSessionStore: ObservableObject {
                         sourceDevice: context.sourceDevice
                     )
 
-                    let activePaths = StoragePath(userID: context.currentUserID)
+                    let activePaths = StoragePath(userID: context.activeLocalProfileID)
                     try activePaths.ensureBaseDirectoriesExist()
 
-                    autoRecoverGuestSourcesIfNeededWorker(
-                        targetUserID: context.guestScopedUserID,
-                        accountUserID: nil,
-                        sourceDevice: context.sourceDevice
+                    autoRecoverLegacySourcesIfNeededWorker(
+                        targetUserID: context.activeLocalProfileID
                     )
 
-                    if let account = context.accountUserID, !account.isEmpty {
-                        let targetAccountUserID = "account_\(account)"
-                        do {
-                            _ = try GuestDataRecoveryService.recover(
-                                from: context.guestScopedUserID,
-                                to: targetAccountUserID
-                            )
-                        } catch {
-                            print("⚠️ bootstrap guest -> account archive failed: \(error)")
-                        }
-                        bindGuestToAccountWorker(
-                            guestID: context.guestID,
-                            accountUserID: account,
-                            sourceDevice: context.sourceDevice
-                        )
-                        autoRecoverGuestSourcesIfNeededWorker(
-                            targetUserID: targetAccountUserID,
-                            accountUserID: account,
-                            sourceDevice: context.sourceDevice
-                        )
-                    }
                 } catch {
                     assertionFailure("Failed to bootstrap filesystem: \(error)")
                 }
@@ -632,33 +779,23 @@ final class UserSessionStore: ObservableObject {
         saveGuestAccountBindingsWorker(existing)
     }
 
-    nonisolated private static func autoRecoverGuestSourcesIfNeededWorker(
-        targetUserID: String,
-        accountUserID: String?,
-        sourceDevice: String
-    ) {
-        let candidates = GuestDataRecoveryService.discoverCandidates(currentUserID: targetUserID)
-        guard !candidates.isEmpty else { return }
-
+    nonisolated private static func autoRecoverLegacySourcesIfNeededWorker(targetUserID: String) {
         var recoveredByTarget = loadAutoRecoveredGuestSourcesWorker()
         var recoveredSources = Set(recoveredByTarget[targetUserID] ?? [])
         var changed = false
 
-        for candidate in candidates {
-            let sourceUserID = candidate.userID
+        let currentGuestID = loadOrCreateGuestIDWorker()
+        let currentDevice = currentDeviceIDWorker() ?? "unknown_device"
+        for sourceUserID in legacyRecoverySourceUserIDsWorker(
+            for: targetUserID,
+            guestID: currentGuestID,
+            sourceDevice: currentDevice
+        ) {
             if recoveredSources.contains(sourceUserID) { continue }
             do {
                 _ = try GuestDataRecoveryService.recover(from: sourceUserID, to: targetUserID)
                 recoveredSources.insert(sourceUserID)
                 changed = true
-                if let accountUserID,
-                   let sourceGuestID = guestIDFromScopedID(sourceUserID) {
-                    bindGuestToAccountWorker(
-                        guestID: sourceGuestID,
-                        accountUserID: accountUserID,
-                        sourceDevice: sourceDevice
-                    )
-                }
             } catch {
                 print("⚠️ auto recover \(sourceUserID) -> \(targetUserID) failed: \(error)")
             }
@@ -669,10 +806,34 @@ final class UserSessionStore: ObservableObject {
         saveAutoRecoveredGuestSourcesWorker(recoveredByTarget)
     }
 
-    nonisolated private static func guestIDFromScopedID(_ userID: String) -> String? {
-        guard userID.hasPrefix("guest_") else { return nil }
-        let id = String(userID.dropFirst("guest_".count)).trimmingCharacters(in: .whitespacesAndNewlines)
-        return id.isEmpty ? nil : id
+    nonisolated private static func legacyRecoverySourceUserIDsWorker(
+        for targetUserID: String,
+        guestID: String,
+        sourceDevice: String
+    ) -> [String] {
+        scopedRecoverySourceUserIDsWorker(
+            targetUserID: targetUserID,
+            guestID: guestID,
+            sourceDevice: sourceDevice
+        )
+    }
+
+    nonisolated private static func hasRecoverableDataWorker(at userID: String) -> Bool {
+        let fm = FileManager.default
+        let paths = StoragePath(userID: userID)
+
+        func dirHasEntries(_ url: URL) -> Bool {
+            guard fm.fileExists(atPath: url.path),
+                  let entries = try? fm.contentsOfDirectory(at: url, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else {
+                return false
+            }
+            return !entries.isEmpty
+        }
+
+        return dirHasEntries(paths.journeysDir)
+            || dirHasEntries(paths.photosDir)
+            || dirHasEntries(paths.thumbnailsDir)
+            || fm.fileExists(atPath: paths.lifelogRouteURL.path)
     }
 
     nonisolated private static func loadLegacyBindingsWorker() -> [LegacyGuestBinding] {
@@ -715,5 +876,95 @@ final class UserSessionStore: ObservableObject {
         if let data = try? JSONEncoder().encode(value) {
             UserDefaults.standard.set(data, forKey: Self.autoRecoveredGuestSourcesKey)
         }
+    }
+
+    private func scopedRecoverySourceUserIDs(
+        targetUserID: String,
+        guestID: String,
+        sourceDevice: String
+    ) -> [String] {
+        let bindings = loadLegacyBindings()
+            .filter { $0.guestID == guestID && $0.sourceDevice == sourceDevice }
+            .map(\.legacyUserID)
+        let accountBindings = loadGuestAccountBindings()
+            .filter { $0.guestID == guestID && $0.sourceDevice == sourceDevice }
+            .map { "account_\($0.accountUserID)" }
+        let explicitCandidates = [currentGuestScopedUserID] + bindings + accountBindings
+        return orderedRecoverableSourceUserIDs(
+            explicitCandidates,
+            targetUserID: targetUserID,
+            hasRecoverableData: hasRecoverableData(at:)
+        )
+    }
+
+    nonisolated private static func scopedRecoverySourceUserIDsWorker(
+        targetUserID: String,
+        guestID: String,
+        sourceDevice: String
+    ) -> [String] {
+        let bindings = loadLegacyBindingsWorker()
+            .filter { $0.guestID == guestID && $0.sourceDevice == sourceDevice }
+            .map(\.legacyUserID)
+        let accountBindings = loadGuestAccountBindingsWorker()
+            .filter { $0.guestID == guestID && $0.sourceDevice == sourceDevice }
+            .map { "account_\($0.accountUserID)" }
+        let explicitCandidates = ["guest_\(guestID)"] + bindings + accountBindings
+        return orderedRecoverableSourceUserIDsWorker(
+            explicitCandidates,
+            targetUserID: targetUserID,
+            hasRecoverableData: hasRecoverableDataWorker(at:)
+        )
+    }
+
+    private func orderedRecoverableSourceUserIDs(
+        _ candidates: [String],
+        targetUserID: String,
+        hasRecoverableData: (String) -> Bool
+    ) -> [String] {
+        Self.orderedRecoverableSourceUserIDsWorker(
+            candidates,
+            targetUserID: targetUserID,
+            hasRecoverableData: hasRecoverableData
+        )
+    }
+
+    nonisolated private static func orderedRecoverableSourceUserIDsWorker(
+        _ candidates: [String],
+        targetUserID: String,
+        hasRecoverableData: (String) -> Bool
+    ) -> [String] {
+        let fm = FileManager.default
+        let uniqueCandidates = Array(Set(candidates)).filter { userID in
+            !userID.isEmpty && userID != targetUserID
+        }
+
+        let discovered = uniqueCandidates.compactMap { userID -> (String, Date)? in
+            guard hasRecoverableData(userID) else { return nil }
+            let url = StoragePath(userID: userID).userRoot
+            let lastModified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            guard fm.fileExists(atPath: url.path) else { return nil }
+            return (userID, lastModified)
+        }
+
+        return discovered
+            .sorted { $0.1 > $1.1 }
+            .map(\.0)
+    }
+
+    nonisolated private static func currentDeviceIDWorker() -> String? {
+        #if canImport(UIKit)
+        return UIDevice.current.identifierForVendor?.uuidString.lowercased()
+        #else
+        return nil
+        #endif
+    }
+
+    nonisolated private static func loadOrCreateGuestIDWorker() -> String {
+        if let existing = UserDefaults.standard.string(forKey: guestIDKey), !existing.isEmpty {
+            return existing
+        }
+        let id = UUID().uuidString.lowercased()
+        UserDefaults.standard.set(id, forKey: guestIDKey)
+        return id
     }
 }

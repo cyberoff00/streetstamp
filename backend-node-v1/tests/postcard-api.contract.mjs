@@ -92,6 +92,17 @@ async function run() {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'postcard-api-'));
   const dataFile = path.join(tmp, 'data.json');
   const mediaDir = path.join(tmp, 'media');
+  await fs.writeFile(dataFile, JSON.stringify({
+    users: {},
+    emailIndex: {},
+    inviteIndex: {},
+    oauthIndex: {},
+    firebaseIdentityIndex: {},
+    handleIndex: {},
+    likesIndex: {},
+    friendRequestsIndex: {},
+    postcardsIndex: {}
+  }, null, 2), 'utf8');
   const child = startServer({ port, dataFile, mediaDir });
 
   try {

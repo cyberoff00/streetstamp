@@ -21,6 +21,21 @@ struct GuestRecoveryResult {
     let mergedMood: Bool
 }
 
+struct GuestRecoveryOptions {
+    let replaceExistingJourneys: Bool
+    let replaceLifelogWhenSourceIsMoreComplete: Bool
+
+    static let conservativeAuto = GuestRecoveryOptions(
+        replaceExistingJourneys: false,
+        replaceLifelogWhenSourceIsMoreComplete: false
+    )
+
+    static let manualImport = GuestRecoveryOptions(
+        replaceExistingJourneys: true,
+        replaceLifelogWhenSourceIsMoreComplete: true
+    )
+}
+
 enum GuestDataRecoveryError: LocalizedError {
     case sourceNotFound
     case invalidSource
@@ -70,7 +85,11 @@ enum GuestDataRecoveryService {
         }
     }
 
-    static func recover(from sourceUserID: String, to targetUserID: String) throws -> GuestRecoveryResult {
+    static func recover(
+        from sourceUserID: String,
+        to targetUserID: String,
+        options: GuestRecoveryOptions = .conservativeAuto
+    ) throws -> GuestRecoveryResult {
         guard sourceUserID != targetUserID else {
             throw GuestDataRecoveryError.invalidSource
         }
@@ -86,12 +105,20 @@ enum GuestDataRecoveryService {
         try target.ensureBaseDirectoriesExist()
 
         let targetBeforeIDs = loadJourneyIDs(from: target.journeysDir)
-        let copiedJourneyFiles = try copyJourneyFiles(sourceDir: source.journeysDir, targetDir: target.journeysDir)
+        let copiedJourneyFiles = try copyJourneyFiles(
+            sourceDir: source.journeysDir,
+            targetDir: target.journeysDir,
+            replaceExisting: options.replaceExistingJourneys
+        )
         let targetAfterIDs = try mergeJourneyIndex(sourceDir: source.journeysDir, targetDir: target.journeysDir)
 
         let copiedPhotos = try copyMissingFiles(from: source.photosDir, to: target.photosDir)
         let copiedThumbnails = try copyMissingFiles(from: source.thumbnailsDir, to: target.thumbnailsDir)
-        let replacedLifelog = try mergeLifelog(sourceURL: source.lifelogRouteURL, targetURL: target.lifelogRouteURL)
+        let replacedLifelog = try mergeLifelog(
+            sourceURL: source.lifelogRouteURL,
+            targetURL: target.lifelogRouteURL,
+            allowReplacement: options.replaceLifelogWhenSourceIsMoreComplete
+        )
         let mergedMood = try mergeMood(
             sourceURL: source.cachesDir.appendingPathComponent("lifelog_mood.json", isDirectory: false),
             targetURL: target.cachesDir.appendingPathComponent("lifelog_mood.json", isDirectory: false)
@@ -229,7 +256,11 @@ enum GuestDataRecoveryService {
         return mergedIDs
     }
 
-    private static func copyJourneyFiles(sourceDir: URL, targetDir: URL) throws -> Int {
+    private static func copyJourneyFiles(
+        sourceDir: URL,
+        targetDir: URL,
+        replaceExisting: Bool
+    ) throws -> Int {
         let fm = FileManager.default
         guard fm.fileExists(atPath: sourceDir.path) else { return 0 }
         try fm.createDirectory(at: targetDir, withIntermediateDirectories: true)
@@ -246,6 +277,8 @@ enum GuestDataRecoveryService {
                 copied += try replaceJourneyFiles(for: id, sourceDir: sourceDir, targetDir: targetDir, fileManager: fm)
                 continue
             }
+
+            guard replaceExisting else { continue }
 
             guard shouldPreferSourceJourney(id: id, sourceDir: sourceDir, targetDir: targetDir, sourceFiles: sourceFiles, targetFiles: targetFiles) else {
                 continue
@@ -374,13 +407,20 @@ enum GuestDataRecoveryService {
         return copied
     }
 
-    private static func mergeLifelog(sourceURL: URL, targetURL: URL) throws -> Bool {
+    private static func mergeLifelog(
+        sourceURL: URL,
+        targetURL: URL,
+        allowReplacement: Bool
+    ) throws -> Bool {
         let fm = FileManager.default
         guard fm.fileExists(atPath: sourceURL.path) else { return false }
 
         let sourceCount = lifelogCount(url: sourceURL)
         let targetCount = lifelogCount(url: targetURL)
-        guard sourceCount > targetCount else { return false }
+        if targetCount > 0 && !allowReplacement {
+            return false
+        }
+        guard sourceCount > targetCount || targetCount == 0 else { return false }
 
         try fm.createDirectory(at: targetURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         if fm.fileExists(atPath: targetURL.path) {

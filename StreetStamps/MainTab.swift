@@ -293,12 +293,14 @@ enum TabRenderPolicy {
 }
 
 private struct SidebarEquipmentEntryView: View {
+    @EnvironmentObject private var sessionStore: UserSessionStore
     @State private var loadout = AvatarLoadoutStore.load()
 
     var body: some View {
         EquipmentView(loadout: $loadout)
             .onChange(of: loadout) { _, newValue in
-                AvatarLoadoutStore.save(newValue)
+                UserScopedProfileStateStore.saveCurrentLoadout(newValue, for: sessionStore.currentUserID)
+                UserScopedProfileStateStore.markPendingLoadout(newValue, for: sessionStore.currentUserID)
             }
     }
 }
@@ -322,10 +324,6 @@ private struct MainSidebarMenuView: View {
         if !profile.isEmpty { return profile.uppercased() }
         if let uid = sessionStore.accountUserID, !uid.isEmpty { return uid.uppercased() }
         return L10n.t("explorer_fallback")
-    }
-
-    private var levelProgress: UserLevelProgress {
-        UserLevelProgress.from(journeys: store.journeys)
     }
 
     var body: some View {
@@ -430,22 +428,12 @@ private struct MainSidebarMenuView: View {
                         .overlay {
                             RobotRendererView(size: 30, face: .front, loadout: AvatarLoadoutStore.load())
                         }
-                        .overlay(alignment: .topTrailing) {
-                            LevelBadgeView(level: levelProgress.level)
-                                .offset(x: 10, y: -10)
-                        }
                         .shadow(color: .black.opacity(0.08), radius: 3, x: 0, y: 1)
 
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: 0) {
                         Text(displayName)
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(FigmaTheme.text)
-                            .lineLimit(1)
-
-                        Text(String(format: L10n.t("level_format"), levelProgress.level))
-                            .font(.system(size: 12, weight: .semibold))
-                            .tracking(0.3)
-                            .foregroundColor(Color(red: 0.42, green: 0.42, blue: 0.42))
                             .lineLimit(1)
                     }
 

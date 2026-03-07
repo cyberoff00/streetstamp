@@ -3,6 +3,8 @@ import Foundation
 enum BackendConfig {
     private static let baseURLKey = "streetstamps.backend.base_url"
     private static let googleIOSClientIDKey = "streetstamps.google.ios_client_id"
+    private static let firebaseInfoPlistName = "GoogleService-Info"
+    private static let firebaseBackupEnabledKey = "streetstamps.firebase.backup_runtime_enabled"
 
     static var defaultBaseURL: String {
         if let fromPlist = Bundle.main.object(forInfoDictionaryKey: "API_BASE_URL") as? String,
@@ -32,6 +34,16 @@ enum BackendConfig {
 
     static var isEnabled: Bool { baseURL != nil }
 
+    static var firebaseBackupRuntimeEnabled: Bool {
+        if UserDefaults.standard.object(forKey: firebaseBackupEnabledKey) != nil {
+            return UserDefaults.standard.bool(forKey: firebaseBackupEnabledKey)
+        }
+        if let fromPlist = Bundle.main.object(forInfoDictionaryKey: "FIREBASE_BACKUP_RUNTIME_ENABLED") as? Bool {
+            return fromPlist
+        }
+        return false
+    }
+
     static var defaultGoogleIOSClientID: String {
         if let fromPlist = Bundle.main.object(forInfoDictionaryKey: "GOOGLE_IOS_CLIENT_ID") as? String,
            !fromPlist.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -47,5 +59,45 @@ enum BackendConfig {
             return defaultGoogleIOSClientID
         }
         set { UserDefaults.standard.set(newValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: googleIOSClientIDKey) }
+    }
+
+    static var googleServiceInfoURL: URL? {
+        Bundle.main.url(forResource: firebaseInfoPlistName, withExtension: "plist")
+    }
+
+    static var firebaseProjectID: String {
+        firebaseString(forKey: "PROJECT_ID")
+    }
+
+    static var firebaseConfiguredBundleID: String {
+        firebaseString(forKey: "BUNDLE_ID")
+    }
+
+    static func firebaseSetupIssue(bundleID: String? = Bundle.main.bundleIdentifier) -> String? {
+        guard googleServiceInfoURL != nil else {
+            return "缺少 GoogleService-Info.plist，请先把 Firebase iOS 配置文件加入 App target。"
+        }
+        if firebaseProjectID.isEmpty {
+            return "GoogleService-Info.plist 缺少 PROJECT_ID，无法确认 Firebase project。"
+        }
+        if firebaseConfiguredBundleID.isEmpty {
+            return "GoogleService-Info.plist 缺少 BUNDLE_ID，无法校验 Firebase iOS app 配置。"
+        }
+        if let bundleID,
+           !bundleID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           firebaseConfiguredBundleID != bundleID {
+            return "Firebase BUNDLE_ID (\(firebaseConfiguredBundleID)) 与当前 App Bundle ID (\(bundleID)) 不一致。"
+        }
+        return nil
+    }
+
+    private static func firebaseString(forKey key: String) -> String {
+        guard let url = googleServiceInfoURL,
+              let data = try? Data(contentsOf: url),
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              let value = plist[key] as? String else {
+            return ""
+        }
+        return value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

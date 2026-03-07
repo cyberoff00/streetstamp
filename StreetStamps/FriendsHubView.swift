@@ -135,6 +135,7 @@ struct FriendsHubView: View {
     @State private var postcardInboxIntent = PostcardInboxIntent(box: "received", messageID: nil)
     @State private var myExclusiveID = ""
     @State private var myInviteCode = ""
+    @State private var showAuthEntry = false
 
     private var sortedFriends: [FriendProfileSnapshot] {
         socialStore.friends.sorted { lhs, rhs in
@@ -204,80 +205,84 @@ struct FriendsHubView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            tabSwitcher
+            if sessionStore.isLoggedIn {
+                tabSwitcher
 
-            Divider().overlay(Color.black.opacity(0.06))
+                Divider().overlay(Color.black.opacity(0.06))
 
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 16) {
-                    if tab == .activity {
-                        if feedEvents.isEmpty {
-                            emptyState(L10n.t("friends_empty_activity"))
-                        } else {
-                            ForEach(feedEvents) { event in
-                                if let friend = feedProfileByID[event.friendID] {
-                                    FriendActivityCard(
-                                        friend: friend,
-                                        event: event,
-                                        likeCount: likeCountForEvent(event),
-                                        likedByMe: likedByMeForEvent(event),
-                                        likeLoading: likeLoadingForEvent(event),
-                                        canLike: event.friendID != currentUserID,
-                                        onToggleLike: {
-                                            guard let journeyID = event.journeyID else { return }
-                                            Task {
-                                                await toggleFeedLike(friendID: friend.id, journeyID: journeyID)
-                                            }
-                                        },
-                                        onOpenProfile: {
-                                            ensureSelfSnapshotInSocialStoreIfNeeded(friendID: friend.id)
-                                            activeRoute = .profile(friend.id)
-                                        },
-                                        onOpenEvent: {
-                                            ensureSelfSnapshotInSocialStoreIfNeeded(friendID: friend.id)
-                                            if let jid = event.journeyID {
-                                                activeRoute = .journey(friendID: friend.id, journeyID: jid)
-                                            } else {
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 16) {
+                        if tab == .activity {
+                            if feedEvents.isEmpty {
+                                emptyState(L10n.t("friends_empty_activity"))
+                            } else {
+                                ForEach(feedEvents) { event in
+                                    if let friend = feedProfileByID[event.friendID] {
+                                        FriendActivityCard(
+                                            friend: friend,
+                                            event: event,
+                                            likeCount: likeCountForEvent(event),
+                                            likedByMe: likedByMeForEvent(event),
+                                            likeLoading: likeLoadingForEvent(event),
+                                            canLike: event.friendID != currentUserID,
+                                            onToggleLike: {
+                                                guard let journeyID = event.journeyID else { return }
+                                                Task {
+                                                    await toggleFeedLike(friendID: friend.id, journeyID: journeyID)
+                                                }
+                                            },
+                                            onOpenProfile: {
+                                                ensureSelfSnapshotInSocialStoreIfNeeded(friendID: friend.id)
                                                 activeRoute = .profile(friend.id)
+                                            },
+                                            onOpenEvent: {
+                                                ensureSelfSnapshotInSocialStoreIfNeeded(friendID: friend.id)
+                                                if let jid = event.journeyID {
+                                                    activeRoute = .journey(friendID: friend.id, journeyID: jid)
+                                                } else {
+                                                    activeRoute = .profile(friend.id)
+                                                }
                                             }
-                                        }
-                                    )
+                                        )
+                                    }
                                 }
-                            }
-                        }
-                    } else {
-                        if !incomingFriendRequests.isEmpty {
-                            friendRequestSectionTitle("待你通过")
-                            ForEach(incomingFriendRequests) { req in
-                                friendRequestCard(request: req, isIncoming: true)
-                            }
-                        }
-
-                        if sortedFriends.isEmpty {
-                            if incomingFriendRequests.isEmpty {
-                                emptyState(L10n.t("friends_empty_all"))
                             }
                         } else {
-                            friendRequestSectionTitle("我的好友")
-                            ForEach(sortedFriends) { friend in
-                                Button {
-                                    activeRoute = .profile(friend.id)
-                                } label: {
-                                    AllFriendsCard(friend: friend, activeText: activeText(for: friend))
+                            if !incomingFriendRequests.isEmpty {
+                                friendRequestSectionTitle("待你通过")
+                                ForEach(incomingFriendRequests) { req in
+                                    friendRequestCard(request: req, isIncoming: true)
                                 }
-                                .buttonStyle(.plain)
+                            }
+
+                            if sortedFriends.isEmpty {
+                                if incomingFriendRequests.isEmpty {
+                                    emptyState(L10n.t("friends_empty_all"))
+                                }
+                            } else {
+                                friendRequestSectionTitle("我的好友")
+                                ForEach(sortedFriends) { friend in
+                                    Button {
+                                        activeRoute = .profile(friend.id)
+                                    } label: {
+                                        AllFriendsCard(friend: friend, activeText: activeText(for: friend))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
                             }
                         }
                     }
+                    .padding(.horizontal, 14)
+                    .padding(.top, 12)
+                    .padding(.bottom, 54)
                 }
-                .padding(.horizontal, 14)
-                .padding(.top, 12)
-                .padding(.bottom, 54)
+                .refreshable {
+                    await refreshRemoteFriends()
+                }
+                .background(FigmaTheme.background)
+            } else {
+                loggedOutState
             }
-            .refreshable {
-                await refreshRemoteFriends()
-            }
-            .background(FigmaTheme.background)
         }
         .background(FigmaTheme.background.ignoresSafeArea())
         .navigationBarBackButtonHidden(true)
@@ -315,6 +320,13 @@ struct FriendsHubView: View {
                     focusMessageID: postcardInboxIntent.messageID
                 )
             }
+        }
+        .fullScreenCover(isPresented: $showAuthEntry) {
+            AuthEntryView(
+                onContinueGuest: { showAuthEntry = false },
+                onAuthenticated: { showAuthEntry = false }
+            )
+            .environmentObject(sessionStore)
         }
         .overlay(alignment: .top) {
             if showToast {
@@ -369,6 +381,47 @@ struct FriendsHubView: View {
         }
     }
 
+    private var loggedOutState: some View {
+        VStack(spacing: 18) {
+            Spacer(minLength: 48)
+
+            VStack(spacing: 12) {
+                Image(systemName: "person.2.slash")
+                    .font(.system(size: 34, weight: .semibold))
+                    .foregroundColor(FigmaTheme.text)
+
+                Text("登录后查看好友动态")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundColor(FigmaTheme.text)
+
+                Text("好友动态、好友列表和好友申请只对已登录账号开放。")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(FigmaTheme.subtext)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+            }
+            .padding(.horizontal, 28)
+
+            Button {
+                showAuthEntry = true
+            } label: {
+                Text("去登录")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                    .background(Color.black)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 28)
+
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(FigmaTheme.background)
+    }
+
     @ViewBuilder
     private func destination(for route: FriendsRoute) -> some View {
         switch route {
@@ -391,7 +444,16 @@ struct FriendsHubView: View {
         UnifiedTabPageHeader(title: L10n.t("friends_title"), horizontalPadding: 16, topPadding: 14, bottomPadding: 12) {
             Color.clear
         } trailing: {
-            if tab == .allFriends {
+            if !sessionStore.isLoggedIn {
+                Button {
+                    showAuthEntry = true
+                } label: {
+                    Text("登录")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(FigmaTheme.text)
+                }
+                .buttonStyle(.plain)
+            } else if tab == .allFriends {
                 Button {
                     showInviteFriendSheet = true
                 } label: {
@@ -1453,6 +1515,7 @@ private struct FriendProfileScreen: View {
 
     @State private var friend: FriendProfileSnapshot?
     @State private var isSendingStomp = false
+    @State private var isVisitorSeated = false
     @State private var stompToastText = ""
     @State private var showStompToast = false
     @State private var sidebarHideToken = UUID().uuidString
@@ -1460,9 +1523,19 @@ private struct FriendProfileScreen: View {
     @State private var showDeleteFriendError = false
     @State private var deleteFriendErrorText = ""
     @State private var isDeletingFriend = false
+    @State private var showPostcardComposer = false
 
-    private var canStomp: Bool {
-        (sessionStore.accountUserID ?? "") != friendID
+    private var viewerUserID: String {
+        let current = sessionStore.accountUserID ?? sessionStore.currentUserID
+        return current.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var isViewingOwnFriendProfile: Bool {
+        !viewerUserID.isEmpty && viewerUserID == friendID
+    }
+
+    private var visitorLoadout: RobotLoadout {
+        AvatarLoadoutStore.load().normalizedForCurrentAvatar()
     }
 
     private var fallbackFriend: FriendProfileSnapshot {
@@ -1487,185 +1560,28 @@ private struct FriendProfileScreen: View {
 
     var body: some View {
         let f = friend ?? fallbackFriend
+        let sceneState = ProfileSceneInteractionState.resolve(
+            mode: .friendProfile,
+            isViewingOwnFriendProfile: isViewingOwnFriendProfile,
+            isVisitorSeated: isVisitorSeated,
+            isInteractionInFlight: isSendingStomp
+        )
 
         ZStack(alignment: .top) {
             FigmaTheme.background.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                HStack {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundColor(FigmaTheme.text)
-                            .frame(width: 42, height: 42)
-                    }
-                    .buttonStyle(.plain)
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 14) {
+                    friendHeroSection(friend: f, sceneState: sceneState)
 
-                    Spacer()
-
-                    Text(f.displayName)
-                        .appHeaderStyle()
-                        .tracking(0.2)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-
-                    Spacer()
-
-                    if sessionStore.isLoggedIn && (sessionStore.accountUserID ?? "") != friendID {
-                        Menu {
-                            Button(role: .destructive) {
-                                showDeleteFriendConfirm = true
-                            } label: {
-                                Label("删除好友", systemImage: "person.crop.circle.badge.xmark")
-                            }
-                        } label: {
-                            Image(systemName: "ellipsis.circle")
-                                .font(.system(size: 19, weight: .semibold))
-                                .foregroundColor(FigmaTheme.text)
-                                .frame(width: 42, height: 42)
-                                .contentShape(Circle())
+                    VStack(spacing: 14) {
+                        if let displayBio = resolvedBioText(for: f) {
+                            Text(displayBio)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(FigmaTheme.text.opacity(0.68))
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 10)
                         }
-                        .disabled(isDeletingFriend)
-                    } else {
-                        Color.clear
-                            .frame(width: 42, height: 42)
-                    }
-                }
-                .padding(.horizontal, 18)
-                .padding(.top, 8)
-                .padding(.bottom, 12)
-                .overlay(alignment: .bottom) {
-                    Rectangle()
-                        .fill(FigmaTheme.border)
-                        .frame(height: 1)
-                }
-
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 24) {
-                        VStack(spacing: 0) {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 32, style: .continuous)
-                                    .fill(FigmaTheme.primary.opacity(0.17))
-                                    .blur(radius: 20)
-                                    .frame(width: 132, height: 132)
-
-                                RoundedRectangle(cornerRadius: 32, style: .continuous)
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [
-                                                FigmaTheme.primary.opacity(0.10),
-                                                FigmaTheme.accent.opacity(0.20)
-                                            ],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        )
-                                    )
-                                    .frame(width: 128, height: 128)
-                                    .shadow(color: FigmaTheme.primary.opacity(0.12), radius: 24, x: 0, y: 4)
-
-                                RobotRendererView(
-                                    size: 96,
-                                    face: .front,
-                                    loadout: f.loadout
-                                )
-                            }
-                            .padding(.top, 32)
-
-                            HStack(spacing: 8) {
-                                Text(f.displayName)
-                                    .font(.system(size: 20, weight: .bold))
-                                    .tracking(-0.3)
-                                    .foregroundColor(FigmaTheme.text)
-                                LevelBadgeView(level: levelProgress.level)
-                            }
-                            .padding(.top, 20)
-
-                            Text(String(format: L10n.t("friends_exclusive_id_format"), f.handle))
-                                .font(.system(size: 13, weight: .regular))
-                                .tracking(0.2)
-                                .foregroundColor(FigmaTheme.subtext)
-                                .padding(.top, 8)
-
-                            if canStomp {
-                                Button {
-                                    Task {
-                                        await sendProfileStomp(to: f)
-                                    }
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "shoeprints.fill")
-                                            .font(.system(size: 13, weight: .semibold))
-                                        Text(isSendingStomp ? "发送中..." : "踩一踩主页")
-                                            .font(.system(size: 12, weight: .semibold))
-                                    }
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 8)
-                                    .background(FigmaTheme.primary)
-                                    .clipShape(Capsule())
-                                }
-                                .buttonStyle(.plain)
-                                .disabled(isSendingStomp)
-                                .padding(.top, 10)
-                            }
-
-                            if let displayBio = resolvedBioText(for: f) {
-                                Text(displayBio)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(FigmaTheme.text.opacity(0.72))
-                                    .multilineTextAlignment(.center)
-                                    .padding(.horizontal, 22)
-                                    .padding(.top, 8)
-                            }
-
-                            HStack(spacing: 8) {
-                                Text(String(format: "%.1f km", max(0, f.stats.totalDistance / 1000.0)))
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(FigmaTheme.text.opacity(0.62))
-                                Text("·")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundColor(FigmaTheme.text.opacity(0.42))
-                                Text(String(format: "Joined %@", dateText(f.createdAt)))
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(FigmaTheme.text.opacity(0.72))
-                            }
-                            .padding(.top, 6)
-
-                            Rectangle()
-                                .fill(FigmaTheme.border)
-                                .frame(height: 1)
-                                .padding(.top, 22)
-
-                            HStack(spacing: 0) {
-                                friendEmbeddedStatItem(
-                                    icon: "mappin.and.ellipse",
-                                    value: "\(f.stats.totalJourneys)",
-                                    label: "TRIPS"
-                                )
-                                Rectangle()
-                                    .fill(FigmaTheme.border)
-                                    .frame(width: 1, height: 52)
-                                friendEmbeddedStatItem(
-                                    icon: "heart",
-                                    value: "\(f.stats.totalMemories)",
-                                    label: "MEMORIES"
-                                )
-                                Rectangle()
-                                    .fill(FigmaTheme.border)
-                                    .frame(width: 1, height: 52)
-                                friendEmbeddedStatItem(
-                                    icon: "paperplane",
-                                    value: "\(f.stats.totalUnlockedCities)",
-                                    label: "CITIES"
-                                )
-                            }
-                            .padding(.horizontal, 22)
-                            .padding(.vertical, 16)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .friendAvatarCardStyle()
 
                         VStack(spacing: 14) {
                             HStack(spacing: 14) {
@@ -1694,50 +1610,14 @@ private struct FriendProfileScreen: View {
                                 .buttonStyle(.plain)
                             }
 
-                            NavigationLink {
-                                PostcardComposerView(
-                                    friendID: friendID,
-                                    friendName: f.displayName
-                                )
-                            } label: {
-                                HStack(spacing: 12) {
-                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                        .fill(FigmaTheme.primary.opacity(0.14))
-                                        .frame(width: 46, height: 46)
-                                        .overlay {
-                                            Image(systemName: "envelope.fill")
-                                                .font(.system(size: 18, weight: .semibold))
-                                                .foregroundColor(FigmaTheme.primary)
-                                        }
-
-                                    Text("SEND POSTCARD")
-                                        .font(.system(size: 14, weight: .bold))
-                                        .foregroundColor(FigmaTheme.text)
-
-                                    Spacer()
-
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundColor(FigmaTheme.subtext)
-                                }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 14)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Color.white)
-                                .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-                                .shadow(color: Color.black.opacity(0.04), radius: 20, x: 0, y: 8)
-                            }
-                            .buttonStyle(.plain)
                         }
-
                     }
                     .frame(maxWidth: 430)
-                    .frame(maxWidth: .infinity)
                     .padding(.horizontal, 24)
-                    .padding(.top, 24)
                     .padding(.bottom, 32)
                 }
             }
+            .ignoresSafeArea(edges: .top)
         }
         .navigationBarBackButtonHidden(true)
         .navigationBarHidden(true)
@@ -1787,6 +1667,151 @@ private struct FriendProfileScreen: View {
         } message: {
             Text(deleteFriendErrorText)
         }
+        .navigationDestination(isPresented: $showPostcardComposer) {
+            PostcardComposerView(
+                friendID: friendID,
+                friendName: (friend ?? fallbackFriend).displayName
+            )
+        }
+    }
+
+    private func friendHeroSection(friend: FriendProfileSnapshot, sceneState: ProfileSceneInteractionState) -> some View {
+        VStack(spacing: 0) {
+            ProfileHeroTopBackdrop {
+                VStack(spacing: 0) {
+                    HStack {
+                        Button {
+                            dismiss()
+                        } label: {
+                            ProfileHeroGlassCircleLabel(systemImage: "chevron.left")
+                        }
+                        .buttonStyle(.plain)
+
+                        Spacer()
+
+                        if sessionStore.isLoggedIn && (sessionStore.accountUserID ?? "") != friendID {
+                            Menu {
+                                Button(role: .destructive) {
+                                    showDeleteFriendConfirm = true
+                                } label: {
+                                    Label("删除好友", systemImage: "person.crop.circle.badge.xmark")
+                                }
+                            } label: {
+                                ProfileHeroGlassCircleLabel(systemImage: "ellipsis")
+                            }
+                            .disabled(isDeletingFriend)
+                        } else {
+                            Color.clear
+                                .frame(width: 40, height: 40)
+                        }
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 18)
+
+                    Spacer(minLength: 4)
+
+                    SofaProfileSceneView(
+                        state: sceneState,
+                        hostLoadout: friend.loadout,
+                        visitorLoadout: visitorLoadout,
+                        welcomeText: "Welcome!",
+                        postcardPromptText: sceneState.postcardPromptText,
+                        onPostcardPromptTap: sceneState.postcardPromptText == nil ? nil : {
+                            showPostcardComposer = true
+                        }
+                    )
+                    .frame(maxWidth: 360)
+                    .padding(.horizontal, 30)
+                    .padding(.top, 8)
+                    .padding(.bottom, 16)
+                }
+            }
+            .frame(height: 376)
+
+            VStack(spacing: 18) {
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Text(friend.displayName)
+                                .font(.system(size: 24, weight: .bold, design: .rounded))
+                                .foregroundColor(Color(red: 17.0 / 255.0, green: 24.0 / 255.0, blue: 39.0 / 255.0))
+
+                            ProfileHeroLevelPill(level: levelProgress.level)
+                        }
+
+                        HStack(spacing: 8) {
+                            Image(systemName: "mappin.and.ellipse")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(Color(red: 156.0 / 255.0, green: 163.0 / 255.0, blue: 175.0 / 255.0))
+
+                            Text(String(format: "%.1f km", max(0, friend.stats.totalDistance / 1000.0)))
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(Color(red: 156.0 / 255.0, green: 163.0 / 255.0, blue: 175.0 / 255.0))
+
+                            Text("•")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(Color(red: 156.0 / 255.0, green: 163.0 / 255.0, blue: 175.0 / 255.0))
+
+                            Text("Joined \(heroJoinedDateText(friend.createdAt))")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(Color(red: 156.0 / 255.0, green: 163.0 / 255.0, blue: 175.0 / 255.0))
+                        }
+                    }
+
+                    Spacer(minLength: 10)
+
+                    if sceneState.showsCTA, let ctaTitle = sceneState.ctaTitle {
+                        Button {
+                            Task {
+                                await sendProfileStomp(to: friend)
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: isVisitorSeated ? "sofa.fill" : "sofa")
+                                    .font(.system(size: 16, weight: .bold))
+                                Text(ctaTitle)
+                                    .font(.system(size: 14, weight: .bold))
+                            }
+                            .foregroundColor(.white)
+                            .frame(height: 48)
+                            .padding(.horizontal, 20)
+                            .background(FigmaTheme.primary)
+                            .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!sceneState.isCTAEnabled)
+                        .opacity(sceneState.isCTAEnabled ? 1 : 0.72)
+                    }
+                }
+
+                ProfileHeroStatsCard(
+                    items: [
+                        ProfileHeroStatItem(id: "trips", value: "\(friend.stats.totalJourneys)", title: "TRIPS"),
+                        ProfileHeroStatItem(id: "memories", value: "\(friend.stats.totalMemories)", title: "MEMORIES"),
+                        ProfileHeroStatItem(id: "cities", value: "\(friend.stats.totalUnlockedCities)", title: "CITIES")
+                    ]
+                )
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 18)
+            .padding(.bottom, 16)
+            .background(FigmaTheme.background)
+            .clipShape(
+                UnevenRoundedRectangle(
+                    cornerRadii: .init(topLeading: 40, bottomLeading: 0, bottomTrailing: 0, topTrailing: 40),
+                    style: .continuous
+                )
+            )
+            .offset(y: -30)
+            .padding(.bottom, -30)
+        }
+    }
+
+    private func heroJoinedDateText(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.dateFormat = "yyyy/M/d"
+        return formatter.string(from: date)
     }
 
     private func resolvedBioText(for friend: FriendProfileSnapshot) -> String? {
@@ -1879,10 +1904,11 @@ private struct FriendProfileScreen: View {
         isSendingStomp = true
         defer { isSendingStomp = false }
         do {
-            let resp = try await BackendAPIClient.shared.stompProfile(token: token, targetUserID: friend.id)
-            showStompToastMessage(resp.message ?? "已踩一踩 \(friend.displayName) 的主页")
+            _ = try await BackendAPIClient.shared.stompProfile(token: token, targetUserID: friend.id)
+            isVisitorSeated = true
+            showStompToastMessage("你坐到了 \(friend.displayName) 身边")
         } catch {
-            showStompToastMessage("踩一踩失败：\(error.localizedDescription)")
+            showStompToastMessage("坐一坐失败：\(error.localizedDescription)")
         }
     }
 

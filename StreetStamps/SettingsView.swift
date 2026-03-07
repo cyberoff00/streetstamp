@@ -7,7 +7,105 @@ import CoreImage.CIFilterBuiltins
 import Network
 import Darwin
 
+enum SettingsAccountCardStyle: Equatable {
+    case guest
+    case member
+}
+
+struct SettingsAccountCardPresentation: Equatable {
+    let style: SettingsAccountCardStyle
+    let title: String
+    let subtitle: String
+    let detailLines: [String]
+    let showsChevron: Bool
+}
+
+enum SettingsAccountPresentation {
+    static let serviceActionTitles = ["PRIVATE DATA TRANSFER", "SUBSCRIPTION"]
+
+    static func card(
+        isLoggedIn: Bool,
+        displayName: String,
+        exclusiveID: String,
+        email: String
+    ) -> SettingsAccountCardPresentation {
+        if isLoggedIn {
+            let resolvedName = trimmedOrFallback(displayName, fallback: "Explorer")
+            let resolvedExclusiveID = trimmedOrFallback(exclusiveID, fallback: "--")
+            let resolvedEmail = trimmedOrFallback(email, fallback: "未绑定")
+            return SettingsAccountCardPresentation(
+                style: .member,
+                title: resolvedName,
+                subtitle: "ID: \(resolvedExclusiveID)",
+                detailLines: [resolvedEmail],
+                showsChevron: true
+            )
+        }
+
+        return SettingsAccountCardPresentation(
+            style: .guest,
+            title: "登录 Worldo",
+            subtitle: "同步旅行数据，解锁好友功能",
+            detailLines: [],
+            showsChevron: true
+        )
+    }
+
+    static func accountActionTitles(isLoggedIn: Bool) -> [String] {
+        []
+    }
+
+    private static func trimmedOrFallback(_ value: String, fallback: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? fallback : trimmed
+    }
+}
+
+enum SettingsRowTextStyle: Equatable {
+    case singleLine
+    case supporting
+}
+
+struct SettingsRowPresentation {
+    let title: String
+    let subtitle: String?
+    let icon: String
+    let iconColor: Color
+    let textStyle: SettingsRowTextStyle
+
+    static func profileVisibility(_ visibility: ProfileVisibility) -> SettingsRowPresentation {
+        SettingsRowPresentation(
+            title: visibility == .private
+                ? L10n.t("settings_profile_visibility_private")
+                : L10n.t("settings_profile_visibility_friends"),
+            subtitle: nil,
+            icon: "person.2",
+            iconColor: FigmaTheme.primary,
+            textStyle: .singleLine
+        )
+    }
+
+    static let mapDarkMode = SettingsRowPresentation(
+        title: L10n.t("settings_map_dark_mode"),
+        subtitle: nil,
+        icon: "map",
+        iconColor: FigmaTheme.primary,
+        textStyle: .singleLine
+    )
+
+    static let stationaryReminder = SettingsRowPresentation(
+        title: L10n.t("settings_stationary_reminder_title"),
+        subtitle: L10n.t("settings_stationary_reminder_desc"),
+        icon: "bell.badge",
+        iconColor: FigmaTheme.secondary,
+        textStyle: .supporting
+    )
+}
+
 struct SettingsView: View {
+    let showsBackButton: Bool
+
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var journeyStore: JourneyStore
     @EnvironmentObject private var cityCache: CityCache
@@ -17,7 +115,6 @@ struct SettingsView: View {
     @AppStorage(AppSettings.voiceBroadcastEnabledKey) private var voiceBroadcastEnabled = true
     @AppStorage(AppSettings.voiceBroadcastIntervalKMKey) private var voiceBroadcastIntervalKM = 1
     @AppStorage(AppSettings.longStationaryReminderEnabledKey) private var longStationaryReminderEnabled = true
-    @AppStorage(AppSettings.avatarHeadlightEnabledKey) private var avatarHeadlightEnabled = true
     @AppStorage(AppSettings.lifelogBackgroundModeKey) private var lifelogBackgroundModeRaw = LifelogBackgroundMode.defaultMode.rawValue
 
     @State private var showComingSoon = false
@@ -43,6 +140,7 @@ struct SettingsView: View {
     @State private var showAccountMessage = false
     @State private var showAuthSheet = false
     @State private var authSheetMode: AuthEntryMode = .signIn
+    @State private var showBackgroundModeInfo = false
 
     private var appearance: MapAppearanceStyle {
         get { MapAppearanceStyle(rawValue: mapAppearanceRaw) ?? .dark }
@@ -66,79 +164,95 @@ struct SettingsView: View {
         nonmutating set { lifelogBackgroundModeRaw = newValue.rawValue }
     }
 
+    private var accountCardPresentation: SettingsAccountCardPresentation {
+        SettingsAccountPresentation.card(
+            isLoggedIn: sessionStore.isLoggedIn,
+            displayName: displayNameDraft,
+            exclusiveID: exclusiveIDDraft,
+            email: accountEmail
+        )
+    }
+
+    init(showsBackButton: Bool = false) {
+        self.showsBackButton = showsBackButton
+    }
+
     var body: some View {
-        NavigationStack {
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 24) {
-                    accountSection
-                    mapAppearanceSection
-                    trackingAssistSection
-                    generalSection
-                    levelRulesSection
-                    infoSection
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 24) {
+                accountSection
+                servicesSection
+                mapAppearanceSection
+                trackingAssistSection
+                generalSection
+                infoSection
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 20)
+            .padding(.bottom, 36)
+        }
+        .background(FigmaTheme.mutedBackground.ignoresSafeArea())
+        .safeAreaInset(edge: .top, spacing: 0) {
+            settingsHeader
+        }
+        .toolbar(.hidden, for: .navigationBar)
+        .alert("Coming Soon", isPresented: $showComingSoon) {
+            Button(L10n.t("ok"), role: .cancel) {}
+        } message: {
+            Text(String(format: L10n.t("coming_soon_message"), comingSoonTitle))
+        }
+        .alert("提示", isPresented: $showAccountMessage) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(accountMessage)
+        }
+        .alert("后台记录模式", isPresented: $showBackgroundModeInfo) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text(L10n.t("settings_lifelog_bg_mode_desc"))
+        }
+        .task {
+            await refreshAccountIfPossible()
+        }
+        .sheet(isPresented: $showDisplayNameEditor) {
+            displayNameEditorSheet
+        }
+        .sheet(isPresented: $showAuthSheet) {
+            AuthEntryView(
+                onContinueGuest: { showAuthSheet = false },
+                initialMode: authSheetMode,
+                onAuthenticated: {
+                    Task { await refreshAccountIfPossible() }
+                    showAuthSheet = false
                 }
-                .padding(.horizontal, 18)
-                .padding(.top, 20)
-                .padding(.bottom, 36)
-            }
-            .background(FigmaTheme.mutedBackground.ignoresSafeArea())
-            .safeAreaInset(edge: .top, spacing: 0) {
-                settingsHeader
-            }
-            .alert("Coming Soon", isPresented: $showComingSoon) {
-                Button(L10n.t("ok"), role: .cancel) {}
-            } message: {
-                Text(String(format: L10n.t("coming_soon_message"), comingSoonTitle))
-            }
-            .alert("提示", isPresented: $showAccountMessage) {
-                Button("好", role: .cancel) {}
-            } message: {
-                Text(accountMessage)
-            }
-            .task {
-                await refreshAccountIfPossible()
-            }
-            .sheet(isPresented: $showDisplayNameEditor) {
-                displayNameEditorSheet
-            }
-            .sheet(isPresented: $showAuthSheet) {
-                AuthEntryView(
-                    onContinueGuest: { showAuthSheet = false },
-                    initialMode: authSheetMode,
-                    onAuthenticated: {
-                        Task { await refreshAccountIfPossible() }
-                        showAuthSheet = false
-                    }
-                )
-                .environmentObject(sessionStore)
-            }
+            )
+            .environmentObject(sessionStore)
         }
     }
 
     private var settingsHeader: some View {
-        HStack {
+        UnifiedTabPageHeader(
+            title: L10n.t("settings_title"),
+            horizontalPadding: 18,
+            topPadding: 8,
+            bottomPadding: 12
+        ) {
+            if showsBackButton {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(FigmaTheme.text)
+                        .frame(width: 42, height: 42)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+            } else {
+                Color.clear
+            }
+        } trailing: {
             Color.clear
-                .frame(width: 42, height: 42)
-
-            Spacer()
-
-            Text(L10n.t("settings_title"))
-                .appHeaderStyle()
-                .foregroundColor(FigmaTheme.text)
-
-            Spacer()
-
-            Color.clear
-                .frame(width: 42, height: 42)
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 4)
-        .padding(.bottom, 10)
-        .background(Color.white.opacity(0.92))
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Color.black.opacity(0.14))
-                .frame(height: 0.8)
         }
     }
 
@@ -146,33 +260,16 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             sectionTitle("MAP APPEARANCE")
 
-            VStack(alignment: .leading, spacing: 14) {
-                Text(L10n.t("settings_map_appearance_desc"))
-                    .font(.system(size: 14, weight: .regular))
-                    .foregroundColor(FigmaTheme.subtext)
-
-                segmentedContainer {
-                    segmentButton(
-                        title: "Dark",
-                        isSelected: appearance == .dark,
-                        action: {
-                            appearance = .dark
-                            MapAppearanceSettings.apply(.dark)
-                        }
-                    )
-                    segmentButton(
-                        title: "Day",
-                        isSelected: appearance == .light,
-                        action: {
-                            appearance = .light
-                            MapAppearanceSettings.apply(.light)
-                        }
-                    )
-                }
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 18)
-            .figmaSurfaceCard(radius: 30)
+            toggleRowCard(
+                presentation: .mapDarkMode,
+                isOn: Binding(
+                    get: { appearance == .dark },
+                    set: { newValue in
+                        appearance = newValue ? .dark : .light
+                        MapAppearanceSettings.apply(newValue ? .dark : .light)
+                    }
+                )
+            )
         }
     }
 
@@ -181,50 +278,24 @@ struct SettingsView: View {
             sectionTitle("TRACKING ASSIST")
 
             VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .top, spacing: 10) {
+                HStack(alignment: .center, spacing: 10) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(L10n.t("settings_voice_broadcast_title"))
-                            .font(.system(size: 30 / 2, weight: .bold))
+                        Text(L10n.t("settings_lifelog_bg_mode_title"))
+                            .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(FigmaTheme.text)
-
-                        Text(L10n.t("settings_voice_broadcast_desc"))
-                            .font(.system(size: 14, weight: .regular))
-                            .foregroundColor(FigmaTheme.subtext)
-                            .fixedSize(horizontal: false, vertical: true)
                     }
 
                     Spacer(minLength: 8)
 
-                    figmaToggle(isOn: $voiceBroadcastEnabled)
+                    Button {
+                        showBackgroundModeInfo = true
+                    } label: {
+                        Image(systemName: "questionmark.circle")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(FigmaTheme.subtext)
+                    }
+                    .buttonStyle(.plain)
                 }
-
-                segmentedContainer {
-                    segmentButton(title: "1 km", isSelected: voiceBroadcastIntervalKM == 1) {
-                        voiceBroadcastIntervalKM = 1
-                    }
-                    segmentButton(title: "2 km", isSelected: voiceBroadcastIntervalKM == 2) {
-                        voiceBroadcastIntervalKM = 2
-                    }
-                    segmentButton(title: "5 km", isSelected: voiceBroadcastIntervalKM == 5) {
-                        voiceBroadcastIntervalKM = 5
-                    }
-                }
-                .opacity(voiceBroadcastEnabled ? 1 : 0.45)
-                .allowsHitTesting(voiceBroadcastEnabled)
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 18)
-            .figmaSurfaceCard(radius: 30)
-
-            VStack(alignment: .leading, spacing: 14) {
-                Text(L10n.t("settings_lifelog_bg_mode_title"))
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(FigmaTheme.text)
-
-                Text(L10n.t("settings_lifelog_bg_mode_desc"))
-                    .font(.system(size: 14, weight: .regular))
-                    .foregroundColor(FigmaTheme.subtext)
-                    .fixedSize(horizontal: false, vertical: true)
 
                 segmentedContainer {
                     segmentButton(
@@ -245,49 +316,6 @@ struct SettingsView: View {
             .padding(.vertical, 18)
             .figmaSurfaceCard(radius: 30)
 
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 10) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(L10n.t("settings_stationary_reminder_title"))
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundColor(FigmaTheme.text)
-
-                        Text(L10n.t("settings_stationary_reminder_desc"))
-                            .font(.system(size: 14, weight: .regular))
-                            .foregroundColor(FigmaTheme.subtext)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    Spacer(minLength: 8)
-
-                    figmaToggle(isOn: $longStationaryReminderEnabled)
-                }
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 18)
-            .figmaSurfaceCard(radius: 30)
-
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 10) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(L10n.t("settings_avatar_headlight_title"))
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundColor(FigmaTheme.text)
-
-                        Text(L10n.t("settings_avatar_headlight_desc"))
-                            .font(.system(size: 14, weight: .regular))
-                            .foregroundColor(FigmaTheme.subtext)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    Spacer(minLength: 8)
-
-                    figmaToggle(isOn: $avatarHeadlightEnabled)
-                }
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 18)
-            .figmaSurfaceCard(radius: 30)
         }
     }
 
@@ -303,9 +331,12 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
 
-                settingsRow(title: "NOTIFICATIONS", icon: "bell", iconColor: FigmaTheme.secondary) {
-                    showPlaceholder("Notifications")
+                NavigationLink {
+                    notificationsView
+                } label: {
+                    settingsRowLabel(title: "NOTIFICATIONS", icon: "bell", iconColor: FigmaTheme.secondary)
                 }
+                .buttonStyle(.plain)
 
                 NavigationLink {
                     DebugChinaTestModule()
@@ -321,8 +352,78 @@ struct SettingsView: View {
                     )
                 }
                 .buttonStyle(.plain)
+
+                NavigationLink {
+                    DebugFriendProfilePreviewView()
+                } label: {
+                    settingsRowLabel(
+                        title: "FRIEND UI PREVIEW",
+                        icon: "person.crop.square",
+                        iconColor: FigmaTheme.primary,
+                        badgeText: "LOCAL",
+                        rowHeight: 74
+                    )
+                }
+                .buttonStyle(.plain)
             }
         }
+    }
+
+    private var notificationsView: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 10) {
+                    sectionTitle("NOTIFICATIONS")
+
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack(alignment: .top, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(L10n.t("settings_voice_broadcast_title"))
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(FigmaTheme.text)
+
+                                Text(L10n.t("settings_voice_broadcast_desc"))
+                                    .font(.system(size: 12, weight: .regular))
+                                    .foregroundColor(FigmaTheme.subtext)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+
+                            Spacer(minLength: 8)
+
+                            figmaToggle(isOn: $voiceBroadcastEnabled)
+                        }
+
+                        segmentedContainer {
+                            segmentButton(title: "1 km", isSelected: voiceBroadcastIntervalKM == 1) {
+                                voiceBroadcastIntervalKM = 1
+                            }
+                            segmentButton(title: "2 km", isSelected: voiceBroadcastIntervalKM == 2) {
+                                voiceBroadcastIntervalKM = 2
+                            }
+                            segmentButton(title: "5 km", isSelected: voiceBroadcastIntervalKM == 5) {
+                                voiceBroadcastIntervalKM = 5
+                            }
+                        }
+                        .opacity(voiceBroadcastEnabled ? 1 : 0.45)
+                        .allowsHitTesting(voiceBroadcastEnabled)
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 18)
+                    .figmaSurfaceCard(radius: 30)
+
+                    toggleRowCard(
+                        presentation: .stationaryReminder,
+                        isOn: $longStationaryReminderEnabled
+                    )
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 16)
+            .padding(.bottom, 28)
+        }
+        .background(FigmaTheme.mutedBackground.ignoresSafeArea())
+        .navigationTitle("Notifications")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private var accountSection: some View {
@@ -331,7 +432,54 @@ struct SettingsView: View {
 
             VStack(spacing: 10) {
                 accountInfoCard
+            }
+        }
+    }
 
+    private var accountInfoCard: some View {
+        Group {
+            if accountCardPresentation.style == .guest {
+                Button {
+                    authSheetMode = .signIn
+                    showAuthSheet = true
+                } label: {
+                    guestAccountCard(presentation: accountCardPresentation)
+                }
+                .buttonStyle(.plain)
+            } else {
+                NavigationLink {
+                    AccountCenterView()
+                        .environmentObject(sessionStore)
+                } label: {
+                    loggedInAccountCard(presentation: accountCardPresentation)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var profileVisibilityRow: some View {
+        toggleRowCard(
+            presentation: .profileVisibility(profileVisibility),
+            isOn: Binding(
+                get: { profileVisibility != .private },
+                set: { newValue in
+                    let previousVisibility = profileVisibility
+                    let newVisibility: ProfileVisibility = newValue ? .friendsOnly : .private
+                    guard profileVisibility != newVisibility else { return }
+                    profileVisibility = newVisibility
+                    Task { await updateVisibility(previous: previousVisibility) }
+                }
+            ),
+            isEnabled: sessionStore.isLoggedIn
+        )
+    }
+
+    private var servicesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionTitle("SERVICES")
+
+            VStack(spacing: 10) {
                 NavigationLink {
                     privateTransferView
                 } label: {
@@ -339,100 +487,11 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
 
-                if !sessionStore.isLoggedIn {
-                    settingsRow(title: "LOGIN", icon: "person.badge.key.fill", iconColor: FigmaTheme.primary) {
-                        authSheetMode = .signIn
-                        showAuthSheet = true
-                    }
-                    settingsRow(title: "REGISTER", icon: "person.crop.circle.badge.plus", iconColor: FigmaTheme.secondary) {
-                        authSheetMode = .register
-                        showAuthSheet = true
-                    }
-                } else {
-                    settingsRow(title: "LOG OUT", icon: "rectangle.portrait.and.arrow.right", iconColor: .red.opacity(0.88)) {
-                        sessionStore.logoutToGuest()
-                        accountEmail = ""
-                        exclusiveIDDraft = ""
-                        profileVisibility = ProfileSharingSettings.visibility
-                        toastAccount("已切回游客模式")
-                    }
-                }
-
                 settingsRow(title: "SUBSCRIPTION", icon: "creditcard", iconColor: FigmaTheme.primary) {
                     showPlaceholder("Subscription")
                 }
             }
         }
-    }
-
-    private var accountInfoCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            accountInfoRow(title: "账号", value: accountValue)
-
-            HStack(alignment: .center, spacing: 8) {
-                Text("昵称")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(FigmaTheme.subtext)
-
-                Spacer(minLength: 8)
-
-                Text(displayNameDraft.isEmpty ? "Explorer" : displayNameDraft)
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(FigmaTheme.text)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-
-                Button {
-                    displayNameInput = displayNameDraft
-                    showDisplayNameEditor = true
-                } label: {
-                    Image(systemName: "pencil")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(FigmaTheme.primary)
-                        .frame(width: 24, height: 24)
-                        .background(FigmaTheme.mutedBackground)
-                        .clipShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .disabled(!sessionStore.isLoggedIn)
-                .opacity(sessionStore.isLoggedIn ? 1 : 0.45)
-            }
-
-            accountInfoRow(title: "登录状态", value: sessionStore.isLoggedIn ? "已登录" : "未登录")
-            accountInfoRow(title: "专属ID", value: exclusiveIDDraft.isEmpty ? "--" : exclusiveIDDraft)
-            accountInfoRow(title: "邮箱", value: accountEmail.isEmpty ? "未绑定" : accountEmail)
-
-            Divider().overlay(Color.black.opacity(0.08))
-
-            HStack(alignment: .top, spacing: 10) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Profile 可见性")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(FigmaTheme.subtext)
-                    Text("好友可见")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(FigmaTheme.text)
-                }
-
-                Spacer(minLength: 8)
-
-                figmaToggle(isOn: Binding(
-                    get: { profileVisibility != .private },
-                    set: { newValue in
-                        let previousVisibility = profileVisibility
-                        let newVisibility: ProfileVisibility = newValue ? .friendsOnly : .private
-                        guard profileVisibility != newVisibility else { return }
-                        profileVisibility = newVisibility
-                        Task { await updateVisibility(previous: previousVisibility) }
-                    }
-                ))
-                .disabled(!sessionStore.isLoggedIn)
-                .opacity(sessionStore.isLoggedIn ? 1 : 0.45)
-            }
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 18)
-        .figmaSurfaceCard(radius: 30)
     }
 
     private var displayNameEditorSheet: some View {
@@ -473,20 +532,68 @@ struct SettingsView: View {
         }
     }
 
-    private func accountInfoRow(title: String, value: String) -> some View {
-        HStack(alignment: .center, spacing: 8) {
-            Text(title)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(FigmaTheme.subtext)
+    private func guestAccountCard(presentation: SettingsAccountCardPresentation) -> some View {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(presentation.title)
+                    .font(.system(size: 16, weight: .black))
+                    .tracking(-0.7)
+                    .foregroundColor(FigmaTheme.text)
 
-            Spacer(minLength: 8)
+                Text(presentation.subtitle)
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundColor(FigmaTheme.subtext)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
-            Text(value)
-                .font(.system(size: 14, weight: .bold))
-                .foregroundColor(FigmaTheme.text)
-                .lineLimit(1)
-                .truncationMode(.middle)
+            Spacer(minLength: 12)
+
+            if presentation.showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(FigmaTheme.primary)
+            }
         }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 24)
+        .figmaSurfaceCard(radius: 36)
+    }
+
+    private func loggedInAccountCard(presentation: SettingsAccountCardPresentation) -> some View {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(presentation.title)
+                    .font(.system(size: 18, weight: .regular))
+                    .foregroundColor(FigmaTheme.text)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Text(presentation.subtitle)
+                    .font(.system(size: 12, weight: .regular, design: .monospaced))
+                    .foregroundColor(Color(red: 139 / 255, green: 139 / 255, blue: 139 / 255))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                ForEach(presentation.detailLines, id: \.self) { line in
+                    Text(line)
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundColor(FigmaTheme.subtext)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+
+            Spacer(minLength: 12)
+
+            if presentation.showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(FigmaTheme.subtext)
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 24)
+        .figmaSurfaceCard(radius: 36)
     }
 
     private var levelRulesSection: some View {
@@ -821,6 +928,43 @@ struct SettingsView: View {
                 .shadow(color: Color.black.opacity(isSelected ? 0.08 : 0), radius: 6, x: 0, y: 2)
         }
         .buttonStyle(.plain)
+    }
+
+    private func toggleRowCard(
+        presentation: SettingsRowPresentation,
+        isOn: Binding<Bool>,
+        isEnabled: Bool = true
+    ) -> some View {
+        HStack(alignment: presentation.textStyle == .singleLine ? .center : .top, spacing: 10) {
+            Image(systemName: presentation.icon)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundColor(presentation.iconColor)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(presentation.title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(FigmaTheme.text)
+                    .lineLimit(presentation.textStyle == .singleLine ? 1 : 2)
+
+                if let subtitle = presentation.subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundColor(FigmaTheme.subtext)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxHeight: .infinity, alignment: presentation.textStyle == .singleLine ? .center : .top)
+
+            Spacer(minLength: 8)
+
+            figmaToggle(isOn: isOn)
+                .disabled(!isEnabled)
+                .opacity(isEnabled ? 1 : 0.45)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 18)
+        .figmaSurfaceCard(radius: 30)
     }
 
     private func figmaToggle(isOn: Binding<Bool>) -> some View {
@@ -1704,7 +1848,11 @@ private final class PrivateDataTransferManager: ObservableObject {
         guard wroteFiles > 0 else {
             throw PrivateTransferError.importSourceNotFound
         }
-        return try GuestDataRecoveryService.recover(from: importSourceID, to: currentUserID)
+        return try GuestDataRecoveryService.recover(
+            from: importSourceID,
+            to: currentUserID,
+            options: .manualImport
+        )
     }
 
     nonisolated private static func collectArchiveFiles(from root: URL, allowedRelativePaths: [String], fileManager fm: FileManager) throws -> [PrivateTransferArchiveFile] {

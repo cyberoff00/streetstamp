@@ -259,6 +259,13 @@
 "auth_fill_email_password" = "Please enter email and password";
 "auth_forgot_password" = "Forgot password?";
 "auth_forgot_password_hint" = "Please use the change-password action in Settings.";
+"settings_map_dark_mode" = "Modo oscuro del mapa";
+"settings_profile_visibility_friends" = "Perfil visible para amigos";
+"settings_profile_visibility_private" = "Perfil visible solo para mi";
+"settings_logout" = "Cerrar sesion";
+"settings_logout_subtitle" = "Cerrar sesion en este dispositivo";
+"settings_logout_confirm_title" = "Cerrar sesion?";
+"settings_logout_confirm_message" = "Volveras al modo invitado en este dispositivo.";
 "auth_full_name" = "FULL NAME";
 "auth_have_account" = "Already have an account?";
 "auth_no_account" = "Don't have an account?";

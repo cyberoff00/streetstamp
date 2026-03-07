@@ -262,6 +262,13 @@
 "auth_fill_email_password" = "Please enter email and password";
 "auth_forgot_password" = "Forgot password?";
 "auth_forgot_password_hint" = "Please use the change-password action in Settings.";
+"settings_map_dark_mode" = "地圖深色模式";
+"settings_profile_visibility_friends" = "Profile 好友可見";
+"settings_profile_visibility_private" = "Profile 僅自己可見";
+"settings_logout" = "LOG OUT";
+"settings_logout_subtitle" = "登出目前帳號並切回訪客模式";
+"settings_logout_confirm_title" = "確認登出？";
+"settings_logout_confirm_message" = "登出後將切回訪客模式，本機資料會保留在目前裝置。";
 "auth_full_name" = "FULL NAME";
 "auth_have_account" = "Already have an account?";
 "auth_no_account" = "Don't have an account?";

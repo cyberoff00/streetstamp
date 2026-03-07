@@ -77,6 +77,56 @@ public func regionForCityWhole(
 
     return nil
 }
+
+enum JourneySnapshotFraming {
+    static func region(
+        for coordsWGS84: [CLLocationCoordinate2D],
+        countryISO2: String?,
+        cityKey: String?,
+        targetAspectRatio: CGFloat
+    ) -> MKCoordinateRegion? {
+        let coords = MapCoordAdapter.forMapKit(
+            coordsWGS84.filter(\.isValid),
+            countryISO2: countryISO2,
+            cityKey: cityKey
+        )
+        guard !coords.isEmpty else { return nil }
+
+        var minLat = coords[0].latitude
+        var maxLat = coords[0].latitude
+        var minLon = coords[0].longitude
+        var maxLon = coords[0].longitude
+
+        for coord in coords.dropFirst() {
+            minLat = min(minLat, coord.latitude)
+            maxLat = max(maxLat, coord.latitude)
+            minLon = min(minLon, coord.longitude)
+            maxLon = max(maxLon, coord.longitude)
+        }
+
+        let rawLat = maxLat - minLat
+        let rawLon = maxLon - minLon
+        let paddingFactor = 1.18
+        var latDelta = max(0.01, rawLat * paddingFactor)
+        var lonDelta = max(0.01, rawLon * paddingFactor)
+
+        let safeAspectRatio = max(1.0, Double(targetAspectRatio))
+        if lonDelta / latDelta < safeAspectRatio {
+            lonDelta = latDelta * safeAspectRatio
+        } else {
+            latDelta = lonDelta / safeAspectRatio
+        }
+
+        return MKCoordinateRegion(
+            center: CLLocationCoordinate2D(
+                latitude: (minLat + maxLat) / 2,
+                longitude: (minLon + maxLon) / 2
+            ),
+            span: MKCoordinateSpan(latitudeDelta: latDelta, longitudeDelta: lonDelta)
+        )
+    }
+}
+
 enum MapCoordAdapter {
     /// MapKit in Mainland China expects GCJ-02. We only opt-in when we have an authoritative signal.
     static func forMapKit(

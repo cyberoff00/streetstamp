@@ -20,6 +20,19 @@ enum JourneyVisibility: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum JourneyVisibilityPolicy {
+    static func canEditVisibility(
+        current: JourneyVisibility,
+        target: JourneyVisibility,
+        isLoggedIn: Bool
+    ) -> Bool {
+        _ = current
+        _ = target
+        guard isLoggedIn else { return false }
+        return true
+    }
+}
+
 enum ProfileVisibility: String, Codable, CaseIterable, Identifiable {
     case `private`
     case friendsOnly

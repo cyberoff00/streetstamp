@@ -14,7 +14,6 @@ enum AuthEntryMode: String {
 }
 
 private enum OAuthProvider {
-    case google
     case apple
 }
 
@@ -44,6 +43,8 @@ struct AuthEntryView: View {
     @State private var showMessage = false
     @State private var messageText = ""
     @State private var showGuestNotice = false
+    @State private var showVerificationSheet = false
+    @State private var pendingVerificationEmail: String?
     @FocusState private var focusedField: AuthField?
 
     private let accent = FigmaTheme.primary
@@ -90,6 +91,23 @@ struct AuthEntryView: View {
             Button(L10n.t("resume_prompt_continue")) { onContinueGuest() }
         } message: {
             Text(L10n.t("guest_mode_message"))
+        }
+        .fullScreenCover(isPresented: $showVerificationSheet) {
+            EmailVerificationView(
+                email: pendingVerificationEmail,
+                onResend: {
+                    guard let pendingVerificationEmail else {
+                        throw BackendAPIError.server("缺少待验证邮箱")
+                    }
+                    try await sessionStore.resendVerificationEmail(email: pendingVerificationEmail)
+                },
+                onRefresh: {
+                    try await refreshVerificationState()
+                },
+                onCancel: {
+                    showVerificationSheet = false
+                }
+            )
         }
         .onAppear {
             if let initialMode {
@@ -189,8 +207,7 @@ struct AuthEntryView: View {
                 HStack {
                     Spacer()
                     Button(L10n.t("auth_forgot_password")) {
-                        messageText = L10n.t("auth_forgot_password_hint")
-                        showMessage = true
+                        Task { await sendPasswordReset() }
                     }
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.black.opacity(0.58))
@@ -257,12 +274,8 @@ struct AuthEntryView: View {
 
     private var socialButtons: some View {
         VStack(spacing: 12) {
-            socialButton(title: "Google", iconName: "g.circle.fill", iconColor: .blue) {
-                Task { await submitOAuth(provider: .google) }
-            }
-
             socialButton(title: "Apple", iconName: "applelogo", iconColor: .black) {
-                Task { await submitOAuth(provider: .apple) }
+                Task { await submitAppleAuth() }
             }
         }
     }
@@ -389,15 +402,35 @@ struct AuthEntryView: View {
             defer { submitting = false }
             do {
                 if mode == .register {
-                    try await sessionStore.registerWithEmail(email: trimmedEmail, password: trimmedPassword)
                     let normalized = normalizedDisplayName(fullName)
+                    let registered = try await sessionStore.registerWithEmail(
+                        email: trimmedEmail,
+                        password: trimmedPassword,
+                        displayName: normalized
+                    )
                     if !normalized.isEmpty {
                         profileName = normalized
                     }
-                    onAuthenticated?()
+                    pendingVerificationEmail = registered.email
+                    if registered.emailVerificationRequired {
+                        showVerificationSheet = true
+                    } else {
+                        try await sessionStore.loginWithEmail(email: trimmedEmail, password: trimmedPassword)
+                        onAuthenticated?()
+                    }
                 } else {
-                    try await sessionStore.loginWithEmail(email: trimmedEmail, password: trimmedPassword)
-                    onAuthenticated?()
+                    do {
+                        try await sessionStore.loginWithEmail(email: trimmedEmail, password: trimmedPassword)
+                        pendingVerificationEmail = trimmedEmail
+                        onAuthenticated?()
+                    } catch {
+                        if isEmailVerificationRequired(error) {
+                            pendingVerificationEmail = trimmedEmail
+                            showVerificationSheet = true
+                        } else {
+                            throw error
+                        }
+                    }
                 }
             } catch {
                 messageText = error.localizedDescription
@@ -406,23 +439,58 @@ struct AuthEntryView: View {
         }
     }
 
-    private func submitOAuth(provider: OAuthProvider) async {
+    private func submitAppleAuth() async {
         submitting = true
         defer { submitting = false }
         do {
-            let token: String
-            switch provider {
-            case .apple:
-                token = try await AppleSignInService.signIn()
-            case .google:
-                token = try await GoogleSignInService.signIn()
-            }
-            let providerRaw = (provider == .apple) ? "apple" : "google"
-            try await sessionStore.loginWithOAuth(provider: providerRaw, idToken: token)
+            let appleSession = try await AppleSignInService.signIn()
+            try await sessionStore.loginWithApple(idToken: appleSession.idToken)
             onAuthenticated?()
         } catch {
-            messageText = localizedOAuthErrorMessage(error, provider: provider)
+            messageText = localizedOAuthErrorMessage(error, provider: .apple)
             showMessage = true
+        }
+    }
+
+    private func isEmailVerificationRequired(_ error: Error) -> Bool {
+        guard case let BackendAPIError.server(message) = error else { return false }
+        return message.localizedCaseInsensitiveContains("email not verified")
+    }
+
+    private func sendPasswordReset() async {
+        let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedEmail.isEmpty else {
+            messageText = L10n.t("auth_fill_email_password")
+            showMessage = true
+            return
+        }
+        submitting = true
+        defer { submitting = false }
+        do {
+            try await sessionStore.sendPasswordReset(email: trimmedEmail)
+            messageText = "Password reset email sent."
+        } catch {
+            messageText = error.localizedDescription
+        }
+        showMessage = true
+    }
+
+    private func refreshVerificationState() async throws -> Bool {
+        let trimmedEmail = pendingVerificationEmail?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let trimmedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedEmail.isEmpty, !trimmedPassword.isEmpty else {
+            throw BackendAPIError.server("请重新输入邮箱和密码后再继续。")
+        }
+        do {
+            try await sessionStore.loginWithEmail(email: trimmedEmail, password: trimmedPassword)
+            showVerificationSheet = false
+            onAuthenticated?()
+            return true
+        } catch {
+            if isEmailVerificationRequired(error) {
+                return false
+            }
+            throw error
         }
     }
 

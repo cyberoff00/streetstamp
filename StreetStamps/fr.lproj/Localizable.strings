@@ -258,6 +258,13 @@
 "auth_fill_email_password" = "Please enter email and password";
 "auth_forgot_password" = "Forgot password?";
 "auth_forgot_password_hint" = "Please use the change-password action in Settings.";
+"settings_map_dark_mode" = "Mode sombre de la carte";
+"settings_profile_visibility_friends" = "Profil visible aux amis";
+"settings_profile_visibility_private" = "Profil visible seulement pour moi";
+"settings_logout" = "Se deconnecter";
+"settings_logout_subtitle" = "Se deconnecter de cet appareil";
+"settings_logout_confirm_title" = "Se deconnecter ?";
+"settings_logout_confirm_message" = "Cet appareil repassera en mode invite.";
 "auth_full_name" = "FULL NAME";
 "auth_have_account" = "Already have an account?";
 "auth_no_account" = "Don't have an account?";

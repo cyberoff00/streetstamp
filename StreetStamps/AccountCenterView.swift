@@ -5,7 +5,6 @@ struct AccountCenterView: View {
     @EnvironmentObject private var sessionStore: UserSessionStore
 
     @State private var backendBaseURL = BackendConfig.baseURLString
-    @State private var googleClientID = BackendConfig.googleIOSClientID
     @State private var displayNameDraft = ""
     @State private var displayNameInput = ""
     @State private var isEditingDisplayName = false
@@ -19,6 +18,7 @@ struct AccountCenterView: View {
     @State private var isLoading = false
     @State private var message = ""
     @State private var showMessage = false
+    @State private var showLogoutConfirmation = false
     @State private var showAuthSheet = false
     @State private var authSheetMode: AuthEntryMode = .signIn
 
@@ -34,8 +34,10 @@ struct AccountCenterView: View {
                     sectionTitle("PROFILE VISIBILITY")
                     visibilityPanel
 
-                    sectionTitle("SECURITY")
-                    securityPanel
+                    if sessionStore.isLoggedIn {
+                        sectionTitle("ACCOUNT ACTIONS")
+                        logoutPanel
+                    }
 
                     if !sessionStore.isLoggedIn {
                         sectionTitle("DEVELOPER")
@@ -57,6 +59,19 @@ struct AccountCenterView: View {
             Button("好", role: .cancel) {}
         } message: {
             Text(message)
+        }
+        .alert(L10n.t("settings_logout_confirm_title"), isPresented: $showLogoutConfirmation) {
+            Button(L10n.t("cancel"), role: .cancel) {}
+            Button(L10n.t("settings_logout"), role: .destructive) {
+                sessionStore.logoutToGuest()
+                accountEmail = ""
+                exclusiveIDDraft = ""
+                profileVisibility = ProfileSharingSettings.visibility
+                toast("已切回游客模式")
+                dismiss()
+            }
+        } message: {
+            Text(L10n.t("settings_logout_confirm_message"))
         }
         .sheet(isPresented: $showAuthSheet) {
             AuthEntryView(
@@ -188,10 +203,6 @@ struct AccountCenterView: View {
                         .foregroundColor(FigmaTheme.subtext)
                 }
 
-                capsuleAction("退出登录", filled: false) {
-                    sessionStore.logoutToGuest()
-                    toast("已切回游客模式")
-                }
             } else {
                 Text("Guest Mode")
                     .font(.system(size: 32 * 0.58, weight: .bold))
@@ -257,35 +268,46 @@ struct AccountCenterView: View {
         .cardStyle()
     }
 
-    private var securityPanel: some View {
+    private var logoutPanel: some View {
         VStack(spacing: 0) {
             infoRow(
-                icon: "key",
-                title: "Change Password",
-                subtitle: "Update account password"
+                icon: "rectangle.portrait.and.arrow.right",
+                title: L10n.t("settings_logout"),
+                subtitle: L10n.t("settings_logout_subtitle"),
+                iconColor: .red.opacity(0.88),
+                titleColor: .red.opacity(0.9),
+                subtitleColor: .red.opacity(0.62)
             ) {
-                toast("后端尚未提供改密接口，先保留此入口")
+                showLogoutConfirmation = true
             }
         }
         .cardStyle()
     }
 
-    private func infoRow(icon: String, title: String, subtitle: String, action: @escaping () -> Void) -> some View {
+    private func infoRow(
+        icon: String,
+        title: String,
+        subtitle: String,
+        iconColor: Color = FigmaTheme.primary,
+        titleColor: Color = FigmaTheme.text,
+        subtitleColor: Color = FigmaTheme.subtext,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             HStack(spacing: 12) {
                 Image(systemName: icon)
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(FigmaTheme.primary)
+                    .foregroundColor(iconColor)
                     .frame(width: 40, height: 40)
                     .background(Color.black.opacity(0.03))
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)
                         .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(FigmaTheme.text)
+                        .foregroundColor(titleColor)
                     Text(subtitle)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(FigmaTheme.subtext)
+                        .foregroundColor(subtitleColor)
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
@@ -327,23 +349,12 @@ struct AccountCenterView: View {
                 .autocorrectionDisabled(true)
                 .textFieldStyle(.roundedBorder)
 
-            TextField("Google iOS Client ID（可选）", text: $googleClientID)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled(true)
-                .textFieldStyle(.roundedBorder)
-
             HStack(spacing: 10) {
                 Button("保存后端地址") {
                     BackendConfig.baseURLString = backendBaseURL
                     toast("已保存后端地址")
                 }
                 .buttonStyle(.borderedProminent)
-
-                Button("保存 Google Client ID") {
-                    BackendConfig.googleIOSClientID = googleClientID
-                    toast("已保存 Google Client ID")
-                }
-                .buttonStyle(.bordered)
             }
 
             Text("当前地址：\(BackendConfig.baseURLString.isEmpty ? "未配置" : BackendConfig.baseURLString)")

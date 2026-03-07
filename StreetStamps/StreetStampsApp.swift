@@ -1,5 +1,8 @@
 import SwiftUI
 import UIKit
+#if canImport(FirebaseCore)
+import FirebaseCore
+#endif
 @main
 struct StreetStampsApp: App {
     @UIApplicationDelegateAdaptor(AppNotificationDelegate.self) private var appDelegate
@@ -46,10 +49,18 @@ struct StreetStampsApp: App {
     }
 
     init() {
+        #if canImport(FirebaseCore)
+        if BackendConfig.firebaseBackupRuntimeEnabled,
+           FirebaseApp.app() == nil,
+           BackendConfig.firebaseSetupIssue() == nil {
+            FirebaseApp.configure()
+        }
+        #endif
         let session = UserSessionStore()
+        UserScopedProfileStateStore.initializeCurrentUser(session.activeLocalProfileID)
         _sessionStore = StateObject(wrappedValue: session)
 
-        let paths = StoragePath(userID: session.currentUserID)
+        let paths = StoragePath(userID: session.activeLocalProfileID)
         let jStore = JourneyStore(paths: paths)
         _journeyStore = StateObject(wrappedValue: jStore)
         _cityCache = StateObject(wrappedValue: CityCache(paths: paths, journeyStore: jStore))
@@ -57,8 +68,8 @@ struct StreetStampsApp: App {
         _lifelogStore = StateObject(wrappedValue: llStore)
         _trackTileStore = StateObject(wrappedValue: TrackTileStore(paths: paths))
         _lifelogRenderCache = StateObject(wrappedValue: LifelogRenderCacheCoordinator())
-        _socialStore = StateObject(wrappedValue: SocialGraphStore(userID: session.currentUserID))
-        _postcardCenter = StateObject(wrappedValue: PostcardCenter(userID: session.currentUserID))
+        _socialStore = StateObject(wrappedValue: SocialGraphStore(userID: session.activeLocalProfileID))
+        _postcardCenter = StateObject(wrappedValue: PostcardCenter(userID: session.activeLocalProfileID))
 
         configureGlobalTabBarAppearance()
     }
@@ -129,7 +140,7 @@ struct StreetStampsApp: App {
             }
             .task {
                 BackendAPIClient.shared.bindSessionStore(sessionStore)
-                let startupUserID = sessionStore.currentUserID
+                let startupUserID = sessionStore.activeLocalProfileID
                 await sessionStore.bootstrapFileSystemAsync()
                 await LifelogMigrationService.migrateLegacyLifelogIfNeededAsync(
                     paths: StoragePath(userID: startupUserID)
@@ -181,12 +192,13 @@ struct StreetStampsApp: App {
                 guard seen else { return }
                 maybeShowFirstAuthPromptIfNeeded()
             }
-            .onChange(of: sessionStore.currentUserID) { _, uid in
+            .onChange(of: sessionStore.activeLocalProfileID) { oldUserID, uid in
                 Task {
+                    UserScopedProfileStateStore.switchActiveUser(from: oldUserID, to: uid)
                     let paths = StoragePath(userID: uid)
                     await sessionStore.bootstrapFileSystemAsync()
                     await LifelogMigrationService.migrateLegacyLifelogIfNeededAsync(paths: paths)
-                    guard sessionStore.currentUserID == uid else { return }
+                    guard sessionStore.activeLocalProfileID == uid else { return }
 
                     journeyStore.rebind(paths: paths)
                     journeyStore.load()
@@ -208,16 +220,18 @@ struct StreetStampsApp: App {
                     ensurePassiveLocationTrackingIfNeeded()
                     socialStore.switchUser(uid)
                     postcardCenter.switchUser(uid)
-
-                    if sessionStore.currentAccessToken != nil {
-                        let count = try? await JourneyCloudMigrationService.downloadAndMerge(
-                            sessionStore: sessionStore,
-                            journeyStore: journeyStore,
-                            cityCache: cityCache
-                        )
-                        if let count, count > 0 {
-                            scheduleTrackTileRebuild(delay: 0.10, force: false)
-                        }
+                }
+            }
+            .onChange(of: sessionStore.currentAccessToken) { _, token in
+                guard let token, !token.isEmpty else { return }
+                Task {
+                    let count = try? await JourneyCloudMigrationService.downloadAndMerge(
+                        sessionStore: sessionStore,
+                        journeyStore: journeyStore,
+                        cityCache: cityCache
+                    )
+                    if let count, count > 0 {
+                        scheduleTrackTileRebuild(delay: 0.10, force: false)
                     }
                 }
             }

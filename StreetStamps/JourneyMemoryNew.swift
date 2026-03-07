@@ -1129,9 +1129,12 @@ struct JourneyMemoryDetailView: View {
         .padding(.horizontal, 32)
         .background(FigmaTheme.background)
         .overlay(
-            Rectangle()
-                .inset(by: 0.5)
-                .stroke(Color(red: 0.90, green: 0.91, blue: 0.92), lineWidth: 0.5)
+            VStack(spacing: 0) {
+                Spacer()
+                Rectangle()
+                    .fill(Color(red: 0.90, green: 0.91, blue: 0.92))
+                    .frame(height: 0.5)
+            }
         )
     }
     
@@ -1314,6 +1317,7 @@ struct JourneyMemoryDetailView: View {
         let view = JourneyMemoryDetailExportSnapshotView(
             journey: journey,
             memories: draftMemories,
+            overallMemory: draftOverallMemory,
             cityName: cityName,
             countryName: countryName,
             journeyDate: journeyDate,
@@ -1633,6 +1637,18 @@ private struct ShareImageItem: Identifiable {
     let image: UIImage
 }
 
+struct JourneyMemoryDetailExportPresentation {
+    let overallMemoryText: String
+
+    init(overallMemory: String?) {
+        self.overallMemoryText = overallMemory?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    var shouldShowOverallMemory: Bool {
+        !overallMemoryText.isEmpty
+    }
+}
+
 // =======================================================
 // MARK: - Timeline Divider
 // =======================================================
@@ -1687,6 +1703,7 @@ struct ActivityView: UIViewControllerRepresentable {
 private struct JourneyMemoryDetailExportSnapshotView: View {
     let journey: JourneyRoute
     let memories: [JourneyMemory]
+    let overallMemory: String
     let cityName: String
     let countryName: String
     let journeyDate: String
@@ -1698,14 +1715,21 @@ private struct JourneyMemoryDetailExportSnapshotView: View {
         memories.sorted(by: { $0.timestamp < $1.timestamp })
     }
 
+    private var presentation: JourneyMemoryDetailExportPresentation {
+        JourneyMemoryDetailExportPresentation(overallMemory: overallMemory)
+    }
+
     var body: some View {
         ZStack {
             FigmaTheme.background
 
             VStack(alignment: .leading, spacing: 24) {
-                        headerCard
-                        memoriesTimeline
-                    }
+                headerCard
+                if presentation.shouldShowOverallMemory {
+                    overallMemorySection
+                }
+                memoriesTimeline
+            }
             .padding(.bottom, 40)
         }
         // 关键：让内容按真实高度撑开，renderer 才能渲出长图
@@ -1785,10 +1809,33 @@ private struct JourneyMemoryDetailExportSnapshotView: View {
         .padding(.horizontal, 32)
         .background(FigmaTheme.background)
         .overlay(
-            Rectangle()
-                .inset(by: 0.5)
-                .stroke(Color(red: 0.90, green: 0.91, blue: 0.92), lineWidth: 0.5)
+            VStack(spacing: 0) {
+                Spacer()
+                Rectangle()
+                    .fill(Color(red: 0.90, green: 0.91, blue: 0.92))
+                    .frame(height: 0.5)
+            }
         )
+    }
+
+    private var overallMemorySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L10n.t("overall_memory"))
+                .font(.system(size: 12, weight: .bold))
+                .tracking(1.2)
+                .foregroundColor(Color(red: 0.60, green: 0.63, blue: 0.69))
+
+            Text(presentation.overallMemoryText)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(Color(red: 0.48, green: 0.54, blue: 0.62))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(minHeight: 52, alignment: .topLeading)
+                .padding(12)
+                .background(FigmaTheme.background)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .padding(.horizontal, 32)
+        .padding(.top, -8)
     }
 
     // MARK: - Memories Timeline (read-only, match spacing)

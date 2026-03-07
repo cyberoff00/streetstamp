@@ -257,6 +257,13 @@
 "auth_fill_email_password" = "Please enter email and password";
 "auth_forgot_password" = "Forgot password?";
 "auth_forgot_password_hint" = "Please use the change-password action in Settings.";
+"settings_map_dark_mode" = "지도 다크 모드";
+"settings_profile_visibility_friends" = "프로필 친구에게만 공개";
+"settings_profile_visibility_private" = "프로필 나만 보기";
+"settings_logout" = "로그아웃";
+"settings_logout_subtitle" = "이 기기에서 로그아웃";
+"settings_logout_confirm_title" = "로그아웃할까요?";
+"settings_logout_confirm_message" = "이 기기는 게스트 모드로 돌아갑니다.";
 "auth_full_name" = "FULL NAME";
 "auth_have_account" = "Already have an account?";
 "auth_no_account" = "Don't have an account?";

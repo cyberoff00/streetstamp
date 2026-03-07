@@ -15,6 +15,16 @@ struct BackendAuthResponse: Codable {
     let refreshToken: String
 }
 
+struct BackendRegisterResponse: Codable {
+    let userId: String
+    let email: String
+    let emailVerificationRequired: Bool
+}
+
+struct BackendRefreshResponse: Codable {
+    let accessToken: String
+}
+
 struct BackendMemoryUploadDTO: Codable {
     var id: String
     var title: String
@@ -39,6 +49,8 @@ struct BackendJourneyUploadDTO: Codable {
 struct BackendMigrationRequest: Codable {
     var journeys: [BackendJourneyUploadDTO]
     var unlockedCityCards: [FriendCityCard]
+    var removedJourneyIDs: [String]?
+    var snapshotComplete: Bool?
 }
 
 struct BackendMediaUploadResponse: Codable {
@@ -132,10 +144,6 @@ private struct BackendNotificationReadRequest: Codable {
     var all: Bool
 }
 
-private struct BackendRefreshRequest: Codable {
-    var refreshToken: String
-}
-
 private actor BackendTokenRefreshGate {
     private var inFlight: Task<String?, Never>?
 
@@ -204,17 +212,33 @@ enum BackendAPIError: LocalizedError {
 
 final class BackendAPIClient {
     static let shared = BackendAPIClient()
-    private let refreshPath = "/v1/auth/refresh"
     private let tokenRefreshGate = BackendTokenRefreshGate()
+    private var transport: @Sendable (URLRequest) async throws -> (Data, URLResponse)
 
     @MainActor
     private weak var sessionStore: UserSessionStore?
 
-    private init() {}
+    private init() {
+        self.transport = { request in
+            try await URLSession.shared.data(for: request)
+        }
+    }
 
     @MainActor
     func bindSessionStore(_ sessionStore: UserSessionStore) {
         self.sessionStore = sessionStore
+    }
+
+    func installTestingTransport(
+        _ transport: @escaping @Sendable (URLRequest) async throws -> (Data, URLResponse)
+    ) {
+        self.transport = transport
+    }
+
+    func resetTestingTransport() {
+        self.transport = { request in
+            try await URLSession.shared.data(for: request)
+        }
     }
 
     private func makeURL(path: String) throws -> URL {
@@ -319,27 +343,29 @@ final class BackendAPIClient {
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.timeoutInterval = 45
-        if let token, !token.isEmpty {
-            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let resolvedToken = try await resolvedAuthorizationToken(explicitToken: token)
+        if let resolvedToken, !resolvedToken.isEmpty {
+            req.setValue("Bearer \(resolvedToken)", forHTTPHeaderField: "Authorization")
         }
         if let body = jsonBody {
             req.httpBody = body
             req.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
 
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let (data, resp) = try await transport(req)
         guard let http = resp as? HTTPURLResponse else {
             throw BackendAPIError.invalidResponse
         }
 
         if http.statusCode == 401,
-           let token,
-           !token.isEmpty,
+           let resolvedToken,
+           !resolvedToken.isEmpty,
            !shouldSkipAutoRefresh(path: path),
-           let refreshedToken = await tokenRefreshGate.refresh(client: self, failedAccessToken: token) {
+           let refreshedToken = await tokenRefreshGate.refresh(client: self, failedAccessToken: resolvedToken),
+           refreshedToken != resolvedToken {
             var retriedReq = req
             retriedReq.setValue("Bearer \(refreshedToken)", forHTTPHeaderField: "Authorization")
-            let (retryData, retryResp) = try await URLSession.shared.data(for: retriedReq)
+            let (retryData, retryResp) = try await transport(retriedReq)
             guard let retryHTTP = retryResp as? HTTPURLResponse else {
                 throw BackendAPIError.invalidResponse
             }
@@ -368,15 +394,42 @@ final class BackendAPIClient {
         return (data, http)
     }
 
-    private func currentSessionSnapshot() async -> (userID: String, accessToken: String, refreshToken: String)? {
+    private func currentSessionSnapshot() async -> (userID: String, accessToken: String)? {
         await MainActor.run {
             guard let store = sessionStore,
                   let userID = store.accountUserID, !userID.isEmpty,
-                  let accessToken = store.currentAccessToken, !accessToken.isEmpty,
-                  let refreshToken = store.currentRefreshToken, !refreshToken.isEmpty else {
+                  let accessToken = store.currentAccessToken, !accessToken.isEmpty else {
                 return nil
             }
-            return (userID, accessToken, refreshToken)
+            return (userID, accessToken)
+        }
+    }
+
+    private func resolvedAuthorizationToken(explicitToken: String?) async throws -> String? {
+        if let explicitToken, !explicitToken.isEmpty {
+            return explicitToken
+        }
+        if let cached = await MainActor.run(resultType: String?.self, body: { sessionStore?.currentAccessToken }),
+           !cached.isEmpty {
+            return cached
+        }
+        return nil
+    }
+
+    private func synchronizeFirebaseSession(idToken: String?) async {
+        let snapshot = FirebaseAuthSession.currentUser
+        await MainActor.run {
+            if let snapshot {
+                sessionStore?.syncFirebaseAccountState(
+                    firebaseUID: snapshot.uid,
+                    provider: snapshot.providerID,
+                    email: snapshot.email,
+                    emailVerified: snapshot.emailVerified,
+                    cachedIDToken: idToken
+                )
+            } else {
+                sessionStore?.updateCachedFirebaseIDToken(idToken)
+            }
         }
     }
 
@@ -387,37 +440,71 @@ final class BackendAPIClient {
             return snapshot.accessToken
         }
 
-        do {
-            let body = try encoder.encode(BackendRefreshRequest(refreshToken: snapshot.refreshToken))
-            let (data, _) = try await request(path: refreshPath, method: "POST", jsonBody: body)
-            let refreshed = try decoder.decode(BackendAuthResponse.self, from: data)
-            guard refreshed.userId == snapshot.userID else { return nil }
-
-            let applied = await MainActor.run {
-                sessionStore?.applyRefreshedAuth(refreshed, expectedUserID: snapshot.userID) ?? false
+        if let refreshToken = await MainActor.run(resultType: String?.self, body: { sessionStore?.currentRefreshToken }),
+           !refreshToken.isEmpty {
+            do {
+                let body = try encoder.encode(["refreshToken": refreshToken])
+                let (data, _) = try await request(path: "/v1/auth/refresh", method: "POST", jsonBody: body)
+                let refreshed = try decoder.decode(BackendRefreshResponse.self, from: data)
+                let currentUserID = await MainActor.run { sessionStore?.accountUserID }
+                guard currentUserID == snapshot.userID else { return nil }
+                await MainActor.run {
+                    sessionStore?.updateAccessToken(refreshed.accessToken)
+                }
+                return await MainActor.run {
+                    guard sessionStore?.currentAccessToken == refreshed.accessToken else { return nil }
+                    return refreshed.accessToken
+                }
+            } catch {
+                return nil
             }
-            return applied ? refreshed.accessToken : nil
+        }
+
+        do {
+            let refreshed = try await FirebaseAuthSession.currentIDToken(forceRefresh: true)
+            guard let refreshed, !refreshed.isEmpty else { return nil }
+            let currentUserID = await MainActor.run { sessionStore?.accountUserID }
+            guard currentUserID == snapshot.userID else { return nil }
+            await synchronizeFirebaseSession(idToken: refreshed)
+            return await MainActor.run {
+                guard sessionStore?.currentAccessToken == refreshed else { return nil }
+                return refreshed
+            }
         } catch {
             return nil
         }
     }
 
-    func emailRegister(email: String, password: String) async throws -> BackendAuthResponse {
+    func register(email: String, password: String, displayName: String) async throws -> BackendRegisterResponse {
+        let body = try encoder.encode([
+            "email": email,
+            "password": password,
+            "displayName": displayName
+        ])
+        let (data, _) = try await request(path: "/v1/auth/register", method: "POST", jsonBody: body)
+        return try decoder.decode(BackendRegisterResponse.self, from: data)
+    }
+
+    func login(email: String, password: String) async throws -> BackendAuthResponse {
         let body = try encoder.encode(["email": email, "password": password])
-        let (data, _) = try await request(path: "/v1/auth/email/register", method: "POST", jsonBody: body)
+        let (data, _) = try await request(path: "/v1/auth/login", method: "POST", jsonBody: body)
         return try decoder.decode(BackendAuthResponse.self, from: data)
     }
 
-    func emailLogin(email: String, password: String) async throws -> BackendAuthResponse {
-        let body = try encoder.encode(["email": email, "password": password])
-        let (data, _) = try await request(path: "/v1/auth/email/login", method: "POST", jsonBody: body)
+    func loginWithApple(idToken: String) async throws -> BackendAuthResponse {
+        let body = try encoder.encode(["idToken": idToken])
+        let (data, _) = try await request(path: "/v1/auth/apple", method: "POST", jsonBody: body)
         return try decoder.decode(BackendAuthResponse.self, from: data)
     }
 
-    func oauthLogin(provider: String, idToken: String) async throws -> BackendAuthResponse {
-        let body = try encoder.encode(["provider": provider, "idToken": idToken])
-        let (data, _) = try await request(path: "/v1/auth/oauth", method: "POST", jsonBody: body)
-        return try decoder.decode(BackendAuthResponse.self, from: data)
+    func resendVerificationEmail(email: String) async throws {
+        let body = try encoder.encode(["email": email])
+        _ = try await request(path: "/v1/auth/resend-verification", method: "POST", jsonBody: body)
+    }
+
+    func sendPasswordReset(email: String) async throws {
+        let body = try encoder.encode(["email": email])
+        _ = try await request(path: "/v1/auth/forgot-password", method: "POST", jsonBody: body)
     }
 
     func fetchFriends(token: String) async throws -> [BackendFriendDTO] {
