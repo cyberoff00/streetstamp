@@ -573,7 +573,7 @@ struct LifelogView: View {
             }
 
             Text(L10n.t("lifelog_title"))
-                .appHeaderStyle()
+                .navigationTitleStyle(level: .primary)
         }
         .padding(.horizontal, 18)
         .padding(.top, 14)

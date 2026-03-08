@@ -122,6 +122,7 @@ struct StreetStampsApp: App {
                     onAuthenticated: { showAuthEntry = false }
                 )
                 .environmentObject(sessionStore)
+                .environmentObject(deepLinkStore)
                 .environmentObject(journeyStore)
                 .environmentObject(cityCache)
                 .environmentObject(socialStore)
@@ -284,12 +285,20 @@ struct StreetStampsApp: App {
             }
             .onOpenURL { url in
                 guard deepLinkStore.handleIncomingURL(url) else { return }
-                flow.requestSelectTab(.friends)
+                if deepLinkStore.pendingPasswordResetToken != nil {
+                    showAuthEntry = true
+                } else {
+                    flow.requestSelectTab(.friends)
+                }
             }
             .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
                 guard let url = activity.webpageURL else { return }
                 guard deepLinkStore.handleIncomingURL(url) else { return }
-                flow.requestSelectTab(.friends)
+                if deepLinkStore.pendingPasswordResetToken != nil {
+                    showAuthEntry = true
+                } else {
+                    flow.requestSelectTab(.friends)
+                }
             }
     }
 

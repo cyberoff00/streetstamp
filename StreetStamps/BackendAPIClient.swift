@@ -507,6 +507,14 @@ final class BackendAPIClient {
         _ = try await request(path: "/v1/auth/forgot-password", method: "POST", jsonBody: body)
     }
 
+    func resetPassword(token: String, newPassword: String) async throws {
+        let body = try encoder.encode([
+            "token": token,
+            "newPassword": newPassword
+        ])
+        _ = try await request(path: "/v1/auth/reset-password", method: "POST", jsonBody: body)
+    }
+
     func fetchFriends(token: String) async throws -> [BackendFriendDTO] {
         let (data, _) = try await request(path: "/v1/friends", method: "GET", token: token)
         return try decoder.decode([BackendFriendDTO].self, from: data)

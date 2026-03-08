@@ -423,6 +423,10 @@
 "visibility_private" = "私密";
 "visibility_friends_only" = "好友可見";
 "visibility_public" = "公開";
+"journey_change_visibility" = "更改旅程權限";
+"journey_current_visibility_format" = "目前：%@";
+"journey_visibility_login_required" = "無法切換為好友可見，請先登入。";
+"journey_visibility_requires_distance_or_memory" = "無法切換為好友可見，旅程需達到 2 公里或至少包含一則記憶。";
 "unknown_id" = "unknown_id";
 "unknown_city" = "未知城市";
 "friends_exclusive_id_format" = "專屬ID：%@";

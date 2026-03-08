@@ -54,6 +54,7 @@ struct StoragePath: Sendable {
     // MARK: - Files
 
     var cityCacheURL: URL { cachesDir.appendingPathComponent("city_cache.json", isDirectory: false) }
+    var cityMembershipIndexURL: URL { cachesDir.appendingPathComponent("city_membership_index.json", isDirectory: false) }
     var lifelogLegacyRouteURL: URL { cachesDir.appendingPathComponent("lifelog_route.json", isDirectory: false) }
     var lifelogPassiveRouteURL: URL { cachesDir.appendingPathComponent("lifelog_passive_route.json", isDirectory: false) }
     var lifelogRouteURL: URL { lifelogPassiveRouteURL }

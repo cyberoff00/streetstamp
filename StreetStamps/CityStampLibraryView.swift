@@ -56,7 +56,7 @@ struct CityStampLibraryView: View {
 
     init(
         showSidebar: Binding<Bool>,
-        autoRebuildFromJourneyStore: Bool = true,
+        autoRebuildFromJourneyStore: Bool = false,
         usesSidebarHeader: Bool = true,
         showHeader: Bool = true,
         allowCityDetailNavigation: Bool = true,
@@ -98,18 +98,12 @@ struct CityStampLibraryView: View {
         .navigationBarBackButtonHidden(true)
         .onAppear {
             if store.hasLoaded {
-                if autoRebuildFromJourneyStore {
-                    cache.rebuildFromJourneyStore()
-                }
                 vm.load(journeyStore: store, cityCache: cache)
                 digestByCityID = makeDigestMap(from: cache.cachedCities)
             }
         }
         .onChange(of: store.hasLoaded) { loaded in
             if loaded {
-                if autoRebuildFromJourneyStore {
-                    cache.rebuildFromJourneyStore()
-                }
                 vm.load(journeyStore: store, cityCache: cache)
                 digestByCityID = makeDigestMap(from: cache.cachedCities)
             }
@@ -148,10 +142,10 @@ struct CityStampLibraryView: View {
         } message: { city in
             Text(String(format: L10n.t("delete_city_alert_message"), locale: Locale.current, (city.displayName ?? city.name)))
         }
-        .alert("暂时不可以公开细节", isPresented: $showPublicDetailUnavailableAlert) {
-            Button("OK", role: .cancel) {}
+        .alert(L10n.t("details_unavailable_title"), isPresented: $showPublicDetailUnavailableAlert) {
+            Button(L10n.t("ok"), role: .cancel) {}
         } message: {
-            Text("该好友的城市卡目前仅支持公开缩略图浏览。")
+            Text(L10n.t("details_unavailable_message"))
         }
     }
 
@@ -166,7 +160,7 @@ struct CityStampLibraryView: View {
     private var headerBar: some View {
         let titleText = (headerTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
             ? (headerTitle ?? "")
-            : "CITIES"
+            : L10n.t("collection_segment_cities")
         return Group {
             if usesSidebarHeader {
                 AppTopHeader(title: titleText, showSidebar: $showSidebar)

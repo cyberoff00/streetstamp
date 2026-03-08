@@ -40,10 +40,12 @@ final class PostcardNotificationBridge {
     private func scheduleLocalNotification(for item: BackendNotificationItem) {
         let deepLink = buildDeepLink(for: item)
         let title = (item.fromDisplayName?.isEmpty == false)
-            ? "\(item.fromDisplayName!) 给你寄来一张明信片"
-            : "你收到一张明信片"
+            ? String(format: NSLocalizedString("postcard_received_title_format", comment: ""), item.fromDisplayName!)
+            : NSLocalizedString("postcard_received_title_fallback", comment: "")
         let city = item.cityName?.isEmpty == false ? item.cityName! : (item.cityID ?? "")
-        let body = city.isEmpty ? item.message : "来自 \(city)"
+        let body = city.isEmpty
+            ? item.message
+            : String(format: NSLocalizedString("postcard_received_body_format", comment: ""), city)
 
         UNUserNotificationCenter.current().getNotificationSettings { settings in
             guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else {

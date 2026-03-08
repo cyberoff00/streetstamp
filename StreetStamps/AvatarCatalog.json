@@ -43,7 +43,8 @@
         { "id": "hair_0003", "nameKey": "Hair 0003", "layer": "hair", "images": { "front": "front_hair001", "right": null, "back": null, "left": null } },
         { "id": "hair_0004", "nameKey": "Hair 0004", "layer": "hair", "images": { "front": "front_hair002", "right": null, "back": null, "left": null } },
         { "id": "hair_0005", "nameKey": "Hair 0005", "layer": "hair", "images": { "front": "front_hair003", "right": null, "back": null, "left": null } },
-        { "id": "hair_0006", "nameKey": "Hair 0006", "layer": "hair", "images": { "front": "front_hair004", "right": null, "back": null, "left": null } }
+        { "id": "hair_0006", "nameKey": "Hair 0006", "layer": "hair", "images": { "front": "front_hair004", "right": null, "back": null, "left": null } },
+        { "id": "hair_0007", "nameKey": "Hair 0007", "layer": "hair", "images": { "front": "front_hair0007", "right": null, "back": null, "left": null } }
       ]
     },
     {

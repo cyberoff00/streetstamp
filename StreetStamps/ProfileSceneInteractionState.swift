@@ -54,7 +54,7 @@ struct ProfileSceneInteractionState: Equatable {
             } else if isVisitorSeated {
                 ctaTitle = "已坐下"
                 isCTAEnabled = false
-                postcardPromptText = "send a post card"
+                postcardPromptText = "send a postcard?"
             } else {
                 ctaTitle = "坐一坐"
                 isCTAEnabled = true

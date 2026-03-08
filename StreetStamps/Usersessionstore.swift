@@ -217,6 +217,10 @@ final class UserSessionStore: ObservableObject {
         try await BackendAPIClient.shared.sendPasswordReset(email: email)
     }
 
+    func resetPassword(token: String, newPassword: String) async throws {
+        try await BackendAPIClient.shared.resetPassword(token: token, newPassword: newPassword)
+    }
+
     func completeFirebaseAuthentication(
         _ firebaseSession: FirebaseAuthenticatedSession,
         preserveGuestBoundary: Bool = false

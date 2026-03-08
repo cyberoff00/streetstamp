@@ -121,6 +121,42 @@ final class AvatarCatalogStore: ObservableObject {
                             nameKey: "Hair 0001",
                             layer: "hair",
                             images: .init(front: "front_hair0001", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "hair_0002",
+                            nameKey: "Hair 0002",
+                            layer: "hair",
+                            images: .init(front: "front_hair0002", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "hair_0003",
+                            nameKey: "Hair 0003",
+                            layer: "hair",
+                            images: .init(front: "front_hair001", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "hair_0004",
+                            nameKey: "Hair 0004",
+                            layer: "hair",
+                            images: .init(front: "front_hair002", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "hair_0005",
+                            nameKey: "Hair 0005",
+                            layer: "hair",
+                            images: .init(front: "front_hair003", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "hair_0006",
+                            nameKey: "Hair 0006",
+                            layer: "hair",
+                            images: .init(front: "front_hair004", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "hair_0007",
+                            nameKey: "Hair 0007",
+                            layer: "hair",
+                            images: .init(front: "front_hair0007", right: nil, back: nil, left: nil)
                         )
                     ]
                 ),

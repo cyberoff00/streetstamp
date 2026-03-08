@@ -1,5 +1,15 @@
 import SwiftUI
 
+enum PromptBubbleStyle {
+    case plain
+    case chat
+}
+
+private enum PromptBubbleTailSide {
+    case leading
+    case trailing
+}
+
 struct SofaProfileSceneView: View {
     let state: ProfileSceneInteractionState
     let hostLoadout: RobotLoadout
@@ -7,6 +17,7 @@ struct SofaProfileSceneView: View {
     let welcomeText: String
     let postcardPromptText: String?
     let onPostcardPromptTap: (() -> Void)?
+    let promptBubbleStyle: PromptBubbleStyle
 
     init(
         state: ProfileSceneInteractionState,
@@ -14,7 +25,8 @@ struct SofaProfileSceneView: View {
         visitorLoadout: RobotLoadout? = nil,
         welcomeText: String = "Welcome!",
         postcardPromptText: String? = nil,
-        onPostcardPromptTap: (() -> Void)? = nil
+        onPostcardPromptTap: (() -> Void)? = nil,
+        promptBubbleStyle: PromptBubbleStyle = .plain
     ) {
         self.state = state
         self.hostLoadout = hostLoadout
@@ -22,6 +34,7 @@ struct SofaProfileSceneView: View {
         self.welcomeText = welcomeText
         self.postcardPromptText = postcardPromptText
         self.onPostcardPromptTap = onPostcardPromptTap
+        self.promptBubbleStyle = promptBubbleStyle
     }
 
     var body: some View {
@@ -41,7 +54,10 @@ struct SofaProfileSceneView: View {
 
                 if let postcardPromptText {
                     postcardPrompt(text: postcardPromptText)
-                        .offset(x: size.width * 0.16, y: -size.height * 0.01)
+                        .offset(
+                            x: promptBubbleStyle == .chat ? size.width * 0.12 : size.width * 0.16,
+                            y: promptBubbleStyle == .chat ? -size.height * 0.15 : -size.height * 0.01
+                        )
                 }
 
                 characters(size: size, avatarSize: avatarSize)
@@ -57,8 +73,15 @@ struct SofaProfileSceneView: View {
 
         ZStack(alignment: .top) {
             if state.showsWelcomeBubble {
-                promptBubble(text: welcomeText, bold: false)
-                    .offset(x: bubbleX(for: size), y: -size.height * 0.05)
+                promptBubble(
+                    text: welcomeText,
+                    bold: false,
+                    tailSide: .leading
+                )
+                .offset(
+                    x: bubbleX(for: size),
+                    y: promptBubbleStyle == .chat ? -size.height * 0.15 : -size.height * 0.05
+                )
             }
 
             ZStack {
@@ -80,11 +103,11 @@ struct SofaProfileSceneView: View {
     private func postcardPrompt(text: String) -> some View {
         if let onPostcardPromptTap {
             Button(action: onPostcardPromptTap) {
-                promptBubble(text: text, bold: true)
+                promptBubble(text: text, bold: true, tailSide: .trailing)
             }
             .buttonStyle(.plain)
         } else {
-            promptBubble(text: text, bold: true)
+            promptBubble(text: text, bold: true, tailSide: .trailing)
         }
     }
 
@@ -130,15 +153,34 @@ struct SofaProfileSceneView: View {
         }
     }
 
-    private func promptBubble(text: String, bold: Bool) -> some View {
-        Text(text)
+    @ViewBuilder
+    private func promptBubble(text: String, bold: Bool, tailSide: PromptBubbleTailSide) -> some View {
+        let bubble = Text(text)
             .font(.system(size: 10, weight: bold ? .bold : .regular))
             .foregroundColor(bold ? .black : Color(red: 75.0 / 255.0, green: 85.0 / 255.0, blue: 99.0 / 255.0))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.horizontal, promptBubbleStyle == .chat ? 12 : 10)
+            .padding(.vertical, promptBubbleStyle == .chat ? 7 : 6)
             .background(Color.white)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .shadow(color: Color.black.opacity(0.08), radius: 8, x: 0, y: 4)
+            .clipShape(RoundedRectangle(cornerRadius: promptBubbleStyle == .chat ? 14 : 10, style: .continuous))
+            .shadow(color: Color.black.opacity(promptBubbleStyle == .chat ? 0.10 : 0.08), radius: 8, x: 0, y: 4)
+
+        if promptBubbleStyle == .plain {
+            bubble
+        } else {
+            VStack(alignment: tailSide == .leading ? .leading : .trailing, spacing: -1) {
+                bubble
+
+                promptBubbleTail
+                    .fill(Color.white)
+                    .frame(width: 12, height: 8)
+                    .padding(tailSide == .leading ? .leading : .trailing, 12)
+                    .shadow(color: Color.black.opacity(0.06), radius: 2, x: 0, y: 2)
+            }
+        }
+    }
+
+    private var promptBubbleTail: some Shape {
+        PromptBubbleTailShape()
     }
 
     private func seatX(for seat: ProfileSceneSeat, in size: CGSize) -> CGFloat {
@@ -161,5 +203,26 @@ struct SofaProfileSceneView: View {
         case .right:
             return size.width * 0.18
         }
+    }
+}
+
+private struct PromptBubbleTailShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: 0, y: 0))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.width, y: 0),
+            control: CGPoint(x: rect.width * 0.5, y: rect.height * 0.2)
+        )
+        path.addQuadCurve(
+            to: CGPoint(x: rect.width * 0.3, y: rect.height),
+            control: CGPoint(x: rect.width * 0.86, y: rect.height * 0.96)
+        )
+        path.addQuadCurve(
+            to: CGPoint(x: 0, y: 0),
+            control: CGPoint(x: rect.width * 0.06, y: rect.height * 0.7)
+        )
+        path.closeSubpath()
+        return path
     }
 }

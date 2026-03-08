@@ -1,0 +1,4 @@
+"CFBundleDisplayName" = "Worldo";
+"NSLocationWhenInUseUsageDescription" = "用于在 Apple Watch 上记录 Journey 轨迹。";
+"NSHealthShareUsageDescription" = "用于在手表上维持运动会话，保证后台轨迹记录稳定。";
+"NSHealthUpdateUsageDescription" = "用于在手表上维持运动会话，保证后台轨迹记录稳定。";

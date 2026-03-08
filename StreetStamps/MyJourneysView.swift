@@ -388,13 +388,16 @@ struct MyJourneysView: View {
         guard !visibilityUpdatingIDs.contains(journey.id) else { return }
 
         let target = pendingVisibility
-        guard JourneyVisibilityPolicy.canEditVisibility(
+        let decision = JourneyVisibilityPolicy.evaluateChange(
             current: journey.visibility,
             target: target,
-            isLoggedIn: sessionStore.isLoggedIn
-        ) else {
+            isLoggedIn: sessionStore.isLoggedIn,
+            journeyDistance: journey.distance,
+            memoryCount: journey.memories.count
+        )
+        guard decision.isAllowed else {
             permissionJourneyID = nil
-            showLoginRequiredMessage()
+            showVisibilityDeniedMessage(reason: decision.reason)
             return
         }
 
@@ -481,6 +484,16 @@ struct MyJourneysView: View {
         messageText = "请先登录后再修改 Journey 权限"
         showMessage = true
     }
+
+    @MainActor
+    private func showVisibilityDeniedMessage(reason: JourneyVisibilityPolicy.DenialReason?) {
+        if let reason {
+            messageText = L10n.t(reason.localizationKey)
+        } else {
+            messageText = "无法修改 Journey 权限"
+        }
+        showMessage = true
+    }
 }
 
 private struct JourneyLiker: Identifiable {
@@ -501,11 +514,11 @@ private struct JourneyVisibilitySheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("更改旅程权限")
+            Text(L10n.t("journey_change_visibility"))
                 .font(.system(size: 20, weight: .bold))
                 .foregroundColor(.black)
 
-            Text("当前：\(journey.visibility.localizedTitle)")
+            Text(String(format: L10n.t("journey_current_visibility_format"), journey.visibility.localizedTitle))
                 .font(.system(size: 13, weight: .medium))
                 .foregroundColor(.black.opacity(0.58))
 
@@ -522,7 +535,7 @@ private struct JourneyVisibilitySheet: View {
                             .progressViewStyle(.circular)
                             .tint(.white)
                     }
-                    Text("确认修改")
+                    Text(L10n.t("journey_confirm_change"))
                         .font(.system(size: 15, weight: .bold))
                 }
                 .foregroundColor(.white)
@@ -555,7 +568,7 @@ private struct JourneyLikesSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("点赞详情")
+            Text(L10n.t("journey_likes_title"))
                 .font(.system(size: 20, weight: .bold))
                 .foregroundColor(.black)
 
@@ -566,7 +579,7 @@ private struct JourneyLikesSheet: View {
 
             Button(action: onEditVisibility) {
                 HStack {
-                    Text("更改权限")
+                    Text(L10n.t("journey_change_permission"))
                         .font(.system(size: 14, weight: .bold))
                     Spacer()
                     Image(systemName: "slider.horizontal.3")
@@ -582,21 +595,21 @@ private struct JourneyLikesSheet: View {
             if isLoading {
                 HStack(spacing: 8) {
                     ProgressView()
-                    Text("加载点赞列表中…")
+                    Text(L10n.t("journey_likes_loading"))
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.black.opacity(0.58))
                 }
             } else if let errorMessage, !errorMessage.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("加载失败：\(errorMessage)")
+                    Text(String(format: L10n.t("journey_loading_failed_format"), errorMessage))
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.red.opacity(0.78))
-                    Button("重试", action: onRetry)
+                    Button(L10n.t("retry"), action: onRetry)
                         .font(.system(size: 13, weight: .bold))
                         .buttonStyle(.plain)
                 }
             } else if likers.isEmpty {
-                Text("暂时还没有人点赞")
+                Text(L10n.t("journey_no_likes_yet"))
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(.black.opacity(0.58))
             } else {

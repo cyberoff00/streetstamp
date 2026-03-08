@@ -13,14 +13,14 @@ struct EmailVerificationView: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 18) {
-                Text("Verify Your Email")
+                Text(L10n.t("verify_your_email"))
                     .appHeaderStyle()
 
                 Text(descriptionText)
                     .appBodyStrongStyle()
                     .foregroundColor(FigmaTheme.subtext)
 
-                Button(isSubmitting ? L10n.t("processing") : "Resend Verification Email") {
+                Button(isSubmitting ? L10n.t("processing") : L10n.t("resend_verification_email")) {
                     Task { await resend() }
                 }
                 .disabled(isSubmitting)
@@ -30,7 +30,7 @@ struct EmailVerificationView: View {
                 .foregroundColor(.white)
                 .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
 
-                Button(isSubmitting ? L10n.t("processing") : "I've Verified My Email") {
+                Button(isSubmitting ? L10n.t("processing") : L10n.t("i_verified_my_email")) {
                     Task { await refreshVerification() }
                 }
                 .disabled(isSubmitting)
@@ -63,9 +63,9 @@ struct EmailVerificationView: View {
 
     private var descriptionText: String {
         if let email, !email.isEmpty {
-            return "We sent a verification link to \(email). Verify it first, then come back here to continue."
+            return String(format: L10n.t("verification_email_description_format"), email)
         }
-        return "We sent a verification link to your email. Verify it first, then come back here to continue."
+        return L10n.t("verification_email_description")
     }
 
     private func resend() async {
@@ -73,7 +73,7 @@ struct EmailVerificationView: View {
         defer { isSubmitting = false }
         do {
             try await onResend()
-            messageText = "Verification email sent."
+            messageText = L10n.t("verification_email_sent")
         } catch {
             messageText = error.localizedDescription
         }
@@ -86,7 +86,7 @@ struct EmailVerificationView: View {
         do {
             let verified = try await onRefresh()
             if !verified {
-                messageText = "This email is still unverified."
+                messageText = L10n.t("email_still_unverified")
                 showMessage = true
             }
         } catch {

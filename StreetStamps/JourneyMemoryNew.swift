@@ -163,7 +163,7 @@ struct JourneyMemoryMainView: View {
     // MARK: - Header
     
     private var headerView: some View {
-        UnifiedTabPageHeader(title: resolvedHeaderTitle, horizontalPadding: 20, topPadding: 14, bottomPadding: 12) {
+        UnifiedTabPageHeader(title: resolvedHeaderTitle, titleLevel: usesSidebarHeader ? .primary : .secondary, horizontalPadding: 20, topPadding: 14, bottomPadding: 12) {
             if hideLeadingControl {
                 Color.clear
             } else if usesSidebarHeader {
@@ -1128,14 +1128,11 @@ struct JourneyMemoryDetailView: View {
         }
         .padding(.horizontal, 32)
         .background(FigmaTheme.background)
-        .overlay(
-            VStack(spacing: 0) {
-                Spacer()
-                Rectangle()
-                    .fill(Color(red: 0.90, green: 0.91, blue: 0.92))
-                    .frame(height: 0.5)
-            }
-        )
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color(red: 0.90, green: 0.91, blue: 0.92))
+                .frame(height: 0.5)
+        }
     }
     
     // MARK: - Memories Timeline
@@ -1808,14 +1805,11 @@ private struct JourneyMemoryDetailExportSnapshotView: View {
         }
         .padding(.horizontal, 32)
         .background(FigmaTheme.background)
-        .overlay(
-            VStack(spacing: 0) {
-                Spacer()
-                Rectangle()
-                    .fill(Color(red: 0.90, green: 0.91, blue: 0.92))
-                    .frame(height: 0.5)
-            }
-        )
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color(red: 0.90, green: 0.91, blue: 0.92))
+                .frame(height: 0.5)
+        }
     }
 
     private var overallMemorySection: some View {

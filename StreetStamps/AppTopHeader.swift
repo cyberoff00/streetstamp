@@ -5,10 +5,28 @@
 
 import SwiftUI
 
+enum NavigationHeaderLeadingAccessory: Equatable {
+    case none
+    case menu
+    case back
+}
+
+enum NavigationTitleLevel: Equatable {
+    case primary
+    case secondary
+}
+
+struct NavigationChrome: Equatable {
+    let title: String
+    let leadingAccessory: NavigationHeaderLeadingAccessory
+    var titleLevel: NavigationTitleLevel = .secondary
+}
+
 /// Unified top header used by main tab root pages.
 /// Guarantees consistent title typography and header height.
 struct UnifiedTabPageHeader<Leading: View, Trailing: View>: View {
     let title: String
+    var titleLevel: NavigationTitleLevel = .primary
     var horizontalPadding: CGFloat = 18
     var topPadding: CGFloat = 14
     var bottomPadding: CGFloat = 12
@@ -17,6 +35,7 @@ struct UnifiedTabPageHeader<Leading: View, Trailing: View>: View {
 
     init(
         title: String,
+        titleLevel: NavigationTitleLevel = .primary,
         horizontalPadding: CGFloat = 18,
         topPadding: CGFloat = 14,
         bottomPadding: CGFloat = 12,
@@ -24,6 +43,7 @@ struct UnifiedTabPageHeader<Leading: View, Trailing: View>: View {
         @ViewBuilder trailing: () -> Trailing
     ) {
         self.title = title
+        self.titleLevel = titleLevel
         self.horizontalPadding = horizontalPadding
         self.topPadding = topPadding
         self.bottomPadding = bottomPadding
@@ -39,7 +59,7 @@ struct UnifiedTabPageHeader<Leading: View, Trailing: View>: View {
             Spacer(minLength: 0)
 
             Text(title)
-                .appHeaderStyle()
+                .navigationTitleStyle(level: titleLevel)
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
 
@@ -60,6 +80,73 @@ struct UnifiedTabPageHeader<Leading: View, Trailing: View>: View {
     }
 }
 
+struct UnifiedNavigationHeader<Trailing: View>: View {
+    let chrome: NavigationChrome
+    var horizontalPadding: CGFloat = 18
+    var topPadding: CGFloat = 14
+    var bottomPadding: CGFloat = 12
+    var onLeadingTap: (() -> Void)? = nil
+    private let trailing: Trailing
+
+    init(
+        chrome: NavigationChrome,
+        horizontalPadding: CGFloat = 18,
+        topPadding: CGFloat = 14,
+        bottomPadding: CGFloat = 12,
+        onLeadingTap: (() -> Void)? = nil,
+        @ViewBuilder trailing: () -> Trailing
+    ) {
+        self.chrome = chrome
+        self.horizontalPadding = horizontalPadding
+        self.topPadding = topPadding
+        self.bottomPadding = bottomPadding
+        self.onLeadingTap = onLeadingTap
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        UnifiedTabPageHeader(
+            title: chrome.title,
+            titleLevel: chrome.titleLevel,
+            horizontalPadding: horizontalPadding,
+            topPadding: topPadding,
+            bottomPadding: bottomPadding
+        ) {
+            leadingControl
+        } trailing: {
+            trailing
+        }
+    }
+
+    @ViewBuilder
+    private var leadingControl: some View {
+        switch chrome.leadingAccessory {
+        case .none:
+            Color.clear
+        case .menu:
+            Button(action: { onLeadingTap?() }) {
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(FigmaTheme.text)
+                    .frame(width: 42, height: 42)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(SidebarHamburgerPressStyle())
+            .disabled(onLeadingTap == nil)
+        case .back:
+            Button(action: { onLeadingTap?() }) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(FigmaTheme.text)
+                    .frame(width: 42, height: 42)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(SidebarHamburgerPressStyle())
+            .disabled(onLeadingTap == nil)
+        }
+    }
+}
+
 /// Unified header for primary tab pages (Home/Friends/Profile/Lifelog).
 /// Keeps title centered with symmetric left/right slots.
 struct MainTabHeader: View {
@@ -76,7 +163,7 @@ struct MainTabHeader: View {
             Spacer()
 
             Text(title)
-                .appHeaderStyle()
+                .navigationTitleStyle(level: .primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
 
@@ -113,7 +200,7 @@ struct AppTopHeader: View {
     var body: some View {
         ZStack {
             Text(title.uppercased())
-                .appHeaderStyle()
+                .navigationTitleStyle(level: .primary)
                 .multilineTextAlignment(.center)
                 .allowsTightening(true)
 
@@ -170,5 +257,23 @@ private struct SidebarHamburgerPressStyle: ButtonStyle {
             )
             .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
             .animation(.easeOut(duration: 0.14), value: configuration.isPressed)
+    }
+}
+
+extension View {
+    func navigationTitleStyle(level: NavigationTitleLevel) -> some View {
+        let font: Font
+        switch level {
+        case .primary:
+            font = .system(size: AppTypography.headerSize, weight: .bold)
+        case .secondary:
+            font = .system(size: AppTypography.titleSize, weight: .medium)
+        }
+
+        return self
+            .font(font)
+            .foregroundColor(FigmaTheme.text)
+            .lineLimit(1)
+            .minimumScaleFactor(0.72)
     }
 }

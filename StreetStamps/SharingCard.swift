@@ -9,6 +9,7 @@ import SwiftUI
 import MapKit
 import CoreLocation
 import UIKit
+import Photos
 import CoreImage
 import CoreImage.CIFilterBuiltins
 
@@ -23,6 +24,7 @@ struct PopSharingCard: View {
     @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
+    @EnvironmentObject private var sessionStore: UserSessionStore
     @Binding var isPresented: Bool
     var journey: JourneyRoute
     var fallbackCenter: CLLocationCoordinate2D?
@@ -55,9 +57,23 @@ struct PopSharingCard: View {
     @State private var customTitle: String = ""
     @State private var activityTag: String = ""
     @State private var overallMemory: String = ""
+    @State private var overallMemoryImagePaths: [String] = []
     @State private var hideMapDetails = false
+    @State private var showCamera = false
+    @State private var showPhotoLibrary = false
+    @State private var showVisibilityRestrictionAlert = false
+    @State private var visibilityRestrictionMessage = ""
     private var canRenderCard: Bool { journey.coordinates.count >= 1 && !journey.isTooShort }
     private let activityPresets: [String] = ["通勤", "跑步", "旅游", "散步", "骑行", "驾车", "地铁", "登山"]
+    private let maxOverallMemoryPhotos = 3
+
+    private var canAddOverallMemoryPhoto: Bool {
+        overallMemoryImagePaths.count < maxOverallMemoryPhotos
+    }
+
+    private var remainingOverallMemoryPhotoSlots: Int {
+        max(0, maxOverallMemoryPhotos - overallMemoryImagePaths.count)
+    }
 
     var durationText: String {
         guard let start = journey.startTime else {
@@ -89,6 +105,33 @@ struct PopSharingCard: View {
                     ShareSheet(activityItems: [img])
                 }
             }
+            .fullScreenCover(isPresented: $showCamera) {
+                SystemCameraPicker(
+                    preferredDevice: .rear,
+                    mirrorOnCapture: false,
+                    onImage: { image in
+                        showCamera = false
+                        appendCapturedOverallMemoryPhoto(image)
+                    },
+                    onCancel: {
+                        showCamera = false
+                    }
+                )
+                .ignoresSafeArea()
+            }
+            .fullScreenCover(isPresented: $showPhotoLibrary) {
+                PhotoLibraryPicker(
+                    selectionLimit: max(1, remainingOverallMemoryPhotoSlots),
+                    onImages: { images in
+                        showPhotoLibrary = false
+                        appendOverallMemoryPhotosFromLibrary(images)
+                    },
+                    onCancel: {
+                        showPhotoLibrary = false
+                    }
+                )
+                .ignoresSafeArea()
+            }
 
             .sheet(isPresented: $showUnlock, onDismiss: {
                 guard pendingExitAfterUnlock else { return }
@@ -118,6 +161,7 @@ struct PopSharingCard: View {
                     : ""
                 activityTag = journey.activityTag ?? ""
                 overallMemory = journey.overallMemory ?? ""
+                overallMemoryImagePaths = journey.overallMemoryImagePaths
                 hideMapDetails = (privacyMode == .hidden)
                 if finalCardImage == nil && canRenderCard {
                     finalCardImage = placeholderCard()
@@ -151,6 +195,11 @@ struct PopSharingCard: View {
                 }
             } message: {
                 Text(L10n.t("share_discard_message"))
+            }
+            .alert(L10n.t("journey_change_visibility"), isPresented: $showVisibilityRestrictionAlert) {
+                Button(L10n.t("done"), role: .cancel) {}
+            } message: {
+                Text(visibilityRestrictionMessage)
             }
         }
     
@@ -349,16 +398,73 @@ struct PopSharingCard: View {
                 Text(L10n.t("share_overall_memory_optional"))
                     .font(.system(size: AppTypography.bodySize, weight: .semibold))
                     .foregroundColor(.black.opacity(0.85))
-                TextEditor(text: $overallMemory)
-                    .font(.system(size: 14))
-                    .padding(10)
-                    .frame(height: 118)
-                    .background(Color.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                VStack(alignment: .leading, spacing: 12) {
+                    TextEditor(text: $overallMemory)
+                        .font(.system(size: 14))
+                        .padding(10)
+                        .frame(height: 118)
+                        .background(Color.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+
+                    HStack(spacing: 12) {
+                        Button(action: { showCamera = true }) {
+                            Image(systemName: "camera.fill")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
+                                .frame(width: 40, height: 40)
+                                .background(Color.black.opacity(0.05))
+                                .clipShape(Circle())
+                        }
+                        .disabled(!canAddOverallMemoryPhoto)
+                        .opacity(canAddOverallMemoryPhoto ? 1 : 0.35)
+
+                        Button(action: { showPhotoLibrary = true }) {
+                            Image(systemName: "photo.on.rectangle.angled")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
+                                .frame(width: 40, height: 40)
+                                .background(Color.black.opacity(0.05))
+                                .clipShape(Circle())
+                        }
+                        .disabled(!canAddOverallMemoryPhoto)
+                        .opacity(canAddOverallMemoryPhoto ? 1 : 0.35)
+
+                        Text(String(format: L10n.t("photo_count"), overallMemoryImagePaths.count, maxOverallMemoryPhotos))
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.gray)
+
+                        Spacer()
+                    }
+
+                    if !overallMemoryImagePaths.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 10) {
+                                ForEach(Array(overallMemoryImagePaths.enumerated()), id: \.offset) { idx, path in
+                                    ZStack(alignment: .topTrailing) {
+                                        PhotoThumb(path: path, userID: sessionStore.currentUserID)
+
+                                        Button {
+                                            let removed = overallMemoryImagePaths.remove(at: idx)
+                                            PhotoStore.delete(named: removed, userID: sessionStore.currentUserID)
+                                        } label: {
+                                            Image(systemName: "xmark.circle.fill")
+                                                .font(.system(size: 16))
+                                                .foregroundColor(FigmaTheme.text.opacity(0.6))
+                                                .background(Color.white.opacity(0.75).clipShape(Circle()))
+                                        }
+                                        .buttonStyle(.plain)
+                                        .padding(4)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 4)
+                        }
+                    }
+                }
             }
 
             HStack(spacing: 10) {
-                Picker(L10n.t("visibility"), selection: $selectedVisibility) {
+                Picker(L10n.t("visibility"), selection: visibilitySelection) {
                     ForEach(JourneyVisibility.frontendCases) { v in
                         Text(v.localizedTitle).tag(v)
                     }
@@ -370,7 +476,7 @@ struct PopSharingCard: View {
                 Text(L10n.t("save"))
                     .font(.system(size: AppTypography.bodyStrongSize, weight: .semibold))
                     .foregroundColor(.white)
-                    .frame(width: 236, height: 60)
+                    .frame(width: 280, height: 60)
                     .background(Color.black)
                     .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                     .shadow(color: Color.black.opacity(0.30), radius: 14, x: 0, y: 4)
@@ -385,6 +491,11 @@ struct PopSharingCard: View {
     // MARK: - Behaviors
 
     private func completeJourneyAndMaybeUnlock() {
+        let decision = visibilityDecision(for: selectedVisibility)
+        guard decision.isAllowed else {
+            showVisibilityRestriction(reason: decision.reason)
+            return
+        }
         onboardingGuide.advance(.saveJourney)
         if let payload = cityCache.consumePendingUnlock() {
             unlockedCity = payload
@@ -406,7 +517,62 @@ struct PopSharingCard: View {
         out.customTitle = trimmedTitle.isEmpty ? nil : trimmedTitle
         out.activityTag = trimmedTag.isEmpty ? nil : trimmedTag
         out.overallMemory = trimmedOverall.isEmpty ? nil : trimmedOverall
+        out.overallMemoryImagePaths = overallMemoryImagePaths
         return out
+    }
+
+    private var visibilitySelection: Binding<JourneyVisibility> {
+        Binding(
+            get: { selectedVisibility },
+            set: { target in
+                let decision = visibilityDecision(for: target)
+                guard decision.isAllowed else {
+                    showVisibilityRestriction(reason: decision.reason)
+                    return
+                }
+                selectedVisibility = target
+            }
+        )
+    }
+
+    private func visibilityDecision(for target: JourneyVisibility) -> JourneyVisibilityPolicy.Decision {
+        JourneyVisibilityPolicy.evaluateChange(
+            current: selectedVisibility,
+            target: target,
+            isLoggedIn: sessionStore.isLoggedIn,
+            journeyDistance: journey.distance,
+            memoryCount: journey.memories.count
+        )
+    }
+
+    private func showVisibilityRestriction(reason: JourneyVisibilityPolicy.DenialReason?) {
+        guard let reason else { return }
+        visibilityRestrictionMessage = L10n.t(reason.localizationKey)
+        showVisibilityRestrictionAlert = true
+    }
+
+    private func appendCapturedOverallMemoryPhoto(_ image: UIImage) {
+        guard canAddOverallMemoryPhoto else { return }
+        if let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) {
+            overallMemoryImagePaths.append(filename)
+        }
+
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else { return }
+            PHPhotoLibrary.shared().performChanges({
+                PHAssetChangeRequest.creationRequestForAsset(from: image)
+            }, completionHandler: nil)
+        }
+    }
+
+    private func appendOverallMemoryPhotosFromLibrary(_ images: [UIImage]) {
+        guard canAddOverallMemoryPhoto else { return }
+        for image in images {
+            if !canAddOverallMemoryPhoto { break }
+            if let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) {
+                overallMemoryImagePaths.append(filename)
+            }
+        }
     }
 
     private func showSavedToastNow() {

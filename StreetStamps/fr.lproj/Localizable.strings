@@ -417,6 +417,10 @@
 "visibility_private" = "Prive";
 "visibility_friends_only" = "Amis";
 "visibility_public" = "Public";
+"journey_change_visibility" = "Change Journey Visibility";
+"journey_current_visibility_format" = "Current: %@";
+"journey_visibility_login_required" = "Unable to switch to Friends. Please sign in first.";
+"journey_visibility_requires_distance_or_memory" = "Unable to switch to Friends. The journey must be at least 2 km or include a memory.";
 "unknown_id" = "unknown_id";
 "unknown_city" = "Ville inconnue";
 "friends_exclusive_id_format" = "ID exclusif : %@";

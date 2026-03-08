@@ -124,6 +124,11 @@ async function run() {
     const forgotOutbox = await readOutbox(outboxFile);
     const resetMail = forgotOutbox.find((item) => item.kind === "password_reset" && item.to === "reset-me@example.com");
     assert.ok(resetMail, "expected password reset email");
+    assert.equal(
+      resetMail.resetURL.startsWith("streetstamps://reset-password?token="),
+      true,
+      "expected password reset link to use the app deep link scheme"
+    );
     const resetToken = extractToken(resetMail.resetURL);
     assert.ok(resetToken);
 

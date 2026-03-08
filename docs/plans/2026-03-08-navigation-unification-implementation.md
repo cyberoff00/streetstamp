@@ -211,7 +211,7 @@ git add StreetStamps/MainTab.swift StreetStamps/FriendsHubView.swift StreetStamp
 git commit -m "feat: add unified sidebar entry points for postcards and invite friend"
 ```
 
-### Task 7: Unify notifications and postcard task flows
+### Task 7: Unify activity notifications and postcard task flows
 
 **Files:**
 - Modify: `StreetStamps/FriendsHubView.swift`
@@ -224,7 +224,7 @@ git commit -m "feat: add unified sidebar entry points for postcards and invite f
 
 Define focused checks:
 
-- notifications page has no hamburger
+- activity notifications page has no hamburger
 - postcard inbox has no hamburger
 - postcard composer has no hamburger
 - postcard preview/completion flow keeps the unified non-root header treatment
@@ -235,7 +235,7 @@ Verify the current pages still use mixed sheet toolbar or default `navigationTit
 
 **Step 3: Write minimal implementation**
 
-Replace mixed toolbar and default nav-bar behavior in notifications and postcard-related task flows with the shared unified detail-page header.
+Replace mixed toolbar and default nav-bar behavior in the activity-notifications flow and postcard-related task flows with the shared unified detail-page header.
 
 **Step 4: Run test to verify it passes**
 
@@ -245,7 +245,7 @@ Build and manually verify the notification path, inbox path, composer path, and 
 
 ```bash
 git add StreetStamps/FriendsHubView.swift StreetStamps/ProfileView.swift StreetStamps/PostcardInboxView.swift StreetStamps/PostcardComposerView.swift StreetStamps/PostcardPreviewView.swift
-git commit -m "refactor: unify notifications and postcard navigation"
+git commit -m "refactor: unify activity notifications and postcard navigation"
 ```
 
 ### Task 8: Remove old navigation styling drift

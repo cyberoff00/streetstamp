@@ -171,7 +171,7 @@ struct EquipmentView: View {
     private var header: some View {
         ZStack {
             Text(L10n.t("equipment_title"))
-                .appHeaderStyle()
+                .navigationTitleStyle(level: .secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
                 .padding(.horizontal, 80)
@@ -180,8 +180,8 @@ struct EquipmentView: View {
                 Button {
                     dismiss()
                 } label: {
-                    Image(systemName: "arrow.left")
-                        .font(.system(size: 16, weight: .bold))
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(FigmaTheme.text)
                         .frame(width: 42, height: 42)
                 }
@@ -232,7 +232,7 @@ struct EquipmentView: View {
     private var tryOnRow: some View {
         HStack(spacing: 10) {
             Toggle(isOn: $isTryOnMode) {
-                Text("试穿模式")
+                Text(L10n.t("equipment_try_on_mode"))
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(FigmaTheme.text)
             }
@@ -241,13 +241,13 @@ struct EquipmentView: View {
             Spacer()
 
             if isTryOnMode, let tryOnLoadout, tryOnLoadout != loadout {
-                Button("应用试穿") {
+                Button(L10n.t("equipment_apply_try_on")) {
                     let missing = missingItemsForTryOn(loadout: tryOnLoadout)
                     guard !missing.isEmpty else {
                         loadout = tryOnLoadout
                         self.tryOnLoadout = nil
                         isTryOnMode = false
-                        showFeedback("已应用")
+                        showFeedback(L10n.t("apply"))
                         return
                     }
                     pendingTryOnPurchase = TryOnPurchasePlan(targetLoadout: tryOnLoadout, missingItems: missing)
@@ -260,7 +260,7 @@ struct EquipmentView: View {
                 .clipShape(Capsule())
                 .buttonStyle(.plain)
 
-                Button("取消") {
+                Button(L10n.t("cancel")) {
                     self.tryOnLoadout = nil
                 }
                 .font(.system(size: 12, weight: .semibold))
@@ -509,7 +509,7 @@ struct EquipmentView: View {
     private func handleTap(category: GearCategory, item: GearItem, ownership: GearOwnership) {
         if isTryOnMode {
             applySelection(category: category, item: item)
-            showFeedback("试穿中")
+            showFeedback(L10n.t("equipment_trying_on"))
             return
         }
 
@@ -535,7 +535,7 @@ struct EquipmentView: View {
             }
         case .owned:
             applySelection(category: category, item: item)
-            showFeedback("Equipped")
+            showFeedback(L10n.t("equipment_equipped_feedback"))
         case .locked:
             if economy.coins < itemPrice {
                 showInsufficientCoinsAlert = true
@@ -554,7 +554,7 @@ struct EquipmentView: View {
     private func addCoins(_ amount: Int) {
         guard amount > 0 else { return }
         economy.coins += amount
-        showFeedback("+\(amount) coins")
+        showFeedback(String(format: L10n.t("equipment_coins_added_format"), amount))
     }
 
     private func showFeedback(_ message: String) {
@@ -569,9 +569,15 @@ struct EquipmentView: View {
     }
 
     private var purchaseConfirmMessage: String {
-        guard let pendingPurchase else { return "Unlock this item?" }
+        guard let pendingPurchase else { return L10n.t("equipment_unlock_prompt") }
         let remaining = economy.coins - itemPrice
-        return "\(pendingPurchase.itemName)\nPrice: \(itemPrice) coins\nBalance: \(economy.coins) → \(remaining)"
+        return String(
+            format: L10n.t("equipment_purchase_confirm_message"),
+            pendingPurchase.itemName,
+            itemPrice,
+            economy.coins,
+            remaining
+        )
     }
 
     private func confirmPendingPurchase() {
@@ -592,7 +598,7 @@ struct EquipmentView: View {
         economy.coins -= itemPrice
         economy.markOwned(categoryId: category.id, itemId: item.id)
         applySelection(category: category, item: item)
-        showFeedback("Unlocked and equipped")
+        showFeedback(L10n.t("equipment_unlocked_and_equipped"))
         self.pendingPurchase = nil
     }
 
@@ -613,7 +619,7 @@ struct EquipmentView: View {
                 }
 
             VStack(spacing: 14) {
-                Text("未购买装备")
+                Text(L10n.t("equipment_unowned_items"))
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(FigmaTheme.text)
 
@@ -646,7 +652,7 @@ struct EquipmentView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "bitcoinsign.circle.fill")
                         .foregroundColor(FigmaTheme.primary)
-                    Text("总价 \(pendingTryOnPurchaseCost)")
+                    Text(String(format: L10n.t("equipment_total_price_format"), pendingTryOnPurchaseCost))
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(FigmaTheme.text)
                 }
@@ -663,7 +669,7 @@ struct EquipmentView: View {
                     .clipShape(Capsule())
                     .buttonStyle(.plain)
 
-                    Button("一键购买并应用") {
+                    Button(L10n.t("equipment_buy_all_and_apply")) {
                         confirmTryOnPurchaseAndApply()
                     }
                     .font(.system(size: 13, weight: .semibold))
@@ -706,7 +712,7 @@ struct EquipmentView: View {
         tryOnLoadout = nil
         isTryOnMode = false
         showTryOnPurchaseDialog = false
-        showFeedback("已购买并应用")
+        showFeedback(L10n.t("equipment_purchased_and_applied"))
         self.pendingTryOnPurchase = nil
     }
 

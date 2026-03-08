@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import ImageIO
 
 struct PostcardPreviewView: View {
     @Environment(\.dismiss) private var dismiss
@@ -21,6 +22,8 @@ struct PostcardPreviewView: View {
     @State private var errorText: String?
     @State private var isFrontShowing = true
     @State private var saveToastText: String?
+    @State private var downsampledImage: UIImage?
+    @State private var sentSuccessfully = false
 
     var body: some View {
         VStack(spacing: 20) {
@@ -38,28 +41,85 @@ struct PostcardPreviewView: View {
                     .foregroundColor(.red)
             }
 
-            Button {
-                Task {
-                    await sendNow()
+            if sentSuccessfully {
+                // Inline success state – replaces the send button
+                VStack(spacing: 12) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                        Text(L10n.t("postcard_sent_success_title"))
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(FigmaTheme.text)
+                    }
+
+                    Button {
+                        dismiss()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            onSent?()
+                            NotificationCenter.default.post(name: .postcardSentGoToInbox, object: nil)
+                        }
+                    } label: {
+                        Text(L10n.t("postcard_go_to_sent_box"))
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(FigmaTheme.primary)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        dismiss()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            onSent?()
+                        }
+                    } label: {
+                        Text(L10n.t("cancel"))
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(FigmaTheme.subtext)
+                    }
+                    .buttonStyle(.plain)
                 }
-            } label: {
-                Text(isSending ? L10n.t("postcard_sending") : L10n.t("postcard_send"))
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(isSending ? FigmaTheme.primary.opacity(0.45) : FigmaTheme.primary)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            } else {
+                Button {
+                    Task {
+                        await sendNow()
+                    }
+                } label: {
+                    Text(isSending ? L10n.t("postcard_sending") : L10n.t("postcard_send"))
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(isSending ? FigmaTheme.primary.opacity(0.45) : FigmaTheme.primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(isSending)
             }
-            .buttonStyle(.plain)
-            .disabled(isSending)
 
             Spacer(minLength: 0)
         }
         .padding(20)
         .background(FigmaTheme.background.ignoresSafeArea())
-        .navigationTitle(L10n.t("postcard_preview_title"))
-        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            UnifiedNavigationHeader(
+                chrome: NavigationChrome(
+                    title: L10n.t("postcard_preview_title"),
+                    leadingAccessory: .back,
+                    titleLevel: .secondary
+                ),
+                horizontalPadding: 18,
+                topPadding: 8,
+                bottomPadding: 12,
+                onLeadingTap: { dismiss() }
+            ) {
+                Color.clear
+            }
+        }
+        .toolbar(.hidden, for: .navigationBar)
+        .onAppear { prepareDownsampledImage() }
     }
 
     private var postcardCard: some View {
@@ -77,6 +137,9 @@ struct PostcardPreviewView: View {
     }
 
     private var photoSource: PostcardPhotoSource {
+        if let downsampledImage {
+            return .uiImage(downsampledImage)
+        }
         if let selectedImage {
             return .uiImage(selectedImage)
         }
@@ -94,7 +157,9 @@ struct PostcardPreviewView: View {
         errorText = nil
         defer { isSending = false }
 
-        let photoPathForSend = composedPostcardImagePath() ?? localImagePath
+        // Send the raw (downsampled) photo – NOT the composed postcard image.
+        // The recipient's client reconstructs the full postcard from metadata.
+        let photoPathForSend = downsampledPhotoPath() ?? localImagePath
         let draft = postcardCenter.createDraft(
             toUserID: friendID,
             cityID: selectedCityID,
@@ -110,10 +175,7 @@ struct PostcardPreviewView: View {
         )
 
         if let latest = postcardCenter.drafts.first(where: { $0.draftID == draft.draftID }), latest.status == .sent {
-            dismiss()
-            DispatchQueue.main.async {
-                onSent?()
-            }
+            sentSuccessfully = true
             return
         }
 
@@ -124,10 +186,26 @@ struct PostcardPreviewView: View {
         }
     }
 
+    /// Save the downsampled raw photo to a temp file for upload.
+    private func downsampledPhotoPath() -> String? {
+        guard let image = downsampledImage ?? selectedImage,
+              let data = image.jpegData(compressionQuality: 0.82) else {
+            return nil
+        }
+        let fileName = "postcard_photo_\(UUID().uuidString).jpg"
+        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+        do {
+            try data.write(to: fileURL, options: .atomic)
+            return fileURL.path
+        } catch {
+            return nil
+        }
+    }
+
     private func composedPostcardImagePath() -> String? {
         guard #available(iOS 16.0, *),
               let image = renderFaceImage(isFront: true),
-              let data = image.jpegData(compressionQuality: 0.92) else {
+              let data = image.jpegData(compressionQuality: 0.82) else {
             return nil
         }
 
@@ -154,7 +232,7 @@ struct PostcardPreviewView: View {
 
     @available(iOS 16.0, *)
     private func renderFaceImage(isFront: Bool) -> UIImage? {
-        let width: CGFloat = 1080
+        let width: CGFloat = 540
         let height: CGFloat = width / (3.0 / 2.0)
 
         let faceView: AnyView
@@ -175,6 +253,7 @@ struct PostcardPreviewView: View {
                     nickname: senderDisplayName.uppercased(),
                     messageText: messageText,
                     avatarLoadout: AvatarLoadoutStore.load(),
+                    sentDate: nil,
                     cornerRadius: 22
                 )
             )
@@ -185,7 +264,7 @@ struct PostcardPreviewView: View {
             .background(Color.white)
 
         let renderer = ImageRenderer(content: renderView)
-        renderer.scale = 3
+        renderer.scale = 2
         renderer.isOpaque = true
         return renderer.uiImage
     }
@@ -194,5 +273,54 @@ struct PostcardPreviewView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             saveToastText = nil
         }
+    }
+
+    // MARK: - Image Downsampling
+
+    /// Max pixel dimension for the postcard photo (2x render width).
+    private static let maxImageDimension: CGFloat = 1080
+
+    private func prepareDownsampledImage() {
+        guard downsampledImage == nil else { return }
+        if let selectedImage {
+            let maxDim = max(selectedImage.size.width, selectedImage.size.height)
+            guard maxDim > Self.maxImageDimension else {
+                downsampledImage = selectedImage
+                return
+            }
+            if let data = selectedImage.jpegData(compressionQuality: 1.0) {
+                downsampledImage = Self.downsample(data: data, maxDimension: Self.maxImageDimension)
+            }
+        } else {
+            let trimmed = localImagePath.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            let url = URL(fileURLWithPath: trimmed)
+            guard FileManager.default.fileExists(atPath: url.path) else { return }
+            downsampledImage = Self.downsample(url: url, maxDimension: Self.maxImageDimension)
+        }
+    }
+
+    /// Efficient thumbnail-style decode via CGImageSource – only decodes the pixels needed.
+    private static func downsample(url: URL, maxDimension: CGFloat) -> UIImage? {
+        let options: [CFString: Any] = [kCGImageSourceShouldCache: false]
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, options as CFDictionary) else { return nil }
+        return downsample(source: source, maxDimension: maxDimension)
+    }
+
+    private static func downsample(data: Data, maxDimension: CGFloat) -> UIImage? {
+        let options: [CFString: Any] = [kCGImageSourceShouldCache: false]
+        guard let source = CGImageSourceCreateWithData(data as CFData, options as CFDictionary) else { return nil }
+        return downsample(source: source, maxDimension: maxDimension)
+    }
+
+    private static func downsample(source: CGImageSource, maxDimension: CGFloat) -> UIImage? {
+        let thumbOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxDimension
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbOptions as CFDictionary) else { return nil }
+        return UIImage(cgImage: cgImage)
     }
 }

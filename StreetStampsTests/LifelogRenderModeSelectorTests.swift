@@ -30,4 +30,26 @@ final class LifelogRenderModeSelectorTests: XCTestCase {
     func test_footprintStepMeters_is50Meters() {
         XCTAssertEqual(LifelogRenderModeSelector.footprintStepMeters, 50)
     }
+
+    func test_mapModePillPresentation_usesLighterSportSymbolAndSoftChrome() {
+        let presentation = TrackingMode.sport.mapPillPresentation
+
+        XCTAssertEqual(presentation.symbolName, "figure.run")
+        XCTAssertEqual(presentation.iconFontSize, 12)
+        XCTAssertEqual(presentation.horizontalSpacing, 7)
+        XCTAssertEqual(presentation.foregroundOpacity, 0.82)
+        XCTAssertEqual(presentation.backgroundOpacity, 0.78)
+        XCTAssertEqual(presentation.borderOpacity, 0.18)
+    }
+
+    func test_mapModePillPresentation_usesLighterDailySymbolAndSoftChrome() {
+        let presentation = TrackingMode.daily.mapPillPresentation
+
+        XCTAssertEqual(presentation.symbolName, "figure.walk.motion")
+        XCTAssertEqual(presentation.iconFontSize, 12)
+        XCTAssertEqual(presentation.horizontalSpacing, 7)
+        XCTAssertEqual(presentation.foregroundOpacity, 0.82)
+        XCTAssertEqual(presentation.backgroundOpacity, 0.78)
+        XCTAssertEqual(presentation.borderOpacity, 0.18)
+    }
 }

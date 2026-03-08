@@ -119,6 +119,7 @@ struct DebugFriendProfilePreviewFixture {
 }
 
 struct DebugFriendProfilePreviewView: View {
+    @Environment(\.dismiss) private var dismiss
     @State private var previewState: DebugFriendProfilePreviewState = .standing
 
     private let fixture = DebugFriendProfilePreviewFixture.make()
@@ -151,8 +152,22 @@ struct DebugFriendProfilePreviewView: View {
             .padding(.bottom, 36)
         }
         .background(FigmaTheme.background.ignoresSafeArea())
-        .navigationTitle("Friend UI Preview")
-        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            UnifiedNavigationHeader(
+                chrome: NavigationChrome(
+                    title: "Friend UI Preview",
+                    leadingAccessory: .back,
+                    titleLevel: .secondary
+                ),
+                horizontalPadding: 18,
+                topPadding: 8,
+                bottomPadding: 12,
+                onLeadingTap: { dismiss() }
+            ) {
+                Color.clear
+            }
+        }
+        .toolbar(.hidden, for: .navigationBar)
     }
 
     private var previewControlsCard: some View {
@@ -187,7 +202,8 @@ struct DebugFriendProfilePreviewView: View {
                         hostLoadout: friend.loadout,
                         visitorLoadout: visitorLoadout,
                         welcomeText: "Welcome!",
-                        postcardPromptText: "send a postcard?"
+                        postcardPromptText: "send a postcard?",
+                        promptBubbleStyle: .chat
                     )
                     .frame(maxWidth: 340)
                     .padding(.horizontal, 20)

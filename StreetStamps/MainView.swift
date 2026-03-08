@@ -34,7 +34,6 @@ struct MainView: View {
     @State private var showStartButton = false
     @State private var didPlayStartIntro = false
     @State private var ripplePhase = false
-    @State private var didRebuildCityCacheForLoadedStore = false
     
     @StateObject private var cityLoc = CityLocationManager()
     
@@ -56,7 +55,7 @@ struct MainView: View {
                 VStack(spacing: 0) {
                     Spacer().frame(height: titleTop)
 
-                    Text("UNLOCK NEW JOURNEY,\nPIN YOUR MEMORIES")
+                    Text(L10n.key("main_unlock_new_journey"))
                         .font(.system(size: 26, weight: .black))
                         .tracking(-0.6)
                         .lineSpacing(9)
@@ -165,10 +164,8 @@ struct MainView: View {
             }
             ripplePhase = true
             startPulse = false
-            // ✅ 只有 store 加载完成才同步，否则等 onChange 触发
             if store.hasLoaded {
                 syncOngoingFromStore()
-                rebuildCityCacheIfNeeded()
             }
             if tracking.isTracking && ongoingJourney.endTime == nil {
                 hasOngoingJourney = true
@@ -186,9 +183,6 @@ struct MainView: View {
         .onChange(of: store.hasLoaded) { loaded in
             if loaded {
                 syncOngoingFromStore()
-                rebuildCityCacheIfNeeded()
-            } else {
-                didRebuildCityCacheForLoadedStore = false
             }
         }
         .onChange(of: trackingMode) { newMode in
@@ -336,12 +330,6 @@ struct MainView: View {
                 return t.isEmpty ? L10n.t("unknown") : t
             }
 
-            private func rebuildCityCacheIfNeeded() {
-                guard !didRebuildCityCacheForLoadedStore else { return }
-                didRebuildCityCacheForLoadedStore = true
-                cityCache.rebuildFromJourneyStore()
-            }
-            
             // MARK: - Sync
             
             private func syncOngoingFromStore() {

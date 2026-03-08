@@ -1,5 +1,9 @@
 import Foundation
 
+extension Notification.Name {
+    static let postcardSentGoToInbox = Notification.Name("postcardSentGoToInbox")
+}
+
 @MainActor
 final class PostcardCenter: ObservableObject {
     @Published private(set) var drafts: [PostcardDraft] = []

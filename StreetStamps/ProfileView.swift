@@ -175,7 +175,7 @@ struct ProfileView: View {
             Spacer()
 
             Text(L10n.t("profile_title"))
-                .appHeaderStyle()
+                .navigationTitleStyle(level: .secondary)
                 .tracking(0.2)
                 .lineLimit(1)
                 .minimumScaleFactor(0.65)
@@ -441,7 +441,7 @@ struct ProfileView: View {
                 }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("邀请好友")
+                Text(L10n.t("profile_invite_friends"))
                     .font(.system(size: 15, weight: .bold))
                     .foregroundColor(FigmaTheme.text)
                     .lineLimit(1)
@@ -498,13 +498,13 @@ struct ProfileView: View {
                 if notificationsLoading && socialNotifications.isEmpty {
                     VStack(spacing: 12) {
                         ProgressView()
-                        Text("加载通知中...")
+                        Text(L10n.t("profile_notifications_loading"))
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(FigmaTheme.subtext)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if socialNotifications.isEmpty {
-                    Text("暂时还没有互动通知")
+                    Text(L10n.t("profile_notifications_empty"))
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(FigmaTheme.subtext)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -522,22 +522,33 @@ struct ProfileView: View {
                 }
             }
             .background(FigmaTheme.background.ignoresSafeArea())
-            .navigationTitle("互动通知")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("关闭") {
-                        showNotificationsSheet = false
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("全部已读") {
+            .safeAreaInset(edge: .top, spacing: 0) {
+                UnifiedNavigationHeader(
+                    chrome: NavigationChrome(
+                        title: L10n.t("profile_notifications_title"),
+                        leadingAccessory: .back,
+                        titleLevel: .secondary
+                    ),
+                    horizontalPadding: 16,
+                    topPadding: 8,
+                    bottomPadding: 12,
+                    onLeadingTap: { showNotificationsSheet = false }
+                ) {
+                    Button {
                         Task {
                             await markSocialNotificationsReadIfNeeded()
                         }
+                    } label: {
+                        Image(systemName: "checkmark.circle")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(FigmaTheme.text)
+                            .frame(width: 42, height: 42)
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(L10n.t("friends_mark_all_read"))
                 }
             }
+            .toolbar(.hidden, for: .navigationBar)
             .task {
                 await refreshSocialNotifications(showToastForLatestUnread: false)
             }
@@ -605,17 +616,17 @@ struct ProfileView: View {
     private var profileNameEditorSheet: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 12) {
-                Text("可修改昵称（1-24 字符）")
+                Text(L10n.t("profile_edit_name_hint"))
                     .font(.system(size: 15, weight: .bold))
                     .foregroundColor(FigmaTheme.text)
 
-                TextField("输入昵称", text: $nameDraft)
+                TextField(L10n.t("profile_name_placeholder"), text: $nameDraft)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled(true)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 16, weight: .semibold))
 
-                Text("支持多语言字母、数字和 . _ -，不能包含空格")
+                Text(L10n.t("profile_name_rules"))
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(FigmaTheme.subtext)
 
@@ -628,38 +639,44 @@ struct ProfileView: View {
                 Spacer()
             }
             .padding(16)
-            .navigationTitle("修改昵称")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("取消") {
-                        showNameEditor = false
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(isSavingName ? "保存中..." : "保存") {
+            .safeAreaInset(edge: .top, spacing: 0) {
+                UnifiedNavigationHeader(
+                    chrome: NavigationChrome(
+                        title: L10n.t("profile_edit_name_title"),
+                        leadingAccessory: .back,
+                        titleLevel: .secondary
+                    ),
+                    horizontalPadding: 16,
+                    topPadding: 8,
+                    bottomPadding: 12,
+                    onLeadingTap: { showNameEditor = false }
+                ) {
+                    Button(isSavingName ? L10n.t("profile_name_saving") : L10n.t("save")) {
                         Task {
                             await saveDisplayName()
                         }
                     }
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(FigmaTheme.text)
                     .disabled(isSavingName)
                 }
             }
+            .toolbar(.hidden, for: .navigationBar)
         }
     }
 
     private func validateDisplayName(_ raw: String) -> String? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "昵称不能为空" }
-        guard trimmed.count <= 24 else { return "昵称最多 24 个字符" }
+        guard !trimmed.isEmpty else { return L10n.t("profile_name_empty") }
+        guard trimmed.count <= 24 else { return L10n.t("profile_name_too_long") }
         guard !trimmed.unicodeScalars.contains(where: CharacterSet.whitespacesAndNewlines.contains) else {
-            return "昵称不能包含空格"
+            return L10n.t("profile_name_no_spaces")
         }
         let allowed = CharacterSet.letters
             .union(.decimalDigits)
             .union(CharacterSet(charactersIn: "._-"))
         let valid = trimmed.unicodeScalars.allSatisfy { allowed.contains($0) }
-        return valid ? nil : "昵称仅支持字母、数字和 . _ -"
+        return valid ? nil : L10n.t("profile_name_charset")
     }
 
     @MainActor
@@ -685,12 +702,12 @@ struct ProfileView: View {
                 )
                 profileName = profile.displayName
             } catch {
-                showToastMessage("昵称已本地更新，云端保存失败：\(error.localizedDescription)")
+                showToastMessage(String(format: L10n.t("profile_name_local_updated_cloud_failed_format"), error.localizedDescription))
             }
         }
 
         showNameEditor = false
-        showToastMessage("昵称已更新")
+        showToastMessage(L10n.t("profile_name_updated"))
     }
 
     @MainActor
@@ -947,10 +964,10 @@ struct InviteFriendSheet: View {
                             .clipShape(Circle())
 
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("StreetStamps")
+                                Text(L10n.t("app_name"))
                                     .font(.system(size: 19, weight: .bold))
                                     .foregroundColor(FigmaTheme.text)
-                                Text("好友邀请码")
+                                Text(L10n.t("profile_friend_invite_code"))
                                     .font(.system(size: 13, weight: .semibold))
                                     .foregroundColor(FigmaTheme.subtext)
                             }
@@ -994,7 +1011,7 @@ struct InviteFriendSheet: View {
                                 .foregroundColor(FigmaTheme.text)
                                 .tracking(1.6)
                             Button {
-                                copyText(inviteCode, success: "邀请码已复制")
+                                copyText(inviteCode, success: L10n.t("profile_invite_code_copied"))
                             } label: {
                                 Image(systemName: "doc.on.doc")
                                     .font(.system(size: 16, weight: .semibold))
@@ -1021,7 +1038,7 @@ struct InviteFriendSheet: View {
                             HStack(spacing: 8) {
                                 Image(systemName: "square.and.arrow.up")
                                     .font(.system(size: 14, weight: .semibold))
-                                Text("分享卡片")
+                                Text(L10n.t("profile_share_card"))
                                     .font(.system(size: 16, weight: .semibold))
                             }
                             .foregroundColor(FigmaTheme.primary)
@@ -1042,13 +1059,13 @@ struct InviteFriendSheet: View {
                     .shadow(color: Color.black.opacity(0.04), radius: 16, x: 0, y: 6)
 
                     VStack(spacing: 10) {
-                        Text("传送好友请求")
+                        Text(L10n.t("profile_send_friend_request"))
                             .font(.system(size: 18, weight: .bold))
                             .foregroundColor(FigmaTheme.text)
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.top, 4)
 
-                        TextField("输入好友邀请码 / 专属ID / 邀请链接", text: $requestInput)
+                        TextField(L10n.t("profile_friend_request_input"), text: $requestInput)
                             .textInputAutocapitalization(.never)
                             .disableAutocorrection(true)
                             .textFieldStyle(.roundedBorder)
@@ -1062,7 +1079,7 @@ struct InviteFriendSheet: View {
                                     ProgressView()
                                         .tint(.white)
                                 }
-                                Text(sendingRequest ? "发送中..." : "发送好友申请")
+                                Text(sendingRequest ? L10n.t("profile_sending") : L10n.t("profile_send_friend_request_button"))
                                     .font(.system(size: 15, weight: .semibold))
                             }
                             .foregroundColor(.white)
@@ -1080,7 +1097,7 @@ struct InviteFriendSheet: View {
                             HStack(spacing: 8) {
                                 Image(systemName: "qrcode.viewfinder")
                                     .font(.system(size: 16, weight: .semibold))
-                                Text("扫描QR码")
+                                Text(L10n.t("profile_scan_qr_code"))
                                     .font(.system(size: 15, weight: .semibold))
                             }
                             .foregroundColor(FigmaTheme.primary)
@@ -1101,13 +1118,22 @@ struct InviteFriendSheet: View {
                 .padding(16)
             }
             .background(FigmaTheme.background.ignoresSafeArea())
-            .navigationTitle("邀请好友")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("关闭") { dismiss() }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                UnifiedNavigationHeader(
+                    chrome: NavigationChrome(
+                        title: L10n.t("profile_invite_friends"),
+                        leadingAccessory: .back,
+                        titleLevel: .secondary
+                    ),
+                    horizontalPadding: 16,
+                    topPadding: 8,
+                    bottomPadding: 12,
+                    onLeadingTap: { dismiss() }
+                ) {
+                    Color.clear
                 }
             }
+            .toolbar(.hidden, for: .navigationBar)
             .overlay(alignment: .top) {
                 if showCopiedToast {
                     Text(copiedToast)
@@ -1150,8 +1176,8 @@ struct InviteFriendSheet: View {
                     Task { await sendFriendRequestFromInput() }
                 }
             }
-            .alert("提示", isPresented: $showRequestMessage) {
-                Button("知道了", role: .cancel) {}
+            .alert(L10n.t("prompt"), isPresented: $showRequestMessage) {
+                Button(L10n.t("got_it"), role: .cancel) {}
             } message: {
                 Text(requestMessage)
             }
@@ -1176,7 +1202,7 @@ struct InviteFriendSheet: View {
         guard !sendingRequest else { return }
         let raw = requestInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else {
-            requestMessage = "请先输入邀请码、专属ID或邀请链接。"
+            requestMessage = L10n.t("profile_friend_request_input_required")
             showRequestMessage = true
             return
         }
@@ -1199,7 +1225,7 @@ struct InviteFriendSheet: View {
                 handle: handle ?? directHandle,
                 accessToken: sessionStore.currentAccessToken
             )
-            requestMessage = "好友申请已发送。"
+            requestMessage = L10n.t("profile_friend_request_sent")
             showRequestMessage = true
             requestInput = ""
         } catch {
@@ -1264,7 +1290,7 @@ private struct InviteShareCardView: View {
             .ignoresSafeArea()
 
             VStack(spacing: 14) {
-                Text("StreetStamps")
+                Text(L10n.t("app_name"))
                     .font(.system(size: 28, weight: .black))
                     .foregroundColor(FigmaTheme.text)
 
@@ -1299,7 +1325,7 @@ private struct InviteShareCardView: View {
                     .foregroundColor(FigmaTheme.text)
                     .tracking(1.8)
 
-                Text("打开 StreetStamps → 好友 → 扫描二维码")
+                Text(L10n.t("profile_open_app_to_scan"))
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(FigmaTheme.subtext)
             }
@@ -1327,7 +1353,7 @@ private struct ProfileInviteScannerSheet: View {
                 )
                 .ignoresSafeArea()
 
-                Text("将好友邀请码二维码放入框内")
+                Text(L10n.t("profile_place_qr_in_frame"))
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 12)
@@ -1336,18 +1362,27 @@ private struct ProfileInviteScannerSheet: View {
                     .clipShape(Capsule())
                     .padding(.bottom, 24)
             }
-            .navigationTitle("扫描二维码")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("关闭") { dismiss() }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                UnifiedNavigationHeader(
+                    chrome: NavigationChrome(
+                        title: L10n.t("profile_scan_qr_code"),
+                        leadingAccessory: .back,
+                        titleLevel: .secondary
+                    ),
+                    horizontalPadding: 16,
+                    topPadding: 8,
+                    bottomPadding: 12,
+                    onLeadingTap: { dismiss() }
+                ) {
+                    Color.clear
                 }
             }
-            .alert("扫描失败", isPresented: Binding(
+            .toolbar(.hidden, for: .navigationBar)
+            .alert(L10n.t("profile_scan_failed"), isPresented: Binding(
                 get: { scannerError != nil },
                 set: { if !$0 { scannerError = nil } }
             )) {
-                Button("知道了", role: .cancel) {}
+                Button(L10n.t("got_it"), role: .cancel) {}
             } message: {
                 Text(scannerError ?? "")
             }
@@ -1404,20 +1439,20 @@ private final class ProfileInviteScannerViewController: UIViewController, AVCapt
 
     private func configureCapture() {
         guard let device = AVCaptureDevice.default(for: .video) else {
-            onFailure?("当前设备不支持摄像头扫描。")
+            onFailure?(L10n.t("profile_scan_camera_unsupported"))
             return
         }
         do {
             let input = try AVCaptureDeviceInput(device: device)
             guard session.canAddInput(input) else {
-                onFailure?("无法访问摄像头输入。")
+                onFailure?(L10n.t("profile_scan_camera_input_unavailable"))
                 return
             }
             session.addInput(input)
 
             let output = AVCaptureMetadataOutput()
             guard session.canAddOutput(output) else {
-                onFailure?("无法配置扫描输出。")
+                onFailure?(L10n.t("profile_scan_output_unavailable"))
                 return
             }
             session.addOutput(output)
@@ -1429,7 +1464,7 @@ private final class ProfileInviteScannerViewController: UIViewController, AVCapt
             view.layer.addSublayer(preview)
             previewLayer = preview
         } catch {
-            onFailure?("摄像头权限不可用，请在系统设置中允许访问。")
+            onFailure?(L10n.t("profile_scan_camera_permission_unavailable"))
         }
     }
 
@@ -1744,7 +1779,7 @@ struct RecentJourneysView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(L10n.t("recent_journeys_title"))
-                    .appHeaderStyle()
+                    .navigationTitleStyle(level: .secondary)
                     .foregroundColor(FigmaTheme.text)
 
                 Text(String(format: L10n.t("recent_journeys_last_30_days"), locale: Locale.current, recentJourneys.count))

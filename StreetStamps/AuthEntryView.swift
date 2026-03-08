@@ -4,11 +4,13 @@ import AuthenticationServices
 enum AuthEntryMode: String {
     case signIn
     case register
+    case resetPassword
 
     var primaryButtonTitle: String {
         switch self {
         case .signIn: return L10n.t("auth_sign_in")
         case .register: return L10n.t("auth_create_account")
+        case .resetPassword: return "Reset Password"
         }
     }
 }
@@ -26,6 +28,7 @@ private enum AuthField: Hashable {
 
 struct AuthEntryView: View {
     @EnvironmentObject private var sessionStore: UserSessionStore
+    @EnvironmentObject private var deepLinkStore: AppDeepLinkStore
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
 
     let onContinueGuest: () -> Void
@@ -45,6 +48,7 @@ struct AuthEntryView: View {
     @State private var showGuestNotice = false
     @State private var showVerificationSheet = false
     @State private var pendingVerificationEmail: String?
+    @State private var pendingPasswordResetToken: String?
     @FocusState private var focusedField: AuthField?
 
     private let accent = FigmaTheme.primary
@@ -71,9 +75,11 @@ struct AuthEntryView: View {
                     formBlock
                     authPrimaryButton
                     switchModeRow
-                    socialDivider
-                    socialButtons
-                    guestButton
+                    if mode != .resetPassword {
+                        socialDivider
+                        socialButtons
+                        guestButton
+                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 28)
@@ -113,6 +119,11 @@ struct AuthEntryView: View {
             if let initialMode {
                 mode = initialMode
             }
+            adoptPendingPasswordResetTokenIfNeeded()
+        }
+        .onReceive(deepLinkStore.$pendingPasswordResetToken) { token in
+            guard token != nil else { return }
+            adoptPendingPasswordResetTokenIfNeeded()
         }
     }
 
@@ -143,12 +154,12 @@ struct AuthEntryView: View {
 
     private var titleBlock: some View {
         VStack(spacing: 8) {
-                Text(mode == .signIn ? L10n.t("auth_sign_in") : L10n.t("auth_sign_up"))
+                Text(titleText)
                     .appHeaderStyle()
                     .lineLimit(1)
                     .minimumScaleFactor(0.65)
 
-            Text(mode == .signIn ? L10n.t("auth_sign_in_subtitle") : L10n.t("auth_create_account_subtitle"))
+            Text(subtitleText)
                 .appBodyStrongStyle()
                 .foregroundColor(FigmaTheme.subtext)
                 .lineLimit(2)
@@ -172,17 +183,19 @@ struct AuthEntryView: View {
                 )
             }
 
-            fieldLabel(L10n.t("auth_email"))
-            fieldContainer(
-                icon: "envelope",
-                placeholder: "your@email.com",
-                text: $email,
-                secure: false,
-                visible: true,
-                focused: .email
-            )
+            if mode != .resetPassword {
+                fieldLabel(L10n.t("auth_email"))
+                fieldContainer(
+                    icon: "envelope",
+                    placeholder: "your@email.com",
+                    text: $email,
+                    secure: false,
+                    visible: true,
+                    focused: .email
+                )
+            }
 
-            fieldLabel(L10n.t("auth_password"))
+            fieldLabel(mode == .resetPassword ? "New Password" : L10n.t("auth_password"))
             fieldContainer(
                 icon: "lock",
                 placeholder: "••••••••",
@@ -193,17 +206,17 @@ struct AuthEntryView: View {
                 onToggleVisibility: { isPasswordVisible.toggle() }
             )
 
-            if mode == .register {
+            if mode == .register || mode == .resetPassword {
                 fieldContainer(
                     icon: "lock.rotation",
-                    placeholder: "confirm password",
+                    placeholder: mode == .resetPassword ? "confirm new password" : "confirm password",
                     text: $confirmPassword,
                     secure: true,
                     visible: isConfirmPasswordVisible,
                     focused: .confirmPassword,
                     onToggleVisibility: { isConfirmPasswordVisible.toggle() }
                 )
-            } else {
+            } else if mode == .signIn {
                 HStack {
                     Spacer()
                     Button(L10n.t("auth_forgot_password")) {
@@ -242,11 +255,22 @@ struct AuthEntryView: View {
                 }
                 .foregroundColor(accent)
                 .fontWeight(.bold)
-            } else {
+            } else if mode == .register {
                 Text(L10n.t("auth_have_account"))
                     .foregroundColor(.black.opacity(0.56))
                 Button(L10n.t("auth_sign_in_lower")) {
                     withAnimation(.easeInOut(duration: 0.16)) {
+                        mode = .signIn
+                    }
+                }
+                .foregroundColor(accent)
+                .fontWeight(.bold)
+            } else {
+                Text("Remembered your password?")
+                    .foregroundColor(.black.opacity(0.56))
+                Button(L10n.t("auth_sign_in_lower")) {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        clearPasswordResetDraft()
                         mode = .signIn
                     }
                 }
@@ -381,6 +405,11 @@ struct AuthEntryView: View {
     }
 
     private func submitEmailAuth() {
+        if mode == .resetPassword {
+            submitPasswordReset()
+            return
+        }
+
         let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -475,6 +504,45 @@ struct AuthEntryView: View {
         showMessage = true
     }
 
+    private func submitPasswordReset() {
+        let trimmedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedConfirmPassword = confirmPassword.trimmingCharacters(in: .whitespacesAndNewlines)
+        let token = pendingPasswordResetToken?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        guard !token.isEmpty else {
+            messageText = "Reset link is missing or invalid."
+            showMessage = true
+            return
+        }
+
+        guard !trimmedPassword.isEmpty, !trimmedConfirmPassword.isEmpty else {
+            messageText = "Please enter and confirm your new password."
+            showMessage = true
+            return
+        }
+
+        guard trimmedPassword == trimmedConfirmPassword else {
+            messageText = L10n.t("auth_password_mismatch")
+            showMessage = true
+            return
+        }
+
+        Task {
+            submitting = true
+            defer { submitting = false }
+            do {
+                try await sessionStore.resetPassword(token: token, newPassword: trimmedPassword)
+                deepLinkStore.consumePendingPasswordResetToken()
+                clearPasswordResetDraft()
+                mode = .signIn
+                messageText = "Password updated. Please sign in with your new password."
+            } catch {
+                messageText = error.localizedDescription
+            }
+            showMessage = true
+        }
+    }
+
     private func refreshVerificationState() async throws -> Bool {
         let trimmedEmail = pendingVerificationEmail?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let trimmedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -497,6 +565,45 @@ struct AuthEntryView: View {
     private func normalizedDisplayName(_ raw: String) -> String {
         let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return value.isEmpty ? "" : value.uppercased()
+    }
+
+    private var titleText: String {
+        switch mode {
+        case .signIn:
+            return L10n.t("auth_sign_in")
+        case .register:
+            return L10n.t("auth_sign_up")
+        case .resetPassword:
+            return "Reset Password"
+        }
+    }
+
+    private var subtitleText: String {
+        switch mode {
+        case .signIn:
+            return L10n.t("auth_sign_in_subtitle")
+        case .register:
+            return L10n.t("auth_create_account_subtitle")
+        case .resetPassword:
+            return "Choose a new password for your account."
+        }
+    }
+
+    private func adoptPendingPasswordResetTokenIfNeeded() {
+        let token = deepLinkStore.pendingPasswordResetToken?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !token.isEmpty else { return }
+        pendingPasswordResetToken = token
+        password = ""
+        confirmPassword = ""
+        withAnimation(.easeInOut(duration: 0.16)) {
+            mode = .resetPassword
+        }
+    }
+
+    private func clearPasswordResetDraft() {
+        pendingPasswordResetToken = nil
+        password = ""
+        confirmPassword = ""
     }
 
     private func localizedOAuthErrorMessage(_ error: Error, provider: OAuthProvider) -> String {

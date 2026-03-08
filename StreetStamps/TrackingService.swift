@@ -1179,8 +1179,8 @@ final class TrackingService: ObservableObject {
             guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { return }
 
             let content = UNMutableNotificationContent()
-            content.title = "Long Stationary Reminder"
-            content.body = "Journey 已持续 1 小时位移不足 100m，建议暂停后再继续。"
+            content.title = L10n.t("long_stationary_reminder_title")
+            content.body = L10n.t("long_stationary_reminder_body")
             content.sound = .default
 
             let request = UNNotificationRequest(

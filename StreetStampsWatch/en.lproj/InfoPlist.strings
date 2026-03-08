@@ -1,0 +1,4 @@
+"CFBundleDisplayName" = "Worldo";
+"NSLocationWhenInUseUsageDescription" = "Used to record your journey route on Apple Watch.";
+"NSHealthShareUsageDescription" = "Used to keep the workout session active so background route recording remains stable on Apple Watch.";
+"NSHealthUpdateUsageDescription" = "Used to keep the workout session active so background route recording remains stable on Apple Watch.";

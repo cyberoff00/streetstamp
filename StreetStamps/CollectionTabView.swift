@@ -8,8 +8,8 @@ private enum CollectionSegment: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .cities: return "Cities"
-        case .journeys: return "Journeys"
+        case .cities: return L10n.t("collection_segment_cities")
+        case .journeys: return L10n.t("collection_segment_journeys")
         }
     }
 }
@@ -65,7 +65,7 @@ struct CollectionTabView: View {
     }
 
     private var header: some View {
-        UnifiedTabPageHeader(title: "COLLECTION", horizontalPadding: 18, topPadding: 14, bottomPadding: 12) {
+        UnifiedTabPageHeader(title: L10n.t("collection_title"), titleLevel: .primary, horizontalPadding: 18, topPadding: 14, bottomPadding: 12) {
             Color.clear
         } trailing: {
             Color.clear
@@ -74,7 +74,7 @@ struct CollectionTabView: View {
 
     private var segmentPicker: some View {
         HStack {
-            Picker("Collection", selection: $segment) {
+            Picker(L10n.t("collection_title"), selection: $segment) {
                 ForEach(CollectionSegment.allCases) { item in
                     Text(item.title).tag(item)
                 }

@@ -28,19 +28,19 @@ struct AccountCenterView: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 18) {
-                    sectionTitle("ACCOUNT")
+                    sectionTitle(L10n.t("account_section_account"))
                     accountPanel
 
-                    sectionTitle("PROFILE VISIBILITY")
+                    sectionTitle(L10n.t("account_section_visibility"))
                     visibilityPanel
 
                     if sessionStore.isLoggedIn {
-                        sectionTitle("ACCOUNT ACTIONS")
+                        sectionTitle(L10n.t("account_section_actions"))
                         logoutPanel
                     }
 
                     if !sessionStore.isLoggedIn {
-                        sectionTitle("DEVELOPER")
+                        sectionTitle(L10n.t("account_section_developer"))
                         backendCard
                     }
                 }
@@ -67,7 +67,7 @@ struct AccountCenterView: View {
                 accountEmail = ""
                 exclusiveIDDraft = ""
                 profileVisibility = ProfileSharingSettings.visibility
-                toast("已切回游客模式")
+                toast(L10n.t("switched_to_guest_mode"))
                 dismiss()
             }
         } message: {
@@ -94,7 +94,7 @@ struct AccountCenterView: View {
                 HStack(spacing: 4) {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 18, weight: .medium))
-                    Text("BACK")
+                    Text(L10n.t("back"))
                         .font(.system(size: 14, weight: .semibold))
                 }
                 .foregroundColor(FigmaTheme.text)
@@ -103,7 +103,7 @@ struct AccountCenterView: View {
 
             Spacer()
 
-            Text("Account Center")
+            Text(L10n.t("account_center_title"))
                 .font(.system(size: 24, weight: .bold))
                 .foregroundColor(FigmaTheme.text)
 
@@ -112,7 +112,7 @@ struct AccountCenterView: View {
             Button {
                 dismiss()
             } label: {
-                Text("Done")
+                Text(L10n.t("done"))
                     .font(.system(size: 15, weight: .bold))
                     .foregroundColor(FigmaTheme.primary)
             }
@@ -139,32 +139,32 @@ struct AccountCenterView: View {
     private var accountPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             if sessionStore.isLoggedIn {
-                Text(displayNameDraft.isEmpty ? "Explorer" : displayNameDraft)
+                Text(displayNameDraft.isEmpty ? L10n.t("explorer_fallback") : displayNameDraft)
                     .font(.system(size: 32 * 0.58, weight: .bold))
                     .foregroundColor(FigmaTheme.text)
 
-                accountInfoRow(label: "昵称", value: displayNameDraft.isEmpty ? "Explorer" : displayNameDraft)
-                accountInfoRow(label: "专属ID", value: exclusiveIDDraft.isEmpty ? "--" : exclusiveIDDraft)
-                accountInfoRow(label: "邮箱", value: accountEmail.isEmpty ? "未绑定" : accountEmail)
+                accountInfoRow(label: L10n.t("account_display_name_label"), value: displayNameDraft.isEmpty ? L10n.t("explorer_fallback") : displayNameDraft)
+                accountInfoRow(label: L10n.t("account_exclusive_id_label"), value: exclusiveIDDraft.isEmpty ? "--" : exclusiveIDDraft)
+                accountInfoRow(label: L10n.t("account_email_label"), value: accountEmail.isEmpty ? L10n.t("not_linked") : accountEmail)
 
                 Divider().overlay(Color.black.opacity(0.08))
 
                 if isEditingDisplayName {
-                    TextField("昵称（可重复）", text: $displayNameInput)
+                    TextField(L10n.t("settings_display_name_placeholder"), text: $displayNameInput)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 14, weight: .semibold))
 
                     HStack(spacing: 8) {
-                        capsuleAction("保存昵称", filled: true) {
+                        capsuleAction(L10n.t("account_save_display_name"), filled: true) {
                             Task { await updateDisplayName(to: displayNameInput) }
                         }
-                        capsuleAction("取消", filled: false) {
+                        capsuleAction(L10n.t("cancel"), filled: false) {
                             isEditingDisplayName = false
                             displayNameInput = displayNameDraft
                         }
                     }
                 } else {
-                    capsuleAction("编辑昵称", filled: false) {
+                    capsuleAction(L10n.t("settings_edit_name_title"), filled: false) {
                         displayNameInput = displayNameDraft
                         isEditingDisplayName = true
                     }
@@ -172,53 +172,53 @@ struct AccountCenterView: View {
 
                 if canChangeExclusiveID {
                     if isEditingExclusiveID {
-                        TextField("专属ID（字母/数字/下划线）", text: $exclusiveIDInput)
+                        TextField(L10n.t("account_exclusive_id_placeholder"), text: $exclusiveIDInput)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled(true)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 14, weight: .semibold))
 
-                        Text("专属ID仅可修改一次，请谨慎设置")
+                        Text(L10n.t("account_exclusive_id_change_once"))
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(FigmaTheme.subtext)
 
                         HStack(spacing: 8) {
-                            capsuleAction("保存专属ID", filled: true) {
+                            capsuleAction(L10n.t("account_save_exclusive_id"), filled: true) {
                                 Task { await updateExclusiveID(to: exclusiveIDInput) }
                             }
-                            capsuleAction("取消", filled: false) {
+                            capsuleAction(L10n.t("cancel"), filled: false) {
                                 isEditingExclusiveID = false
                                 exclusiveIDInput = exclusiveIDDraft
                             }
                         }
                     } else {
-                        capsuleAction("编辑专属ID", filled: false) {
+                        capsuleAction(L10n.t("account_edit_exclusive_id"), filled: false) {
                             exclusiveIDInput = exclusiveIDDraft
                             isEditingExclusiveID = true
                         }
                     }
                 } else {
-                    Text("专属ID已完成一次修改，无法再次更改")
+                    Text(L10n.t("account_exclusive_id_locked"))
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(FigmaTheme.subtext)
                 }
 
             } else {
-                Text("Guest Mode")
+                Text(L10n.t("guest_mode"))
                     .font(.system(size: 32 * 0.58, weight: .bold))
                     .foregroundColor(FigmaTheme.text)
 
                 Divider().overlay(Color.black.opacity(0.08))
 
-                Text("Please login to access your account")
+                Text(L10n.t("please_sign_in_to_access_your_account"))
                     .font(.system(size: 14, weight: .medium))
                     .foregroundColor(FigmaTheme.subtext)
 
-                capsuleAction("LOGIN", filled: true) {
+                capsuleAction(L10n.t("account_login"), filled: true) {
                     authSheetMode = .signIn
                     showAuthSheet = true
                 }
-                capsuleAction("REGISTER", filled: false) {
+                capsuleAction(L10n.t("account_register"), filled: false) {
                     authSheetMode = .register
                     showAuthSheet = true
                 }
@@ -255,7 +255,7 @@ struct AccountCenterView: View {
                 }
             )) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("仅好友可见")
+                    Text(L10n.t("settings_profile_visibility_friends"))
                         .font(.system(size: 16, weight: .bold))
                         .foregroundColor(FigmaTheme.text)
                     Text(profileVisibility == .private ? "当前：仅自己可见" : "当前：好友可见")
@@ -341,23 +341,23 @@ struct AccountCenterView: View {
 
     private var backendCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("后端配置")
+            Text(L10n.t("backend_configuration"))
                 .font(.system(size: 13, weight: .semibold))
 
-            TextField("API_BASE_URL（例如 https://api.xxx.com）", text: $backendBaseURL)
+            TextField(L10n.t("backend_base_url_placeholder"), text: $backendBaseURL)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled(true)
                 .textFieldStyle(.roundedBorder)
 
             HStack(spacing: 10) {
-                Button("保存后端地址") {
+                Button(L10n.t("save_backend_url")) {
                     BackendConfig.baseURLString = backendBaseURL
-                    toast("已保存后端地址")
+                    toast(L10n.t("backend_url_saved"))
                 }
                 .buttonStyle(.borderedProminent)
             }
 
-            Text("当前地址：\(BackendConfig.baseURLString.isEmpty ? "未配置" : BackendConfig.baseURLString)")
+            Text(String(format: L10n.t("backend_current_url_format"), BackendConfig.baseURLString.isEmpty ? L10n.t("not_linked") : BackendConfig.baseURLString))
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(.secondary)
         }
@@ -381,7 +381,7 @@ struct AccountCenterView: View {
                 ProfileSharingSettings.visibility = pv
             }
         } catch {
-            toast("获取资料失败：\(error.localizedDescription)")
+            toast(String(format: L10n.t("account_fetch_profile_failed_format"), error.localizedDescription))
         }
     }
 
@@ -389,7 +389,7 @@ struct AccountCenterView: View {
         guard let token = sessionStore.currentAccessToken, !token.isEmpty else { return }
         let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else {
-            return toast("昵称不能为空")
+            return toast(L10n.t("profile_name_empty"))
         }
         isLoading = true
         defer { isLoading = false }
@@ -399,20 +399,20 @@ struct AccountCenterView: View {
             displayNameDraft = value
             displayNameInput = value
             isEditingDisplayName = false
-            toast("昵称已更新")
+            toast(L10n.t("profile_name_updated"))
         } catch {
-            toast("更新失败：\(error.localizedDescription)")
+            toast(String(format: L10n.t("update_failed_format"), error.localizedDescription))
         }
     }
 
     private func updateExclusiveID(to input: String) async {
         guard let token = sessionStore.currentAccessToken, !token.isEmpty else { return }
-        guard canChangeExclusiveID else { return toast("专属ID已完成一次修改，无法再次更改") }
+        guard canChangeExclusiveID else { return toast(L10n.t("account_exclusive_id_locked")) }
 
         let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { return toast("专属ID不能为空") }
+        guard !value.isEmpty else { return toast(L10n.t("account_exclusive_id_empty")) }
         guard value.range(of: #"^[A-Za-z0-9_]{1,24}$"#, options: .regularExpression) != nil else {
-            return toast("专属ID仅支持字母、数字、下划线")
+            return toast(L10n.t("account_exclusive_id_rules"))
         }
 
         isLoading = true
@@ -425,9 +425,9 @@ struct AccountCenterView: View {
             canChangeExclusiveID = updated.canChangeExclusiveID
             accountEmail = updated.email ?? sessionStore.currentEmail ?? accountEmail
             isEditingExclusiveID = false
-            toast("专属ID已更新")
+            toast(L10n.t("account_exclusive_id_updated"))
         } catch {
-            toast("更新失败：\(error.localizedDescription)")
+            toast(String(format: L10n.t("update_failed_format"), error.localizedDescription))
         }
     }
 
@@ -438,10 +438,10 @@ struct AccountCenterView: View {
         do {
             _ = try await BackendAPIClient.shared.updateProfileVisibility(token: token, visibility: profileVisibility)
             ProfileSharingSettings.visibility = profileVisibility
-            toast("可见性已更新")
+            toast(L10n.t("visibility_updated"))
         } catch {
             profileVisibility = previous
-            toast("更新失败：\(error.localizedDescription)")
+            toast(String(format: L10n.t("update_failed_format"), error.localizedDescription))
         }
     }
 

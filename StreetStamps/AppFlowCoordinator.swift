@@ -67,9 +67,14 @@ struct PostcardInboxIntent: Equatable {
 final class AppDeepLinkStore: ObservableObject {
     @Published private(set) var pendingFriendInvite: FriendInviteIntent?
     @Published private(set) var pendingPostcardInbox: PostcardInboxIntent?
+    @Published private(set) var pendingPasswordResetToken: String?
 
     @discardableResult
     func handleIncomingURL(_ url: URL) -> Bool {
+        if let resetToken = Self.parsePasswordResetToken(from: url) {
+            pendingPasswordResetToken = resetToken
+            return true
+        }
         if let inviteIntent = Self.parseInvite(from: url), !inviteIntent.isEmpty {
             pendingFriendInvite = inviteIntent
             return true
@@ -87,6 +92,10 @@ final class AppDeepLinkStore: ObservableObject {
 
     func consumePendingPostcardInbox() {
         pendingPostcardInbox = nil
+    }
+
+    func consumePendingPasswordResetToken() {
+        pendingPasswordResetToken = nil
     }
 
     static func parseInvite(from rawText: String) -> FriendInviteIntent? {
@@ -174,5 +183,16 @@ final class AppDeepLinkStore: ObservableObject {
         let box = rawBox == "sent" ? "sent" : "received"
         let messageID = firstNonEmptyValue(in: queryItems, keys: ["messageID", "messageId", "mid"])
         return PostcardInboxIntent(box: box, messageID: messageID)
+    }
+
+    private static func parsePasswordResetToken(from url: URL) -> String? {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: true) else { return nil }
+        let scheme = (components.scheme ?? "").lowercased()
+        guard scheme == "streetstamps" else { return nil }
+
+        let host = (components.host ?? "").lowercased()
+        guard host == "reset-password" else { return nil }
+
+        return firstNonEmptyValue(in: components.queryItems ?? [], keys: ["token"])
     }
 }

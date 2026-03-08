@@ -227,9 +227,9 @@ Navigation treatment:
 - no hamburger on entry
 - use the unified non-root header treatment
 
-### Notifications
+### Activity notifications / 互动通知
 
-The notifications experience is not a root page. It should not use its own sheet toolbar style and should not show a hamburger menu.
+The activity-notifications experience is not a root page. This refers to the in-app social/activity notification surface, not the notification settings controls in settings. It should not use its own sheet toolbar style and should not show a hamburger menu.
 
 Navigation treatment:
 

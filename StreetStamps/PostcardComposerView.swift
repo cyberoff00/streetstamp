@@ -187,8 +187,22 @@ struct PostcardComposerView: View {
             .padding(20)
         }
         .background(FigmaTheme.background.ignoresSafeArea())
-        .navigationTitle(L10n.t("postcard_new_title"))
-        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            UnifiedNavigationHeader(
+                chrome: NavigationChrome(
+                    title: L10n.t("postcard_new_title"),
+                    leadingAccessory: .back,
+                    titleLevel: .secondary
+                ),
+                horizontalPadding: 18,
+                topPadding: 8,
+                bottomPadding: 12,
+                onLeadingTap: { dismiss() }
+            ) {
+                Color.clear
+            }
+        }
+        .toolbar(.hidden, for: .navigationBar)
         .task {
             if selectedCityID.isEmpty, let first = cityOptions.first {
                 selectedCityID = first.id

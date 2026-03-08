@@ -161,7 +161,7 @@ struct FriendsHubView: View {
             handle: handle.isEmpty ? fallbackHandle : handle,
             inviteCode: invite.isEmpty ? fallbackInvite : invite,
             profileVisibility: .friendsOnly,
-            displayName: name.isEmpty ? "Explorer" : name,
+            displayName: name.isEmpty ? L10n.t("explorer_fallback") : name,
             bio: "",
             loadout: AvatarLoadoutStore.load().normalizedForCurrentAvatar(),
             stats: ProfileStatsSnapshot(
@@ -379,6 +379,10 @@ struct FriendsHubView: View {
             showPostcardInboxSheet = true
             deepLinkStore.consumePendingPostcardInbox()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .postcardSentGoToInbox)) { _ in
+            postcardInboxIntent = PostcardInboxIntent(box: "sent", messageID: nil)
+            showPostcardInboxSheet = true
+        }
     }
 
     private var loggedOutState: some View {
@@ -390,11 +394,11 @@ struct FriendsHubView: View {
                     .font(.system(size: 34, weight: .semibold))
                     .foregroundColor(FigmaTheme.text)
 
-                Text("登录后查看好友动态")
+                Text(L10n.t("friends_logged_out_title"))
                     .font(.system(size: 22, weight: .bold))
                     .foregroundColor(FigmaTheme.text)
 
-                Text("好友动态、好友列表和好友申请只对已登录账号开放。")
+                Text(L10n.t("friends_logged_out_message"))
                     .font(.system(size: 14, weight: .medium))
                     .foregroundColor(FigmaTheme.subtext)
                     .multilineTextAlignment(.center)
@@ -405,7 +409,7 @@ struct FriendsHubView: View {
             Button {
                 showAuthEntry = true
             } label: {
-                Text("去登录")
+                Text(L10n.t("friends_go_login"))
                     .font(.system(size: 15, weight: .bold))
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
@@ -441,14 +445,14 @@ struct FriendsHubView: View {
     }
 
     private var header: some View {
-        UnifiedTabPageHeader(title: L10n.t("friends_title"), horizontalPadding: 16, topPadding: 14, bottomPadding: 12) {
+        UnifiedTabPageHeader(title: L10n.t("friends_title"), titleLevel: .primary, horizontalPadding: 16, topPadding: 14, bottomPadding: 12) {
             Color.clear
         } trailing: {
             if !sessionStore.isLoggedIn {
                 Button {
                     showAuthEntry = true
                 } label: {
-                    Text("登录")
+                    Text(L10n.t("friends_go_login"))
                         .font(.system(size: 14, weight: .bold))
                         .foregroundColor(FigmaTheme.text)
                 }
@@ -538,20 +542,20 @@ struct FriendsHubView: View {
 
             if isIncoming {
                 HStack(spacing: 10) {
-                    Button(loading ? "处理中..." : "通过") {
+                    Button(loading ? L10n.t("profile_sending") : L10n.t("friends_accept")) {
                         Task { await acceptFriendRequest(request.id) }
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(loading)
 
-                    Button("忽略") {
+                    Button(L10n.t("friends_ignore")) {
                         Task { await rejectFriendRequest(request.id) }
                     }
                     .buttonStyle(.bordered)
                     .disabled(loading)
                 }
             } else {
-                Text("等待对方通过")
+                Text(L10n.t("friends_waiting_approval"))
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(FigmaTheme.subtext)
             }
@@ -581,15 +585,15 @@ struct FriendsHubView: View {
 
     private func shortAgoText(from date: Date) -> String {
         let delta = max(1, Int(Date().timeIntervalSince(date)))
-        if delta < 3600 { return "\(max(1, delta / 60))m ago" }
-        if delta < 86400 { return "\(max(1, delta / 3600))h ago" }
-        if delta < 7 * 86400 { return "\(max(1, delta / 86400))d ago" }
-        return "\(max(1, delta / (7 * 86400)))w ago"
+        if delta < 3600 { return String(format: L10n.t("friends_ago_minutes_format"), max(1, delta / 60)) }
+        if delta < 86400 { return String(format: L10n.t("friends_ago_hours_format"), max(1, delta / 3600)) }
+        if delta < 7 * 86400 { return String(format: L10n.t("friends_ago_days_format"), max(1, delta / 86400)) }
+        return String(format: L10n.t("friends_ago_weeks_format"), max(1, delta / (7 * 86400)))
     }
 
     private func resolvedDisplayNameForInvite() -> String {
         let value = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return value.isEmpty ? "Explorer" : value
+        return value.isEmpty ? L10n.t("explorer_fallback") : value
     }
 
     private func resolvedExclusiveIDForInvite() -> String {
@@ -659,7 +663,7 @@ struct FriendsHubView: View {
                 case .city:
                     metaText = ""
                 case .memory:
-                    metaText = "\(max(photoCount, memoryCount)) photos"
+                    metaText = String(format: L10n.t("friends_photos_count_format"), max(photoCount, memoryCount))
                 case .journey:
                     metaText = "\(formatDistance(journey.distance))  \(formatDuration(start: journey.startTime, end: journey.endTime))"
                 }
@@ -695,7 +699,7 @@ struct FriendsHubView: View {
     }
 
     private func formatDistance(_ meters: Double) -> String {
-        String(format: "%.1fkm", meters / 1000.0)
+        String(format: L10n.t("friends_distance_compact_format"), meters / 1000.0)
     }
 
     private func formatDuration(start: Date?, end: Date?) -> String {
@@ -777,11 +781,11 @@ struct FriendsHubView: View {
     @MainActor
     private func toggleFeedLike(friendID: String, journeyID: String) async {
         guard BackendConfig.isEnabled else {
-            showFeedToast("后端地址未配置，请先在 Account Center 配置 API_BASE_URL", duration: 2.0)
+            showFeedToast(L10n.t("friends_backend_not_configured"), duration: 2.0)
             return
         }
         guard let token = sessionStore.currentAccessToken, !token.isEmpty else {
-            showFeedToast("请先登录账号", duration: 2.0)
+            showFeedToast(L10n.t("please_sign_in_to_access_your_account"), duration: 2.0)
             return
         }
 
@@ -808,7 +812,7 @@ struct FriendsHubView: View {
             }
             feedLikeStats[key] = (likes: max(0, resp.likes), likedByMe: resp.likedByMe)
         } catch {
-            showFeedToast("点赞失败：\(error.localizedDescription)")
+            showFeedToast(String(format: L10n.t("journey_loading_failed_format"), error.localizedDescription))
         }
     }
 
@@ -917,7 +921,7 @@ struct FriendsHubView: View {
         guard BackendConfig.isEnabled,
               let token = sessionStore.currentAccessToken,
               !token.isEmpty else {
-            showFeedToast("请先登录账号", duration: 2.0)
+            showFeedToast(L10n.t("please_sign_in_to_access_your_account"), duration: 2.0)
             return
         }
         guard !requestActionLoadingIDs.contains(requestID) else { return }
@@ -927,9 +931,9 @@ struct FriendsHubView: View {
         do {
             let resp = try await BackendAPIClient.shared.acceptFriendRequest(token: token, requestID: requestID)
             await refreshRemoteFriends()
-            showFeedToast(resp.message ?? "已通过好友申请")
+            showFeedToast(resp.message ?? L10n.t("friends_request_accepted"))
         } catch {
-            showFeedToast("通过失败：\(error.localizedDescription)")
+            showFeedToast(String(format: L10n.t("friends_accept_failed_format"), error.localizedDescription))
         }
     }
 
@@ -938,7 +942,7 @@ struct FriendsHubView: View {
         guard BackendConfig.isEnabled,
               let token = sessionStore.currentAccessToken,
               !token.isEmpty else {
-            showFeedToast("请先登录账号", duration: 2.0)
+            showFeedToast(L10n.t("please_sign_in_to_access_your_account"), duration: 2.0)
             return
         }
         guard !requestActionLoadingIDs.contains(requestID) else { return }
@@ -948,9 +952,9 @@ struct FriendsHubView: View {
         do {
             let resp = try await BackendAPIClient.shared.rejectFriendRequest(token: token, requestID: requestID)
             await refreshFriendRequests()
-            showFeedToast(resp.message ?? "已拒绝好友申请")
+            showFeedToast(resp.message ?? L10n.t("friends_request_rejected"))
         } catch {
-            showFeedToast("拒绝失败：\(error.localizedDescription)")
+            showFeedToast(String(format: L10n.t("friends_reject_failed_format"), error.localizedDescription))
         }
     }
 
@@ -1019,22 +1023,33 @@ struct FriendsHubView: View {
                 }
             }
             .background(FigmaTheme.background.ignoresSafeArea())
-            .navigationTitle("互动通知")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("关闭") {
-                        showSocialNotificationsSheet = false
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("全部已读") {
+            .safeAreaInset(edge: .top, spacing: 0) {
+                UnifiedNavigationHeader(
+                    chrome: NavigationChrome(
+                        title: "互动通知",
+                        leadingAccessory: .back,
+                        titleLevel: .secondary
+                    ),
+                    horizontalPadding: 16,
+                    topPadding: 8,
+                    bottomPadding: 12,
+                    onLeadingTap: { showSocialNotificationsSheet = false }
+                ) {
+                    Button {
                         Task {
                             await markAllSocialNotificationsRead()
                         }
+                    } label: {
+                        Image(systemName: "checkmark.circle")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(FigmaTheme.text)
+                            .frame(width: 42, height: 42)
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("全部已读")
                 }
             }
+            .toolbar(.hidden, for: .navigationBar)
             .task {
                 await refreshSocialNotifications(showToastForLatestUnread: false)
             }
@@ -1350,7 +1365,7 @@ private struct AddFriendSheet: View {
                 Button {
                     showScannerSheet = true
                 } label: {
-                    Label("扫描二维码", systemImage: "qrcode.viewfinder")
+                    Label(L10n.t("profile_scan_qr_code"), systemImage: "qrcode.viewfinder")
                         .font(.system(size: 14, weight: .semibold))
                 }
                 .buttonStyle(.bordered)
@@ -1366,13 +1381,22 @@ private struct AddFriendSheet: View {
                 Spacer(minLength: 0)
             }
             .padding(16)
-            .navigationTitle(L10n.t("friends_add_title"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(L10n.t("close")) { dismiss() }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                UnifiedNavigationHeader(
+                    chrome: NavigationChrome(
+                        title: L10n.t("friends_add_title"),
+                        leadingAccessory: .back,
+                        titleLevel: .secondary
+                    ),
+                    horizontalPadding: 16,
+                    topPadding: 8,
+                    bottomPadding: 12,
+                    onLeadingTap: { dismiss() }
+                ) {
+                    Color.clear
                 }
             }
+            .toolbar(.hidden, for: .navigationBar)
             .alert(L10n.t("prompt"), isPresented: $showMessage) {
                 Button(L10n.t("ok"), role: .cancel) {}
             } message: {
@@ -1628,6 +1652,9 @@ private struct FriendProfileScreen: View {
             flow.popSidebarButtonHidden(token: sidebarHideToken)
         }
         .overlay(alignment: .top) {
+            friendTopControls
+        }
+        .overlay(alignment: .top) {
             if showStompToast {
                 Text(stompToastText)
                     .font(.system(size: 12, weight: .semibold))
@@ -1649,21 +1676,21 @@ private struct FriendProfileScreen: View {
             friend = snapshots.first(where: { $0.id == friendID })
         }
         .confirmationDialog(
-            "确认删除好友？",
+            L10n.t("friends_delete_confirm_title"),
             isPresented: $showDeleteFriendConfirm,
             titleVisibility: .visible
         ) {
-            Button("删除好友", role: .destructive) {
+            Button(L10n.t("friends_delete_friend"), role: .destructive) {
                 Task {
                     await removeFriend()
                 }
             }
-            Button("取消", role: .cancel) {}
+            Button(L10n.t("cancel"), role: .cancel) {}
         } message: {
-            Text("删除后将从好友列表移除，对方需要重新发起申请。")
+            Text(L10n.t("friends_delete_confirm_message"))
         }
-        .alert("删除失败", isPresented: $showDeleteFriendError) {
-            Button("知道了", role: .cancel) {}
+        .alert(L10n.t("friends_delete_failed"), isPresented: $showDeleteFriendError) {
+            Button(L10n.t("got_it"), role: .cancel) {}
         } message: {
             Text(deleteFriendErrorText)
         }
@@ -1675,55 +1702,73 @@ private struct FriendProfileScreen: View {
         }
     }
 
+    private var friendTopControls: some View {
+        GeometryReader { proxy in
+            HStack {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(FigmaTheme.text)
+                        .frame(width: 42, height: 42)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+
+                Spacer()
+
+                if sessionStore.isLoggedIn && (sessionStore.accountUserID ?? "") != friendID {
+                    Menu {
+                        Button(role: .destructive) {
+                            showDeleteFriendConfirm = true
+                        } label: {
+                            Label(L10n.t("friends_delete_friend"), systemImage: "person.crop.circle.badge.xmark")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(FigmaTheme.text)
+                            .frame(width: 42, height: 42)
+                            .contentShape(Circle())
+                    }
+                    .disabled(isDeletingFriend)
+                } else {
+                    Color.clear
+                        .frame(width: 42, height: 42)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, proxy.safeAreaInsets.top + 8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .frame(height: 96)
+    }
+
     private func friendHeroSection(friend: FriendProfileSnapshot, sceneState: ProfileSceneInteractionState) -> some View {
         VStack(spacing: 0) {
             ProfileHeroTopBackdrop {
-                VStack(spacing: 0) {
-                    HStack {
-                        Button {
-                            dismiss()
-                        } label: {
-                            ProfileHeroGlassCircleLabel(systemImage: "chevron.left")
-                        }
-                        .buttonStyle(.plain)
+                GeometryReader { _ in
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 72)
 
-                        Spacer()
-
-                        if sessionStore.isLoggedIn && (sessionStore.accountUserID ?? "") != friendID {
-                            Menu {
-                                Button(role: .destructive) {
-                                    showDeleteFriendConfirm = true
-                                } label: {
-                                    Label("删除好友", systemImage: "person.crop.circle.badge.xmark")
-                                }
-                            } label: {
-                                ProfileHeroGlassCircleLabel(systemImage: "ellipsis")
-                            }
-                            .disabled(isDeletingFriend)
-                        } else {
-                            Color.clear
-                                .frame(width: 40, height: 40)
-                        }
+                        SofaProfileSceneView(
+                            state: sceneState,
+                            hostLoadout: friend.loadout,
+                            visitorLoadout: visitorLoadout,
+                            welcomeText: L10n.t("friends_welcome"),
+                            postcardPromptText: sceneState.postcardPromptText,
+                            onPostcardPromptTap: sceneState.postcardPromptText == nil ? nil : {
+                                showPostcardComposer = true
+                            },
+                            promptBubbleStyle: .chat
+                        )
+                        .frame(maxWidth: 360)
+                        .padding(.horizontal, 30)
+                        .padding(.top, 0)
+                        .padding(.bottom, 16)
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.top, 18)
-
-                    Spacer(minLength: 4)
-
-                    SofaProfileSceneView(
-                        state: sceneState,
-                        hostLoadout: friend.loadout,
-                        visitorLoadout: visitorLoadout,
-                        welcomeText: "Welcome!",
-                        postcardPromptText: sceneState.postcardPromptText,
-                        onPostcardPromptTap: sceneState.postcardPromptText == nil ? nil : {
-                            showPostcardComposer = true
-                        }
-                    )
-                    .frame(maxWidth: 360)
-                    .padding(.horizontal, 30)
-                    .padding(.top, 8)
-                    .padding(.bottom, 16)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
             }
             .frame(height: 376)
@@ -1752,7 +1797,7 @@ private struct FriendProfileScreen: View {
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundColor(Color(red: 156.0 / 255.0, green: 163.0 / 255.0, blue: 175.0 / 255.0))
 
-                            Text("Joined \(heroJoinedDateText(friend.createdAt))")
+                            Text(String(format: L10n.t("friends_joined_format"), heroJoinedDateText(friend.createdAt)))
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundColor(Color(red: 156.0 / 255.0, green: 163.0 / 255.0, blue: 175.0 / 255.0))
                         }
@@ -1898,7 +1943,7 @@ private struct FriendProfileScreen: View {
     private func sendProfileStomp(to friend: FriendProfileSnapshot) async {
         guard !isSendingStomp else { return }
         guard let token = sessionStore.currentAccessToken, !token.isEmpty else {
-            showStompToastMessage("请先登录账号")
+            showStompToastMessage(L10n.t("please_sign_in_to_access_your_account"))
             return
         }
         isSendingStomp = true
@@ -1959,7 +2004,7 @@ private struct FriendInviteScannerSheet: View {
                 )
                 .ignoresSafeArea()
 
-                Text("将好友邀请码二维码放入框内")
+                Text(L10n.t("profile_place_qr_in_frame"))
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 12)
@@ -1968,18 +2013,27 @@ private struct FriendInviteScannerSheet: View {
                     .clipShape(Capsule())
                     .padding(.bottom, 24)
             }
-            .navigationTitle("扫描二维码")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("关闭") { dismiss() }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                UnifiedNavigationHeader(
+                    chrome: NavigationChrome(
+                        title: L10n.t("profile_scan_qr_code"),
+                        leadingAccessory: .back,
+                        titleLevel: .secondary
+                    ),
+                    horizontalPadding: 16,
+                    topPadding: 8,
+                    bottomPadding: 12,
+                    onLeadingTap: { dismiss() }
+                ) {
+                    Color.clear
                 }
             }
-            .alert("扫描失败", isPresented: Binding(
+            .toolbar(.hidden, for: .navigationBar)
+            .alert(L10n.t("profile_scan_failed"), isPresented: Binding(
                 get: { scannerError != nil },
                 set: { if !$0 { scannerError = nil } }
             )) {
-                Button("知道了", role: .cancel) {}
+                Button(L10n.t("got_it"), role: .cancel) {}
             } message: {
                 Text(scannerError ?? "")
             }
@@ -2036,20 +2090,20 @@ private final class FriendInviteScannerViewController: UIViewController, AVCaptu
 
     private func configureCapture() {
         guard let device = AVCaptureDevice.default(for: .video) else {
-            onFailure?("当前设备不支持摄像头扫描。")
+            onFailure?(L10n.t("profile_scan_camera_unsupported"))
             return
         }
         do {
             let input = try AVCaptureDeviceInput(device: device)
             guard session.canAddInput(input) else {
-                onFailure?("无法访问摄像头输入。")
+                onFailure?(L10n.t("profile_scan_camera_input_unavailable"))
                 return
             }
             session.addInput(input)
 
             let output = AVCaptureMetadataOutput()
             guard session.canAddOutput(output) else {
-                onFailure?("无法配置扫描输出。")
+                onFailure?(L10n.t("profile_scan_output_unavailable"))
                 return
             }
             session.addOutput(output)
@@ -2410,6 +2464,7 @@ private struct FriendCitiesScreen: View {
 }
 
 private struct FriendEquipmentScreen: View {
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var socialStore: SocialGraphStore
     @ObservedObject private var catalogStore: AvatarCatalogStore = .shared
 
@@ -2455,14 +2510,28 @@ private struct FriendEquipmentScreen: View {
                     .padding(12)
                 }
                 .background(Color(red: 251.0/255.0, green: 251.0/255.0, blue: 249.0/255.0).ignoresSafeArea())
-                .navigationTitle("\(friend.displayName) Equipment")
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    UnifiedNavigationHeader(
+                        chrome: NavigationChrome(
+                            title: "\(friend.displayName) Equipment",
+                            leadingAccessory: .back,
+                            titleLevel: .secondary
+                        ),
+                        horizontalPadding: 16,
+                        topPadding: 8,
+                        bottomPadding: 12,
+                        onLeadingTap: { dismiss() }
+                    ) {
+                        Color.clear
+                    }
+                }
+                .toolbar(.hidden, for: .navigationBar)
             } else {
                 Text(L10n.t("content_unavailable"))
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.secondary)
             }
         }
-        .friendChevronBackButton()
     }
 }
 

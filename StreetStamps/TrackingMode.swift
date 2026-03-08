@@ -7,6 +7,16 @@
 
 import Foundation
 import CoreLocation
+import SwiftUI
+
+struct MapTrackingModePillPresentation: Equatable {
+    let symbolName: String
+    let iconFontSize: CGFloat
+    let horizontalSpacing: CGFloat
+    let foregroundOpacity: Double
+    let backgroundOpacity: Double
+    let borderOpacity: Double
+}
 
 /// 追踪模式：运动 vs 日常
 enum TrackingMode: String, Codable, CaseIterable {
@@ -24,6 +34,29 @@ enum TrackingMode: String, Codable, CaseIterable {
         switch self {
         case .sport: return "figure.run"
         case .daily: return "figure.walk.motion"
+        }
+    }
+
+    var mapPillPresentation: MapTrackingModePillPresentation {
+        switch self {
+        case .sport:
+            return MapTrackingModePillPresentation(
+                symbolName: "figure.run",
+                iconFontSize: 12,
+                horizontalSpacing: 7,
+                foregroundOpacity: 0.82,
+                backgroundOpacity: 0.78,
+                borderOpacity: 0.18
+            )
+        case .daily:
+            return MapTrackingModePillPresentation(
+                symbolName: "figure.walk.motion",
+                iconFontSize: 12,
+                horizontalSpacing: 7,
+                foregroundOpacity: 0.82,
+                backgroundOpacity: 0.78,
+                borderOpacity: 0.18
+            )
         }
     }
 }

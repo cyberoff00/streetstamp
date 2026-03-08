@@ -393,7 +393,7 @@ async function deliverVerificationEmail(email, token) {
 }
 
 async function deliverPasswordResetEmail(email, token) {
-  const resetURL = `${AUTH_LINK_BASE || "http://localhost"}/reset-password?token=${encodeURIComponent(token)}`;
+  const resetURL = `streetstamps://reset-password?token=${encodeURIComponent(token)}`;
   if (TEST_EMAIL_OUTBOX_FILE) {
     await appendTestEmailOutbox({
       kind: "password_reset",

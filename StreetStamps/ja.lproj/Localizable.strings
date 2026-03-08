@@ -417,6 +417,10 @@
 "visibility_private" = "非公開";
 "visibility_friends_only" = "友だちに公開";
 "visibility_public" = "公開";
+"journey_change_visibility" = "旅程の公開範囲を変更";
+"journey_current_visibility_format" = "現在：%@";
+"journey_visibility_login_required" = "友だち公開に切り替えるには、先にログインしてください。";
+"journey_visibility_requires_distance_or_memory" = "友だち公開に切り替えるには、旅程が2km以上、または記憶が1件以上必要です。";
 "unknown_id" = "unknown_id";
 "unknown_city" = "不明な都市";
 "friends_exclusive_id_format" = "専用ID：%@";

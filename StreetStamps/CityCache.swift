@@ -379,17 +379,20 @@ final class CityCache: ObservableObject {
     private var geocodeTask: Task<Void, Never>? = nil
 
     private var fileURL: URL
+    private var membershipIndexURL: URL
     private unowned let journeyStore: JourneyStore
     private var thumbnails: CityThumbnailCache
     private var migrationMarkerV2URL: URL
     private var migrationMarkerV3URL: URL
     private var migrationMarkerV4URL: URL
     private var paths: StoragePath
+    private var membershipIndex = CityMembershipIndex()
     private var cancellables: Set<AnyCancellable> = []
     private var hasRebuiltForCurrentLoadedState = false
 
     init(paths: StoragePath, journeyStore: JourneyStore) {
         self.fileURL = paths.cityCacheURL
+        self.membershipIndexURL = paths.cityMembershipIndexURL
         self.journeyStore = journeyStore
         self.thumbnails = CityThumbnailCache(dir: paths.thumbnailsDir)
         self.migrationMarkerV2URL = paths.migrationMarkerV2_thumbnailPaths
@@ -397,6 +400,7 @@ final class CityCache: ObservableObject {
         self.migrationMarkerV4URL = paths.migrationMarkerV4_removeLegacyThumbnails
         self.paths = paths
         loadFromDisk()
+        loadMembershipIndexFromDisk()
 
         // Migrate thumbnail paths from absolute to relative (V2 migration)
         migrateThumbnailPathsIfNeeded()
@@ -404,7 +408,7 @@ final class CityCache: ObservableObject {
         // Migrate intercity routes to starting cities (V3 migration)
         migrateInterCityRoutesToStartingCitiesIfNeeded()
         removeLegacyDiskThumbnailsIfNeeded()
-        rebuildFromJourneyStore()
+        handleJourneyStoreLoadedState(journeyStore.hasLoaded)
 
         journeyStore.$hasLoaded
             .receive(on: RunLoop.main)
@@ -424,16 +428,17 @@ final class CityCache: ObservableObject {
     func rebind(paths: StoragePath) {
         self.paths = paths
         self.fileURL = paths.cityCacheURL
+        self.membershipIndexURL = paths.cityMembershipIndexURL
         self.thumbnails = CityThumbnailCache(dir: paths.thumbnailsDir)
         self.migrationMarkerV2URL = paths.migrationMarkerV2_thumbnailPaths
         self.migrationMarkerV3URL = paths.migrationMarkerV3_intercityToStartingCity
         self.migrationMarkerV4URL = paths.migrationMarkerV4_removeLegacyThumbnails
 
         loadFromDisk()
+        loadMembershipIndexFromDisk()
         migrateThumbnailPathsIfNeeded()
         migrateInterCityRoutesToStartingCitiesIfNeeded()
         removeLegacyDiskThumbnailsIfNeeded()
-        rebuildFromJourneyStore()
         handleJourneyStoreLoadedState(journeyStore.hasLoaded)
     }
 
@@ -442,7 +447,7 @@ final class CityCache: ObservableObject {
             hasRebuiltForCurrentLoadedState = false
             return
         }
-        guard !hasRebuiltForCurrentLoadedState else { return }
+        guard membershipIndex.entries.isEmpty || !hasRebuiltForCurrentLoadedState else { return }
         hasRebuiltForCurrentLoadedState = true
         rebuildFromJourneyStore()
     }
@@ -526,12 +531,30 @@ final class CityCache: ObservableObject {
         }
     }
 
+    private func loadMembershipIndexFromDisk() {
+        do {
+            let data = try Data(contentsOf: membershipIndexURL)
+            membershipIndex = try JSONDecoder().decode(CityMembershipIndex.self, from: data)
+        } catch {
+            membershipIndex = CityMembershipIndex()
+        }
+    }
+
     fileprivate func saveToDisk() {
         do {
             let data = try JSONEncoder().encode(cachedCities)
             try data.write(to: fileURL, options: [.atomic])
         } catch {
             print("❌ city cache save failed:", error)
+        }
+    }
+
+    private func saveMembershipIndexToDisk() {
+        do {
+            let data = try JSONEncoder().encode(membershipIndex)
+            try data.write(to: membershipIndexURL, options: [.atomic])
+        } catch {
+            print("❌ city membership index save failed:", error)
         }
     }
 
@@ -681,67 +704,111 @@ final class CityCache: ObservableObject {
 
     func rebuildFromJourneyStore() {
         guard journeyStore.hasLoaded else { return }
+        membershipIndex = CityCache.buildMembershipIndex(from: journeyStore.journeys)
+        saveMembershipIndexToDisk()
+        replaceCachedCitiesFromMembershipIndex()
+    }
 
-        let completed = journeyStore.journeys.filter { $0.isCompleted }
-        let existingByKey = Dictionary(uniqueKeysWithValues: cachedCities.map { ($0.id, $0) })
+    func applyJourneyMutation(oldJourney: JourneyRoute?, newJourney: JourneyRoute?) {
+        let oldContribution = CityMembershipContribution(journey: oldJourney)
+        let newContribution = CityMembershipContribution(journey: newJourney)
+        guard oldContribution != nil || newContribution != nil else { return }
 
-        var grouped: [String: [JourneyRoute]] = [:]
-        for j in completed {
-            let keyRaw = (j.startCityKey ?? j.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
-            let key = keyRaw.isEmpty ? j.canonicalCityKeyFallback : keyRaw
-            grouped[key, default: []].append(j)
+        membershipIndex.applyJourneyMutation(oldJourney: oldJourney, newJourney: newJourney)
+        saveMembershipIndexToDisk()
+
+        let affectedCityKeys = Set([
+            oldContribution?.cityKey,
+            newContribution?.cityKey
+        ].compactMap { $0 })
+        refreshCachedCities(for: affectedCityKeys, preferredAnchorJourney: newJourney)
+    }
+
+    private static func buildMembershipIndex(from journeys: [JourneyRoute]) -> CityMembershipIndex {
+        var index = CityMembershipIndex()
+        for journey in journeys where journey.isCompleted {
+            index.applyJourneyMutation(oldJourney: nil, newJourney: journey)
+        }
+        return index
+    }
+
+    private func replaceCachedCitiesFromMembershipIndex() {
+        let stableExistingByKey = Dictionary(
+            uniqueKeysWithValues: cachedCities
+                .filter { !($0.isTemporary ?? false) }
+                .map { ($0.id, $0) }
+        )
+
+        let rebuilt = membershipIndex.entries.values.map { entry in
+            makeCachedCity(from: entry, previous: stableExistingByKey[entry.cityKey], preferredAnchorJourney: nil)
         }
 
-        var rebuilt: [CachedCity] = []
-        rebuilt.reserveCapacity(grouped.count)
+        let temps = cachedCities.filter { $0.isTemporary ?? false }
+        let sortedStable = sortStableCities(rebuilt)
+        cachedCities = sortedStable + temps
+        saveToDisk()
+        notifyCitiesChanged()
+    }
 
-        for (key, js) in grouped {
-            let sortedByStart = js.sorted {
-                ($0.startTime ?? .distantFuture) < ($1.startTime ?? .distantFuture)
+    private func refreshCachedCities(for cityKeys: Set<String>, preferredAnchorJourney: JourneyRoute?) {
+        guard !cityKeys.isEmpty else { return }
+
+        var stableCities = cachedCities.filter { !($0.isTemporary ?? false) }
+        let existingByKey = Dictionary(uniqueKeysWithValues: stableCities.map { ($0.id, $0) })
+
+        stableCities.removeAll { cityKeys.contains($0.id) }
+
+        for cityKey in cityKeys {
+            guard let entry = membershipIndex.entries[cityKey] else { continue }
+            let preferredJourney: JourneyRoute?
+            if let preferredAnchorJourney, entry.journeyIDs.contains(preferredAnchorJourney.id) {
+                preferredJourney = preferredAnchorJourney
+            } else {
+                preferredJourney = nil
             }
-            let old = existingByKey[key]
-            let first = sortedByStart.first
-            let nameCandidate = (first?.canonicalCity ?? first?.cityName ?? first?.displayCityName ?? old?.name ?? L10n.t("unknown"))
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let name = nameCandidate.isEmpty ? (old?.name ?? L10n.t("unknown")) : nameCandidate
-
-            let isoCandidate = (first?.countryISO2 ?? old?.countryISO2 ?? "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .uppercased()
-            let iso = isoCandidate.isEmpty ? nil : isoCandidate
-
-            let anchorCoord = first?.startCoordinate?.isValid == true ? first?.startCoordinate : old?.anchor?.cl
-            let anchor = anchorCoord.map(LatLon.init)
-
-            rebuilt.append(
-                CachedCity(
-                    id: key,
-                    name: name,
-                    countryISO2: iso,
-                    journeyIds: sortedByStart.map(\.id),
-                    explorations: sortedByStart.count,
-                    memories: sortedByStart.reduce(0) { $0 + $1.memoryCount },
-                    boundary: old?.boundary,
-                    anchor: anchor,
-                    thumbnailBasePath: old?.thumbnailBasePath,
-                    thumbnailRoutePath: old?.thumbnailRoutePath,
-                    reservedLevelRaw: old?.reservedLevelRaw,
-                    reservedParentRegionKey: old?.reservedParentRegionKey,
-                    reservedAvailableLevelNames: old?.reservedAvailableLevelNames,
-                    isTemporary: false
-                )
+            stableCities.append(
+                makeCachedCity(from: entry, previous: existingByKey[cityKey], preferredAnchorJourney: preferredJourney)
             )
         }
 
         let temps = cachedCities.filter { $0.isTemporary ?? false }
-        rebuilt.sort {
+        cachedCities = sortStableCities(stableCities) + temps
+        saveToDisk()
+        notifyCitiesChanged()
+    }
+
+    private func makeCachedCity(
+        from entry: CityMembershipEntry,
+        previous: CachedCity?,
+        preferredAnchorJourney: JourneyRoute?
+    ) -> CachedCity {
+        let anchorCoord = preferredAnchorJourney?.startCoordinate?.isValid == true
+            ? preferredAnchorJourney?.startCoordinate
+            : previous?.anchor?.cl
+
+        return CachedCity(
+            id: entry.cityKey,
+            name: entry.cityName,
+            countryISO2: entry.countryISO2,
+            journeyIds: entry.journeyIDs,
+            explorations: entry.explorations,
+            memories: entry.memories,
+            boundary: previous?.boundary,
+            anchor: anchorCoord.map(LatLon.init),
+            thumbnailBasePath: previous?.thumbnailBasePath,
+            thumbnailRoutePath: previous?.thumbnailRoutePath,
+            reservedLevelRaw: previous?.reservedLevelRaw,
+            reservedParentRegionKey: previous?.reservedParentRegionKey,
+            reservedAvailableLevelNames: previous?.reservedAvailableLevelNames,
+            isTemporary: false
+        )
+    }
+
+    private func sortStableCities(_ cities: [CachedCity]) -> [CachedCity] {
+        cities.sorted {
             if $0.explorations != $1.explorations { return $0.explorations > $1.explorations }
             return $0.name < $1.name
         }
-
-        cachedCities = rebuilt + temps
-        saveToDisk()
-        notifyCitiesChanged()
     }
 
     // ===================================================
@@ -908,7 +975,14 @@ final class CityCache: ObservableObject {
             iso: iso
         )
 
-        refreshCityFromStore(cityKey: key)
+        var indexedJourney = journey
+        indexedJourney.startCityKey = key
+        indexedJourney.cityKey = key
+        indexedJourney.cityName = canonicalName
+        indexedJourney.canonicalCity = canonicalName
+        indexedJourney.countryISO2 = iso.isEmpty ? journey.countryISO2 : iso
+
+        applyJourneyMutation(oldJourney: nil, newJourney: indexedJourney)
         updateCityLevelReserveProfile(
             cityKey: key,
             level: reserveLevel,

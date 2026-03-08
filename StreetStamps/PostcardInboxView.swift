@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 struct PostcardInboxView: View {
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     enum Box: String, CaseIterable, Identifiable {
         case sent = "sent"
@@ -18,10 +19,10 @@ struct PostcardInboxView: View {
 
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var postcardCenter: PostcardCenter
+    @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
 
     @State private var selectedBox: Box
     @State private var pendingFocusMessageID: String?
-    @State private var selectedDetail: PostcardDetailTarget?
     @State private var isRefreshing = false
     private let focusMessageID: String?
 
@@ -29,6 +30,11 @@ struct PostcardInboxView: View {
         _selectedBox = State(initialValue: initialBox)
         _pendingFocusMessageID = State(initialValue: focusMessageID)
         self.focusMessageID = focusMessageID
+    }
+
+    private var myDisplayName: String {
+        let normalized = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.isEmpty ? "EXPLORER" : normalized
     }
 
     var body: some View {
@@ -45,7 +51,7 @@ struct PostcardInboxView: View {
             }
 
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 12) {
+                LazyVStack(spacing: 24) {
                     if selectedBox == .sent {
                         sentSection
                     } else {
@@ -59,17 +65,28 @@ struct PostcardInboxView: View {
         .padding(.horizontal, 16)
         .padding(.top, 12)
         .background(FigmaTheme.background.ignoresSafeArea())
-        .navigationTitle(L10n.t("postcard_nav_title"))
-        .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(item: $selectedDetail) { target in
-            detailDestination(for: target)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            UnifiedNavigationHeader(
+                chrome: NavigationChrome(
+                    title: L10n.t("postcard_nav_title"),
+                    leadingAccessory: .back,
+                    titleLevel: .secondary
+                ),
+                horizontalPadding: 16,
+                topPadding: 8,
+                bottomPadding: 12,
+                onLeadingTap: { dismiss() }
+            ) {
+                Color.clear
+            }
         }
+        .toolbar(.hidden, for: .navigationBar)
         .task {
             await refreshInbox()
             if focusMessageID != nil {
                 selectedBox = .received
             }
-            openFocusedMessageIfNeeded()
+            autoFocusReceivedIfNeeded()
         }
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
@@ -85,101 +102,44 @@ struct PostcardInboxView: View {
             await refreshInbox()
         }
         .onReceive(postcardCenter.$receivedItems) { _ in
-            openFocusedMessageIfNeeded()
+            autoFocusReceivedIfNeeded()
         }
     }
+
+    // MARK: - Sent
 
     @ViewBuilder
     private var sentSection: some View {
-        if postcardCenter.sentItems.isEmpty && pendingDrafts.isEmpty {
+        let visibleDrafts = pendingDrafts.filter { $0.status != .failed }
+        if postcardCenter.sentItems.isEmpty && visibleDrafts.isEmpty {
             emptyState(text: L10n.t("postcard_sent_empty"))
         } else {
             ForEach(postcardCenter.sentItems) { item in
-                Button {
-                    selectedDetail = PostcardDetailTarget(kind: .sent(messageID: item.messageID))
-                } label: {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text(item.cityName)
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(FigmaTheme.text)
-                            Spacer()
-                            Text(item.sentAt, style: .date)
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(FigmaTheme.subtext)
-                        }
-
-                        Text(item.messageText)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(FigmaTheme.subtext)
-
-                        Text("\(L10n.t("postcard_to_prefix"))\(item.toUserID)")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(FigmaTheme.text)
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    .shadow(color: Color.black.opacity(0.04), radius: 14, x: 0, y: 5)
-                }
-                .buttonStyle(.plain)
+                PostcardCardRow(
+                    cityName: item.cityName,
+                    nickname: myDisplayName.uppercased(),
+                    messageText: item.messageText,
+                    photoSource: photoSource(for: item),
+                    sentDate: item.sentAt,
+                    metaLabel: "\(L10n.t("postcard_to_prefix"))\(item.toDisplayName ?? item.toUserID)"
+                )
             }
 
-            ForEach(pendingDrafts) { draft in
-                Button {
-                    selectedDetail = PostcardDetailTarget(kind: .draft(draftID: draft.draftID))
-                } label: {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text(draft.cityName)
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(FigmaTheme.text)
-                            Spacer()
-                            Text(draft.status.rawValue.uppercased())
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundColor(statusColor(draft.status))
-                        }
-
-                        Text(draft.message)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(FigmaTheme.subtext)
-
-                        Text("\(L10n.t("postcard_to_prefix"))\(draft.toUserID)")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(FigmaTheme.text)
-
-                        if draft.status == .failed {
-                            Button {
-                                Task {
-                                    await postcardCenter.retry(
-                                        draftID: draft.draftID,
-                                        token: sessionStore.currentAccessToken,
-                                        allowedCityIDs: [draft.cityID]
-                                    )
-                                }
-                            } label: {
-                                Text(L10n.t("postcard_retry"))
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 7)
-                                    .background(FigmaTheme.primary)
-                                    .clipShape(Capsule())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    .shadow(color: Color.black.opacity(0.04), radius: 14, x: 0, y: 5)
-                }
-                .buttonStyle(.plain)
+            ForEach(visibleDrafts) { draft in
+                PostcardCardRow(
+                    cityName: draft.cityName,
+                    nickname: myDisplayName.uppercased(),
+                    messageText: draft.message,
+                    photoSource: draftPhotoSource(draft),
+                    sentDate: draft.sentAt ?? draft.updatedAt,
+                    metaLabel: "\(L10n.t("postcard_to_prefix"))\(draft.toUserID)",
+                    statusBadge: draft.status == .sending ? L10n.t("postcard_sending") : nil
+                )
             }
         }
     }
+
+    // MARK: - Received
 
     @ViewBuilder
     private var receivedSection: some View {
@@ -187,38 +147,19 @@ struct PostcardInboxView: View {
             emptyState(text: L10n.t("postcard_received_empty"))
         } else {
             ForEach(postcardCenter.receivedItems) { item in
-                Button {
-                    selectedDetail = PostcardDetailTarget(kind: .received(messageID: item.messageID))
-                } label: {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text(item.cityName)
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(FigmaTheme.text)
-                            Spacer()
-                            Text(item.sentAt, style: .date)
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(FigmaTheme.subtext)
-                        }
-
-                        Text(item.messageText)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(FigmaTheme.subtext)
-
-                        Text("\(L10n.t("postcard_from_prefix"))\(item.fromDisplayName ?? item.fromUserID)")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(FigmaTheme.text)
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    .shadow(color: Color.black.opacity(0.04), radius: 14, x: 0, y: 5)
-                }
-                .buttonStyle(.plain)
+                PostcardCardRow(
+                    cityName: item.cityName,
+                    nickname: (item.fromDisplayName ?? item.fromUserID).uppercased(),
+                    messageText: item.messageText,
+                    photoSource: photoSource(for: item),
+                    sentDate: item.sentAt,
+                    metaLabel: "\(L10n.t("postcard_from_prefix"))\(item.fromDisplayName ?? item.fromUserID)"
+                )
             }
         }
     }
+
+    // MARK: - Helpers
 
     private var pendingDrafts: [PostcardDraft] {
         let sentIDs = Set(postcardCenter.sentItems.map(\.messageID))
@@ -229,68 +170,34 @@ struct PostcardInboxView: View {
         }
     }
 
-    @ViewBuilder
-    private func detailDestination(for target: PostcardDetailTarget) -> some View {
-        switch target.kind {
-        case .draft(let draftID):
-            if let draft = postcardCenter.drafts.first(where: { $0.draftID == draftID }) {
-                PostcardDetailView(
-                    cityName: draft.cityName,
-                    messageText: draft.message,
-                    nickname: draft.toUserID,
-                    date: draft.sentAt ?? draft.updatedAt,
-                    statusText: draft.status.rawValue.uppercased(),
-                    localImagePath: draft.photoLocalPath,
-                    remoteImageURL: nil
-                )
-            } else {
-                emptyState(text: L10n.t("postcard_send_failed"))
-            }
-        case .sent(let messageID):
-            if let item = postcardCenter.sentItems.first(where: { $0.messageID == messageID }) {
-                PostcardDetailView(
-                    cityName: item.cityName,
-                    messageText: item.messageText,
-                    nickname: item.toUserID,
-                    date: item.sentAt,
-                    statusText: (item.status ?? "sent").uppercased(),
-                    localImagePath: nil,
-                    remoteImageURL: item.photoURL
-                )
-            } else {
-                emptyState(text: L10n.t("postcard_send_failed"))
-            }
-        case .received(let messageID):
-            if let item = postcardCenter.receivedItems.first(where: { $0.messageID == messageID }) {
-                PostcardDetailView(
-                    cityName: item.cityName,
-                    messageText: item.messageText,
-                    nickname: item.fromDisplayName ?? item.fromUserID,
-                    date: item.sentAt,
-                    statusText: nil,
-                    localImagePath: nil,
-                    remoteImageURL: item.photoURL
-                )
-            } else {
-                emptyState(text: L10n.t("postcard_send_failed"))
-            }
+    private func photoSource(for item: BackendPostcardMessageDTO) -> PostcardPhotoSource {
+        if let url = item.photoURL, !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .remoteURL(url)
         }
+        return .none
     }
 
-    private func openFocusedMessageIfNeeded() {
+    private func draftPhotoSource(_ draft: PostcardDraft) -> PostcardPhotoSource {
+        let path = draft.photoLocalPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty else { return .none }
+        if path.lowercased().hasPrefix("http") {
+            return .remoteURL(path)
+        }
+        return .localPath(path)
+    }
+
+    private func autoFocusReceivedIfNeeded() {
         guard let messageID = pendingFocusMessageID, !messageID.isEmpty else { return }
         guard postcardCenter.receivedItems.contains(where: { $0.messageID == messageID }) else {
             Task {
                 await refreshInbox()
                 guard postcardCenter.receivedItems.contains(where: { $0.messageID == messageID }) else { return }
                 selectedBox = .received
-                selectedDetail = PostcardDetailTarget(kind: .received(messageID: messageID))
                 pendingFocusMessageID = nil
             }
             return
         }
         selectedBox = .received
-        selectedDetail = PostcardDetailTarget(kind: .received(messageID: messageID))
         pendingFocusMessageID = nil
     }
 
@@ -306,12 +213,12 @@ struct PostcardInboxView: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 12, weight: .bold))
                 .foregroundColor(.orange)
-            Text("明信片同步异常：\(text)")
+            Text(String(format: L10n.t("postcard_sync_error_format"), text))
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(FigmaTheme.subtext)
                 .lineLimit(2)
             Spacer(minLength: 8)
-            Button("重试") {
+            Button(L10n.t("retry")) {
                 Task { await refreshInbox() }
             }
             .font(.system(size: 12, weight: .bold))
@@ -330,126 +237,74 @@ struct PostcardInboxView: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 32)
     }
-
-    private func statusColor(_ status: PostcardDraftStatus) -> Color {
-        switch status {
-        case .draft: return .gray
-        case .sending: return .orange
-        case .sent: return .green
-        case .failed: return .red
-        }
-    }
 }
 
-private struct PostcardDetailTarget: Identifiable, Hashable {
-    enum Kind: Hashable {
-        case draft(draftID: String)
-        case sent(messageID: String)
-        case received(messageID: String)
-    }
+// MARK: - Card Row (each card has its own flip state)
 
-    let kind: Kind
-
-    var id: String {
-        switch kind {
-        case .draft(let draftID): return "draft_\(draftID)"
-        case .sent(let messageID): return "sent_\(messageID)"
-        case .received(let messageID): return "received_\(messageID)"
-        }
-    }
-}
-
-private struct PostcardDetailView: View {
+private struct PostcardCardRow: View {
     let cityName: String
-    let messageText: String
     let nickname: String
-    let date: Date
-    let statusText: String?
-    let localImagePath: String?
-    let remoteImageURL: String?
-    @State private var isFrontShowing = true
+    let messageText: String
+    let photoSource: PostcardPhotoSource
+    let sentDate: Date
+    let metaLabel: String
+    var statusBadge: String? = nil
+
+    @State private var isFront = true
     @State private var saveToastText: String?
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: 16) {
-                FlippablePostcardView(
-                    cityName: cityName,
-                    nickname: nickname.uppercased(),
-                    messageText: messageText,
-                    photoSource: photoSource,
-                    avatarLoadout: AvatarLoadoutStore.load(),
-                    isFront: $isFrontShowing,
-                    onLongPress: {
-                        saveCurrentFaceToPhotos()
-                    }
-                )
+        VStack(spacing: 10) {
+            FlippablePostcardView(
+                cityName: cityName,
+                nickname: nickname,
+                messageText: messageText,
+                photoSource: photoSource,
+                avatarLoadout: AvatarLoadoutStore.load(),
+                isFront: $isFront,
+                sentDate: sentDate,
+                onLongPress: { saveCurrentFaceToPhotos() }
+            )
 
-                HStack(spacing: 10) {
-                    Text(date.formatted(date: .abbreviated, time: .shortened))
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(FigmaTheme.subtext)
-                    Spacer(minLength: 8)
-                    if let statusText, !statusText.isEmpty {
-                        Text(statusText)
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(FigmaTheme.subtext)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.black.opacity(0.05))
-                            .clipShape(Capsule())
-                    }
+            HStack(spacing: 8) {
+                Text(metaLabel)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(FigmaTheme.text)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                if let statusBadge {
+                    Text(statusBadge)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.orange)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(Color.white)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                Text(sentDate, style: .date)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(FigmaTheme.subtext)
+            }
+            .padding(.horizontal, 4)
 
-                if let saveToastText {
-                    Text(saveToastText)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.green)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 26)
-        }
-        .background(FigmaTheme.background.ignoresSafeArea())
-        .navigationTitle(cityName)
-        .navigationBarTitleDisplayMode(.inline)
-    }
-
-    private var photoSource: PostcardPhotoSource {
-        if let localImagePath {
-            let trimmed = localImagePath.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
-                return .localPath(trimmed)
+            if let saveToastText {
+                Text(saveToastText)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.green)
             }
         }
-        if let remoteImageURL {
-            let trimmed = remoteImageURL.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
-                return .remoteURL(trimmed)
-            }
-        }
-        return .none
     }
 
     private func saveCurrentFaceToPhotos() {
-        guard #available(iOS 16.0, *), let image = renderFaceImage(isFront: isFrontShowing) else {
+        guard #available(iOS 16.0, *), let image = renderFaceImage(isFront: isFront) else {
             saveToastText = "保存失败"
             clearSaveToastSoon()
             return
         }
         UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
-        saveToastText = isFrontShowing ? "已保存明信片正面" : "已保存明信片反面"
+        saveToastText = isFront ? "已保存明信片正面" : "已保存明信片反面"
         clearSaveToastSoon()
     }
 
     @available(iOS 16.0, *)
     private func renderFaceImage(isFront: Bool) -> UIImage? {
-        let width: CGFloat = 1080
+        let width: CGFloat = 540
         let height: CGFloat = width / (3.0 / 2.0)
 
         let faceView: AnyView
@@ -457,7 +312,7 @@ private struct PostcardDetailView: View {
             faceView = AnyView(
                 PostcardFrontFaceView(
                     cityName: cityName,
-                    nickname: nickname.uppercased(),
+                    nickname: nickname,
                     photoSource: photoSource,
                     avatarLoadout: AvatarLoadoutStore.load(),
                     cornerRadius: 22
@@ -467,9 +322,10 @@ private struct PostcardDetailView: View {
             faceView = AnyView(
                 PostcardBackFaceView(
                     cityName: cityName,
-                    nickname: nickname.uppercased(),
+                    nickname: nickname,
                     messageText: messageText,
                     avatarLoadout: AvatarLoadoutStore.load(),
+                    sentDate: sentDate,
                     cornerRadius: 22
                 )
             )
@@ -480,7 +336,7 @@ private struct PostcardDetailView: View {
             .background(Color.white)
 
         let renderer = ImageRenderer(content: renderView)
-        renderer.scale = 3
+        renderer.scale = 2
         renderer.isOpaque = true
         return renderer.uiImage
     }

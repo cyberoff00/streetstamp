@@ -114,12 +114,12 @@ final class WatchJourneyRecorder: NSObject, ObservableObject {
             requestWorkoutAuthorizationAndStart(isRecovery: false)
         case .notDetermined:
             pendingStartMode = .newJourney
-            statusText = "请先允许定位权限"
+            statusText = NSLocalizedString("watch_status_permission_needed", comment: "")
             locationManager.requestWhenInUseAuthorization()
         case .denied, .restricted:
-            statusText = "请先允许手表定位权限"
+            statusText = NSLocalizedString("watch_status_watch_permission_needed", comment: "")
         @unknown default:
-            statusText = "定位权限状态未知"
+            statusText = NSLocalizedString("watch_status_permission_unknown", comment: "")
         }
     }
 
@@ -128,7 +128,7 @@ final class WatchJourneyRecorder: NSObject, ObservableObject {
         clearInactivityAlert()
 
         state = .paused
-        statusText = "已暂停"
+        statusText = NSLocalizedString("watch_status_paused", comment: "")
         locationManager.stopUpdatingLocation()
         if usesWorkoutSession {
             workoutSession?.pause()
@@ -144,7 +144,7 @@ final class WatchJourneyRecorder: NSObject, ObservableObject {
         clearInactivityAlert()
 
         guard let startedAt else {
-            statusText = "恢复失败，请重新开始"
+            statusText = NSLocalizedString("watch_status_resume_failed_restart", comment: "")
             resetToIdle(clearPersisted: true)
             return
         }
@@ -153,13 +153,13 @@ final class WatchJourneyRecorder: NSObject, ObservableObject {
             do {
                 try startWorkoutSessionIfNeeded(startAt: startedAt)
             } catch {
-                statusText = "恢复失败: \(error.localizedDescription)"
+                statusText = String(format: NSLocalizedString("watch_status_resume_failed_format", comment: ""), error.localizedDescription)
                 return
             }
         }
 
         state = .recording
-        statusText = "录制中"
+        statusText = NSLocalizedString("watch_status_recording", comment: "")
         if usesWorkoutSession {
             workoutSession?.resume()
         }
@@ -181,7 +181,7 @@ final class WatchJourneyRecorder: NSObject, ObservableObject {
         sendEndedInChunks(finalPoints, endedAt: Date())
         endWorkoutSession()
 
-        statusText = "已结束，等待手机同步"
+        statusText = NSLocalizedString("watch_status_sync_waiting", comment: "")
         resetToIdle(clearPersisted: true)
     }
 
@@ -215,7 +215,7 @@ final class WatchJourneyRecorder: NSObject, ObservableObject {
     func continueAfterInactivityAlert() {
         inactivityAlertPresented = false
         inactivityAlertMessage = ""
-        statusText = "继续录制中"
+        statusText = NSLocalizedString("watch_status_resuming_recording", comment: "")
     }
 
     func pauseFromInactivityAlert() {
@@ -228,7 +228,7 @@ final class WatchJourneyRecorder: NSObject, ObservableObject {
         inactivityAlertPresented = false
         inactivityAlertMessage = ""
         inactivitySuppressedUntil = Date().addingTimeInterval(lowMovementReminderSnooze)
-        statusText = "30分钟后再提醒"
+        statusText = NSLocalizedString("watch_status_remind_later", comment: "")
     }
 
     private func recoverRecordingIfNeeded() {
@@ -238,7 +238,7 @@ final class WatchJourneyRecorder: NSObject, ObservableObject {
         else { return }
 
         isRecoveringFromDisk = true
-        statusText = "恢复录制中..."
+        statusText = NSLocalizedString("watch_status_recovering", comment: "")
 
         let auth = locationManager.authorizationStatus
         switch auth {
@@ -248,11 +248,11 @@ final class WatchJourneyRecorder: NSObject, ObservableObject {
             pendingStartMode = .recover
             locationManager.requestWhenInUseAuthorization()
         case .denied, .restricted:
-            statusText = "已恢复记录，请先允许定位后继续"
+            statusText = NSLocalizedString("watch_status_recovered_needs_permission", comment: "")
             state = .paused
             persistState(force: true)
         @unknown default:
-            statusText = "恢复失败，权限状态未知"
+            statusText = NSLocalizedString("watch_status_recover_permission_unknown", comment: "")
             state = .paused
             persistState(force: true)
         }
@@ -269,7 +269,7 @@ final class WatchJourneyRecorder: NSObject, ObservableObject {
         }
 
         guard HKHealthStore.isHealthDataAvailable() else {
-            statusText = "当前设备不支持健康数据"
+            statusText = NSLocalizedString("watch_status_health_unsupported", comment: "")
             if !isRecovery { resetToIdle(clearPersisted: true) }
             return
         }
@@ -280,7 +280,7 @@ final class WatchJourneyRecorder: NSObject, ObservableObject {
                 guard let self else { return }
 
                 if let error {
-                    self.statusText = "健康权限失败: \(error.localizedDescription)"
+                    self.statusText = String(format: NSLocalizedString("watch_status_health_failed_format", comment: ""), error.localizedDescription)
                     if !isRecovery {
                         self.resetToIdle(clearPersisted: true)
                     }
@@ -288,7 +288,7 @@ final class WatchJourneyRecorder: NSObject, ObservableObject {
                 }
 
                 guard success else {
-                    self.statusText = "请允许健康权限后再开始"
+                    self.statusText = NSLocalizedString("watch_status_health_permission_needed", comment: "")
                     if !isRecovery {
                         self.resetToIdle(clearPersisted: true)
                     }
@@ -311,7 +311,7 @@ final class WatchJourneyRecorder: NSObject, ObservableObject {
         state = .recording
         distanceMeters = 0
         pointCount = 0
-        statusText = "录制中"
+        statusText = NSLocalizedString("watch_status_recording", comment: "")
         clearInactivityAlert()
         lastInactivityReminderAt = .distantPast
         inactivitySuppressedUntil = .distantPast
@@ -327,7 +327,7 @@ final class WatchJourneyRecorder: NSObject, ObservableObject {
             do {
                 try startWorkoutSessionIfNeeded(startAt: startedAt)
             } catch {
-                statusText = "无法启动后台追踪: \(error.localizedDescription)"
+                statusText = String(format: NSLocalizedString("watch_status_background_start_failed_format", comment: ""), error.localizedDescription)
                 resetToIdle(clearPersisted: true)
                 return
             }
@@ -351,7 +351,7 @@ final class WatchJourneyRecorder: NSObject, ObservableObject {
             do {
                 try startWorkoutSessionIfNeeded(startAt: startedAt)
             } catch {
-                statusText = "恢复后台会话失败: \(error.localizedDescription)"
+                statusText = String(format: NSLocalizedString("watch_status_background_resume_failed_format", comment: ""), error.localizedDescription)
                 state = .paused
                 persistState(force: true)
                 return
@@ -359,7 +359,7 @@ final class WatchJourneyRecorder: NSObject, ObservableObject {
         }
 
         state = .recording
-        statusText = "录制中"
+        statusText = NSLocalizedString("watch_status_recording", comment: "")
         isRecoveringFromDisk = false
         clearInactivityAlert()
         locationManager.startUpdatingLocation()
@@ -588,7 +588,7 @@ final class WatchJourneyRecorder: NSObject, ObservableObject {
         lastProgressSentAt = .distantPast
         sendEvent(.started, points: [])
         persistState(force: true)
-        statusText = "已自动分段继续记录"
+        statusText = NSLocalizedString("watch_status_segment_resumed", comment: "")
     }
 
     private func shouldAutoEndForDuration(now: Date) -> Bool {
@@ -605,7 +605,7 @@ final class WatchJourneyRecorder: NSObject, ObservableObject {
         sendEndedInChunks(recordedPoints, endedAt: now)
         endWorkoutSession()
         resetToIdle(clearPersisted: true)
-        statusText = "已达到24小时上限，自动结束"
+        statusText = NSLocalizedString("watch_status_auto_ended", comment: "")
     }
 
     private func maybePromptLowMovement(now: Date) {
@@ -635,9 +635,9 @@ final class WatchJourneyRecorder: NSObject, ObservableObject {
         else { return }
 
         lastInactivityReminderAt = now
-        inactivityAlertMessage = "近60分钟首尾位移不足100m，是否暂停？"
+        inactivityAlertMessage = NSLocalizedString("watch_inactivity_message", comment: "")
         inactivityAlertPresented = true
-        statusText = "低位移提醒"
+        statusText = NSLocalizedString("watch_inactivity_title", comment: "")
     }
 
     private func boundsDiagonalDistance(_ points: [WatchJourneyPoint]) -> Double? {
@@ -729,9 +729,9 @@ final class WatchJourneyRecorder: NSObject, ObservableObject {
             statusText = ""
             clearPersistedStateFile()
         case .recording:
-            statusText = "检测到未完成旅程，正在恢复"
+            statusText = NSLocalizedString("watch_status_found_unfinished", comment: "")
         case .paused:
-            statusText = "已暂停（已恢复）"
+            statusText = NSLocalizedString("watch_status_paused_recovered", comment: "")
         }
     }
 
@@ -800,7 +800,7 @@ extension WatchJourneyRecorder: CLLocationManagerDelegate {
         let status = manager.authorizationStatus
 
         if status == .denied || status == .restricted {
-            statusText = "定位权限被拒绝"
+            statusText = NSLocalizedString("watch_status_permission_denied", comment: "")
             clearInactivityAlert()
             if state == .recording {
                 state = .paused
@@ -832,8 +832,8 @@ extension WatchJourneyRecorder: CLLocationManagerDelegate {
             accept(location)
         }
 
-        if state == .recording, !locations.isEmpty, statusText != "录制中" {
-            statusText = "录制中"
+        if state == .recording, !locations.isEmpty, statusText != NSLocalizedString("watch_status_recording", comment: "") {
+            statusText = NSLocalizedString("watch_status_recording", comment: "")
         }
     }
 
@@ -843,16 +843,16 @@ extension WatchJourneyRecorder: CLLocationManagerDelegate {
             switch clError.code {
             case .locationUnknown:
                 #if targetEnvironment(simulator)
-                statusText = "模拟器默认无GPS，请在Xcode设置模拟位置"
+                statusText = NSLocalizedString("watch_status_simulator_no_gps", comment: "")
                 #else
-                statusText = "GPS 搜索中..."
+                statusText = NSLocalizedString("watch_status_gps_searching", comment: "")
                 #endif
                 return
             case .denied:
-                statusText = "定位权限被拒绝"
+                statusText = NSLocalizedString("watch_status_permission_denied", comment: "")
                 return
             case .network:
-                statusText = "定位网络不可用，自动重试中"
+                statusText = NSLocalizedString("watch_status_network_retrying", comment: "")
                 return
             default:
                 break
@@ -861,7 +861,7 @@ extension WatchJourneyRecorder: CLLocationManagerDelegate {
 
         let now = Date()
         if now.timeIntervalSince(lastLocationErrorAt) >= 8 {
-            statusText = "定位暂时异常，自动重试中"
+            statusText = NSLocalizedString("watch_status_location_retrying", comment: "")
             lastLocationErrorAt = now
         }
     }
@@ -888,7 +888,7 @@ extension WatchJourneyRecorder: HKWorkoutSessionDelegate, HKLiveWorkoutBuilderDe
     func workoutSession(_ workoutSession: HKWorkoutSession, didFailWithError error: any Error) {
         _ = workoutSession
         guard usesWorkoutSession else { return }
-        statusText = "Workout 会话失败: \(error.localizedDescription)"
+        statusText = String(format: NSLocalizedString("watch_status_workout_failed_format", comment: ""), error.localizedDescription)
 
         if state == .recording {
             state = .paused

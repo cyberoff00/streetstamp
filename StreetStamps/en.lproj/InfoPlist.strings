@@ -1,0 +1,8 @@
+"CFBundleDisplayName" = "Worldo";
+"NSPhotoLibraryAddUsageDescription" = "We need access to save journey photos to your photo library.";
+"NSPhotoLibraryUsageDescription" = "We need access to your photo library so you can add photos to memories.";
+"NSCameraUsageDescription" = "We need access to your camera so you can capture journey photos.";
+"NSLocalNetworkUsageDescription" = "Used to transfer private journey data between your devices on the same local network.";
+"NSLocationWhenInUseUsageDescription" = "We use your location to track your journey.";
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "We use your location to continue tracking your journey in the background.";
+"NSHealthShareUsageDescription" = "Used to read your daily steps and show them in Lifelog.";

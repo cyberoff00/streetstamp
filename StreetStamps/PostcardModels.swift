@@ -26,6 +26,7 @@ struct BackendPostcardMessageDTO: Codable, Identifiable {
     var fromUserID: String
     var fromDisplayName: String?
     var toUserID: String
+    var toDisplayName: String?
     var cityID: String
     var cityName: String
     var photoURL: String?
@@ -43,6 +44,7 @@ struct BackendPostcardMessageDTO: Codable, Identifiable {
         case fromUserID
         case fromDisplayName
         case toUserID
+        case toDisplayName
         case cityID
         case cityName
         case photoURL
@@ -61,6 +63,7 @@ struct BackendPostcardMessageDTO: Codable, Identifiable {
         fromUserID = (try? c.decode(String.self, forKey: .fromUserID)) ?? ""
         fromDisplayName = try? c.decode(String.self, forKey: .fromDisplayName)
         toUserID = (try? c.decode(String.self, forKey: .toUserID)) ?? ""
+        toDisplayName = try? c.decode(String.self, forKey: .toDisplayName)
         cityID = (try? c.decode(String.self, forKey: .cityID)) ?? ""
         cityName = (try? c.decode(String.self, forKey: .cityName)) ?? cityID
         photoURL = try? c.decode(String.self, forKey: .photoURL)
@@ -77,6 +80,7 @@ struct BackendPostcardMessageDTO: Codable, Identifiable {
         try c.encode(fromUserID, forKey: .fromUserID)
         try c.encodeIfPresent(fromDisplayName, forKey: .fromDisplayName)
         try c.encode(toUserID, forKey: .toUserID)
+        try c.encodeIfPresent(toDisplayName, forKey: .toDisplayName)
         try c.encode(cityID, forKey: .cityID)
         try c.encode(cityName, forKey: .cityName)
         try c.encodeIfPresent(photoURL, forKey: .photoURL)

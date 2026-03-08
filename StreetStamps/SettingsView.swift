@@ -21,7 +21,7 @@ struct SettingsAccountCardPresentation: Equatable {
 }
 
 enum SettingsAccountPresentation {
-    static let serviceActionTitles = ["PRIVATE DATA TRANSFER", "SUBSCRIPTION"]
+    static let serviceActionTitles = [L10n.t("settings_private_transfer_row"), L10n.t("settings_subscription_row")]
 
     static func card(
         isLoggedIn: Bool,
@@ -30,13 +30,13 @@ enum SettingsAccountPresentation {
         email: String
     ) -> SettingsAccountCardPresentation {
         if isLoggedIn {
-            let resolvedName = trimmedOrFallback(displayName, fallback: "Explorer")
+            let resolvedName = trimmedOrFallback(displayName, fallback: L10n.t("explorer_fallback"))
             let resolvedExclusiveID = trimmedOrFallback(exclusiveID, fallback: "--")
-            let resolvedEmail = trimmedOrFallback(email, fallback: "未绑定")
+            let resolvedEmail = trimmedOrFallback(email, fallback: L10n.t("not_linked"))
             return SettingsAccountCardPresentation(
                 style: .member,
                 title: resolvedName,
-                subtitle: "ID: \(resolvedExclusiveID)",
+                subtitle: String(format: L10n.t("account_id_format"), resolvedExclusiveID),
                 detailLines: [resolvedEmail],
                 showsChevron: true
             )
@@ -44,8 +44,8 @@ enum SettingsAccountPresentation {
 
         return SettingsAccountCardPresentation(
             style: .guest,
-            title: "登录 Worldo",
-            subtitle: "同步旅行数据，解锁好友功能",
+            title: L10n.t("settings_sign_in_title"),
+            subtitle: L10n.t("settings_sign_in_subtitle"),
             detailLines: [],
             showsChevron: true
         )
@@ -151,7 +151,7 @@ struct SettingsView: View {
         if let userID = sessionStore.accountUserID, !userID.isEmpty {
             return userID
         }
-        return "游客模式"
+        return L10n.t("guest_mode")
     }
 
     private var appVersionText: String {
@@ -196,18 +196,18 @@ struct SettingsView: View {
             settingsHeader
         }
         .toolbar(.hidden, for: .navigationBar)
-        .alert("Coming Soon", isPresented: $showComingSoon) {
+        .alert(L10n.t("settings_coming_soon_title"), isPresented: $showComingSoon) {
             Button(L10n.t("ok"), role: .cancel) {}
         } message: {
             Text(String(format: L10n.t("coming_soon_message"), comingSoonTitle))
         }
-        .alert("提示", isPresented: $showAccountMessage) {
-            Button("好", role: .cancel) {}
+        .alert(L10n.t("prompt"), isPresented: $showAccountMessage) {
+            Button(L10n.t("ok"), role: .cancel) {}
         } message: {
             Text(accountMessage)
         }
-        .alert("后台记录模式", isPresented: $showBackgroundModeInfo) {
-            Button("知道了", role: .cancel) {}
+        .alert(L10n.t("settings_lifelog_bg_mode_title"), isPresented: $showBackgroundModeInfo) {
+            Button(L10n.t("got_it"), role: .cancel) {}
         } message: {
             Text(L10n.t("settings_lifelog_bg_mode_desc"))
         }
@@ -233,6 +233,7 @@ struct SettingsView: View {
     private var settingsHeader: some View {
         UnifiedTabPageHeader(
             title: L10n.t("settings_title"),
+            titleLevel: .secondary,
             horizontalPadding: 18,
             topPadding: 8,
             bottomPadding: 12
@@ -258,7 +259,7 @@ struct SettingsView: View {
 
     private var mapAppearanceSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("MAP APPEARANCE")
+            sectionTitle(L10n.t("settings_section_map_appearance"))
 
             toggleRowCard(
                 presentation: .mapDarkMode,
@@ -275,7 +276,7 @@ struct SettingsView: View {
 
     private var trackingAssistSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("TRACKING ASSIST")
+            sectionTitle(L10n.t("settings_section_tracking_assist"))
 
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .center, spacing: 10) {
@@ -321,27 +322,25 @@ struct SettingsView: View {
 
     private var generalSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("GENERAL")
+            sectionTitle(L10n.t("settings_section_general"))
 
             VStack(spacing: 10) {
                 NavigationLink {
                     gpxImportEntryView
                 } label: {
-                    settingsRowLabel(title: "IMPORT GPX", icon: "map", iconColor: FigmaTheme.primary)
+                    settingsRowLabel(title: L10n.t("settings_import_gpx_row"), icon: "map", iconColor: FigmaTheme.primary)
                 }
                 .buttonStyle(.plain)
 
                 NavigationLink {
                     notificationsView
                 } label: {
-                    settingsRowLabel(title: "NOTIFICATIONS", icon: "bell", iconColor: FigmaTheme.secondary)
+                    settingsRowLabel(title: L10n.t("settings_notifications_title"), icon: "bell", iconColor: FigmaTheme.secondary)
                 }
                 .buttonStyle(.plain)
 
                 NavigationLink {
-                    DebugChinaTestModule()
-                        .navigationTitle(L10n.t("debug_tools_title"))
-                        .navigationBarTitleDisplayMode(.inline)
+                    SettingsDebugToolsEntryView()
                 } label: {
                     settingsRowLabel(
                         title: "DEBUG TOOLS",
@@ -373,7 +372,7 @@ struct SettingsView: View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 10) {
-                    sectionTitle("NOTIFICATIONS")
+                    sectionTitle(L10n.t("settings_notifications_title"))
 
                     VStack(alignment: .leading, spacing: 14) {
                         HStack(alignment: .top, spacing: 10) {
@@ -422,13 +421,27 @@ struct SettingsView: View {
             .padding(.bottom, 28)
         }
         .background(FigmaTheme.mutedBackground.ignoresSafeArea())
-        .navigationTitle("Notifications")
-        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            UnifiedNavigationHeader(
+                chrome: NavigationChrome(
+                    title: L10n.t("settings_notifications_title"),
+                    leadingAccessory: .back,
+                    titleLevel: .secondary
+                ),
+                horizontalPadding: 18,
+                topPadding: 8,
+                bottomPadding: 12,
+                onLeadingTap: { dismiss() }
+            ) {
+                Color.clear
+            }
+        }
+        .toolbar(.hidden, for: .navigationBar)
     }
 
     private var accountSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("ACCOUNT")
+            sectionTitle(L10n.t("account_section_account"))
 
             VStack(spacing: 10) {
                 accountInfoCard
@@ -477,17 +490,17 @@ struct SettingsView: View {
 
     private var servicesSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("SERVICES")
+            sectionTitle(L10n.t("settings_section_services"))
 
             VStack(spacing: 10) {
                 NavigationLink {
                     privateTransferView
                 } label: {
-                    settingsRowLabel(title: "PRIVATE DATA TRANSFER", icon: "qrcode.viewfinder", iconColor: FigmaTheme.primary)
+                    settingsRowLabel(title: L10n.t("settings_private_transfer_row"), icon: "qrcode.viewfinder", iconColor: FigmaTheme.primary)
                 }
                 .buttonStyle(.plain)
 
-                settingsRow(title: "SUBSCRIPTION", icon: "creditcard", iconColor: FigmaTheme.primary) {
+                settingsRow(title: L10n.t("settings_subscription_row"), icon: "creditcard", iconColor: FigmaTheme.primary) {
                     showPlaceholder("Subscription")
                 }
             }
@@ -497,7 +510,7 @@ struct SettingsView: View {
     private var displayNameEditorSheet: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 14) {
-                Text("编辑昵称")
+                Text(L10n.t("settings_edit_name_title"))
                     .font(.system(size: 20, weight: .bold))
                     .foregroundColor(FigmaTheme.text)
 
@@ -505,7 +518,7 @@ struct SettingsView: View {
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 14, weight: .semibold))
 
-                Text("支持 1-24 个字符")
+                Text(L10n.t("settings_name_character_limit"))
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(FigmaTheme.subtext)
 
@@ -513,22 +526,30 @@ struct SettingsView: View {
             }
             .padding(18)
             .background(FigmaTheme.mutedBackground.ignoresSafeArea())
-            .navigationTitle("修改昵称")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") {
+            .safeAreaInset(edge: .top, spacing: 0) {
+                UnifiedNavigationHeader(
+                    chrome: NavigationChrome(
+                        title: L10n.t("profile_edit_name_title"),
+                        leadingAccessory: .back,
+                        titleLevel: .secondary
+                    ),
+                    horizontalPadding: 18,
+                    topPadding: 8,
+                    bottomPadding: 12,
+                    onLeadingTap: {
                         showDisplayNameEditor = false
                         displayNameInput = displayNameDraft
                     }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") {
+                ) {
+                    Button(L10n.t("save")) {
                         Task { await updateDisplayName(to: displayNameInput) }
                     }
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(FigmaTheme.text)
                     .disabled(!sessionStore.isLoggedIn)
                 }
             }
+            .toolbar(.hidden, for: .navigationBar)
         }
     }
 
@@ -598,7 +619,7 @@ struct SettingsView: View {
 
     private var levelRulesSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("LEVEL RULES")
+            sectionTitle(L10n.t("settings_section_level_rules"))
 
             VStack(alignment: .leading, spacing: 10) {
                 Text(L10n.t("settings_level_rules_intro"))
@@ -633,7 +654,7 @@ struct SettingsView: View {
 
     private var infoSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("INFORMATION")
+            sectionTitle(L10n.t("settings_section_information"))
 
             VStack(spacing: 10) {
                 settingsRow(
@@ -661,7 +682,7 @@ struct SettingsView: View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("私密数据迁移")
+                    Text(L10n.t("settings_private_transfer_title"))
                         .font(.system(size: 20, weight: .bold))
                         .foregroundColor(FigmaTheme.text)
 
@@ -672,7 +693,7 @@ struct SettingsView: View {
                 .padding(.bottom, 4)
 
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("旧设备（导出）")
+                    Text(L10n.t("settings_transfer_old_device"))
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(FigmaTheme.text.opacity(0.76))
 
@@ -702,7 +723,7 @@ struct SettingsView: View {
                         } label: {
                             HStack(spacing: 8) {
                                 Image(systemName: "stop.circle")
-                                Text("停止导出")
+                                Text(L10n.t("settings_transfer_stop_export"))
                                     .font(.system(size: 15, weight: .semibold))
                             }
                             .foregroundColor(.white)
@@ -720,7 +741,7 @@ struct SettingsView: View {
                         } label: {
                             HStack(spacing: 8) {
                                 Image(systemName: "qrcode")
-                                Text("生成扫码迁移二维码")
+                                Text(L10n.t("settings_transfer_generate_qr"))
                                     .font(.system(size: 15, weight: .semibold))
                             }
                             .foregroundColor(.white)
@@ -738,7 +759,7 @@ struct SettingsView: View {
                 .figmaSurfaceCard(radius: 22)
 
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("新设备（导入）")
+                    Text(L10n.t("settings_transfer_new_device"))
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(FigmaTheme.text.opacity(0.76))
 
@@ -752,7 +773,7 @@ struct SettingsView: View {
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: "camera.viewfinder")
-                            Text("扫码并导入")
+                            Text(L10n.t("settings_transfer_scan_import"))
                                 .font(.system(size: 15, weight: .semibold))
                         }
                         .foregroundColor(.white)
@@ -773,8 +794,22 @@ struct SettingsView: View {
             .padding(.bottom, 28)
         }
         .background(FigmaTheme.mutedBackground.ignoresSafeArea())
-        .navigationTitle("设备迁移")
-        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            UnifiedNavigationHeader(
+                chrome: NavigationChrome(
+                    title: L10n.t("settings_device_transfer_title"),
+                    leadingAccessory: .back,
+                    titleLevel: .secondary
+                ),
+                horizontalPadding: 18,
+                topPadding: 8,
+                bottomPadding: 12,
+                onLeadingTap: { dismiss() }
+            ) {
+                Color.clear
+            }
+        }
+        .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showTransferScanner) {
             QRCodeScannerSheet(
                 onFound: { payload in
@@ -794,11 +829,11 @@ struct SettingsView: View {
                 }
             )
         }
-        .alert("迁移提示", isPresented: Binding(
+        .alert(L10n.t("settings_transfer_alert_title"), isPresented: Binding(
             get: { privateTransfer.alertMessage != nil },
             set: { if !$0 { privateTransfer.alertMessage = nil } }
         )) {
-            Button("好", role: .cancel) {}
+            Button(L10n.t("ok"), role: .cancel) {}
         } message: {
             Text(privateTransfer.alertMessage ?? "")
         }
@@ -879,9 +914,23 @@ struct SettingsView: View {
             .padding(.bottom, 28)
         }
         .background(FigmaTheme.mutedBackground.ignoresSafeArea())
-        .navigationTitle(L10n.t("import_gpx_title"))
-        .navigationBarTitleDisplayMode(.inline)
-        .alert("Import Failed", isPresented: Binding(
+        .safeAreaInset(edge: .top, spacing: 0) {
+            UnifiedNavigationHeader(
+                chrome: NavigationChrome(
+                    title: L10n.t("import_gpx_title"),
+                    leadingAccessory: .back,
+                    titleLevel: .secondary
+                ),
+                horizontalPadding: 18,
+                topPadding: 8,
+                bottomPadding: 12,
+                onLeadingTap: { dismiss() }
+            ) {
+                Color.clear
+            }
+        }
+        .toolbar(.hidden, for: .navigationBar)
+        .alert(L10n.t("settings_import_failed_title"), isPresented: Binding(
             get: { gpxImportError != nil },
             set: { if !$0 { gpxImportError = nil } }
         )) {
@@ -1085,7 +1134,7 @@ struct SettingsView: View {
                 profileVisibility = .friendsOnly
             }
         } catch {
-            toastAccount("获取账号信息失败：\(error.localizedDescription)")
+            toastAccount(String(format: L10n.t("account_fetch_profile_failed_format"), error.localizedDescription))
         }
     }
 
@@ -1093,16 +1142,16 @@ struct SettingsView: View {
         guard let token = sessionStore.currentAccessToken, !token.isEmpty else { return }
         let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else {
-            return toastAccount("昵称不能为空")
+            return toastAccount(L10n.t("profile_name_empty"))
         }
         do {
             _ = try await BackendAPIClient.shared.updateDisplayName(token: token, displayName: value)
             displayNameDraft = value
             displayNameInput = value
             showDisplayNameEditor = false
-            toastAccount("昵称已更新")
+            toastAccount(L10n.t("profile_name_updated"))
         } catch {
-            toastAccount("更新失败：\(error.localizedDescription)")
+            toastAccount(String(format: L10n.t("update_failed_format"), error.localizedDescription))
         }
     }
 
@@ -1113,7 +1162,7 @@ struct SettingsView: View {
             ProfileSharingSettings.visibility = profileVisibility
         } catch {
             profileVisibility = previous
-            toastAccount("更新失败：\(error.localizedDescription)")
+            toastAccount(String(format: L10n.t("update_failed_format"), error.localizedDescription))
         }
     }
 
@@ -1254,15 +1303,22 @@ struct SettingsView: View {
             }
             .padding(18)
             .background(FigmaTheme.mutedBackground.ignoresSafeArea())
-            .navigationTitle(L10n.t("import_gpx_title"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(L10n.t("cancel")) {
-                        gpxImportPreview = nil
-                    }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                UnifiedNavigationHeader(
+                    chrome: NavigationChrome(
+                        title: L10n.t("import_gpx_title"),
+                        leadingAccessory: .back,
+                        titleLevel: .secondary
+                    ),
+                    horizontalPadding: 18,
+                    topPadding: 8,
+                    bottomPadding: 12,
+                    onLeadingTap: { gpxImportPreview = nil }
+                ) {
+                    Color.clear
                 }
             }
+            .toolbar(.hidden, for: .navigationBar)
         }
     }
 
@@ -1296,6 +1352,30 @@ struct SettingsView: View {
         lifelogStore.importExternalTrack(points: lifelogTimeline)
 
         gpxImportPreview = nil
+    }
+}
+
+private struct SettingsDebugToolsEntryView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        DebugChinaTestModule()
+            .safeAreaInset(edge: .top, spacing: 0) {
+                UnifiedNavigationHeader(
+                    chrome: NavigationChrome(
+                        title: L10n.t("debug_tools_title"),
+                        leadingAccessory: .back,
+                        titleLevel: .secondary
+                    ),
+                    horizontalPadding: 18,
+                    topPadding: 8,
+                    bottomPadding: 12,
+                    onLeadingTap: { dismiss() }
+                ) {
+                    Color.clear
+                }
+            }
+            .toolbar(.hidden, for: .navigationBar)
     }
 }
 
@@ -1338,7 +1418,7 @@ private enum GPXImportService {
         await progress?(0.2, L10n.t("gpx_import_progress_parsing"))
         let parsed = try GPXXMLParser.parse(data: data)
         guard parsed.count >= 2 else {
-            throw NSError(domain: "GPXImport", code: 1, userInfo: [NSLocalizedDescriptionKey: "GPX 轨迹点不足（至少需要 2 个点）。"])
+            throw NSError(domain: "GPXImport", code: 1, userInfo: [NSLocalizedDescriptionKey: L10n.t("gpx_import_not_enough_points")])
         }
 
         await progress?(0.45, L10n.t("gpx_import_progress_building"))
@@ -1497,8 +1577,8 @@ private enum GPXXMLParser {
         if success {
             return delegate.points
         }
-        let message = parser.parserError?.localizedDescription ?? "Unknown parse error"
-        throw NSError(domain: "GPXImport", code: 2, userInfo: [NSLocalizedDescriptionKey: "GPX 解析失败：\(message)"])
+        let message = parser.parserError?.localizedDescription ?? L10n.t("unknown_parse_error")
+        throw NSError(domain: "GPXImport", code: 2, userInfo: [NSLocalizedDescriptionKey: String(format: L10n.t("gpx_import_parse_failed_format"), message)])
     }
 }
 
@@ -1608,23 +1688,23 @@ private enum PrivateTransferError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .sourceMissing:
-            return "未找到本地私密数据目录。"
+            return L10n.t("transfer_error_source_missing")
         case .noPrivateData:
-            return "当前没有可迁移的私密 Journey 或 Lifelog 数据。"
+            return L10n.t("transfer_error_no_private_data")
         case .packageEncodeFailed:
-            return "私密数据打包失败。"
+            return L10n.t("transfer_error_package_encode")
         case .packageDecodeFailed:
-            return "私密数据包解析失败。"
+            return L10n.t("transfer_error_package_decode")
         case .serverStartFailed:
-            return "本地迁移服务启动失败。"
+            return L10n.t("transfer_error_server_start")
         case .localIPUnavailable:
-            return "无法获取本机局域网地址，请确认已连接 Wi-Fi。"
+            return L10n.t("transfer_error_local_ip")
         case .invalidPayload:
-            return "二维码内容无效。"
+            return L10n.t("transfer_error_invalid_payload")
         case .invalidResponse:
-            return "旧设备返回异常。"
+            return L10n.t("transfer_error_invalid_response")
         case .importSourceNotFound:
-            return "导入包内容不完整。"
+            return L10n.t("transfer_error_import_source_missing")
         }
     }
 }
@@ -1636,8 +1716,8 @@ private final class PrivateDataTransferManager: ObservableObject {
     @Published var isHosting = false
     @Published var isImporting = false
     @Published var isBusy = false
-    @Published private(set) var hostingHintText: String = "点击生成二维码后，保持此页面常亮，等待新设备扫码。"
-    @Published private(set) var importStatusText: String = "点击“扫码并导入”，扫描旧设备上的二维码。"
+    @Published private(set) var hostingHintText: String = L10n.t("transfer_hosting_hint_idle")
+    @Published private(set) var importStatusText: String = L10n.t("transfer_import_status_idle")
 
     private struct HostedSession {
         let server: PrivateDataTransferHTTPServer
@@ -1665,7 +1745,7 @@ private final class PrivateDataTransferManager: ObservableObject {
                 throw PrivateTransferError.sourceMissing
             }
 
-            hostingHintText = "正在准备私密数据包…"
+            hostingHintText = L10n.t("transfer_hosting_preparing")
 
             let staged = try await Task.detached(priority: .userInitiated) {
                 try Self.makeHostedArchive(from: sourceRoot)
@@ -1701,8 +1781,13 @@ private final class PrivateDataTransferManager: ObservableObject {
             hostedSession = HostedSession(server: server, stagingDirectory: staged.stagingDirectory)
             hostingQRCode = qr
             isHosting = true
-            let lifelogText = staged.summary.includesLifelog ? "，含 Lifelog" : ""
-            hostingHintText = "二维码已生成（\(Self.prettySize(fileSize))，私密 Journey \(staged.summary.privateJourneyCount) 条，照片 \(staged.summary.privatePhotoCount) 张\(lifelogText)）。请在新设备扫码并保持两台设备处于同一 Wi-Fi。"
+            hostingHintText = String(
+                format: L10n.t("transfer_hosting_ready_format"),
+                Self.prettySize(fileSize),
+                staged.summary.privateJourneyCount,
+                staged.summary.privatePhotoCount,
+                staged.summary.includesLifelog ? L10n.t("transfer_hosting_includes_lifelog") : ""
+            )
         } catch {
             stopHosting(clearAlert: true)
             alertMessage = error.localizedDescription
@@ -1726,7 +1811,7 @@ private final class PrivateDataTransferManager: ObservableObject {
 
         do {
             let payload = try Self.parsePayload(payloadText)
-            importStatusText = "正在连接旧设备…"
+            importStatusText = L10n.t("transfer_import_connecting")
 
             var components = URLComponents()
             components.scheme = "http"
@@ -1738,13 +1823,13 @@ private final class PrivateDataTransferManager: ObservableObject {
                 throw PrivateTransferError.invalidPayload
             }
 
-            importStatusText = "正在下载私密数据包…"
+            importStatusText = L10n.t("transfer_import_downloading")
             let (downloadURL, response) = try await URLSession.shared.download(from: url)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                 throw PrivateTransferError.invalidResponse
             }
 
-            importStatusText = "正在导入私密数据包…"
+            importStatusText = L10n.t("transfer_import_importing")
             let recoverResult = try await Task.detached(priority: .userInitiated) {
                 try Self.importArchive(
                     downloadURL: downloadURL,
@@ -1752,15 +1837,20 @@ private final class PrivateDataTransferManager: ObservableObject {
                 )
             }.value
 
-            importStatusText = "正在刷新本地数据…"
+            importStatusText = L10n.t("transfer_import_refreshing")
             journeyStore.load()
             cityCache.rebuildFromJourneyStore()
             lifelogStore.load()
 
-            importStatusText = "导入完成。"
-            alertMessage = "导入完成：新增 Journey \(recoverResult.mergedJourneyCount) 条，照片 \(recoverResult.copiedPhotos) 个，Lifelog \(recoverResult.replacedLifelog ? "已替换为更完整版本" : "无需替换")。"
+            importStatusText = L10n.t("transfer_import_done")
+            alertMessage = String(
+                format: L10n.t("transfer_import_done_alert_format"),
+                recoverResult.mergedJourneyCount,
+                recoverResult.copiedPhotos,
+                recoverResult.replacedLifelog ? L10n.t("transfer_lifelog_replaced") : L10n.t("transfer_lifelog_not_replaced")
+            )
         } catch {
-            importStatusText = "导入失败。"
+            importStatusText = L10n.t("transfer_import_failed")
             alertMessage = error.localizedDescription
         }
     }
@@ -1773,7 +1863,7 @@ private final class PrivateDataTransferManager: ObservableObject {
         hostedSession = nil
         hostingQRCode = nil
         isHosting = false
-        hostingHintText = "点击生成二维码后，保持此页面常亮，等待新设备扫码。"
+        hostingHintText = L10n.t("transfer_hosting_hint_idle")
         if clearAlert {
             alertMessage = nil
         }

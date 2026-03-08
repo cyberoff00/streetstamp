@@ -255,6 +255,7 @@ struct JourneyRoute: Codable {
     var customTitle: String? = nil
     var activityTag: String? = nil
     var overallMemory: String? = nil
+    var overallMemoryImagePaths: [String] = []
 
     // ✅ 加回普通 init，修复 “Missing argument for 'from'”
     init(
@@ -285,7 +286,8 @@ struct JourneyRoute: Codable {
         visibility: JourneyVisibility = .private,
         customTitle: String? = nil,
         activityTag: String? = nil,
-        overallMemory: String? = nil
+        overallMemory: String? = nil,
+        overallMemoryImagePaths: [String] = []
     ) {
         self.id = id
         self.startTime = startTime
@@ -315,6 +317,7 @@ struct JourneyRoute: Codable {
         self.customTitle = customTitle
         self.activityTag = activityTag
         self.overallMemory = overallMemory
+        self.overallMemoryImagePaths = overallMemoryImagePaths
     }
 
     var isCompleted: Bool { endTime != nil && startTime != nil }
@@ -346,7 +349,7 @@ struct JourneyRoute: Codable {
         case countryISO2
         case currentCity, cityName, startCityKey, endCityKey
         case exploreMode, trackingMode
-        case visibility, customTitle, activityTag, overallMemory
+        case visibility, customTitle, activityTag, overallMemory, overallMemoryImagePaths
 
         // 兼容更老字段名（如果你确实历史里用过）
         case coords
@@ -396,6 +399,7 @@ struct JourneyRoute: Codable {
         customTitle = try c.decodeIfPresent(String.self, forKey: .customTitle)
         activityTag = try c.decodeIfPresent(String.self, forKey: .activityTag)
         overallMemory = try c.decodeIfPresent(String.self, forKey: .overallMemory)
+        overallMemoryImagePaths = try c.decodeIfPresent([String].self, forKey: .overallMemoryImagePaths) ?? []
     }
 
     // ✅ 自己实现 encode，修复 Encodable 合成失败（并且你可以选择写出 coords 兼容）
@@ -444,6 +448,9 @@ struct JourneyRoute: Codable {
         try c.encodeIfPresent(customTitle, forKey: .customTitle)
         try c.encodeIfPresent(activityTag, forKey: .activityTag)
         try c.encodeIfPresent(overallMemory, forKey: .overallMemory)
+        if !overallMemoryImagePaths.isEmpty {
+            try c.encode(overallMemoryImagePaths, forKey: .overallMemoryImagePaths)
+        }
     }
 }
 
@@ -476,6 +483,7 @@ extension JourneyRoute {
         if let t = other.customTitle, !t.isEmpty { out.customTitle = t }
         if let tag = other.activityTag, !tag.isEmpty { out.activityTag = tag }
         if let memo = other.overallMemory, !memo.isEmpty { out.overallMemory = memo }
+        out.overallMemoryImagePaths = other.overallMemoryImagePaths
         return out
     }
 
@@ -909,7 +917,9 @@ struct MapView: View {
     }
 
     private var topTrackingHeader: some View {
-        ZStack {
+        let pillPresentation = journeyRoute.trackingMode.mapPillPresentation
+
+        return ZStack {
             Text(journeyRoute.displayCityName.uppercased())
                 .font(.system(size: 20, weight: .bold))
                 .tracking(-0.9)
@@ -950,23 +960,30 @@ struct MapView: View {
                         showModeSelector = true
                     }
                 } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: journeyRoute.trackingMode == .sport ? "bolt.fill" : "shoeprints.fill")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(FigmaTheme.secondary)
+                    HStack(spacing: pillPresentation.horizontalSpacing) {
+                        Image(systemName: pillPresentation.symbolName)
+                            .font(.system(size: pillPresentation.iconFontSize, weight: .medium))
+                            .foregroundColor(FigmaTheme.text.opacity(pillPresentation.foregroundOpacity))
                         Text(journeyRoute.trackingMode == .sport ? L10n.key("lockscreen_sport_mode") : L10n.key("lockscreen_daily_mode"))
-                            .font(.system(size: 11, weight: .bold))
+                            .font(.system(size: 11, weight: .semibold))
                             .lineLimit(1)
-                            .foregroundColor(FigmaTheme.secondary)
+                            .foregroundColor(FigmaTheme.text.opacity(pillPresentation.foregroundOpacity))
                     }
-                    .padding(.horizontal, 12)
-                    .frame(height: 32)
-                    .background(Color.white.opacity(0.94))
-                    .clipShape(Capsule(style: .continuous))
+                    .padding(.horizontal, 13)
+                    .frame(height: 34)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(.ultraThinMaterial)
+                    )
                     .overlay(
                         Capsule(style: .continuous)
-                            .stroke(FigmaTheme.secondary.opacity(0.6), lineWidth: 1)
+                            .fill(FigmaTheme.background.opacity(pillPresentation.backgroundOpacity))
                     )
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .stroke(FigmaTheme.text.opacity(pillPresentation.borderOpacity), lineWidth: 0.8)
+                    )
+                    .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
                 }
                 .buttonStyle(.plain)
             }
@@ -2148,7 +2165,7 @@ private var hasUnsavedChanges: Bool {
                 onClose: { showPhotoViewer = false }
             )
         }
-        .alert("丢弃更改？", isPresented: $showDiscardAlert) {
+        .alert(L10n.t("discard_changes_title"), isPresented: $showDiscardAlert) {
             Button(L10n.t("cancel"), role: .cancel) {}
             Button(L10n.t("discard"), role: .destructive) { closeWithoutSaving() }
         } message: {

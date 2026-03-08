@@ -48,7 +48,7 @@ final class ProfileSceneInteractionStateTests: XCTestCase {
         XCTAssertTrue(state.showsCTA)
         XCTAssertFalse(state.isCTAEnabled)
         XCTAssertEqual(state.ctaTitle, "已坐下")
-        XCTAssertEqual(state.postcardPromptText, "send a post card")
+        XCTAssertEqual(state.postcardPromptText, "send a postcard?")
     }
 
     func test_friendProfile_loading_usesLoadingCopy() {

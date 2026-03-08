@@ -1,12 +1,59 @@
 import SwiftUI
 import Combine
 
-private enum MainSidebarDestination: String, Identifiable {
+struct MainTabLayout {
+    struct Item: Equatable {
+        let tab: NavigationTab
+        let systemImage: String
+    }
+
+    static let bottomTabs: [Item] = [
+        Item(tab: .start, systemImage: "point.bottomleft.forward.to.point.topright.scurvepath"),
+        Item(tab: .memory, systemImage: "heart.fill"),
+        Item(tab: .cities, systemImage: "square.grid.2x2.fill"),
+        Item(tab: .lifelog, systemImage: "house.fill"),
+        Item(tab: .friends, systemImage: "person.2.fill")
+    ]
+
+    static func systemImage(for tab: NavigationTab) -> String {
+        bottomTabs.first(where: { $0.tab == tab })?.systemImage ?? tab.icon
+    }
+}
+
+enum MainSidebarDestination: String, Identifiable, CaseIterable {
     case profile
     case settings
     case equipment
+    case postcards
+    case inviteFriend
 
     var id: String { rawValue }
+
+    static let primaryDestinations: [MainSidebarDestination] = [
+        .profile,
+        .equipment,
+        .settings
+    ]
+
+    static let quickActions: [MainSidebarDestination] = [
+        .postcards,
+        .inviteFriend
+    ]
+
+    var navigationChrome: NavigationChrome {
+        switch self {
+        case .profile:
+            return NavigationChrome(title: L10n.t("profile_title"), leadingAccessory: .none, titleLevel: .secondary)
+        case .settings:
+            return NavigationChrome(title: L10n.t("settings_title"), leadingAccessory: .none, titleLevel: .secondary)
+        case .equipment:
+            return NavigationChrome(title: L10n.t("equipment_title"), leadingAccessory: .none, titleLevel: .secondary)
+        case .postcards:
+            return NavigationChrome(title: L10n.t("postcard_nav_title"), leadingAccessory: .back, titleLevel: .secondary)
+        case .inviteFriend:
+            return NavigationChrome(title: L10n.t("profile_invite_friends"), leadingAccessory: .back, titleLevel: .secondary)
+        }
+    }
 }
 
 @MainActor
@@ -19,6 +66,8 @@ struct MainTabView: View {
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var flow: AppFlowCoordinator
     @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
+    @EnvironmentObject private var socialStore: SocialGraphStore
+    @EnvironmentObject private var sessionStore: UserSessionStore
 
     @State private var pendingResumeJourney: JourneyRoute? = nil
     @State private var didPromptResumeThisLaunch: Bool = false
@@ -61,7 +110,7 @@ struct MainTabView: View {
             if onboardingGuide.canResume {
                 HStack {
                     Spacer()
-                    Button("继续引导") {
+                    Button(L10n.t("main_resume_onboarding")) {
                         onboardingGuide.resume()
                     }
                     .font(.system(size: 13, weight: .semibold))
@@ -97,6 +146,10 @@ struct MainTabView: View {
                     SettingsView()
                 case .equipment:
                     SidebarEquipmentEntryView()
+                case .postcards:
+                    SidebarPostcardsEntryView()
+                case .inviteFriend:
+                    SidebarInviteFriendEntryView()
                 }
             }
         }
@@ -149,31 +202,7 @@ struct MainTabView: View {
             ))
             .tag(NavigationTab.start)
             .tabItem {
-                Label("Home", systemImage: "house.fill")
-            }
-
-            NavigationStack {
-                if shouldRenderTab(.friends) {
-                    FriendsHubView()
-                } else {
-                    Color.clear
-                }
-            }
-            .tag(NavigationTab.friends)
-            .tabItem {
-                Label("Friends", systemImage: "person.2.fill")
-            }
-
-            NavigationStack {
-                if shouldRenderTab(.cities) {
-                    CollectionTabView()
-                } else {
-                    Color.clear
-                }
-            }
-            .tag(NavigationTab.cities)
-            .tabItem {
-                Label("Collection", systemImage: "square.grid.2x2.fill")
+                Label(L10n.t("tab_home"), systemImage: MainTabLayout.systemImage(for: .start))
             }
 
             NavigationStack {
@@ -189,7 +218,19 @@ struct MainTabView: View {
             }
             .tag(NavigationTab.memory)
             .tabItem {
-                Label("Memory", systemImage: "heart.fill")
+                Label(L10n.t("tab_memory"), systemImage: MainTabLayout.systemImage(for: .memory))
+            }
+
+            NavigationStack {
+                if shouldRenderTab(.cities) {
+                    CollectionTabView()
+                } else {
+                    Color.clear
+                }
+            }
+            .tag(NavigationTab.cities)
+            .tabItem {
+                Label(L10n.t("tab_collection"), systemImage: MainTabLayout.systemImage(for: .cities))
             }
 
             Group {
@@ -201,8 +242,20 @@ struct MainTabView: View {
             }
                 .tag(NavigationTab.lifelog)
                 .tabItem {
-                    Label(L10n.t("tab_lifelog"), systemImage: "point.bottomleft.forward.to.point.topright.scurvepath")
+                    Label(L10n.t("tab_lifelog"), systemImage: MainTabLayout.systemImage(for: .lifelog))
                 }
+
+            NavigationStack {
+                if shouldRenderTab(.friends) {
+                    FriendsHubView()
+                } else {
+                    Color.clear
+                }
+            }
+            .tag(NavigationTab.friends)
+            .tabItem {
+                Label(L10n.t("tab_friends"), systemImage: MainTabLayout.systemImage(for: .friends))
+            }
         }
         .tint(FigmaTheme.primary)
         .toolbarColorScheme(.light, for: .tabBar)
@@ -252,7 +305,7 @@ struct MainTabView: View {
             iconWeight: .semibold,
             foreground: .black
         )
-        .accessibilityLabel("Open sidebar")
+        .accessibilityLabel(L10n.t("open_sidebar"))
     }
 
     /// Prompt user once per launch if there is an unfinished journey on disk.
@@ -314,9 +367,11 @@ private struct MainSidebarMenuView: View {
     let onSelectDestination: (MainSidebarDestination) -> Void
     
     private let sidebarItems: [(title: String, icon: String, destination: MainSidebarDestination)] = [
-        ("PROFILE", "person", .profile),
-        ("EQUIPMENT", "tshirt", .equipment),
-        ("SETTINGS", "gearshape", .settings)
+        (L10n.t("profile_title"), "person", .profile),
+        (L10n.t("equipment_title"), "tshirt", .equipment),
+        (L10n.t("settings_title"), "gearshape", .settings),
+        (L10n.t("postcard_nav_title"), "envelope", .postcards),
+        (L10n.t("profile_invite_friends"), "person.badge.plus", .inviteFriend)
     ]
 
     private var displayName: String {
@@ -479,6 +534,43 @@ private struct MainSidebarMenuView: View {
             .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct SidebarPostcardsEntryView: View {
+    var body: some View {
+        PostcardInboxView()
+    }
+}
+
+private struct SidebarInviteFriendEntryView: View {
+    @EnvironmentObject private var socialStore: SocialGraphStore
+    @EnvironmentObject private var sessionStore: UserSessionStore
+    @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
+
+    private var resolvedDisplayName: String {
+        let trimmed = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? L10n.t("explorer_fallback") : trimmed
+    }
+
+    private var resolvedExclusiveID: String {
+        let source = sessionStore.accountUserID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return source.isEmpty ? "explorer" : source
+    }
+
+    private var resolvedInviteCode: String {
+        SocialGraphStore.generateInviteCode(source: sessionStore.accountUserID ?? resolvedExclusiveID)
+    }
+
+    var body: some View {
+        InviteFriendSheet(
+            displayName: resolvedDisplayName,
+            loadout: AvatarLoadoutStore.load(),
+            exclusiveID: resolvedExclusiveID,
+            inviteCode: resolvedInviteCode
+        )
+        .environmentObject(socialStore)
+        .environmentObject(sessionStore)
     }
 }
 
