@@ -4,15 +4,21 @@
   "private": true,
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test tests/postcard-rules.test.mjs tests/oauth-account-unification.test.mjs",
+    "test:api-contract": "node tests/postcard-api.contract.mjs",
+    "test:oauth-account-unification": "node --test tests/oauth-account-unification.test.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.758.0",
+    "@aws-sdk/client-sesv2": "^3.924.0",
     "cors": "^2.8.5",
     "express": "^4.19.2",
+    "firebase-admin": "^13.1.0",
     "google-auth-library": "^9.15.1",
     "jose": "^5.9.6",
     "jsonwebtoken": "^9.0.2",
-    "multer": "^1.4.5-lts.1"
+    "multer": "^1.4.5-lts.1",
+    "pg": "^8.16.3"
   }
 }

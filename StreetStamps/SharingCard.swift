@@ -9,6 +9,7 @@ import SwiftUI
 import MapKit
 import CoreLocation
 import UIKit
+import Photos
 import CoreImage
 import CoreImage.CIFilterBuiltins
 
@@ -22,6 +23,8 @@ enum ShareMapPrivacyMode: Hashable {
 struct PopSharingCard: View {
     @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var store: JourneyStore
+    @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
+    @EnvironmentObject private var sessionStore: UserSessionStore
     @Binding var isPresented: Bool
     var journey: JourneyRoute
     var fallbackCenter: CLLocationCoordinate2D?
@@ -53,12 +56,24 @@ struct PopSharingCard: View {
     @State private var selectedVisibility: JourneyVisibility = .private
     @State private var customTitle: String = ""
     @State private var activityTag: String = ""
-    @State private var isCustomActivityInput = false
-    @State private var customActivityInput = ""
     @State private var overallMemory: String = ""
+    @State private var overallMemoryImagePaths: [String] = []
     @State private var hideMapDetails = false
+    @State private var showCamera = false
+    @State private var showPhotoLibrary = false
+    @State private var showVisibilityRestrictionAlert = false
+    @State private var visibilityRestrictionMessage = ""
     private var canRenderCard: Bool { journey.coordinates.count >= 1 && !journey.isTooShort }
     private let activityPresets: [String] = ["通勤", "跑步", "旅游", "散步", "骑行", "驾车", "地铁", "登山"]
+    private let maxOverallMemoryPhotos = 3
+
+    private var canAddOverallMemoryPhoto: Bool {
+        overallMemoryImagePaths.count < maxOverallMemoryPhotos
+    }
+
+    private var remainingOverallMemoryPhotoSlots: Int {
+        max(0, maxOverallMemoryPhotos - overallMemoryImagePaths.count)
+    }
 
     var durationText: String {
         guard let start = journey.startTime else {
@@ -90,6 +105,33 @@ struct PopSharingCard: View {
                     ShareSheet(activityItems: [img])
                 }
             }
+            .fullScreenCover(isPresented: $showCamera) {
+                SystemCameraPicker(
+                    preferredDevice: .rear,
+                    mirrorOnCapture: false,
+                    onImage: { image in
+                        showCamera = false
+                        appendCapturedOverallMemoryPhoto(image)
+                    },
+                    onCancel: {
+                        showCamera = false
+                    }
+                )
+                .ignoresSafeArea()
+            }
+            .fullScreenCover(isPresented: $showPhotoLibrary) {
+                PhotoLibraryPicker(
+                    selectionLimit: max(1, remainingOverallMemoryPhotoSlots),
+                    onImages: { images in
+                        showPhotoLibrary = false
+                        appendOverallMemoryPhotosFromLibrary(images)
+                    },
+                    onCancel: {
+                        showPhotoLibrary = false
+                    }
+                )
+                .ignoresSafeArea()
+            }
 
             .sheet(isPresented: $showUnlock, onDismiss: {
                 guard pendingExitAfterUnlock else { return }
@@ -100,6 +142,7 @@ struct PopSharingCard: View {
                 if let payload = unlockedCity {
                     UnlockModal(
                         payload: payload,
+                        journey: finalizedJourney(),
                         isPresented: $showUnlock,
                         onGoToLibrary: {
                             showUnlock = false
@@ -115,16 +158,10 @@ struct PopSharingCard: View {
                 selectedVisibility = journey.visibility
                 customTitle = (journey.customTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
                     ? (journey.customTitle ?? "")
-                    : journey.displayCityName
+                    : ""
                 activityTag = journey.activityTag ?? ""
-                if !activityTag.isEmpty && !activityPresets.contains(activityTag) {
-                    isCustomActivityInput = true
-                    customActivityInput = activityTag
-                } else {
-                    isCustomActivityInput = false
-                    customActivityInput = ""
-                }
                 overallMemory = journey.overallMemory ?? ""
+                overallMemoryImagePaths = journey.overallMemoryImagePaths
                 hideMapDetails = (privacyMode == .hidden)
                 if finalCardImage == nil && canRenderCard {
                     finalCardImage = placeholderCard()
@@ -150,14 +187,19 @@ struct PopSharingCard: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
-            .alert("丢弃旅程？", isPresented: $showDiscardConfirm) {
-                Button("取消", role: .cancel) {}
-                Button("丢弃", role: .destructive) {
+            .alert(L10n.t("discard_journey_title"), isPresented: $showDiscardConfirm) {
+                Button(L10n.t("cancel"), role: .cancel) {}
+                Button(L10n.t("discard"), role: .destructive) {
                     isPresented = false
                     store.deleteJourney(id: journey.id)
                 }
             } message: {
-                Text("这条旅程将不会被保存。")
+                Text(L10n.t("share_discard_message"))
+            }
+            .alert(L10n.t("journey_change_visibility"), isPresented: $showVisibilityRestrictionAlert) {
+                Button(L10n.t("done"), role: .cancel) {}
+            } message: {
+                Text(visibilityRestrictionMessage)
             }
         }
     
@@ -166,8 +208,8 @@ struct PopSharingCard: View {
 
     private var header: some View {
         ZStack {
-            Text("保存旅程记录")
-                .appHeaderStyle()
+            Text(L10n.t("share_save_journey_title"))
+                .appTitleStyle()
                 .foregroundColor(.black)
 
             HStack {
@@ -176,7 +218,7 @@ struct PopSharingCard: View {
                     Button(role: .destructive) {
                         showDiscardConfirm = true
                     } label: {
-                        Label("丢弃旅程", systemImage: "trash")
+                        Label(L10n.t("discard_journey"), systemImage: "trash")
                     }
                 } label: {
                     Image(systemName: "ellipsis")
@@ -198,8 +240,8 @@ struct PopSharingCard: View {
     private var preview: some View {
         VStack(spacing: 12) {
             HStack {
-                Text("旅程卡片")
-                    .font(.system(size: 14, weight: .black))
+                Text(L10n.t("share_journey_card"))
+                    .font(.system(size: AppTypography.bodySize, weight: .semibold))
                     .foregroundColor(.black)
                 Spacer()
 
@@ -209,7 +251,7 @@ struct PopSharingCard: View {
                     }
                 } label: {
                     HStack(spacing: 8) {
-                        Text("可分享或保存")
+                        Text(L10n.t("share_or_save"))
                             .font(.system(size: 12, weight: .regular))
                             .foregroundColor(.black.opacity(0.45))
                         if showShareActions {
@@ -297,7 +339,7 @@ struct PopSharingCard: View {
             .frame(height: 160)
             .overlay(
                 VStack(spacing: 12) {
-                    Text("当前旅程太短或卡片未生成，暂不展示图片。")
+                    Text(L10n.t("share_image_unavailable"))
                         .font(.system(size: 14, weight: .medium))
                         .foregroundColor(.gray)
                         .multilineTextAlignment(.center)
@@ -309,10 +351,10 @@ struct PopSharingCard: View {
     private var actions: some View {
         VStack(spacing: 22) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("旅程名称（可不填）")
-                    .font(.system(size: 14, weight: .black))
+                Text(L10n.t("share_journey_name_optional"))
+                    .font(.system(size: AppTypography.bodySize, weight: .semibold))
                     .foregroundColor(.black.opacity(0.85))
-                TextField("给这段旅程起个名字", text: $customTitle)
+                TextField(L10n.t("share_journey_name_placeholder"), text: $customTitle)
                     .font(.system(size: 14, weight: .regular))
                     .padding(.horizontal, 22)
                     .frame(height: 52)
@@ -321,85 +363,125 @@ struct PopSharingCard: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("活动类型（可不填）")
-                    .font(.system(size: 14, weight: .black))
+                Text(L10n.t("share_activity_optional"))
+                    .font(.system(size: AppTypography.bodySize, weight: .semibold))
                     .foregroundColor(.black.opacity(0.85))
-                Menu {
-                    ForEach(activityPresets, id: \.self) { item in
-                        Button(item) {
-                            activityTag = item
-                            isCustomActivityInput = false
-                            customActivityInput = ""
+                HStack(spacing: 8) {
+                    TextField(L10n.t("share_activity_placeholder"), text: $activityTag)
+                        .font(.system(size: 14, weight: .regular))
+                        .textInputAutocapitalization(.never)
+
+                    Menu {
+                        ForEach(activityPresets, id: \.self) { item in
+                            Button(item) {
+                                activityTag = item
+                            }
                         }
-                    }
-                    Divider()
-                    Button("自定义") {
-                        isCustomActivityInput = true
-                        if customActivityInput.isEmpty {
-                            customActivityInput = activityTag
+                        Divider()
+                        Button(L10n.t("clear")) {
+                            activityTag = ""
                         }
-                    }
-                } label: {
-                    HStack {
-                        Text(activityTag.isEmpty ? "选择活动类型" : activityTag)
-                            .font(.system(size: 14, weight: .regular))
-                            .foregroundColor(activityTag.isEmpty ? .gray : .black)
-                        Spacer()
+                    } label: {
                         Image(systemName: "chevron.down")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(.black.opacity(0.5))
                     }
-                    .padding(.horizontal, 22)
-                    .frame(height: 52)
-                    .background(Color.white)
-                    .clipShape(Capsule(style: .continuous))
                 }
+                .padding(.horizontal, 22)
+                .frame(height: 52)
+                .background(Color.white)
+                .clipShape(Capsule(style: .continuous))
                 .buttonStyle(.plain)
-
-                if isCustomActivityInput {
-                    TextField("输入自定义活动类型", text: $customActivityInput)
-                        .font(.system(size: 14, weight: .regular))
-                        .padding(.horizontal, 18)
-                        .frame(height: 44)
-                        .background(Color.white.opacity(0.94))
-                        .clipShape(Capsule(style: .continuous))
-                        .onChange(of: customActivityInput) { v in
-                            activityTag = v
-                        }
-                }
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("整体感受（Overall Memory，可不填）")
-                    .font(.system(size: 14, weight: .black))
+                Text(L10n.t("share_overall_memory_optional"))
+                    .font(.system(size: AppTypography.bodySize, weight: .semibold))
                     .foregroundColor(.black.opacity(0.85))
-                TextEditor(text: $overallMemory)
-                    .font(.system(size: 14))
-                    .padding(10)
-                    .frame(height: 118)
-                    .background(Color.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                VStack(alignment: .leading, spacing: 12) {
+                    TextEditor(text: $overallMemory)
+                        .font(.system(size: 14))
+                        .padding(10)
+                        .frame(height: 118)
+                        .background(Color.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+
+                    HStack(spacing: 12) {
+                        Button(action: { showCamera = true }) {
+                            Image(systemName: "camera.fill")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
+                                .frame(width: 40, height: 40)
+                                .background(Color.black.opacity(0.05))
+                                .clipShape(Circle())
+                        }
+                        .disabled(!canAddOverallMemoryPhoto)
+                        .opacity(canAddOverallMemoryPhoto ? 1 : 0.35)
+
+                        Button(action: { showPhotoLibrary = true }) {
+                            Image(systemName: "photo.on.rectangle.angled")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
+                                .frame(width: 40, height: 40)
+                                .background(Color.black.opacity(0.05))
+                                .clipShape(Circle())
+                        }
+                        .disabled(!canAddOverallMemoryPhoto)
+                        .opacity(canAddOverallMemoryPhoto ? 1 : 0.35)
+
+                        Text(String(format: L10n.t("photo_count"), overallMemoryImagePaths.count, maxOverallMemoryPhotos))
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.gray)
+
+                        Spacer()
+                    }
+
+                    if !overallMemoryImagePaths.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 10) {
+                                ForEach(Array(overallMemoryImagePaths.enumerated()), id: \.offset) { idx, path in
+                                    ZStack(alignment: .topTrailing) {
+                                        PhotoThumb(path: path, userID: sessionStore.currentUserID)
+
+                                        Button {
+                                            let removed = overallMemoryImagePaths.remove(at: idx)
+                                            PhotoStore.delete(named: removed, userID: sessionStore.currentUserID)
+                                        } label: {
+                                            Image(systemName: "xmark.circle.fill")
+                                                .font(.system(size: 16))
+                                                .foregroundColor(FigmaTheme.text.opacity(0.6))
+                                                .background(Color.white.opacity(0.75).clipShape(Circle()))
+                                        }
+                                        .buttonStyle(.plain)
+                                        .padding(4)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 4)
+                        }
+                    }
+                }
             }
 
             HStack(spacing: 10) {
-                Picker("可见性", selection: $selectedVisibility) {
-                    ForEach(JourneyVisibility.allCases) { v in
-                        Text(v.titleCN).tag(v)
+                Picker(L10n.t("visibility"), selection: visibilitySelection) {
+                    ForEach(JourneyVisibility.frontendCases) { v in
+                        Text(v.localizedTitle).tag(v)
                     }
                 }
                 .pickerStyle(.segmented)
             }
 
             Button(action: completeJourneyAndMaybeUnlock) {
-                Text("Save")
-                    .font(.system(size: 18, weight: .semibold))
+                Text(L10n.t("save"))
+                    .font(.system(size: AppTypography.bodyStrongSize, weight: .semibold))
                     .foregroundColor(.white)
-                    .frame(width: 176, height: 60)
+                    .frame(width: 280, height: 60)
                     .background(Color.black)
                     .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                     .shadow(color: Color.black.opacity(0.30), radius: 14, x: 0, y: 4)
             }
-            .frame(maxWidth: .infinity, alignment: .trailing)
+            .frame(maxWidth: .infinity, alignment: .center)
             .padding(.top, 6)
         }
         .padding(.horizontal, 22)
@@ -409,6 +491,12 @@ struct PopSharingCard: View {
     // MARK: - Behaviors
 
     private func completeJourneyAndMaybeUnlock() {
+        let decision = visibilityDecision(for: selectedVisibility)
+        guard decision.isAllowed else {
+            showVisibilityRestriction(reason: decision.reason)
+            return
+        }
+        onboardingGuide.advance(.saveJourney)
         if let payload = cityCache.consumePendingUnlock() {
             unlockedCity = payload
             pendingExitAfterUnlock = true
@@ -429,7 +517,62 @@ struct PopSharingCard: View {
         out.customTitle = trimmedTitle.isEmpty ? nil : trimmedTitle
         out.activityTag = trimmedTag.isEmpty ? nil : trimmedTag
         out.overallMemory = trimmedOverall.isEmpty ? nil : trimmedOverall
+        out.overallMemoryImagePaths = overallMemoryImagePaths
         return out
+    }
+
+    private var visibilitySelection: Binding<JourneyVisibility> {
+        Binding(
+            get: { selectedVisibility },
+            set: { target in
+                let decision = visibilityDecision(for: target)
+                guard decision.isAllowed else {
+                    showVisibilityRestriction(reason: decision.reason)
+                    return
+                }
+                selectedVisibility = target
+            }
+        )
+    }
+
+    private func visibilityDecision(for target: JourneyVisibility) -> JourneyVisibilityPolicy.Decision {
+        JourneyVisibilityPolicy.evaluateChange(
+            current: selectedVisibility,
+            target: target,
+            isLoggedIn: sessionStore.isLoggedIn,
+            journeyDistance: journey.distance,
+            memoryCount: journey.memories.count
+        )
+    }
+
+    private func showVisibilityRestriction(reason: JourneyVisibilityPolicy.DenialReason?) {
+        guard let reason else { return }
+        visibilityRestrictionMessage = L10n.t(reason.localizationKey)
+        showVisibilityRestrictionAlert = true
+    }
+
+    private func appendCapturedOverallMemoryPhoto(_ image: UIImage) {
+        guard canAddOverallMemoryPhoto else { return }
+        if let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) {
+            overallMemoryImagePaths.append(filename)
+        }
+
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else { return }
+            PHPhotoLibrary.shared().performChanges({
+                PHAssetChangeRequest.creationRequestForAsset(from: image)
+            }, completionHandler: nil)
+        }
+    }
+
+    private func appendOverallMemoryPhotosFromLibrary(_ images: [UIImage]) {
+        guard canAddOverallMemoryPhoto else { return }
+        for image in images {
+            if !canAddOverallMemoryPhoto { break }
+            if let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) {
+                overallMemoryImagePaths.append(filename)
+            }
+        }
     }
 
     private func showSavedToastNow() {
@@ -624,7 +767,7 @@ struct PopSharingCard: View {
                 }
 
                 let valueAttr: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.systemFont(ofSize: 56, weight: .bold),
+                    .font: UIFont.systemFont(ofSize: 48, weight: .bold),
                     .foregroundColor: textPrimary
                 ]
                 let labelAttr: [NSAttributedString.Key: Any] = [
@@ -734,8 +877,12 @@ struct PopSharingCard: View {
                         // Face: if we only have 1 point, default to front
                         let face: RobotFaceSnap = .front
 
-                        // marker size for snapshot 900x1200
-                        drawRobotMarker(in: renderer.cgContext, at: p, face: face, size: 96)
+                        drawRobotMarker(
+                            in: renderer.cgContext,
+                            at: p,
+                            face: face,
+                            size: 112
+                        )
                         return
                     }
 
@@ -752,19 +899,14 @@ struct PopSharingCard: View {
                     if let last = drawCoords.last {
                         let endPoint = snap.point(for: last)
 
-                        let face: RobotFaceSnap = {
-                            // Use last two points to infer direction; if not enough, default front
-                            if drawCoords.count >= 2 {
-                                let a = drawCoords[drawCoords.count - 2]
-                                let b = drawCoords[drawCoords.count - 1]
-                                let heading = bearingDegrees(from: a, to: b)
-                                return robotFaceFromHeadingSnap(heading)
-                            } else {
-                                return .front
-                            }
-                        }()
+                        let face: RobotFaceSnap = .front
 
-                        drawRobotMarker(in: renderer.cgContext, at: endPoint, face: face, size: 96)
+                        drawRobotMarker(
+                            in: renderer.cgContext,
+                            at: endPoint,
+                            face: face,
+                            size: 112
+                        )
                     }
 
                 }
@@ -794,7 +936,7 @@ struct PopSharingCard: View {
 
         guard let minLat = lats.min(), let maxLat = lats.max(),
               let minLon = lons.min(), let maxLon = lons.max() else {
-            let center = drawCoords.last ?? fallbackCenter ?? drawCoords[0]
+            let center = drawCoords.last ?? fallbackCenter ?? CLLocationCoordinate2D(latitude: 0, longitude: 0)
             let region = MKCoordinateRegion(center: center, span: .init(latitudeDelta: stillSpan, longitudeDelta: stillSpan))
             snapshot(region: region, drawRoute: false)
             return
@@ -878,6 +1020,34 @@ struct ShareCardGenerator {
                 completion: completion
             )
         }
+    }
+
+    /// Generate unlock preview image using the same map+route pipeline as share card,
+    /// but without title/stats overlays and robot marker.
+    static func generateUnlockMapPreview(
+        journey: JourneyRoute,
+        size: CGSize = CGSize(width: 1200, height: 660),
+        completion: @escaping (UIImage) -> Void
+    ) {
+        let raw = journey.coordinates.clCoords
+        let safeCoords = raw.filter { CLLocationCoordinate2DIsValid($0) && abs($0.latitude) <= 90 && abs($0.longitude) <= 180 }
+
+        let center = safeCoords.last
+        let safeCenter: CLLocationCoordinate2D? = {
+            guard let c = center, CLLocationCoordinate2DIsValid(c), abs(c.latitude) <= 90, abs(c.longitude) <= 180 else { return nil }
+            return c
+        }()
+
+        makeMapSnapshotWithRoute(
+            coords: safeCoords,
+            fallbackCenter: safeCenter,
+            privacy: .exact,
+            countryISO2: journey.countryISO2,
+            cityKey: journey.cityKey,
+            snapshotSize: size,
+            drawRobot: false,
+            completion: completion
+        )
     }
 
     private static func durationText(for journey: JourneyRoute) -> String {
@@ -1031,7 +1201,7 @@ struct ShareCardGenerator {
                 }
 
                 let valueAttr: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.systemFont(ofSize: 56, weight: .bold),
+                    .font: UIFont.systemFont(ofSize: 48, weight: .bold),
                     .foregroundColor: textPrimary
                 ]
                 let labelAttr: [NSAttributedString.Key: Any] = [
@@ -1080,9 +1250,10 @@ struct ShareCardGenerator {
         privacy: ShareMapPrivacyMode,
         countryISO2: String?,
         cityKey: String?,
+        snapshotSize: CGSize = CGSize(width: 900, height: 1200),
+        drawRobot: Bool = true,
         completion: @escaping (UIImage) -> Void
     ) {
-        let snapshotSize = CGSize(width: 900, height: 1200)
         let scale: CGFloat = 2
 
         let stillSpan: Double = 0.0035
@@ -1127,11 +1298,17 @@ struct ShareCardGenerator {
                     }
 
                     guard drawRoute, drawCoords.count > 1 else {
+                        guard drawRobot else { return }
                         let centerCoord: CLLocationCoordinate2D? = drawCoords.last ?? adaptedFallbackCenter
                         guard let c = centerCoord else { return }
                         let p = snap.point(for: c)
                         let face: RobotFaceSnap = .front
-                        drawRobotMarker(in: renderer.cgContext, at: p, face: face, size: 96)
+                        drawRobotMarker(
+                            in: renderer.cgContext,
+                            at: p,
+                            face: face,
+                            size: 112
+                        )
                         return
                     }
 
@@ -1144,21 +1321,17 @@ struct ShareCardGenerator {
                         stroke: .init(coreWidth: isFlightLike ? 8 : 7)
                     )
 
-                    if let last = drawCoords.last {
+                    if drawRobot, let last = drawCoords.last {
                         let endPoint = snap.point(for: last)
 
-                        let face: RobotFaceSnap = {
-                            if drawCoords.count >= 2 {
-                                let a = drawCoords[drawCoords.count - 2]
-                                let b = drawCoords[drawCoords.count - 1]
-                                let heading = bearingDegrees(from: a, to: b)
-                                return robotFaceFromHeadingSnap(heading)
-                            } else {
-                                return .front
-                            }
-                        }()
+                        let face: RobotFaceSnap = .front
 
-                        drawRobotMarker(in: renderer.cgContext, at: endPoint, face: face, size: 96)
+                        drawRobotMarker(
+                            in: renderer.cgContext,
+                            at: endPoint,
+                            face: face,
+                            size: 112
+                        )
                     }
                 }
 
@@ -1187,7 +1360,7 @@ struct ShareCardGenerator {
 
         guard let minLat = lats.min(), let maxLat = lats.max(),
               let minLon = lons.min(), let maxLon = lons.max() else {
-            let center = drawCoords.last ?? fallbackCenter ?? drawCoords[0]
+            let center = drawCoords.last ?? fallbackCenter ?? CLLocationCoordinate2D(latitude: 0, longitude: 0)
             let region = MKCoordinateRegion(center: center, span: .init(latitudeDelta: stillSpan, longitudeDelta: stillSpan))
             snapshot(region: region, drawRoute: false)
             return
@@ -1214,7 +1387,9 @@ struct ShareCardGenerator {
 // =======================================================
 
 struct UnlockModal: View {
+    @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
     let payload: UnlockedPayload
+    let journey: JourneyRoute
     @Binding var isPresented: Bool
     var onGoToLibrary: (() -> Void)? = nil
 
@@ -1226,13 +1401,13 @@ struct UnlockModal: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(.gray)
 
-            CityThumbnailView(basePath: payload.baseThumbPath, routePath: payload.routeThumbPath)
+            UnlockRouteMapPreview(journey: journey)
                 .frame(height: 220)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .padding(.horizontal, 16)
 
             VStack(spacing: 6) {
-                Text(payload.title)
+                Text(payload.id)
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundColor(.black)
                     .lineLimit(2)
@@ -1261,6 +1436,7 @@ struct UnlockModal: View {
                 Button {
                     isPresented = false
                     onGoToLibrary?()
+                    onboardingGuide.advance(.openCityCards)
                 } label: {
                     Text(L10n.t("go_to_library"))
                         .font(.system(size: 13, weight: .semibold))
@@ -1268,6 +1444,12 @@ struct UnlockModal: View {
                         .frame(height: 44)
                         .frame(maxWidth: .infinity)
                         .background(RoundedRectangle(cornerRadius: 10).fill(Color.blue))
+                        .overlay {
+                            if onboardingGuide.isCurrent(.openCityCards) {
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(Color.white, lineWidth: 2)
+                            }
+                        }
                 }
             }
             .padding(.horizontal, 16)
@@ -1276,6 +1458,60 @@ struct UnlockModal: View {
         }
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
+        .overlay(alignment: .bottom) {
+            if onboardingGuide.isCurrent(.openCityCards) {
+                OnboardingCoachCard(
+                    message: OnboardingGuideStore.Step.openCityCards.message,
+                    actionTitle: OnboardingGuideStore.Step.openCityCards.actionTitle,
+                    onAction: {
+                        isPresented = false
+                        onGoToLibrary?()
+                        onboardingGuide.advance(.openCityCards)
+                    },
+                    onLater: { onboardingGuide.pauseForLater() },
+                    onSkip: { onboardingGuide.skipAll() }
+                )
+                .padding(.horizontal, 18)
+                .padding(.bottom, 12)
+            }
+        }
+    }
+}
+
+private struct UnlockRouteMapPreview: View {
+    let journey: JourneyRoute
+    @State private var image: UIImage?
+    @State private var isGenerating = false
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color(UIColor.systemGray6))
+                    .overlay {
+                        VStack(spacing: 8) {
+                            if isGenerating {
+                                ProgressView()
+                            }
+                            Text(L10n.key("loading_map"))
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                        }
+                    }
+            }
+        }
+        .onAppear {
+            guard !isGenerating, image == nil else { return }
+            isGenerating = true
+            ShareCardGenerator.generateUnlockMapPreview(journey: journey) { generated in
+                image = generated
+                isGenerating = false
+            }
+        }
     }
 }
 
@@ -1336,110 +1572,56 @@ private func bearingDegrees(from a: CLLocationCoordinate2D, to b: CLLocationCoor
     return brng
 }
 
-private func robotImageForFace(_ face: RobotFaceSnap) -> UIImage? {
-    return UIImage(named: "base_default_\(face.rawValue)")
-}
-
-private struct AvatarPartRender {
-    let name: String
-    let mirrored: Bool
-    let alpha: CGFloat
-}
-
-private func avatarPartRender(
-    images: PartImages,
-    face: RobotFaceSnap,
-    sideFallbackAlpha: CGFloat,
-    backFallbackAlpha: CGFloat
-) -> AvatarPartRender? {
+private func toRobotFace(_ face: RobotFaceSnap) -> RobotFace {
     switch face {
-    case .front:
-        guard let n = images.front else { return nil }
-        return .init(name: n, mirrored: false, alpha: 1.0)
-    case .right:
-        if let n = images.right {
-            return .init(name: n, mirrored: false, alpha: 1.0)
-        }
-        if let n = images.front {
-            return .init(name: n, mirrored: false, alpha: sideFallbackAlpha)
-        }
-        return nil
-    case .left:
-        if let n = images.left {
-            return .init(name: n, mirrored: false, alpha: 1.0)
-        }
-        if let n = images.right {
-            return .init(name: n, mirrored: true, alpha: 1.0)
-        }
-        if let n = images.front {
-            return .init(name: n, mirrored: true, alpha: sideFallbackAlpha)
-        }
-        return nil
-    case .back:
-        if let n = images.back {
-            return .init(name: n, mirrored: false, alpha: 1.0)
-        }
-        if let n = images.front {
-            return .init(name: n, mirrored: false, alpha: backFallbackAlpha)
-        }
-        return nil
+    case .front: return .front
+    case .right: return .right
+    case .back: return .back
+    case .left: return .left
     }
 }
 
-private func drawAvatarPart(
-    _ render: AvatarPartRender,
-    in rect: CGRect,
-    ctx: CGContext
-) {
-    guard let image = UIImage(named: render.name) else { return }
-    ctx.saveGState()
-    if render.mirrored {
-        ctx.translateBy(x: rect.midX, y: rect.midY)
-        ctx.scaleBy(x: -1, y: 1)
-        image.draw(in: CGRect(x: -rect.width / 2, y: -rect.height / 2, width: rect.width, height: rect.height), blendMode: .normal, alpha: render.alpha)
-    } else {
-        image.draw(in: rect, blendMode: .normal, alpha: render.alpha)
-    }
-    ctx.restoreGState()
-}
+private func avatarImageForFace(_ face: RobotFaceSnap, size: CGFloat) -> UIImage? {
+    let render: () -> UIImage? = {
+        let view = RobotRendererView(
+            size: size,
+            face: toRobotFace(face),
+            loadout: AvatarLoadoutStore.load()
+        )
+        let host = UIHostingController(rootView: view)
+        let rect = CGRect(x: 0, y: 0, width: size, height: size)
+        host.view.frame = rect
+        host.view.backgroundColor = .clear
+        host.view.isOpaque = false
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
 
-private func avatarImageForFace(_ face: RobotFaceSnap) -> UIImage? {
-    let loadout = AvatarLoadoutStore.load()
-    let catalogStore = AvatarCatalogStore.shared
-    let catalog = catalogStore.catalog
-    let canvas = CGSize(width: 256, height: 256)
-    let rect = CGRect(origin: .zero, size: canvas)
+        let format = UIGraphicsImageRendererFormat.default()
+        format.opaque = false
+        format.scale = UIScreen.main.scale
 
-    return UIGraphicsImageRenderer(size: canvas).image { renderer in
-        let ctx = renderer.cgContext
-
-        if let part = avatarPartRender(images: catalog.base.body, face: face, sideFallbackAlpha: 1.0, backFallbackAlpha: 0.35) {
-            drawAvatarPart(part, in: rect, ctx: ctx)
-        }
-        if let part = avatarPartRender(images: catalog.base.baseOutfit, face: face, sideFallbackAlpha: 1.0, backFallbackAlpha: 0.25) {
-            drawAvatarPart(part, in: rect, ctx: ctx)
-        }
-        if let outfit = catalogStore.item(categoryId: "outfit", itemId: loadout.outfitId),
-           let part = avatarPartRender(images: outfit.images, face: face, sideFallbackAlpha: 0.25, backFallbackAlpha: 0.20) {
-            drawAvatarPart(part, in: rect, ctx: ctx)
-        }
-        if let part = avatarPartRender(images: catalog.base.head, face: face, sideFallbackAlpha: 1.0, backFallbackAlpha: 0.25) {
-            drawAvatarPart(part, in: rect, ctx: ctx)
-        }
-        if let expr = catalogStore.item(categoryId: "expression", itemId: loadout.expressionId),
-           let part = avatarPartRender(images: expr.images, face: face, sideFallbackAlpha: 0.20, backFallbackAlpha: 0.20) {
-            drawAvatarPart(part, in: rect, ctx: ctx)
-        }
-        if let accessoryId = loadout.accessoryId,
-           let accessory = catalogStore.item(categoryId: "accessory", itemId: accessoryId),
-           let part = avatarPartRender(images: accessory.images, face: face, sideFallbackAlpha: 0.20, backFallbackAlpha: 0.20) {
-            drawAvatarPart(part, in: rect, ctx: ctx)
-        }
-        if let hair = catalogStore.item(categoryId: "hair", itemId: loadout.hairId),
-           let part = avatarPartRender(images: hair.images, face: face, sideFallbackAlpha: 0.20, backFallbackAlpha: 0.20) {
-            drawAvatarPart(part, in: rect, ctx: ctx)
+        return UIGraphicsImageRenderer(size: rect.size, format: format).image { renderer in
+            // Prefer drawHierarchy for SwiftUI-backed views; fallback to layer.render.
+            let drewHierarchy = host.view.drawHierarchy(in: rect, afterScreenUpdates: true)
+            if !drewHierarchy {
+                host.view.layer.render(in: renderer.cgContext)
+            }
         }
     }
+
+    // UIKit/SwiftUI view tree rendering must run on main thread.
+    if Thread.isMainThread {
+        return render()
+    }
+
+    var output: UIImage?
+    let semaphore = DispatchSemaphore(value: 0)
+    DispatchQueue.main.async {
+        output = render()
+        semaphore.signal()
+    }
+    _ = semaphore.wait(timeout: .now() + 3.0)
+    return output
 }
 
 private func drawRobotMarker(
@@ -1448,28 +1630,9 @@ private func drawRobotMarker(
     face: RobotFaceSnap,
     size: CGFloat
 ) {
-    guard let img = avatarImageForFace(face) ?? robotImageForFace(face) else { return }
+    guard let img = avatarImageForFace(face, size: size) else { return }
 
-    // Ground shadow (subtle)
-    let shadowRect = CGRect(
-        x: point.x - size * 0.26,
-        y: point.y + size * 0.24,
-        width: size * 0.52,
-        height: size * 0.16
-    )
-    ctx.saveGState()
-    ctx.setFillColor(UIColor.black.withAlphaComponent(0.22).cgColor)
-    ctx.fillEllipse(in: shadowRect)
-    ctx.restoreGState()
-
-    // Draw the robot centered
+    // Keep the same transparent avatar rendering style as RobotRendererView in MapView.
     let rect = CGRect(x: point.x - size/2, y: point.y - size/2, width: size, height: size)
-
-    ctx.saveGState()
-    ctx.setShadow(offset: CGSize(width: 0, height: 6), blur: 10, color: UIColor.black.withAlphaComponent(0.18).cgColor)
     img.draw(in: rect)
-    ctx.restoreGState()
-
-
-    
 }

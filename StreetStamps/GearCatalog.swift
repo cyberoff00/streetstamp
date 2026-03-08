@@ -35,7 +35,7 @@ struct PartImages: Codable, Equatable {
 struct GearCategory: Codable, Equatable, Identifiable {
     var id: String
     var titleKey: String
-    /// Which property of RobotLoadout this category controls (hairId / outfitId / accessoryId).
+    /// Which property of RobotLoadout this category controls (hairId / suitId / upperId / underId / accessoryId / expressionId).
     var selectionKey: String
     var items: [GearItem]
 }
@@ -91,48 +91,147 @@ final class AvatarCatalogStore: ObservableObject {
     // MARK: Fallback (keeps app usable even if JSON is missing)
     static func fallbackCatalog() -> AvatarCatalog {
         AvatarCatalog(
-            version: 1,
+            version: 2,
             base: .init(
-                body: .init(front: "avatar_body_front", right: "avatar_body_side", back: nil, left: "avatar_body_side"),
-                head: .init(front: "avatar_head_front", right: "avatar_head_side", back: nil, left: "avatar_head_side"),
-                baseOutfit: .init(front: "avatar_base_top_front", right: "avatar_base_top_side", back: nil, left: "avatar_base_top_side")
+                body: .init(front: "front_body0001", right: nil, back: nil, left: nil),
+                head: .init(front: "front_head0001", right: nil, back: nil, left: nil),
+                baseOutfit: .init(front: "front_upper0001", right: nil, back: nil, left: nil)
             ),
             categories: [
+                .init(
+                    id: "expression",
+                    titleKey: "equipment_expression",
+                    selectionKey: "expressionId",
+                    items: [
+                        .init(
+                            id: "expr_0001",
+                            nameKey: "Expression 0001",
+                            layer: "expression",
+                            images: .init(front: "front_exp0001", right: nil, back: nil, left: nil)
+                        )
+                    ]
+                ),
                 .init(
                     id: "hair",
                     titleKey: "equipment_hair",
                     selectionKey: "hairId",
                     items: [
                         .init(
-                            id: "hair_boy_default",
-                            nameKey: "equipment_item_hair_boy",
+                            id: "hair_0001",
+                            nameKey: "Hair 0001",
                             layer: "hair",
-                            images: .init(front: "avatar_hair_boy_front", right: "avatar_hair_boy_side", back: nil, left: "avatar_hair_boy_side")
+                            images: .init(front: "front_hair0001", right: nil, back: nil, left: nil)
                         ),
                         .init(
-                            id: "hair_girl_default",
-                            nameKey: "equipment_item_hair_girl",
+                            id: "hair_0002",
+                            nameKey: "Hair 0002",
                             layer: "hair",
-                            images: .init(front: "avatar_hair_girl_front", right: "avatar_hair_girl_side", back: nil, left: "avatar_hair_girl_side")
+                            images: .init(front: "front_hair0002", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "hair_0003",
+                            nameKey: "Hair 0003",
+                            layer: "hair",
+                            images: .init(front: "front_hair001", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "hair_0004",
+                            nameKey: "Hair 0004",
+                            layer: "hair",
+                            images: .init(front: "front_hair002", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "hair_0005",
+                            nameKey: "Hair 0005",
+                            layer: "hair",
+                            images: .init(front: "front_hair003", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "hair_0006",
+                            nameKey: "Hair 0006",
+                            layer: "hair",
+                            images: .init(front: "front_hair004", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "hair_0007",
+                            nameKey: "Hair 0007",
+                            layer: "hair",
+                            images: .init(front: "front_hair0007", right: nil, back: nil, left: nil)
                         )
                     ]
                 ),
                 .init(
-                    id: "outfit",
-                    titleKey: "equipment_outfit",
-                    selectionKey: "outfitId",
+                    id: "suit",
+                    titleKey: "equipment_suit",
+                    selectionKey: "suitId",
                     items: [
                         .init(
-                            id: "outfit_boy_suit",
-                            nameKey: "equipment_item_outfit_boy_suit",
-                            layer: "outfit",
-                            images: .init(front: "avatar_outfit_boy_suit_front", right: nil, back: nil, left: nil)
+                            id: "none",
+                            nameKey: "equipment_item_none",
+                            layer: "suit",
+                            images: .init(front: nil, right: nil, back: nil, left: nil)
                         ),
                         .init(
-                            id: "outfit_girl_suit",
-                            nameKey: "equipment_item_outfit_girl_suit",
-                            layer: "outfit",
-                            images: .init(front: "avatar_outfit_girl_suit_front", right: nil, back: nil, left: nil)
+                            id: "suit_0001",
+                            nameKey: "Suit 0001",
+                            layer: "suit",
+                            images: .init(front: "front_suit001", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "suit_0002",
+                            nameKey: "Suit 0002",
+                            layer: "suit",
+                            images: .init(front: "front_suit002", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "suit_0003",
+                            nameKey: "Suit 0003",
+                            layer: "suit",
+                            images: .init(front: "front_suit003", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "suit_0004",
+                            nameKey: "Suit 0004",
+                            layer: "suit",
+                            images: .init(front: "front_suit004", right: nil, back: nil, left: nil)
+                        )
+                    ]
+                ),
+                .init(
+                    id: "upper",
+                    titleKey: "equipment_upper",
+                    selectionKey: "upperId",
+                    items: [
+                        .init(
+                            id: "none",
+                            nameKey: "equipment_item_none",
+                            layer: "upper",
+                            images: .init(front: nil, right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "upper_0001",
+                            nameKey: "Upper 0001",
+                            layer: "upper",
+                            images: .init(front: "front_upper0001", right: nil, back: nil, left: nil)
+                        )
+                    ]
+                ),
+                .init(
+                    id: "under",
+                    titleKey: "equipment_under",
+                    selectionKey: "underId",
+                    items: [
+                        .init(
+                            id: "none",
+                            nameKey: "equipment_item_none",
+                            layer: "under",
+                            images: .init(front: nil, right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "under_0001",
+                            nameKey: "Under 0001",
+                            layer: "under",
+                            images: .init(front: "front_under0001", right: nil, back: nil, left: nil)
                         )
                     ]
                 ),
@@ -148,23 +247,10 @@ final class AvatarCatalogStore: ObservableObject {
                             images: .init(front: nil, right: nil, back: nil, left: nil)
                         ),
                         .init(
-                            id: "acc_headphone",
-                            nameKey: "equipment_item_acc_headphone",
+                            id: "acc_0001",
+                            nameKey: "Accessory 0001",
                             layer: "accessory",
-                            images: .init(front: "avatar_acc_headphone_front", right: "avatar_acc_headphone_side", back: nil, left: "avatar_acc_headphone_side")
-                        )
-                    ]
-                ),
-                .init(
-                    id: "expression",
-                    titleKey: "equipment_expression",
-                    selectionKey: "expressionId",
-                    items: [
-                        .init(
-                            id: "expr_default",
-                            nameKey: "equipment_item_expr_default",
-                            layer: "expression",
-                            images: .init(front: "avatar_expr_default_front", right: "avatar_expr_default_side", back: nil, left: "avatar_expr_default_side")
+                            images: .init(front: "front_ac001", right: nil, back: nil, left: nil)
                         )
                     ]
                 )

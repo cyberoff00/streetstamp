@@ -9,20 +9,18 @@ enum NavigationTab: Int, CaseIterable, Identifiable {
     case memory = 3
     case profile = 4
     case lifelog = 5
-    case global = 6
     case settings = 7
 
     var id: Int { rawValue }
 
     /// Sidebar order aligned with current product UI.
     static var allCases: [NavigationTab] {
-        [.start, .memory, .cities, .lifelog, .profile, .settings]
+        [.start, .memory, .cities, .friends, .lifelog, .profile, .settings]
     }
 
     var title: String {
         switch self {
         case .start: return "START"
-        case .global: return "GLOBE VIEW"
         case .cities: return "CITIES"
         case .friends: return "FRIENDS"
         case .memory: return "MEMORY"
@@ -39,7 +37,6 @@ enum NavigationTab: Int, CaseIterable, Identifiable {
         case .cities: return "CITIES"
         case .profile: return "PROFILE"
         case .settings: return "SETTINGS"
-        case .global: return "GLOBE VIEW"
         case .friends: return "FRIENDS"
         case .lifelog: return "LIFELOG"
         }
@@ -48,7 +45,6 @@ enum NavigationTab: Int, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .start: return "house"
-        case .global: return "globe.europe.africa"
         case .cities: return "mappin.and.ellipse"
         case .friends: return "person.2"
         case .memory: return "heart"
@@ -106,10 +102,10 @@ struct SidebarMenuView: View {
                         Divider()
                             .overlay(Color.black.opacity(0.06))
 
-                        Text("JOURNEY DIARY V1.0")
+                        Text(L10n.t("journey_diary_version"))
                             .font(.system(size: 10, weight: .semibold))
                             .tracking(0.6)
-                            .foregroundColor(.black.opacity(0.5))
+                            .foregroundColor(FigmaTheme.text.opacity(0.5))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 18)
                     }
@@ -137,9 +133,9 @@ struct SidebarMenuView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 24) {
             HStack(spacing: 8) {
-                Text("EXPLORE")
+                Text(L10n.t("explore"))
                     .appHeaderStyle()
-                    .foregroundColor(.black)
+                    .foregroundColor(FigmaTheme.text)
                 Spacer(minLength: 0)
                 Button {
                     withAnimation(.easeOut(duration: 0.25)) {
@@ -148,7 +144,7 @@ struct SidebarMenuView: View {
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 22, weight: .regular))
-                        .foregroundColor(.black)
+                        .foregroundColor(FigmaTheme.text)
                         .frame(width: 40, height: 40)
                 }
                 .buttonStyle(.plain)
@@ -174,11 +170,11 @@ struct SidebarMenuView: View {
 
                 VStack(alignment: .leading, spacing: 0) {
                     Text(displayName)
-                        .font(.system(size: 14, weight: .black))
-                        .foregroundColor(.black)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(FigmaTheme.text)
                         .lineLimit(1)
 
-                    Text("EXPLORER")
+                    Text(L10n.t("explorer_fallback"))
                         .font(.system(size: 12, weight: .regular))
                         .tracking(0.3)
                         .foregroundColor(Color(red: 0.42, green: 0.42, blue: 0.42))
@@ -231,7 +227,7 @@ struct SidebarMenuItem: View {
                     .frame(width: 30)
 
                 Text(tab.sidebarTitle)
-                    .font(.system(size: 14, weight: .black))
+                    .font(.system(size: 14, weight: .semibold))
                     .tracking(0.3)
                     .foregroundColor(isSelected ? .white : .black)
 
@@ -280,7 +276,7 @@ struct NavigationHeader: View {
                     Text(subtitle.uppercased())
                         .font(.system(size: 11, weight: .medium))
                         .tracking(1.5)
-                        .foregroundColor(.black.opacity(0.5))
+                        .foregroundColor(FigmaTheme.text.opacity(0.5))
                 }
             }
 
@@ -331,7 +327,7 @@ struct TwoLineNavigationHeader: View {
                     Text(subtitle.uppercased())
                         .font(.system(size: 11, weight: .medium))
                         .tracking(1.5)
-                        .foregroundColor(.black.opacity(0.5))
+                        .foregroundColor(FigmaTheme.text.opacity(0.5))
                         .padding(.top, 4)
                 }
             }

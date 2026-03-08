@@ -1,0 +1,8 @@
+"CFBundleDisplayName" = "Worldo";
+"NSPhotoLibraryAddUsageDescription" = "我們需要存取你的相簿以儲存旅程照片。";
+"NSPhotoLibraryUsageDescription" = "我們需要存取你的相簿，讓你可以把照片加入記憶。";
+"NSCameraUsageDescription" = "我們需要存取你的相機來拍攝旅程照片。";
+"NSLocalNetworkUsageDescription" = "用於在同一區域網路下於你的裝置之間傳輸私密旅程資料。";
+"NSLocationWhenInUseUsageDescription" = "我們需要使用你的位置資訊來記錄旅程。";
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "我們需要在背景持續使用你的位置資訊來記錄旅程。";
+"NSHealthShareUsageDescription" = "用於讀取你當天的步數並在 Lifelog 中顯示。";

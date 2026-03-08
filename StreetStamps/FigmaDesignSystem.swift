@@ -7,7 +7,7 @@ enum FigmaTheme {
     static let primary = Color(red: 82.0 / 255.0, green: 183.0 / 255.0, blue: 136.0 / 255.0) // #52B788
     static let accent = Color(red: 116.0 / 255.0, green: 198.0 / 255.0, blue: 157.0 / 255.0) // #74C69D
     static let secondary = Color(red: 212.0 / 255.0, green: 165.0 / 255.0, blue: 116.0 / 255.0) // #D4A574
-    static let text = Color.black
+    static let text = Color(red: 33.0 / 255.0, green: 33.0 / 255.0, blue: 33.0 / 255.0) // #212121
     static let subtext = Color(red: 107.0 / 255.0, green: 107.0 / 255.0, blue: 107.0 / 255.0) // #6B6B6B
     static let border = Color.black.opacity(0.06)
     static let softShadow = Color.black.opacity(0.04)

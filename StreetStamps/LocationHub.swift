@@ -83,6 +83,7 @@ final class LocationHub: ObservableObject {
 
     /// Expose auth + fix state for UI.
     @Published private(set) var authorizationStatus: CLAuthorizationStatus = .notDetermined
+    @Published private(set) var headingDegrees: Double = 0
     @Published private(set) var lastLocationAccuracy: CLLocationAccuracy?
     @Published private(set) var lastLocationUpdateTime: Date?
     @Published private(set) var isFirstFixReady: Bool = false
@@ -162,6 +163,15 @@ final class LocationHub: ObservableObject {
                 self.maybeReverseGeocodeCountry(for: loc)
             }
             .store(in: &cancellables)
+
+        current.headingPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] heading in
+                guard let self else { return }
+                let h = heading.truncatingRemainder(dividingBy: 360)
+                headingDegrees = h >= 0 ? h : (h + 360)
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Fast CN bbox guess (cheap)
@@ -214,6 +224,14 @@ final class LocationHub: ObservableObject {
 
     func requestPermissionIfNeeded() {
         current.requestPermissionIfNeeded()
+    }
+
+    func requestAlwaysPermissionIfNeeded() {
+        if current === systemSource {
+            systemSource.requestAlwaysAuthorizationIfNeeded()
+        } else {
+            current.requestPermissionIfNeeded()
+        }
     }
 
     /// 默认 start：高功耗（前台精细）
@@ -278,6 +296,24 @@ final class LocationHub: ObservableObject {
             systemSource.startLowPower()
         } else {
             current.stop()
+        }
+    }
+
+    /// Passive Lifelog recording mode (only used when no active journey is running).
+    func startPassiveLifelog(mode passiveMode: LifelogBackgroundMode) {
+        #if DEBUG
+        if mode == .mock { return }
+        #endif
+
+        if current === systemSource {
+            switch passiveMode {
+            case .highPrecision:
+                systemSource.startPassiveHighPrecision()
+            case .lowPrecision:
+                systemSource.startPassiveLowPrecision()
+            }
+        } else {
+            current.start()
         }
     }
 

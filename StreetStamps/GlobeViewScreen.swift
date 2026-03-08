@@ -21,17 +21,23 @@ struct GlobeViewScreen: View {
 
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var cityCache: CityCache
+    @EnvironmentObject private var lifelogStore: LifelogStore
+    @EnvironmentObject private var trackTileStore: TrackTileStore
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
 
     @State private var dummyPresented: Bool = true
     @State private var shareItem: GlobeShareImageItem? = nil
+    @State private var journeysForRender: [JourneyRoute] = []
+    @State private var visitedCountries: [String] = []
+    @State private var isPreparingData = false
+    @State private var refreshGate = GlobeRefreshGate()
 
     var body: some View {
-        let journeysForRender = externalJourneys ?? store.journeys
         ZStack {
             MapboxGlobeView(
                 isPresented: $dummyPresented,
                 journeys: journeysForRender,
+                visitedCountryISO2Override: visitedCountries,
                 showsCloseButton: false
             )
             .ignoresSafeArea()
@@ -48,6 +54,37 @@ struct GlobeViewScreen: View {
         .sheet(item: $shareItem) { item in
             ShareSheet(activityItems: [item.image])
         }
+        .overlay {
+            if isPreparingData {
+                ProgressView()
+                    .tint(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color.black.opacity(0.45), in: Capsule())
+            }
+        }
+        .task {
+            guard journeysForRender.isEmpty else { return }
+            refreshGlobeData()
+        }
+        .onChange(of: store.trackTileRevision) { _ in
+            refreshGlobeData()
+        }
+        .onChange(of: lifelogStore.trackTileRevision) { _ in
+            refreshGlobeData()
+        }
+        .onChange(of: cityCache.cachedCities.count) { _ in
+            refreshGlobeData()
+        }
+        .onChange(of: trackTileStore.refreshRevision) { _ in
+            refreshGlobeData()
+        }
+        .onChange(of: store.hasLoaded) { _ in
+            refreshGlobeData()
+        }
+        .onChange(of: lifelogStore.hasLoaded) { _ in
+            refreshGlobeData()
+        }
     }
 
     private var topHeader: some View {
@@ -56,10 +93,13 @@ struct GlobeViewScreen: View {
 
             Spacer()
 
-            Text("GLOBAL VIEW")
+            Text(L10n.t("globe_view_title"))
                 .appHeaderStyle()
                 .foregroundColor(.white)
-                .shadow(color: .black.opacity(0.25), radius: 6, x: 0, y: 2)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color.black.opacity(0.45), in: Capsule())
+                .shadow(color: .black.opacity(0.45), radius: 6, x: 0, y: 2)
 
             Spacer()
 
@@ -77,17 +117,15 @@ struct GlobeViewScreen: View {
     }
 
     private var bottomSummaryCard: some View {
-        let journeys = externalJourneys ?? store.journeys
-        let totalJourneys = journeys.count
-        let totalMemories = journeys.reduce(0) { $0 + $1.memories.count }
-        let totalDistanceMeters = journeys.reduce(0.0) { partial, journey in
-            let d = journey.distance
-            return partial + ((d.isFinite && d > 0) ? d : 0)
-        }
-        let totalDistanceKm = totalDistanceMeters / 1000.0
-        let distanceKmDisplay = max(0, Int(totalDistanceKm.rounded(.down)))
-        let cityCount = cityCache.cachedCities.filter { !($0.isTemporary ?? false) }.count
-        let totalEP = max(0, Int(totalDistanceKm.rounded(.down)))
+        let nonTemporaryCities = cityCache.cachedCities.filter { !($0.isTemporary ?? false) }
+        let cityCount = nonTemporaryCities.count
+        let totalMemories = nonTemporaryCities.reduce(0) { $0 + max(0, $1.memories) }
+        let levelProgress = UserLevelProgress.from(journeys: store.journeys)
+        let cardContent = ProfileSummaryCardContent(
+            level: levelProgress.level,
+            cityCount: cityCount,
+            memoryCount: totalMemories
+        )
 
         return HStack(spacing: 14) {
             ZStack {
@@ -97,6 +135,10 @@ struct GlobeViewScreen: View {
 
                 RobotRendererView(size: 56, face: .front, loadout: AvatarLoadoutStore.load())
             }
+            .overlay(alignment: .topTrailing) {
+                LevelBadgeView(level: levelProgress.level)
+                    .offset(x: 10, y: -10)
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(normalizedDisplayName(profileName))
@@ -104,24 +146,12 @@ struct GlobeViewScreen: View {
                     .foregroundColor(.black)
                     .lineLimit(1)
 
-                Text("Lv.1  ·  \(totalEP) EP")
+                Text(cardContent.levelText)
                     .appCaptionStyle()
                     .foregroundColor(.black.opacity(0.62))
                     .lineLimit(1)
 
-                GeometryReader { proxy in
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(Color.black.opacity(0.08))
-                            .frame(height: 6)
-                        Capsule()
-                            .fill(UITheme.accent)
-                            .frame(width: max(8, proxy.size.width * 0.45), height: 6)
-                    }
-                }
-                .frame(height: 6)
-
-                Text("\(cityCount) \(localizedLabel(zh: "城市", en: "Cities"))  ·  \(totalJourneys) \(localizedLabel(zh: "旅程", en: "Trips"))  ·  \(totalMemories) \(localizedLabel(zh: "记忆", en: "Memories"))  ·  \(distanceKmDisplay)km")
+                Text(cardContent.statsText)
                     .appFootnoteStyle()
                     .foregroundColor(.black.opacity(0.56))
                     .lineLimit(1)
@@ -134,7 +164,7 @@ struct GlobeViewScreen: View {
                     shareItem = GlobeShareImageItem(image: image)
                 }
             } label: {
-                Label(localizedLabel(zh: "分享", en: "Share"), systemImage: "square.and.arrow.up")
+                Label(L10n.t("share"), systemImage: "square.and.arrow.up")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 12)
@@ -155,16 +185,112 @@ struct GlobeViewScreen: View {
         .shadow(color: Color.black.opacity(0.10), radius: 16, x: 0, y: 8)
     }
 
-    private func localizedLabel(zh: String, en: String) -> String {
-        if Locale.preferredLanguages.first?.hasPrefix("zh") == true {
-            return zh
-        }
-        return en
-    }
-
     private func normalizedDisplayName(_ name: String) -> String {
         let value = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        return value.isEmpty ? "EXPLORER" : value
+        return value.isEmpty ? L10n.t("explorer_fallback") : value
+    }
+
+    private func refreshGlobeData() {
+        var gate = refreshGate
+        guard gate.startOrQueue() else {
+            refreshGate = gate
+            return
+        }
+        refreshGate = gate
+        isPreparingData = true
+
+        let countryISO2 = lifelogStore.countryISO2
+        let external = externalJourneys
+        let summary = store.journeys
+        let tileSegments = trackTileStore.tiles(
+            for: nil,
+            zoom: TrackRenderAdapter.unifiedRenderZoom
+        )
+        let cityISO2 = cityCache.cachedCities
+            .filter { $0.isTemporary != true }
+            .compactMap { $0.countryISO2?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
+            .filter { $0.count == 2 }
+        let previewRoutes = GlobeRouteResolver.resolve(
+            externalJourneys: external,
+            summaryJourneys: summary,
+            segments: tileSegments,
+            countryISO2: countryISO2
+        )
+        let previewCountries = Self.resolveVisitedCountries(routes: previewRoutes, cityISO2: cityISO2)
+        journeysForRender = previewRoutes
+        visitedCountries = previewCountries
+
+        let shouldFetchUnifiedSegments = GlobeRouteResolver.shouldFetchUnifiedSegments(tileSegments: tileSegments)
+        guard shouldFetchUnifiedSegments else {
+            var gate = refreshGate
+            let shouldRefreshAgain = gate.finish()
+            refreshGate = gate
+            isPreparingData = false
+            if shouldRefreshAgain {
+                refreshGlobeData()
+            }
+            return
+        }
+
+        Task(priority: .userInitiated) {
+            let segments = await UnifiedLifelogRenderProvider.segmentsAsync(
+                journeyStore: store,
+                lifelogStore: lifelogStore,
+                zoom: TrackRenderAdapter.unifiedRenderZoom
+            )
+            let routes = GlobeRouteResolver.resolve(
+                externalJourneys: external,
+                summaryJourneys: summary,
+                segments: segments,
+                countryISO2: countryISO2
+            )
+            let countries = Self.resolveVisitedCountries(routes: routes, cityISO2: cityISO2)
+
+            await MainActor.run {
+                journeysForRender = routes
+                visitedCountries = countries
+
+                var gate = refreshGate
+                let shouldRefreshAgain = gate.finish()
+                refreshGate = gate
+                isPreparingData = false
+                if shouldRefreshAgain {
+                    refreshGlobeData()
+                }
+            }
+        }
+    }
+
+    private static func resolveVisitedCountries(routes: [JourneyRoute], cityISO2: [String]) -> [String] {
+        var set = Set<String>()
+        for j in routes {
+            if let iso = j.countryISO2?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+               iso.count == 2 {
+                set.insert(iso)
+            }
+            if let iso = isoFromCityKey(j.startCityKey) {
+                set.insert(iso)
+            }
+            if let iso = isoFromCityKey(j.cityKey) {
+                set.insert(iso)
+            }
+            if let iso = isoFromCityKey(j.endCityKey) {
+                set.insert(iso)
+            }
+        }
+
+        for iso in cityISO2 {
+            set.insert(iso)
+        }
+        return Array(set).sorted()
+    }
+
+    private static func isoFromCityKey(_ cityKey: String?) -> String? {
+        guard let cityKey else { return nil }
+        let parts = cityKey.split(separator: "|", omittingEmptySubsequences: false)
+        guard let raw = parts.last else { return nil }
+        let iso = String(raw).trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return iso.count == 2 ? iso : nil
     }
 
     private func captureCurrentPageImage() -> UIImage? {

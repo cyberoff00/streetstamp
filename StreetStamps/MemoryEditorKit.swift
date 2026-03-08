@@ -33,7 +33,8 @@ struct MemoryNotesTextView: UIViewRepresentable {
         tv.textContainer.lineFragmentPadding = 0
         tv.delegate = context.coordinator
 
-        tv.keyboardDismissMode = .interactive
+        // Avoid interactive-dismiss keyboard notifications when no software keyboard is shown.
+        tv.keyboardDismissMode = .none
         tv.autocorrectionType = .no
         tv.smartDashesType = .no
         tv.smartQuotesType = .no
@@ -158,10 +159,24 @@ struct MemoryNotesEditor: View {
 // MARK: - Keyboard helper
 @inline(__always)
 func endEditingGlobal() {
-    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
-                                    to: nil,
-                                    from: nil,
-                                    for: nil)
+    guard let responder = UIResponder.currentTextInputFirstResponder() else { return }
+    responder.resignFirstResponder()
+}
+
+private extension UIResponder {
+    private static weak var _currentFirstResponder: UIResponder?
+
+    static func currentTextInputFirstResponder() -> UIResponder? {
+        _currentFirstResponder = nil
+        UIApplication.shared.sendAction(#selector(findFirstResponder), to: nil, from: nil, for: nil)
+        guard let responder = _currentFirstResponder else { return nil }
+        let isTextInput = responder is UITextField || responder is UITextView || responder is UITextInput
+        return isTextInput ? responder : nil
+    }
+
+    @objc func findFirstResponder() {
+        UIResponder._currentFirstResponder = self
+    }
 }
 
 

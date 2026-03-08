@@ -14,7 +14,7 @@ import PhotosUI
 
 // MARK: - Models
 
-struct CoordinateCodable: Codable, Hashable {
+struct CoordinateCodable: Codable, Hashable, Sendable {
     var lat: Double
     var lon: Double
 }
@@ -50,6 +50,7 @@ struct JourneyMemory: Identifiable, Codable, Equatable {
     var notes: String
     var imageData: Data? = nil
     var imagePaths: [String] = []
+    var remoteImageURLs: [String] = []
 
     var cityKey: String? = nil
     var cityName: String? = nil
@@ -57,7 +58,7 @@ struct JourneyMemory: Identifiable, Codable, Equatable {
     var type: JourneyMemoryType
 
     enum CodingKeys: String, CodingKey {
-        case id, timestamp, title, notes, imageData, imagePaths, cityKey, cityName, coordinateLat, coordinateLon, type
+        case id, timestamp, title, notes, imageData, imagePaths, remoteImageURLs, cityKey, cityName, coordinateLat, coordinateLon, type
     }
 
     init(
@@ -67,6 +68,7 @@ struct JourneyMemory: Identifiable, Codable, Equatable {
         notes: String,
         imageData: Data?,
         imagePaths: [String] = [],
+        remoteImageURLs: [String] = [],
         cityKey: String? = nil,
         cityName: String? = nil,
         coordinate: (Double, Double),
@@ -78,6 +80,7 @@ struct JourneyMemory: Identifiable, Codable, Equatable {
         self.notes = notes
         self.imageData = imageData
         self.imagePaths = imagePaths
+        self.remoteImageURLs = remoteImageURLs
         self.cityKey = cityKey
         self.cityName = cityName
         self.coordinate = coordinate
@@ -92,6 +95,7 @@ struct JourneyMemory: Identifiable, Codable, Equatable {
         notes = try c.decode(String.self, forKey: .notes)
         imageData = try c.decodeIfPresent(Data.self, forKey: .imageData)
         imagePaths = (try? c.decode([String].self, forKey: .imagePaths)) ?? []
+        remoteImageURLs = (try? c.decode([String].self, forKey: .remoteImageURLs)) ?? []
         cityKey = try c.decodeIfPresent(String.self, forKey: .cityKey)
         cityName = try c.decodeIfPresent(String.self, forKey: .cityName)
         let lat = try c.decode(Double.self, forKey: .coordinateLat)
@@ -108,6 +112,7 @@ struct JourneyMemory: Identifiable, Codable, Equatable {
         try c.encode(notes, forKey: .notes)
         try c.encodeIfPresent(imageData, forKey: .imageData)
         if !imagePaths.isEmpty { try c.encode(imagePaths, forKey: .imagePaths) }
+        if !remoteImageURLs.isEmpty { try c.encode(remoteImageURLs, forKey: .remoteImageURLs) }
         if let cityKey, !cityKey.isEmpty { try c.encode(cityKey, forKey: .cityKey) }
         if let cityName, !cityName.isEmpty { try c.encode(cityName, forKey: .cityName) }
         try c.encode(coordinate.0, forKey: .coordinateLat)
@@ -122,6 +127,7 @@ struct JourneyMemory: Identifiable, Codable, Equatable {
         lhs.notes == rhs.notes &&
         lhs.imageData == rhs.imageData &&
         lhs.imagePaths == rhs.imagePaths &&
+        lhs.remoteImageURLs == rhs.remoteImageURLs &&
         lhs.cityKey == rhs.cityKey &&
         lhs.cityName == rhs.cityName &&
         lhs.coordinate.0 == rhs.coordinate.0 &&
@@ -209,10 +215,20 @@ extension UIImage {
 // MARK: - Journey merge helper
 // =======================================================
 struct JourneyRoute: Codable {
+    enum RouteSource: String, Codable {
+        case raw
+        case corrected
+        case matched
+    }
+
     var id: String = UUID().uuidString
     var startTime: Date?
     var endTime: Date?
     var distance: Double = 0
+    /// Cumulative paused duration in seconds for this journey.
+    var pausedDurationSeconds: TimeInterval = 0
+    /// Cumulative moving duration in seconds for this journey.
+    var movingDurationSeconds: TimeInterval = 0
     /// Total positive elevation gain (meters).
     var elevationGain: Double = 0
     /// Total negative elevation loss (meters).
@@ -221,6 +237,9 @@ struct JourneyRoute: Codable {
     var cityKey: String = "Unknown|"
     var canonicalCity: String = "Unknown"
     var coordinates: [CoordinateCodable] = []
+    var correctedCoordinates: [CoordinateCodable] = []
+    var matchedCoordinates: [CoordinateCodable] = []
+    var preferredRouteSource: RouteSource = .raw
     var memories: [JourneyMemory] = []
     var thumbnailCoordinates: [CoordinateCodable] = []
     var countryISO2: String? = nil
@@ -236,6 +255,7 @@ struct JourneyRoute: Codable {
     var customTitle: String? = nil
     var activityTag: String? = nil
     var overallMemory: String? = nil
+    var overallMemoryImagePaths: [String] = []
 
     // ✅ 加回普通 init，修复 “Missing argument for 'from'”
     init(
@@ -243,12 +263,17 @@ struct JourneyRoute: Codable {
         startTime: Date? = nil,
         endTime: Date? = nil,
         distance: Double = 0,
+        pausedDurationSeconds: TimeInterval = 0,
+        movingDurationSeconds: TimeInterval = 0,
         elevationGain: Double = 0,
         elevationLoss: Double = 0,
         isTooShort: Bool = false,
         cityKey: String = "Unknown|",
         canonicalCity: String = "Unknown",
         coordinates: [CoordinateCodable] = [],
+        correctedCoordinates: [CoordinateCodable] = [],
+        matchedCoordinates: [CoordinateCodable] = [],
+        preferredRouteSource: RouteSource = .raw,
         memories: [JourneyMemory] = [],
         thumbnailCoordinates: [CoordinateCodable] = [],
         countryISO2: String? = nil,
@@ -261,18 +286,24 @@ struct JourneyRoute: Codable {
         visibility: JourneyVisibility = .private,
         customTitle: String? = nil,
         activityTag: String? = nil,
-        overallMemory: String? = nil
+        overallMemory: String? = nil,
+        overallMemoryImagePaths: [String] = []
     ) {
         self.id = id
         self.startTime = startTime
         self.endTime = endTime
         self.distance = distance
+        self.pausedDurationSeconds = pausedDurationSeconds
+        self.movingDurationSeconds = movingDurationSeconds
         self.elevationGain = elevationGain
         self.elevationLoss = elevationLoss
         self.isTooShort = isTooShort
         self.cityKey = cityKey
         self.canonicalCity = canonicalCity
         self.coordinates = coordinates
+        self.correctedCoordinates = correctedCoordinates
+        self.matchedCoordinates = matchedCoordinates
+        self.preferredRouteSource = preferredRouteSource
         self.memories = memories
         self.thumbnailCoordinates = thumbnailCoordinates
         self.countryISO2 = countryISO2
@@ -286,27 +317,39 @@ struct JourneyRoute: Codable {
         self.customTitle = customTitle
         self.activityTag = activityTag
         self.overallMemory = overallMemory
+        self.overallMemoryImagePaths = overallMemoryImagePaths
     }
 
     var isCompleted: Bool { endTime != nil && startTime != nil }
 
     var displayCityName: String {
+        let unknownLocalized = L10n.t("unknown")
+        let unknownEN = "Unknown"
         let label = (cityName ?? canonicalCity).trimmingCharacters(in: .whitespacesAndNewlines)
-        if !label.isEmpty && label != "Unknown" { return label }
+        if !label.isEmpty,
+           label.caseInsensitiveCompare(unknownEN) != .orderedSame,
+           label != unknownLocalized {
+            return label
+        }
         let old = currentCity.trimmingCharacters(in: .whitespacesAndNewlines)
-        return old.isEmpty ? "Unknown" : old
+        if old.isEmpty || old.caseInsensitiveCompare(unknownEN) == .orderedSame || old == unknownLocalized {
+            return unknownLocalized
+        }
+        return old
     }
 
     enum CodingKeys: String, CodingKey {
         case id, startTime, endTime, distance
+        case pausedDurationSeconds, movingDurationSeconds
         case elevationGain, elevationLoss
         case isTooShort
         case cityKey, canonicalCity
-        case coordinates, memories, thumbnailCoordinates
+        case coordinates, correctedCoordinates, matchedCoordinates, preferredRouteSource
+        case memories, thumbnailCoordinates
         case countryISO2
         case currentCity, cityName, startCityKey, endCityKey
         case exploreMode, trackingMode
-        case visibility, customTitle, activityTag, overallMemory
+        case visibility, customTitle, activityTag, overallMemory, overallMemoryImagePaths
 
         // 兼容更老字段名（如果你确实历史里用过）
         case coords
@@ -321,6 +364,8 @@ struct JourneyRoute: Codable {
         endTime = try c.decodeIfPresent(Date.self, forKey: .endTime)
 
         distance = try c.decodeIfPresent(Double.self, forKey: .distance) ?? 0
+        pausedDurationSeconds = try c.decodeIfPresent(TimeInterval.self, forKey: .pausedDurationSeconds) ?? 0
+        movingDurationSeconds = try c.decodeIfPresent(TimeInterval.self, forKey: .movingDurationSeconds) ?? 0
         elevationGain = try c.decodeIfPresent(Double.self, forKey: .elevationGain) ?? 0
         elevationLoss = try c.decodeIfPresent(Double.self, forKey: .elevationLoss) ?? 0
 
@@ -334,6 +379,9 @@ struct JourneyRoute: Codable {
         if coordinates.isEmpty {
             coordinates = try c.decodeIfPresent([CoordinateCodable].self, forKey: .coords) ?? []
         }
+        correctedCoordinates = try c.decodeIfPresent([CoordinateCodable].self, forKey: .correctedCoordinates) ?? []
+        matchedCoordinates = try c.decodeIfPresent([CoordinateCodable].self, forKey: .matchedCoordinates) ?? []
+        preferredRouteSource = try c.decodeIfPresent(RouteSource.self, forKey: .preferredRouteSource) ?? .raw
 
         memories = try c.decodeIfPresent([JourneyMemory].self, forKey: .memories) ?? []
         thumbnailCoordinates = try c.decodeIfPresent([CoordinateCodable].self, forKey: .thumbnailCoordinates) ?? []
@@ -351,6 +399,7 @@ struct JourneyRoute: Codable {
         customTitle = try c.decodeIfPresent(String.self, forKey: .customTitle)
         activityTag = try c.decodeIfPresent(String.self, forKey: .activityTag)
         overallMemory = try c.decodeIfPresent(String.self, forKey: .overallMemory)
+        overallMemoryImagePaths = try c.decodeIfPresent([String].self, forKey: .overallMemoryImagePaths) ?? []
     }
 
     // ✅ 自己实现 encode，修复 Encodable 合成失败（并且你可以选择写出 coords 兼容）
@@ -362,6 +411,8 @@ struct JourneyRoute: Codable {
         try c.encodeIfPresent(endTime, forKey: .endTime)
 
         try c.encode(distance, forKey: .distance)
+        try c.encode(pausedDurationSeconds, forKey: .pausedDurationSeconds)
+        try c.encode(movingDurationSeconds, forKey: .movingDurationSeconds)
         try c.encode(elevationGain, forKey: .elevationGain)
         try c.encode(elevationLoss, forKey: .elevationLoss)
 
@@ -371,6 +422,13 @@ struct JourneyRoute: Codable {
         try c.encode(canonicalCity, forKey: .canonicalCity)
 
         try c.encode(coordinates, forKey: .coordinates)
+        if !correctedCoordinates.isEmpty {
+            try c.encode(correctedCoordinates, forKey: .correctedCoordinates)
+        }
+        if !matchedCoordinates.isEmpty {
+            try c.encode(matchedCoordinates, forKey: .matchedCoordinates)
+        }
+        try c.encode(preferredRouteSource, forKey: .preferredRouteSource)
         // 可选：如果你想写出老 key 方便旧版本读取
         // try c.encode(coordinates, forKey: .coords)
 
@@ -390,6 +448,9 @@ struct JourneyRoute: Codable {
         try c.encodeIfPresent(customTitle, forKey: .customTitle)
         try c.encodeIfPresent(activityTag, forKey: .activityTag)
         try c.encodeIfPresent(overallMemory, forKey: .overallMemory)
+        if !overallMemoryImagePaths.isEmpty {
+            try c.encode(overallMemoryImagePaths, forKey: .overallMemoryImagePaths)
+        }
     }
 }
 
@@ -402,7 +463,14 @@ extension JourneyRoute {
         var out = other
 
         if self.coordinates.count > other.coordinates.count { out.coordinates = self.coordinates }
+        if self.correctedCoordinates.count > other.correctedCoordinates.count { out.correctedCoordinates = self.correctedCoordinates }
+        if self.matchedCoordinates.count > other.matchedCoordinates.count { out.matchedCoordinates = self.matchedCoordinates }
+        if out.preferredRouteSource == .raw {
+            out.preferredRouteSource = self.preferredRouteSource
+        }
         if self.thumbnailCoordinates.count > other.thumbnailCoordinates.count { out.thumbnailCoordinates = self.thumbnailCoordinates }
+        out.pausedDurationSeconds = max(self.pausedDurationSeconds, other.pausedDurationSeconds)
+        out.movingDurationSeconds = max(self.movingDurationSeconds, other.movingDurationSeconds)
 
         var byId: [String: JourneyMemory] = [:]
         for m in self.memories { byId[m.id] = m }
@@ -415,7 +483,24 @@ extension JourneyRoute {
         if let t = other.customTitle, !t.isEmpty { out.customTitle = t }
         if let tag = other.activityTag, !tag.isEmpty { out.activityTag = tag }
         if let memo = other.overallMemory, !memo.isEmpty { out.overallMemory = memo }
+        out.overallMemoryImagePaths = other.overallMemoryImagePaths
         return out
+    }
+
+    var displayRouteCoordinates: [CoordinateCodable] {
+        switch preferredRouteSource {
+        case .matched:
+            if !matchedCoordinates.isEmpty { return matchedCoordinates }
+            if !correctedCoordinates.isEmpty { return correctedCoordinates }
+            return coordinates
+        case .corrected:
+            if !correctedCoordinates.isEmpty { return correctedCoordinates }
+            return coordinates
+        case .raw:
+            if !coordinates.isEmpty { return coordinates }
+            if !correctedCoordinates.isEmpty { return correctedCoordinates }
+            return matchedCoordinates
+        }
     }
 }
 
@@ -560,7 +645,10 @@ struct MapView: View {
 
     @EnvironmentObject private var journeyStore: JourneyStore
     @EnvironmentObject private var cityCache: CityCache
+    @EnvironmentObject private var lifelogStore: LifelogStore
     @EnvironmentObject private var sessionStore: UserSessionStore
+    @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
+    @AppStorage(AppSettings.avatarHeadlightEnabledKey) private var avatarHeadlightEnabled = true
 
     @StateObject private var mapController = JourneyMapController()
     @State private var cameraDistance: CLLocationDistance = 900
@@ -568,8 +656,8 @@ struct MapView: View {
     @State private var showMemoryEditor = false
     @State private var showFinishConfirm = false
     @State private var showExitWarning = false
+    @State private var showModeSelector = false
     @State private var exitToastMessage: String = ""
-    @State private var now: Date = Date()
 
     let cityName: String
     @Binding var isPresented: Bool
@@ -601,6 +689,8 @@ struct MapView: View {
     @State private var isUserInteractingWithMap = false
     @State private var followUser = false
     @State private var isResolvingStartCity = false
+    @State private var isProcessingHistoricalRoute = false
+    @State private var lastSyncedCoordCount = 0
 
     @State private var editingMemory: JourneyMemory? = nil
 
@@ -615,7 +705,6 @@ struct MapView: View {
 
     private var displaySegments: [RenderRouteSegment] { tracking.renderUnifiedSegmentsForMap }
     private var liveTail: [CLLocationCoordinate2D] { tracking.renderLiveTailForMap }
-
     private func lineWidths(for distance: CLLocationDistance, mode: TravelMode) -> (glow: CGFloat, core: CGFloat) {
         let t = max(0.9, min(2.4, distance / 700.0))
         var core = 6 * t
@@ -660,12 +749,29 @@ struct MapView: View {
         .navigationBarBackButtonHidden(true)
         .overlay(alignment: .top) { exitToast }
         .overlay {
+            if showModeSelector {
+                modeSelectorOverlay
+            }
+        }
+        .overlay {
             if showMemoryEditor {
                 MemoryEditorSheet(
                     isPresented: $showMemoryEditor,
                     userID: sessionStore.currentUserID,
                     existing: editingMemory,
                     onSave: { draft in
+                        if draft == nil {
+                            if let existingID = editingMemory?.id,
+                               let idx = journeyRoute.memories.firstIndex(where: { $0.id == existingID }) {
+                                let removed = journeyRoute.memories.remove(at: idx)
+                                for path in removed.imagePaths {
+                                    PhotoStore.delete(named: path, userID: sessionStore.currentUserID)
+                                }
+                                if journeyRoute.endTime == nil { persistSnapshot(.memoryAdded) }
+                            }
+                            editingMemory = nil
+                            return
+                        }
                         guard var m = draft else { return }
                         if let existingID = editingMemory?.id,
                            let idx = journeyRoute.memories.firstIndex(where: { $0.id == existingID }) {
@@ -676,6 +782,7 @@ struct MapView: View {
                             journeyRoute.memories[idx] = m
                             if journeyRoute.endTime == nil { persistSnapshot(.memoryAdded) }
                             editingMemory = m
+                            onboardingGuide.advance(.recordMemory)
                         } else {
                             guard let loc = tracking.userLocation else { return }
                             m.id = UUID().uuidString
@@ -686,6 +793,7 @@ struct MapView: View {
                             journeyRoute.memories.append(m)
                             if journeyRoute.endTime == nil { persistSnapshot(.memoryAdded) }
                             assignCityToMemory(memoryID: mid, coordinate: loc.coordinate)
+                            onboardingGuide.advance(.recordMemory)
                         }
                     }
                 )
@@ -694,6 +802,7 @@ struct MapView: View {
         .onChange(of: showMemoryEditor) { visible in
             if !visible { editingMemory = nil }
         }
+        .animation(.easeInOut(duration: 0.18), value: showModeSelector)
         .alert(L10n.t("finish_confirm_title"), isPresented: $showFinishConfirm) {
             Button(L10n.t("finish_confirm_finish"), role: .destructive) { finishJourney() }
             Button(L10n.t("finish_confirm_continue"), role: .cancel) {}
@@ -712,7 +821,6 @@ struct MapView: View {
             if journeyRoute.endTime == nil { flushSnapshot(.exitToHome) }
         }
         .onReceive(tracking.$coords) { onCoordsUpdated($0) }
-        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { now = $0 }
         .onReceive(tracking.$userLocation.compactMap { $0 }) { loc in
             if followUser, !isUserInteractingWithMap {
                 updateCamera(for: loc)
@@ -762,6 +870,7 @@ struct MapView: View {
             controller: mapController,
             userCoordinate: mapUserCoord(),
             headingDegrees: tracking.headingDegrees,
+            headlightEnabled: avatarHeadlightEnabled,
             travelMode: tracking.mode,
             segments: displaySegments,
             liveTail: liveTail,
@@ -808,40 +917,57 @@ struct MapView: View {
     }
 
     private var topTrackingHeader: some View {
-        HStack(spacing: 8) {
-            Button {
-                if tracking.isPaused {
-                    exitToastMessage = L10n.t("journey_paused")
-                    showExitWarning = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        showExitWarning = false
-                        exitToHomePaused()
-                    }
-                } else {
-                    exitToastMessage = L10n.t("continue_background")
-                    showExitWarning = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        showExitWarning = false
-                        exitToHomeLowPower()
-                    }
-                }
-            } label: {
-                Image(systemName: "arrow.left")
-                    .font(.system(size: 16, weight: .medium))
-                .foregroundColor(.black)
-                .frame(width: 32, alignment: .leading)
-            }
-            .buttonStyle(.plain)
+        let pillPresentation = journeyRoute.trackingMode.mapPillPresentation
 
+        return ZStack {
             Text(journeyRoute.displayCityName.uppercased())
-                .font(.system(size: 20, weight: .black))
+                .font(.system(size: 20, weight: .bold))
                 .tracking(-0.9)
-                .foregroundColor(.black)
+                .foregroundColor(FigmaTheme.text)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
-                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 64)
 
-            Color.clear.frame(width: 72, height: 1)
+            HStack {
+                Button {
+                    if tracking.isPaused {
+                        exitToastMessage = L10n.t("journey_paused")
+                        showExitWarning = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                            showExitWarning = false
+                            exitToHomePaused()
+                        }
+                    } else {
+                        exitToastMessage = L10n.t("continue_background")
+                        showExitWarning = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                            showExitWarning = false
+                            exitToHomeLowPower()
+                        }
+                    }
+                } label: {
+                    Image(systemName: "arrow.left")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(FigmaTheme.text)
+                        .frame(width: 32, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+
+                Spacer()
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        showModeSelector = true
+                    }
+                } label: {
+                    Image(systemName: pillPresentation.symbolName)
+                        .font(.system(size: pillPresentation.iconFontSize, weight: .medium))
+                        .foregroundColor(FigmaTheme.text.opacity(pillPresentation.foregroundOpacity))
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(.horizontal, 16)
         .frame(height: 56)
@@ -853,26 +979,22 @@ struct MapView: View {
     }
 
     private var distanceTimeChip: some View {
-        Text("\(distanceText) · \(elapsedText)")
-            .font(.system(size: 14, weight: .black))
-            .tracking(-0.5)
-            .foregroundColor(.black)
-            .padding(.horizontal, 20)
-            .frame(height: 36)
-            .background(Color.white.opacity(0.78))
-            .clipShape(Capsule(style: .continuous))
-            .shadow(color: Color.black.opacity(0.10), radius: 8, x: 0, y: 2)
+        TrackingDistanceTimeChip(
+            distanceProvider: { max(0, tracking.totalDistance) },
+            movingDurationProvider: { date in currentMovingDuration(at: date) },
+            durationFormatter: formatDuration
+        )
     }
 
     private var gpsStatusChip: some View {
         HStack(spacing: 8) {
             Image(systemName: "bolt.fill")
-                .font(.system(size: 14, weight: .black))
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(gpsStatusColor)
             Text(gpsStatusLabel)
-                .font(.system(size: 12, weight: .black))
+                .font(.system(size: 12, weight: .semibold))
                 .tracking(-0.3)
-                .foregroundColor(.black.opacity(0.72))
+                .foregroundColor(FigmaTheme.text.opacity(0.72))
         }
         .padding(.leading, 14)
         .padding(.trailing, 16)
@@ -893,9 +1015,9 @@ struct MapView: View {
                 else { tracking.pauseJourney() }
             } label: {
                 Text(tracking.isPaused ? "RESUME" : "PAUSE")
-                    .font(.system(size: 34 / 2, weight: .black))
+                    .font(.system(size: 34 / 2, weight: .bold))
                     .tracking(-0.85)
-                    .foregroundColor(.black)
+                    .foregroundColor(FigmaTheme.text)
                     .frame(maxWidth: .infinity)
                     .frame(height: 60)
                     .background(Color.white.opacity(0.95))
@@ -907,9 +1029,9 @@ struct MapView: View {
             Button { showFinishConfirm = true } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 18, weight: .black))
-                    Text("FINISH")
-                        .font(.system(size: 34 / 2, weight: .black))
+                        .font(.system(size: 18, weight: .bold))
+                    Text(L10n.t("finish_upper"))
+                        .font(.system(size: 34 / 2, weight: .bold))
                         .tracking(-0.85)
                 }
                 .foregroundColor(.white)
@@ -923,21 +1045,6 @@ struct MapView: View {
         }
         .padding(.horizontal, 24)
         .padding(.bottom, 24)
-    }
-
-    private var elapsedText: String {
-        guard let start = journeyRoute.startTime else { return "00:00" }
-        let reference = journeyRoute.endTime ?? now
-        let seconds = max(0, Int(reference.timeIntervalSince(start)))
-        let m = (seconds / 60) % 60
-        let s = seconds % 60
-        return String(format: "%02d:%02d", m, s)
-    }
-
-    private var distanceText: String {
-        let d = max(0, tracking.totalDistance)
-        if d < 1000 { return String(format: "%.0f m", d) }
-        return String(format: "%.2f km", d / 1000)
     }
 
     private var gpsStatusLabel: String {
@@ -954,7 +1061,7 @@ struct MapView: View {
         return Color.gray
     }
 
-    private func floatingActionButton(icon: String, label: String, dark: Bool, action: @escaping () -> Void) -> some View {
+    private func floatingActionButton(icon: String, label: String, dark: Bool, highlighted: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 8) {
                 Image(systemName: icon)
@@ -964,9 +1071,16 @@ struct MapView: View {
                     .background(dark ? Color.black : Color.white.opacity(0.95))
                     .clipShape(Circle())
                     .shadow(color: Color.black.opacity(0.20), radius: 12, x: 0, y: 4)
+                    .overlay {
+                        if highlighted {
+                            Circle()
+                                .stroke(Color.white, lineWidth: 3)
+                        }
+                    }
+                    .scaleEffect(highlighted ? 1.06 : 1.0)
 
                 Text(label)
-                    .font(.system(size: 9, weight: .black))
+                    .font(.system(size: 9, weight: .semibold))
                     .tracking(0.62)
                     .foregroundColor(Color.white.opacity(0.6))
             }
@@ -1001,6 +1115,8 @@ struct MapView: View {
             journeyRoute.cityName = cityName
         }
 
+        tracking.setTrackingMode(journeyRoute.trackingMode)
+
         tracking.activateMapRenderingSurface()
 
         if !(tracking.isTracking && journeyRoute.endTime == nil) {
@@ -1008,16 +1124,21 @@ struct MapView: View {
         }
 
         if journeyRoute.endTime == nil {
-            tracking.resumeJourney()
-            hasOngoingJourney = true
             journeyRoute.startTime = journeyRoute.startTime ?? Date()
+            tracking.resumeJourney(
+                startTime: journeyRoute.startTime,
+                restoredPausedDuration: journeyRoute.pausedDurationSeconds
+            )
+            hasOngoingJourney = true
         } else {
             hasOngoingJourney = false
+            maybeProcessHistoricalRouteLazily()
         }
 
         tracking.activateMapRenderingSurface()
         tracking.requestRefresh()
         autoFitOnceOnEnter()
+        syncJourneyCoordinatesIncremental(from: tracking.coords)
 
         followUser = true
         if let loc = tracking.userLocation { updateCamera(for: loc) }
@@ -1144,12 +1265,40 @@ struct MapView: View {
     }
 
     private func onCoordsUpdated(_ coords: [CLLocationCoordinate2D]) {
-        journeyRoute.coordinates = coords.map { .init(lat: $0.latitude, lon: $0.longitude) }
+        syncJourneyCoordinatesIncremental(from: coords)
         journeyRoute.distance = tracking.totalDistance
         journeyRoute.elevationGain = tracking.totalAscent
         journeyRoute.elevationLoss = tracking.totalDescent
+        syncTimingFields()
         guard journeyRoute.endTime == nil else { return }
         persistSnapshot(.coordsTick)
+    }
+
+    private func syncJourneyCoordinatesIncremental(from coords: [CLLocationCoordinate2D]) {
+        if coords.isEmpty {
+            journeyRoute.coordinates = []
+            lastSyncedCoordCount = 0
+            return
+        }
+
+        if lastSyncedCoordCount == 0 {
+            lastSyncedCoordCount = journeyRoute.coordinates.count
+        }
+
+        if coords.count < lastSyncedCoordCount || journeyRoute.coordinates.count > coords.count {
+            journeyRoute.coordinates = coords.map { .init(lat: $0.latitude, lon: $0.longitude) }
+            lastSyncedCoordCount = coords.count
+            return
+        }
+
+        if journeyRoute.coordinates.count != lastSyncedCoordCount {
+            lastSyncedCoordCount = journeyRoute.coordinates.count
+        }
+
+        guard coords.count > lastSyncedCoordCount else { return }
+        let appended = coords[lastSyncedCoordCount...].map { CoordinateCodable(lat: $0.latitude, lon: $0.longitude) }
+        journeyRoute.coordinates.append(contentsOf: appended)
+        lastSyncedCoordCount = coords.count
     }
 
     private func updateCamera(for location: CLLocation) {
@@ -1207,6 +1356,8 @@ struct MapView: View {
     }
 
     private func finishJourney() {
+        onboardingGuide.advance(.finishJourney)
+        syncTimingFields()
         journeyRoute.endTime = Date()
         hasOngoingJourney = false
         tracking.stopJourney()
@@ -1217,6 +1368,7 @@ struct MapView: View {
             route: journeyRoute,
             journeyStore: journeyStore,
             cityCache: cityCache,
+            lifelogStore: lifelogStore,
             source: .userConfirmedFinish
         ) { updated in
             journeyRoute = updated
@@ -1224,6 +1376,95 @@ struct MapView: View {
             showSharingCard = true
             selectedTab = 0
             isPresented = false
+        }
+    }
+
+    private func maybeProcessHistoricalRouteLazily() {
+        guard journeyRoute.endTime != nil else { return }
+        guard !isProcessingHistoricalRoute else { return }
+        guard journeyRoute.correctedCoordinates.isEmpty || journeyRoute.matchedCoordinates.isEmpty else { return }
+
+        isProcessingHistoricalRoute = true
+        let snapshot = journeyRoute
+
+        Task {
+            let processed = await JourneyRoutePostProcessor.processIfNeeded(snapshot)
+            await MainActor.run {
+                defer { isProcessingHistoricalRoute = false }
+                guard processed.id == journeyRoute.id else { return }
+                guard processed.correctedCoordinates != journeyRoute.correctedCoordinates ||
+                        processed.matchedCoordinates != journeyRoute.matchedCoordinates ||
+                        processed.preferredRouteSource != journeyRoute.preferredRouteSource else {
+                    return
+                }
+
+                journeyRoute = processed
+                tracking.syncFromJourneyIfNeeded(processed)
+                journeyStore.upsertSnapshotThrottled(processed, coordCount: processed.coordinates.count)
+                journeyStore.flushPersist(journey: processed)
+            }
+        }
+    }
+
+    private func currentMovingDuration(at now: Date = Date()) -> TimeInterval {
+        if journeyRoute.endTime == nil {
+            return tracking.movingDuration(at: now)
+        }
+        if journeyRoute.movingDurationSeconds > 0 {
+            return journeyRoute.movingDurationSeconds
+        }
+        guard let start = journeyRoute.startTime, let end = journeyRoute.endTime else { return 0 }
+        let elapsed = max(0, end.timeIntervalSince(start))
+        return max(0, elapsed - max(0, journeyRoute.pausedDurationSeconds))
+    }
+
+    private func syncTimingFields(at now: Date = Date()) {
+        journeyRoute.pausedDurationSeconds = tracking.pausedDuration(at: now)
+        journeyRoute.movingDurationSeconds = tracking.movingDuration(at: now)
+    }
+
+    private func formatDuration(_ totalSeconds: Int) -> String {
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+        if hours > 0 {
+            return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
+        }
+        return String(format: "%02d:%02d", minutes, seconds)
+    }
+
+    private var modeSelectorOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        showModeSelector = false
+                    }
+                }
+
+            MapTrackingModeSelector(
+                selectedMode: journeyRoute.trackingMode,
+                onSelect: { mode in
+                    applyTrackingMode(mode)
+                    withAnimation(.easeInOut(duration: 0.18)) { showModeSelector = false }
+                },
+                onClose: {
+                    withAnimation(.easeInOut(duration: 0.18)) { showModeSelector = false }
+                }
+            )
+            .frame(maxWidth: 360)
+            .padding(.horizontal, 28)
+            .transition(.opacity)
+        }
+    }
+
+    private func applyTrackingMode(_ mode: TrackingMode) {
+        guard journeyRoute.trackingMode != mode else { return }
+        journeyRoute.trackingMode = mode
+        tracking.setTrackingMode(mode)
+        if journeyRoute.endTime == nil {
+            persistSnapshot(.coordsTick)
         }
     }
 
@@ -1250,7 +1491,7 @@ struct MapView: View {
         DispatchQueue.main.async {
             if let idx = journeyRoute.memories.firstIndex(where: { $0.id == memoryID }) {
                 journeyRoute.memories[idx].cityKey = key.isEmpty ? "Unknown|" : key
-                journeyRoute.memories[idx].cityName = name.isEmpty ? "Unknown" : name
+                journeyRoute.memories[idx].cityName = name.isEmpty ? L10n.t("unknown") : name
 
                 if journeyRoute.endTime == nil { persistSnapshot(.memoryAdded) }
                 journeyStore.upsertSnapshotThrottled(journeyRoute, coordCount: journeyRoute.coordinates.count)
@@ -1297,6 +1538,33 @@ struct MapView: View {
 // =======================
 // MARK: - Modifiers
 // =======================
+
+private struct TrackingDistanceTimeChip: View {
+    let distanceProvider: () -> Double
+    let movingDurationProvider: (Date) -> TimeInterval
+    let durationFormatter: (Int) -> String
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1.0)) { context in
+            let distance = distanceProvider()
+            let movingSeconds = max(0, Int(movingDurationProvider(context.date)))
+            let distanceText: String = {
+                if distance < 1000 { return String(format: "%.0f m", distance) }
+                return String(format: "%.2f km", distance / 1000)
+            }()
+
+            Text("\(distanceText) · \(durationFormatter(movingSeconds))")
+                .font(.system(size: 14, weight: .semibold))
+                .tracking(-0.5)
+                .foregroundColor(FigmaTheme.text)
+                .padding(.horizontal, 20)
+                .frame(height: 36)
+                .background(Color.white.opacity(0.78))
+                .clipShape(Capsule(style: .continuous))
+                .shadow(color: Color.black.opacity(0.10), radius: 8, x: 0, y: 2)
+        }
+    }
+}
 
 private struct UserGestureDetection: ViewModifier {
     @Binding var isUserInteracting: Bool
@@ -1370,14 +1638,14 @@ struct MemoryClusterView: View {
                                 onOpenDetail(m)
                             } label: {
                                 HStack(spacing: 12) {
-                                    Image(systemName: m.imagePaths.isEmpty ? "note.text" : "photo")
+                                    Image(systemName: (m.imagePaths.isEmpty && m.remoteImageURLs.isEmpty) ? "note.text" : "photo")
                                         .foregroundColor(.blue)
                                         .frame(width: 24)
 
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(m.title.isEmpty ? "Memory" : m.title)
                                             .font(.system(size: 14, weight: .semibold))
-                                            .foregroundColor(.black)
+                                            .foregroundColor(FigmaTheme.text)
 
                                         Text(m.timestamp.formatted(date: .abbreviated, time: .shortened))
                                             .font(.system(size: 11))
@@ -1449,16 +1717,16 @@ struct MemoryDetailPage: View {
                         if !memory.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             Text(memory.title)
                                 .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.black)
+                                .foregroundColor(FigmaTheme.text)
                         }
 
                         if !memory.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             Text(memory.notes)
                                 .font(.system(size: 14))
-                                .foregroundColor(.black.opacity(0.85))
+                                .foregroundColor(FigmaTheme.text.opacity(0.85))
                         }
 
-                        if !memory.imagePaths.isEmpty {
+                        if !memory.imagePaths.isEmpty || !memory.remoteImageURLs.isEmpty {
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 10) {
                                     ForEach(Array(memory.imagePaths.enumerated()), id: \.offset) { idx, p in
@@ -1479,6 +1747,35 @@ struct MemoryDetailPage: View {
                                         .onTapGesture {
                                             viewerIndex = idx
                                             showViewer = true
+                                        }
+                                    }
+                                    ForEach(memory.remoteImageURLs, id: \.self) { rawURL in
+                                        if let url = URL(string: rawURL) {
+                                            AsyncImage(url: url) { phase in
+                                                switch phase {
+                                                case .success(let image):
+                                                    image
+                                                        .resizable()
+                                                        .scaledToFill()
+                                                        .frame(width: 88, height: 88)
+                                                        .clipped()
+                                                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                                case .failure:
+                                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                        .fill(Color(UIColor(white: 0.92, alpha: 1)))
+                                                        .frame(width: 88, height: 88)
+                                                        .overlay {
+                                                            Image(systemName: "exclamationmark.triangle")
+                                                                .foregroundColor(.secondary)
+                                                        }
+                                                case .empty:
+                                                    ProgressView()
+                                                        .frame(width: 88, height: 88)
+                                                @unknown default:
+                                                    EmptyView()
+                                                        .frame(width: 88, height: 88)
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -1537,6 +1834,123 @@ struct MemoryDetailPage: View {
     }
 }
 
+private struct MapTrackingModeSelector: View {
+    let selectedMode: TrackingMode
+    let onSelect: (TrackingMode) -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(L10n.t("select_mode"))
+                    .font(.system(size: 16, weight: .bold))
+                    .tracking(1)
+                    .foregroundColor(.white)
+
+                Spacer()
+
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.9))
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .background(FigmaTheme.primary)
+
+            VStack(spacing: 14) {
+                MapModeOptionCard(
+                    mode: .sport,
+                    isSelected: selectedMode == .sport,
+                    onSelect: { onSelect(.sport) }
+                )
+
+                MapModeOptionCard(
+                    mode: .daily,
+                    isSelected: selectedMode == .daily,
+                    onSelect: { onSelect(.daily) }
+                )
+            }
+            .padding(18)
+            .background(Color.white)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.black.opacity(0.10), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.18), radius: 18, x: 0, y: 10)
+    }
+}
+
+private struct MapModeOptionCard: View {
+    let mode: TrackingMode
+    let isSelected: Bool
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 16) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(isSelected ? FigmaTheme.primary.opacity(0.15) : Color.black.opacity(0.05))
+                        .frame(width: 48, height: 48)
+
+                    Image(systemName: mode == .sport ? "bolt.fill" : "figure.walk")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(isSelected ? FigmaTheme.primary : .black.opacity(0.5))
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(mode == .sport ? L10n.key("lockscreen_sport_mode") : L10n.key("lockscreen_daily_mode"))
+                        .font(.system(size: 15, weight: .bold))
+                        .tracking(0.8)
+                        .foregroundColor(FigmaTheme.text)
+
+                    Text(mode == .sport ? L10n.key("sport_mode_desc") : L10n.key("daily_mode_desc"))
+                        .font(.system(size: 12))
+                        .foregroundColor(FigmaTheme.text.opacity(0.55))
+                        .lineLimit(3)
+                        .multilineTextAlignment(.leading)
+
+                    HStack(spacing: 12) {
+                        if mode == .sport {
+                            Text(L10n.key("hint_precise"))
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(FigmaTheme.primary)
+                            Text(L10n.key("hint_battery"))
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(FigmaTheme.text.opacity(0.35))
+                        } else {
+                            Text(L10n.key("hint_precision"))
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(FigmaTheme.text.opacity(0.35))
+                            Text(L10n.key("hint_efficient"))
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(FigmaTheme.primary)
+                        }
+                    }
+                    .padding(.top, 2)
+                }
+
+                Spacer()
+            }
+            .padding(16)
+            .background(isSelected ? FigmaTheme.background : Color.white)
+            .cornerRadius(16)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(isSelected ? FigmaTheme.primary : Color.black.opacity(0.10), lineWidth: isSelected ? 2 : 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 // =======================================================
 // MARK: - Unified Memory Editor (System Camera, Photo Library, mirror toggle)
 // =======================================================
@@ -1558,6 +1972,7 @@ struct MemoryEditorSheet: View {
     @State private var viewerIndex = 0
     @State private var showExpanded = false
     @State private var showDiscardAlert = false
+    @State private var showDeleteAlert = false
 
     // ✅ Used to decide whether we should auto-resume the editor when user returns
     // (Back gesture / swipe-dismiss). Save & Cancel will set this to true.
@@ -1565,11 +1980,14 @@ struct MemoryEditorSheet: View {
 
     /// ✅ 镜像开关：默认不镜像
     @State private var mirrorSelfie: Bool = false
+    @State private var initialTitle: String
+    @State private var initialNotes: String
+    @State private var initialImagePaths: [String]
+    @State private var initialMirrorSelfie: Bool
     private let maxPhotos = 3
 
     private func hideKeyboard() {
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
-                                        to: nil, from: nil, for: nil)
+        endEditingGlobal()
     }
 
     init(
@@ -1595,6 +2013,11 @@ struct MemoryEditorSheet: View {
             _imagePaths = State(initialValue: existing?.imagePaths ?? [])
             _mirrorSelfie = State(initialValue: false)
         }
+
+        _initialTitle = State(initialValue: existing?.title ?? "")
+        _initialNotes = State(initialValue: existing?.notes ?? "")
+        _initialImagePaths = State(initialValue: existing?.imagePaths ?? [])
+        _initialMirrorSelfie = State(initialValue: false)
     }
 
 private var draftMemoryID: String { existing?.id ?? "new" }
@@ -1608,23 +2031,24 @@ private func clearDraft() {
     MemoryDraftStore.clear(userID: userID, memoryID: draftMemoryID)
 }
 
-private var hasDraft: Bool {
-        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-        !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-        !imagePaths.isEmpty
+private var hasUnsavedChanges: Bool {
+        title.trimmingCharacters(in: .whitespacesAndNewlines) != initialTitle.trimmingCharacters(in: .whitespacesAndNewlines) ||
+        notes.trimmingCharacters(in: .whitespacesAndNewlines) != initialNotes.trimmingCharacters(in: .whitespacesAndNewlines) ||
+        imagePaths != initialImagePaths ||
+        mirrorSelfie != initialMirrorSelfie
     }
     private var canAddPhoto: Bool { imagePaths.count < maxPhotos }
     private var remainingPhotoSlots: Int { max(0, maxPhotos - imagePaths.count) }
 
     private func dismissSmart() {
-        if hasDraft { showDiscardAlert = true }
+        if hasUnsavedChanges { showDiscardAlert = true }
         else { closeWithoutSaving() }
     }
 
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.20)
+            Color.black.opacity(0.14)
                 .ignoresSafeArea()
                 .onTapGesture {
                     notesFocused = false
@@ -1643,7 +2067,7 @@ private var hasDraft: Bool {
                 .frame(maxWidth: 430)
                 .background(FigmaTheme.mutedBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
-                .shadow(color: Color.black.opacity(0.25), radius: 32, x: 0, y: 12)
+                .shadow(color: Color.black.opacity(0.14), radius: 20, x: 0, y: 8)
 
                 Spacer()
             }
@@ -1654,18 +2078,18 @@ private var hasDraft: Bool {
 .onChange(of: notes) { _ in persistDraft() }
 .onChange(of: imagePaths) { _ in persistDraft() }
 .onChange(of: mirrorSelfie) { _ in persistDraft() }
-.interactiveDismissDisabled(hasDraft)
+.interactiveDismissDisabled(hasUnsavedChanges)
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             // ✅ If the app is backgrounded / killed, keep the draft
-            persistDraft()
-            if !didExitExplicitly {
+            if !didExitExplicitly, hasUnsavedChanges {
+                persistDraft()
                 MemoryDraftResumeStore.set(true, userID: userID, memoryID: draftMemoryID)
             }
         }
         .onDisappear {
             // ✅ Back gesture / swipe-dismiss should keep editing state
             // unless user explicitly saved or canceled.
-            if !didExitExplicitly {
+            if !didExitExplicitly, hasUnsavedChanges {
                 persistDraft()
                 MemoryDraftResumeStore.set(true, userID: userID, memoryID: draftMemoryID)
             }
@@ -1708,6 +2132,7 @@ private var hasDraft: Bool {
                     mirrorSelfie: $mirrorSelfie,
                     maxPhotos: maxPhotos,
                     isNew: existing == nil,
+                    onDelete: existing == nil ? nil : { deleteExistingMemory() },
                     onClose: { showExpanded = false },
                     onSave: { saveAndDismiss() }
                 )
@@ -1721,26 +2146,34 @@ private var hasDraft: Bool {
                 onClose: { showPhotoViewer = false }
             )
         }
-        .alert("丢弃更改？", isPresented: $showDiscardAlert) {
+        .alert(L10n.t("discard_changes_title"), isPresented: $showDiscardAlert) {
             Button(L10n.t("cancel"), role: .cancel) {}
-            Button("丢弃", role: .destructive) { closeWithoutSaving() }
+            Button(L10n.t("discard"), role: .destructive) { closeWithoutSaving() }
         } message: {
-            Text("当前编辑内容不会保存。")
+            Text(L10n.t("discard_edit_message"))
+        }
+        .alert(L10n.t("delete_memory_confirm_title"), isPresented: $showDeleteAlert) {
+            Button(L10n.t("cancel"), role: .cancel) {}
+            Button(L10n.t("delete"), role: .destructive) { deleteExistingMemory() }
+        } message: {
+            Text(L10n.t("delete_memory_confirm_message"))
         }
     }
 
     private var header: some View {
         HStack(spacing: 10) {
             Text(existing == nil ? L10n.key("add_memory") : L10n.key("edit_memory"))
-                .appHeaderStyle()
-                .foregroundColor(.black)
+                .font(.system(size: 20, weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .foregroundColor(FigmaTheme.text)
 
             Spacer()
 
             Button { showExpanded = true } label: {
                 Image(systemName: "arrow.up.left.and.arrow.down.right")
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(.black.opacity(0.85))
+                    .foregroundColor(FigmaTheme.text.opacity(0.85))
                     .frame(width: 32, height: 32)
                     .background(Color.black.opacity(0.04))
                     .clipShape(Circle())
@@ -1750,7 +2183,7 @@ private var hasDraft: Bool {
             Button { dismissSmart() } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(.black.opacity(0.85))
+                    .foregroundColor(FigmaTheme.text.opacity(0.85))
                     .frame(width: 32, height: 32)
                     .background(Color.black.opacity(0.04))
                     .clipShape(Circle())
@@ -1764,77 +2197,51 @@ private var hasDraft: Bool {
 
     private var content: some View {
         VStack(spacing: 0) {
-            ZStack(alignment: .bottomLeading) {
-                VStack(spacing: 8) {
-                    MemoryNotesEditor(text: $notes, isFocused: $notesFocused, placeholder: L10n.t("memory_notes_placeholder"))
-                        .frame(minHeight: 188, maxHeight: 240)
-                        .padding(.horizontal, 6)
-                        .padding(.top, 8)
+            VStack(spacing: 8) {
+                MemoryNotesEditor(text: $notes, isFocused: $notesFocused, placeholder: L10n.t("memory_notes_placeholder"))
+                    .frame(minHeight: 188, maxHeight: 240)
+                    .padding(.horizontal, 6)
+                    .padding(.top, 8)
 
-                    if !imagePaths.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 10) {
-                                ForEach(Array(imagePaths.enumerated()), id: \.offset) { idx, p in
-                                    ZStack(alignment: .topTrailing) {
-                                        PhotoThumb(path: p, userID: userID)
-                                            .onTapGesture {
-                                                viewerIndex = idx
-                                                showPhotoViewer = true
-                                            }
-
-                                        Button {
-                                            let removed = imagePaths.remove(at: idx)
-                                            PhotoStore.delete(named: removed, userID: userID)
-                                        } label: {
-                                            Image(systemName: "xmark.circle.fill")
-                                                .font(.system(size: 16))
-                                                .foregroundColor(.black.opacity(0.6))
-                                                .background(Color.white.opacity(0.75).clipShape(Circle()))
+                if !imagePaths.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(Array(imagePaths.enumerated()), id: \.offset) { idx, p in
+                                ZStack(alignment: .topTrailing) {
+                                    PhotoThumb(path: p, userID: userID)
+                                        .onTapGesture {
+                                            viewerIndex = idx
+                                            showPhotoViewer = true
                                         }
-                                        .buttonStyle(.plain)
-                                        .padding(4)
+
+                                    Button {
+                                        let removed = imagePaths.remove(at: idx)
+                                        PhotoStore.delete(named: removed, userID: userID)
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.system(size: 16))
+                                            .foregroundColor(FigmaTheme.text.opacity(0.6))
+                                            .background(Color.white.opacity(0.75).clipShape(Circle()))
                                     }
+                                    .buttonStyle(.plain)
+                                    .padding(4)
                                 }
                             }
-                            .padding(.horizontal, 4)
-                            .padding(.bottom, 44)
                         }
+                        .padding(.horizontal, 4)
+                        .padding(.bottom, 8)
                     }
                 }
-                .padding(.horizontal, 14)
-                .padding(.top, 8)
-                .padding(.bottom, 8)
-
-                HStack(spacing: 12) {
-                    Button { showCamera = true } label: {
-                        Image(systemName: "camera")
-                            .font(.system(size: 20, weight: .medium))
-                            .foregroundColor(Color.black.opacity(0.82))
-                            .frame(width: 32, height: 32)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!canAddPhoto)
-                    .opacity(canAddPhoto ? 1 : 0.35)
-
-                    Button { showPhotoLibrary = true } label: {
-                        Image(systemName: "photo")
-                            .font(.system(size: 20, weight: .medium))
-                            .foregroundColor(Color.black.opacity(0.82))
-                            .frame(width: 32, height: 32)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!canAddPhoto)
-                    .opacity(canAddPhoto ? 1 : 0.35)
-                }
-                .padding(.leading, 20)
-                .padding(.bottom, 12)
             }
+            .padding(.horizontal, 14)
+            .padding(.top, 8)
+            .padding(.bottom, 8)
             .frame(minHeight: 290)
             .background(Color.white)
             .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-            .padding(.horizontal, 24)
-            .padding(.top, 22)
-            .padding(.bottom, 18)
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+            .padding(.bottom, 10)
             .onTapGesture {
                 notesFocused = false
                 hideKeyboard()
@@ -1844,23 +2251,55 @@ private var hasDraft: Bool {
 
     private var footer: some View {
         HStack {
-            Text("照片 \(imagePaths.count)/\(maxPhotos)")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(FigmaTheme.subtext)
+            HStack(spacing: 12) {
+                Button { showCamera = true } label: {
+                    Image(systemName: "camera")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundColor(FigmaTheme.text.opacity(0.82))
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .disabled(!canAddPhoto)
+                .opacity(canAddPhoto ? 1 : 0.35)
+
+                Button { showPhotoLibrary = true } label: {
+                    Image(systemName: "photo")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundColor(FigmaTheme.text.opacity(0.82))
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .disabled(!canAddPhoto)
+                .opacity(canAddPhoto ? 1 : 0.35)
+            }
             Spacer()
 
-            Button { saveAndDismiss() } label: {
-                Text(L10n.t("save").uppercased())
-                    .font(.system(size: 14, weight: .black))
-                    .tracking(-0.3)
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 30)
-                    .frame(height: 48)
-                    .background(UITheme.accent)
-                    .clipShape(Capsule(style: .continuous))
-                    .shadow(color: UITheme.accent.opacity(0.22), radius: 10, x: 0, y: 3)
+            HStack(spacing: 10) {
+                if existing != nil {
+                    Button { showDeleteAlert = true } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.red.opacity(0.9))
+                            .frame(width: 48, height: 48)
+                            .background(Color.red.opacity(0.10))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Button { saveAndDismiss() } label: {
+                    Text(L10n.t("save").uppercased())
+                        .font(.system(size: 14, weight: .semibold))
+                        .tracking(-0.3)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 30)
+                        .frame(height: 48)
+                        .background(UITheme.accent)
+                        .clipShape(Capsule(style: .continuous))
+                        .shadow(color: UITheme.accent.opacity(0.22), radius: 10, x: 0, y: 3)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 24)
         .padding(.bottom, 20)
@@ -1893,6 +2332,15 @@ private var hasDraft: Bool {
         didExitExplicitly = true
         clearDraft()
         MemoryDraftResumeStore.set(false, userID: userID, memoryID: draftMemoryID)
+        isPresented = false
+    }
+
+    private func deleteExistingMemory() {
+        guard existing != nil else { return }
+        didExitExplicitly = true
+        clearDraft()
+        MemoryDraftResumeStore.set(false, userID: userID, memoryID: draftMemoryID)
+        onSave(nil)
         isPresented = false
     }
 
@@ -1962,6 +2410,7 @@ struct MemoryEditorPage: View {
     let maxPhotos: Int
     let isNew: Bool
 
+    let onDelete: (() -> Void)?
     let onClose: () -> Void
     let onSave: () -> Void
 
@@ -1970,6 +2419,7 @@ struct MemoryEditorPage: View {
     @State private var showPhotoLibrary: Bool = false
     @State private var showPhotoViewer: Bool = false
     @State private var viewerIndex: Int = 0
+    @State private var showDeleteConfirm: Bool = false
     private var canAddPhoto: Bool { imagePaths.count < maxPhotos }
     private var remainingPhotoSlots: Int { max(0, maxPhotos - imagePaths.count) }
 
@@ -2019,81 +2469,63 @@ struct MemoryEditorPage: View {
                 onClose: { showPhotoViewer = false }
             )
         }
+        .alert(L10n.t("delete_memory_confirm_title"), isPresented: $showDeleteConfirm) {
+            Button(L10n.t("cancel"), role: .cancel) {}
+            Button(L10n.t("delete"), role: .destructive) {
+                onDelete?()
+            }
+        } message: {
+            Text(L10n.t("delete_memory_confirm_message"))
+        }
     }
 
     private var content: some View {
         VStack(spacing: 0) {
-            ZStack(alignment: .bottomLeading) {
-                VStack(spacing: 8) {
-                    MemoryNotesEditor(text: $notes, isFocused: $notesFocused, placeholder: L10n.t("memory_notes_placeholder"))
-                        .frame(minHeight: 188, maxHeight: 240)
-                        .padding(.horizontal, 6)
-                        .padding(.top, 8)
+            VStack(spacing: 8) {
+                MemoryNotesEditor(text: $notes, isFocused: $notesFocused, placeholder: L10n.t("memory_notes_placeholder"))
+                    .frame(minHeight: 188, maxHeight: 240)
+                    .padding(.horizontal, 6)
+                    .padding(.top, 8)
 
-                    if !imagePaths.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 10) {
-                                ForEach(Array(imagePaths.enumerated()), id: \.offset) { idx, p in
-                                    ZStack(alignment: .topTrailing) {
-                                        PhotoThumb(path: p, userID: userID)
-                                            .onTapGesture {
-                                                viewerIndex = idx
-                                                showPhotoViewer = true
-                                            }
-
-                                        Button {
-                                            let removed = imagePaths.remove(at: idx)
-                                            PhotoStore.delete(named: removed, userID: userID)
-                                        } label: {
-                                            Image(systemName: "xmark.circle.fill")
-                                                .font(.system(size: 16))
-                                                .foregroundColor(.black.opacity(0.6))
-                                                .background(Color.white.opacity(0.75).clipShape(Circle()))
+                if !imagePaths.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(Array(imagePaths.enumerated()), id: \.offset) { idx, p in
+                                ZStack(alignment: .topTrailing) {
+                                    PhotoThumb(path: p, userID: userID)
+                                        .onTapGesture {
+                                            viewerIndex = idx
+                                            showPhotoViewer = true
                                         }
-                                        .buttonStyle(.plain)
-                                        .padding(4)
+
+                                    Button {
+                                        let removed = imagePaths.remove(at: idx)
+                                        PhotoStore.delete(named: removed, userID: userID)
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.system(size: 16))
+                                            .foregroundColor(FigmaTheme.text.opacity(0.6))
+                                            .background(Color.white.opacity(0.75).clipShape(Circle()))
                                     }
+                                    .buttonStyle(.plain)
+                                    .padding(4)
                                 }
                             }
-                            .padding(.horizontal, 4)
-                            .padding(.bottom, 44)
                         }
+                        .padding(.horizontal, 4)
+                        .padding(.bottom, 8)
                     }
                 }
-                .padding(.horizontal, 14)
-                .padding(.top, 8)
-                .padding(.bottom, 8)
-
-                HStack(spacing: 12) {
-                    Button { showCamera = true } label: {
-                        Image(systemName: "camera")
-                            .font(.system(size: 20, weight: .medium))
-                            .foregroundColor(Color.black.opacity(0.82))
-                            .frame(width: 32, height: 32)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!canAddPhoto)
-                    .opacity(canAddPhoto ? 1 : 0.35)
-
-                    Button { showPhotoLibrary = true } label: {
-                        Image(systemName: "photo")
-                            .font(.system(size: 20, weight: .medium))
-                            .foregroundColor(Color.black.opacity(0.82))
-                            .frame(width: 32, height: 32)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!canAddPhoto)
-                    .opacity(canAddPhoto ? 1 : 0.35)
-                }
-                .padding(.leading, 20)
-                .padding(.bottom, 12)
             }
+            .padding(.horizontal, 14)
+            .padding(.top, 8)
+            .padding(.bottom, 8)
             .frame(minHeight: 290)
             .background(Color.white)
             .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-            .padding(.horizontal, 24)
-            .padding(.top, 22)
-            .padding(.bottom, 18)
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+            .padding(.bottom, 10)
             .onTapGesture {
                 notesFocused = false
                 endEditingGlobal()
@@ -2103,23 +2535,55 @@ struct MemoryEditorPage: View {
 
     private var footer: some View {
         HStack {
-            Text("照片 \(imagePaths.count)/\(maxPhotos)")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(FigmaTheme.subtext)
+            HStack(spacing: 12) {
+                Button { showCamera = true } label: {
+                    Image(systemName: "camera")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundColor(FigmaTheme.text.opacity(0.82))
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .disabled(!canAddPhoto)
+                .opacity(canAddPhoto ? 1 : 0.35)
+
+                Button { showPhotoLibrary = true } label: {
+                    Image(systemName: "photo")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundColor(FigmaTheme.text.opacity(0.82))
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .disabled(!canAddPhoto)
+                .opacity(canAddPhoto ? 1 : 0.35)
+            }
             Spacer()
 
-            Button(action: onSave) {
-                Text(L10n.t("save").uppercased())
-                    .font(.system(size: 14, weight: .black))
-                    .tracking(-0.3)
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 30)
-                    .frame(height: 48)
-                    .background(UITheme.accent)
-                    .clipShape(Capsule(style: .continuous))
-                    .shadow(color: UITheme.accent.opacity(0.22), radius: 10, x: 0, y: 3)
+            HStack(spacing: 10) {
+                if onDelete != nil {
+                    Button { showDeleteConfirm = true } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.red.opacity(0.9))
+                            .frame(width: 48, height: 48)
+                            .background(Color.red.opacity(0.10))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Button(action: onSave) {
+                    Text(L10n.t("save").uppercased())
+                        .font(.system(size: 14, weight: .semibold))
+                        .tracking(-0.3)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 30)
+                        .frame(height: 48)
+                        .background(UITheme.accent)
+                        .clipShape(Capsule(style: .continuous))
+                        .shadow(color: UITheme.accent.opacity(0.22), radius: 10, x: 0, y: 3)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 24)
         .padding(.bottom, 20)
@@ -2128,15 +2592,17 @@ struct MemoryEditorPage: View {
     private var header: some View {
         HStack(spacing: 10) {
             Text(isNew ? L10n.key("add_memory") : L10n.key("edit_memory"))
-                .appHeaderStyle()
-                .foregroundColor(.black)
+                .font(.system(size: 20, weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .foregroundColor(FigmaTheme.text)
 
             Spacer()
 
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(.black.opacity(0.85))
+                    .foregroundColor(FigmaTheme.text.opacity(0.85))
                     .frame(width: 32, height: 32)
                     .background(Color.black.opacity(0.04))
                     .clipShape(Circle())
@@ -2314,13 +2780,13 @@ struct MemoryGroupDetailPage: View {
                                     if !mem.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                         Text(mem.notes)
                                             .font(.system(size: 14))
-                                            .foregroundColor(.black.opacity(0.85))
+                                            .foregroundColor(FigmaTheme.text.opacity(0.85))
                                             .lineLimit(4)
                                             .frame(maxWidth: .infinity, alignment: .leading)
                                     } else if !mem.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                         Text(mem.title)
                                             .font(.system(size: 14, weight: .semibold))
-                                            .foregroundColor(.black)
+                                            .foregroundColor(FigmaTheme.text)
                                             .frame(maxWidth: .infinity, alignment: .leading)
                                     } else {
                                         Text(L10n.key("empty_memory"))
@@ -2434,61 +2900,19 @@ private final class RobotAnnotation: NSObject, MKAnnotation {
     }
 }
 
-private struct HeadlightConeShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        let radius = min(rect.width, rect.height) * 0.54
-        let spread = Angle.degrees(34)
-        var path = Path()
-        path.move(to: center)
-        path.addArc(
-            center: center,
-            radius: radius,
-            startAngle: .degrees(-90) - spread,
-            endAngle: .degrees(-90) + spread,
-            clockwise: false
-        )
-        path.closeSubpath()
-        return path
-    }
-}
-
-private struct RobotHeadingHaloView: View {
-    let headingDegrees: Double
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .fill(Color.green.opacity(0.16))
-                .frame(width: 68, height: 68)
-
-            HeadlightConeShape()
-                .fill(
-                    LinearGradient(
-                        colors: [Color.green.opacity(0.42), Color.green.opacity(0.03)],
-                        startPoint: .center,
-                        endPoint: .top
-                    )
-                )
-                .frame(width: 88, height: 88)
-                .blur(radius: 4)
-                .rotationEffect(.degrees(headingDegrees))
-
-            HeadlightConeShape()
-                .stroke(Color.green.opacity(0.22), lineWidth: 1)
-                .frame(width: 86, height: 86)
-                .rotationEffect(.degrees(headingDegrees))
-        }
-    }
-}
-
 private struct RobotMapMarkerView: View {
     let face: RobotFace
     let headingDegrees: Double
+    let showsHeadlight: Bool
 
     var body: some View {
-        RobotRendererView(size: 96, face: face, loadout: AvatarLoadoutStore.load())
-            .frame(width: 96, height: 96)
+        ZStack {
+            if showsHeadlight {
+                AvatarHeadlightConeView(headingDegrees: headingDegrees)
+            }
+            RobotRendererView(size: AvatarMapMarkerStyle.visualSize, face: face, loadout: AvatarLoadoutStore.load())
+        }
+        .frame(width: AvatarMapMarkerStyle.annotationSize, height: AvatarMapMarkerStyle.annotationSize)
     }
 }
 
@@ -2498,6 +2922,7 @@ private struct JourneyMKMapView: UIViewRepresentable {
 
     let userCoordinate: CLLocationCoordinate2D?
     let headingDegrees: Double
+    let headlightEnabled: Bool
     let travelMode: TravelMode
 
     let segments: [RenderRouteSegment]
@@ -2581,6 +3006,9 @@ private struct JourneyMKMapView: UIViewRepresentable {
         private var lastSegmentsSignature: String = ""
         private var lastTailSignature: String = ""
         private var isProgrammaticRegionChange = false
+        private var renderedSegments: [RenderRouteSegment] = []
+        private var routeOverlays: [WeightedRoutePolyline] = []
+        private var tailOverlay: MKPolyline?
 
         init(_ parent: JourneyMKMapView) {
             self.parent = parent
@@ -2654,12 +3082,18 @@ private struct JourneyMKMapView: UIViewRepresentable {
 
         private func configureRobotAnnotationView(
             _ view: MKAnnotationView,
-            face: RobotFace,
+            face _: RobotFace,
             worldHeading: Double,
             cameraHeading: Double
         ) {
+            let fixedFace: RobotFace = .front
             view.canShowCallout = false
-            view.bounds = CGRect(x: 0, y: 0, width: 112, height: 112)
+            view.bounds = CGRect(
+                x: 0,
+                y: 0,
+                width: AvatarMapMarkerStyle.annotationSize,
+                height: AvatarMapMarkerStyle.annotationSize
+            )
             view.backgroundColor = .clear
             view.centerOffset = .zero
             view.displayPriority = .required
@@ -2670,7 +3104,11 @@ private struct JourneyMKMapView: UIViewRepresentable {
 
             let displayHeading = normalizedHeading(worldHeading - cameraHeading)
             let hosting = UIHostingController(
-                rootView: RobotMapMarkerView(face: face, headingDegrees: displayHeading)
+                rootView: RobotMapMarkerView(
+                    face: fixedFace,
+                    headingDegrees: displayHeading,
+                    showsHeadlight: parent.headlightEnabled
+                )
             )
             hosting.view.backgroundColor = .clear
             hosting.view.frame = view.bounds
@@ -2686,7 +3124,7 @@ private struct JourneyMKMapView: UIViewRepresentable {
                     .map { m in
                         let t = m.title.trimmingCharacters(in: .whitespacesAndNewlines)
                         let n = m.notes.trimmingCharacters(in: .whitespacesAndNewlines)
-                        return "\(m.id)|t:\(t.count)|n:\(n.count)|p:\(m.imagePaths.count)"
+                        return "\(m.id)|t:\(t.count)|n:\(n.count)|p:\(m.imagePaths.count)|rp:\(m.remoteImageURLs.count)"
                     }
                     .joined(separator: ";")
             }
@@ -2765,41 +3203,77 @@ private struct JourneyMKMapView: UIViewRepresentable {
 
             guard needsSegUpdate || needsTailUpdate else { return }
 
-            // Remove old route overlays (keep any unrelated overlays)
-            let keep = map.overlays.filter { ov in
-                guard let shape = ov as? MKShape, let t = shape.title else { return true }
-                return !(t.hasPrefix("route_") || t == "tail")
-            }
-            map.removeOverlays(map.overlays)
-            map.addOverlays(keep)
-
-            var counts: [String: Int] = [:]
-            for seg in segments where seg.style != .dashed && seg.coords.count >= 2 {
-                let sig = segmentSignature(seg.coords)
-                counts[sig, default: 0] += 1
-            }
-            let p95 = max(1.0, quantile(Array(counts.values), p: 0.95))
-
-            for seg in segments where seg.coords.count > 1 {
-                let poly = WeightedRoutePolyline(coordinates: seg.coords, count: seg.coords.count)
-                poly.isGap = (seg.style == .dashed)
-                if let n = counts[segmentSignature(seg.coords)], !poly.isGap {
-                    poly.repeatWeight = min(1.0, log(1.0 + Double(n)) / log(1.0 + p95))
-                } else {
-                    poly.repeatWeight = 0.0
+            if needsSegUpdate {
+                var counts: [String: Int] = [:]
+                for seg in segments where seg.style != .dashed && seg.coords.count >= 2 {
+                    let sig = segmentSignature(seg.coords)
+                    counts[sig, default: 0] += 1
                 }
-                poly.title = poly.isGap ? "route_dashed" : "route_solid"
-                map.addOverlay(poly)
+                let p95 = max(1.0, quantile(Array(counts.values), p: 0.95))
+                let commonPrefixCount = sharedPrefixCount(lhs: renderedSegments, rhs: segments)
+
+                if commonPrefixCount < routeOverlays.count {
+                    let stale = Array(routeOverlays[commonPrefixCount...])
+                    map.removeOverlays(stale)
+                    routeOverlays.removeSubrange(commonPrefixCount..<routeOverlays.count)
+                }
+
+                if commonPrefixCount < segments.count {
+                    var appended: [WeightedRoutePolyline] = []
+                    appended.reserveCapacity(segments.count - commonPrefixCount)
+
+                    for seg in segments[commonPrefixCount...] where seg.coords.count > 1 {
+                        let poly = WeightedRoutePolyline(coordinates: seg.coords, count: seg.coords.count)
+                        poly.isGap = (seg.style == .dashed)
+                        if let n = counts[segmentSignature(seg.coords)], !poly.isGap {
+                            poly.repeatWeight = min(1.0, log(1.0 + Double(n)) / log(1.0 + p95))
+                        } else {
+                            poly.repeatWeight = 0.0
+                        }
+                        poly.title = poly.isGap ? "route_dashed" : "route_solid"
+                        appended.append(poly)
+                    }
+
+                    if !appended.isEmpty {
+                        map.addOverlays(appended)
+                        routeOverlays.append(contentsOf: appended)
+                    }
+                }
+
+                renderedSegments = segments
+
+                // Keep tail above newly-added route overlays when only segments changed.
+                if !needsTailUpdate, let tail = tailOverlay {
+                    map.removeOverlay(tail)
+                    map.addOverlay(tail)
+                }
             }
 
-            if liveTail.count == 2 {
-                let poly = MKPolyline(coordinates: liveTail, count: liveTail.count)
-                poly.title = "tail"
-                map.addOverlay(poly)
+            if needsTailUpdate {
+                if let oldTail = tailOverlay {
+                    map.removeOverlay(oldTail)
+                    tailOverlay = nil
+                }
+                if liveTail.count == 2 {
+                    let poly = MKPolyline(coordinates: liveTail, count: liveTail.count)
+                    poly.title = "tail"
+                    map.addOverlay(poly)
+                    tailOverlay = poly
+                }
             }
 
             lastSegmentsSignature = segSig
             lastTailSignature = tailSig
+        }
+
+        private func sharedPrefixCount(lhs: [RenderRouteSegment], rhs: [RenderRouteSegment]) -> Int {
+            let limit = min(lhs.count, rhs.count)
+            var index = 0
+            while index < limit {
+                if lhs[index] != rhs[index] { break }
+                index += 1
+            }
+            return index
         }
 
         // MARK: - MKMapViewDelegate
@@ -2828,8 +3302,8 @@ private struct JourneyMKMapView: UIViewRepresentable {
 
             if poly.title == "tail" {
                 let renderer = MKPolylineRenderer(polyline: poly)
-                renderer.strokeColor = MapAppearanceSettings.routeBaseColor.withAlphaComponent(0.35)
-                renderer.lineWidth = 3
+                renderer.strokeColor = MapAppearanceSettings.routeBaseColor.withAlphaComponent(0.72)
+                renderer.lineWidth = 3.6
                 renderer.lineCap = .round
                 renderer.lineJoin = .round
                 return renderer
@@ -2839,10 +3313,10 @@ private struct JourneyMKMapView: UIViewRepresentable {
             let coreWidth = widths(for: mapView.camera.altitude, mode: parent.travelMode)
             guard let styled = poly as? WeightedRoutePolyline else {
                 let renderer = MKPolylineRenderer(polyline: poly)
-                renderer.lineWidth = coreWidth
+                renderer.lineWidth = coreWidth * 0.90
                 renderer.lineCap = .round
                 renderer.lineJoin = .round
-                renderer.strokeColor = base.withAlphaComponent(0.50)
+                renderer.strokeColor = base.withAlphaComponent(0.88)
                 if poly.title == "route_dashed" {
                     renderer.lineDashPattern = RouteRenderStyleTokens.dashLengths.map { NSNumber(value: Double($0)) }
                 }
@@ -2853,25 +3327,25 @@ private struct JourneyMKMapView: UIViewRepresentable {
             let weight = CGFloat(max(0, min(1, styled.repeatWeight)))
 
             let halo = MKPolylineRenderer(polyline: styled)
-            halo.lineWidth = isGap ? max(1.2, coreWidth * 0.6) : (coreWidth * 0.95 + weight * 1.1)
+            halo.lineWidth = isGap ? max(1.0, coreWidth * 0.45) : (coreWidth * 1.04 + weight * 0.50)
             halo.lineCap = CGLineCap.round
             halo.lineJoin = CGLineJoin.round
-            halo.strokeColor = base.withAlphaComponent(isGap ? 0.08 : 0.12)
+            halo.strokeColor = base.withAlphaComponent(isGap ? 0.06 : 0.08)
             if isGap {
                 halo.lineDashPattern = RouteRenderStyleTokens.dashLengths.map { NSNumber(value: Double($0)) }
             }
 
             let freq = MKPolylineRenderer(polyline: styled)
-            freq.lineWidth = isGap ? 0 : (coreWidth * 0.82 + weight * 0.95)
+            freq.lineWidth = isGap ? 0 : (coreWidth * 0.96 + weight * 0.55)
             freq.lineCap = CGLineCap.round
             freq.lineJoin = CGLineJoin.round
-            freq.strokeColor = base.withAlphaComponent(isGap ? 0 : (0.05 + 0.15 * weight))
+            freq.strokeColor = base.withAlphaComponent(isGap ? 0 : (0.08 + 0.10 * weight))
 
             let core = MKPolylineRenderer(polyline: styled)
-            core.lineWidth = isGap ? max(0.9, coreWidth * 0.46) : (coreWidth * 0.64 + weight * 0.52)
+            core.lineWidth = isGap ? max(1.1, coreWidth * 0.62) : (coreWidth * 0.88 + weight * 0.36)
             core.lineCap = CGLineCap.round
             core.lineJoin = CGLineJoin.round
-            core.strokeColor = base.withAlphaComponent(isGap ? 0.30 : 0.84)
+            core.strokeColor = base.withAlphaComponent(isGap ? 0.46 : 0.97)
             if isGap {
                 core.lineDashPattern = RouteRenderStyleTokens.dashLengths.map { NSNumber(value: Double($0)) }
             }
@@ -2915,17 +3389,11 @@ if let ann = annotation as? MemoryGroupAnnotation {
 
         func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
     if let ann = view.annotation as? RobotAnnotation {
-        // cycle 90° per tap: front -> right -> back -> left -> front
-        switch ann.face {
-        case .front: ann.face = .right
-        case .right: ann.face = .back
-        case .back: ann.face = .left
-        case .left: ann.face = .front
-        }
-
+        // Keep avatar always front-facing on map.
+        ann.face = .front
         configureRobotAnnotationView(
             view,
-            face: ann.face,
+            face: .front,
             worldHeading: ann.headingDegrees,
             cameraHeading: mapView.camera.heading
         )

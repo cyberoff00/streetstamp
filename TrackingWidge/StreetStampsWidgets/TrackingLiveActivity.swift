@@ -48,7 +48,7 @@ struct TrackingLiveActivity: Widget {
                             .fill(context.state.isPaused ? WidgetTheme.mutedText : WidgetTheme.activeGreen)
                             .frame(width: 8, height: 8)
                         
-                        Text(context.attributes.trackingMode == "sport" ? "运动" : "日常")
+                        Text(context.attributes.trackingMode == "sport" ? localized("lockscreen_mode_sport_short") : localized("lockscreen_mode_daily_short"))
                             .font(.system(size: 12, weight: .bold))
                             .foregroundColor(.white)
                     }
@@ -63,7 +63,7 @@ struct TrackingLiveActivity: Widget {
                                 .font(.system(size: 14, weight: .bold))
                                 .foregroundColor(.white)
                             
-                            Text("km")
+                            Text(localized("lockscreen_distance_unit_km_short"))
                                 .font(.system(size: 10))
                                 .foregroundColor(WidgetTheme.offWhite)
                         }
@@ -84,7 +84,7 @@ struct TrackingLiveActivity: Widget {
                             HStack(spacing: 6) {
                                 Image(systemName: "plus")
                                     .font(.system(size: 12, weight: .bold))
-                                Text("添加记忆")
+                                Text(localized("lockscreen_add_memory"))
                                     .font(.system(size: 12, weight: .bold))
                             }
                             .foregroundColor(.black)
@@ -189,7 +189,7 @@ struct SportModeLockScreen: View {
                         .fill(state.isPaused ? WidgetTheme.mutedText : WidgetTheme.activeGreen)
                         .frame(width: 12, height: 12)
                     
-                    Text(state.isPaused ? "已暂停" : "追踪中")
+                    Text(state.isPaused ? localized("watch_status_paused") : localized("lockscreen_tracking_active"))
                         .font(.system(size: 12, weight: .bold))
                         .tracking(0.6)
                         .foregroundColor(.white)
@@ -198,7 +198,7 @@ struct SportModeLockScreen: View {
                 Spacer()
                 
                 // Mode indicator
-                Text("运动模式")
+                Text(localized("lockscreen_sport_mode"))
                     .font(.system(size: 12, weight: .bold))
                     .tracking(0.6)
                     .foregroundColor(WidgetTheme.offWhite)
@@ -208,7 +208,7 @@ struct SportModeLockScreen: View {
             HStack(alignment: .top, spacing: 24) {
                 // Distance
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("距离")
+                    Text(localized("lockscreen_distance"))
                         .font(.system(size: 12, weight: .medium))
                         .tracking(0.6)
                         .foregroundColor(WidgetTheme.offWhite)
@@ -217,14 +217,14 @@ struct SportModeLockScreen: View {
                         .font(.system(size: 30, weight: .bold))
                         .foregroundColor(.white)
                     
-                    Text("公里")
+                    Text(localized("lockscreen_kilometers"))
                         .font(.system(size: 12))
                         .foregroundColor(WidgetTheme.offWhite)
                 }
                 
                 // Duration
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("时长")
+                    Text(localized("lockscreen_duration"))
                         .font(.system(size: 12, weight: .medium))
                         .tracking(0.6)
                         .foregroundColor(WidgetTheme.offWhite)
@@ -233,7 +233,7 @@ struct SportModeLockScreen: View {
                         .font(.system(size: 30, weight: .bold))
                         .foregroundColor(.white)
                     
-                    Text("已用时间")
+                    Text(localized("lockscreen_elapsed"))
                         .font(.system(size: 12))
                         .foregroundColor(WidgetTheme.offWhite)
                 }
@@ -267,7 +267,7 @@ struct DailyModeLockScreen: View {
                         .fill(state.isPaused ? WidgetTheme.mutedText : WidgetTheme.activeGreen)
                         .frame(width: 12, height: 12)
                     
-                    Text(state.isPaused ? "已暂停" : "追踪中")
+                    Text(state.isPaused ? localized("watch_status_paused") : localized("lockscreen_tracking_active"))
                         .font(.system(size: 12, weight: .bold))
                         .tracking(0.6)
                         .foregroundColor(.white)
@@ -276,7 +276,7 @@ struct DailyModeLockScreen: View {
                 Spacer()
                 
                 // Mode indicator
-                Text("日常模式")
+                Text(localized("lockscreen_daily_mode"))
                     .font(.system(size: 12, weight: .bold))
                     .tracking(0.6)
                     .foregroundColor(WidgetTheme.mutedText)
@@ -313,6 +313,10 @@ enum WidgetTheme {
     static let activeGreen = Color(red: 0, green: 1, blue: 0.25)
     static let offWhite = Color(red: 1, green: 1, blue: 0.97)
     static let mutedText = Color(red: 0.42, green: 0.45, blue: 0.51)
+}
+
+private func localized(_ key: String) -> String {
+    NSLocalizedString(key, comment: "")
 }
 
 // MARK: - Preview

@@ -2,6 +2,7 @@ import Foundation
 import CoreLocation
 import UIKit
 import Combine
+import UserNotifications
 
 @MainActor
 final class TrackingService: ObservableObject {
@@ -15,18 +16,23 @@ final class TrackingService: ObservableObject {
     
 
     /// Raw recorded points (WGS84) used for storage & internal segment building.
-    @Published var coords: [CLLocationCoordinate2D] = []
+    @Published private(set) var coords: [CLLocationCoordinate2D] = []
 
     @Published var totalDistance: Double = 0
-    /// 3D-euclidean distance (horizontal + altitude delta).
-    /// Note: filtering/outlier detection still uses horizontal distance; only accumulation is 3D.
-    /// This makes distance feel more "real" on hills/stairs without destabilizing jitter logic.
+    /// Total horizontal (2D) distance in meters.
 
     /// Total positive elevation gain (meters) accumulated from accepted points.
     @Published var totalAscent: Double = 0
     /// Total negative elevation loss (meters) accumulated from accepted points.
     @Published var totalDescent: Double = 0
     @Published var headingDegrees: Double = 0
+    @Published private(set) var elapsedSeconds: Int = 0
+    @Published private(set) var movingSeconds: Int = 0
+    @Published private(set) var pausedSeconds: Int = 0
+    @Published private(set) var droppedByAccuracyCount: Int = 0
+    @Published private(set) var droppedByJumpCount: Int = 0
+    @Published private(set) var droppedByStationaryCount: Int = 0
+    @Published private(set) var missingSegmentCount: Int = 0
 
     @Published private(set) var mode: TravelMode = .unknown
 
@@ -95,6 +101,7 @@ final class TrackingService: ObservableObject {
     // MARK: - Internal state
 
     private var lastLocation: CLLocation?
+    private var rawCoords: [CLLocationCoordinate2D] = []
     private var acceptedLocations: [CLLocation] = []
     private let smoothingWindow: Int = 5
 
@@ -173,6 +180,16 @@ final class TrackingService: ObservableObject {
         .bike: 16, .motorcycle: 14, .drive: 14,
         .flight: 180, .unknown: 16
     ]
+    private let defaultTurnKeepAngleForeground: [TravelMode: Double] = [
+        .walk: 22, .run: 20, .transit: 18,
+        .bike: 18, .motorcycle: 16, .drive: 16,
+        .flight: 180, .unknown: 20
+    ]
+    private let defaultTurnKeepAngleBackground: [TravelMode: Double] = [
+        .walk: 18, .run: 18, .transit: 16,
+        .bike: 16, .motorcycle: 14, .drive: 14,
+        .flight: 180, .unknown: 16
+    ]
 
     // MARK: - Segment switching hysteresis
 
@@ -191,6 +208,18 @@ final class TrackingService: ObservableObject {
 
     private var bag = Set<AnyCancellable>()
     private let hub = LocationHub.shared
+    private var trackingStartedAt: Date?
+    private var accumulatedPausedDuration: TimeInterval = 0
+    private var currentPauseStartedAt: Date?
+
+    // MARK: - Long stationary reminder (1h / 100m start-end displacement)
+
+    private var longStationaryAnchorLocation: CLLocation?
+    private var longStationaryAnchorTime: Date?
+    private let longStationaryWindow: TimeInterval = 60 * 60
+    private let longStationaryThresholdMeters: Double = 100
+    private let longStationaryNotificationID = "streetstamps.long_stationary_reminder"
+    private let longStationaryNotificationPermissionAskedKey = "streetstamps.long_stationary_reminder.notification_asked.v1"
 
     // MARK: - ✅ Render cache internals
 
@@ -198,6 +227,11 @@ final class TrackingService: ObservableObject {
     private var pendingRenderWork: DispatchWorkItem?
     private var lastRenderCoordCount: Int = 0
     private var lastRenderSegPointCount: Int = 0
+    private let publishDebounceInterval: TimeInterval = 0.2
+    private var pendingPublishWork: DispatchWorkItem?
+    private var latestRenderSegmentsForMap: [RouteSegment] = []
+    private var latestRenderUnifiedSegmentsForMap: [RenderRouteSegment] = []
+    private var latestRenderLiveTailForMap: [CLLocationCoordinate2D] = []
     /// Dynamic debounce to reduce CPU/GPU wakeups without changing live-tracking UX.
     /// - While actively tracking (and not paused): keep original 10Hz.
     /// - Otherwise: relax updates; also respect iOS Low Power Mode.
@@ -216,10 +250,12 @@ final class TrackingService: ObservableObject {
         return t
     }
 
-    // MARK: - ✅ One Euro Filter (foreground walk/run only)
+    // MARK: - ✅ One Euro Filter (enabled by mode config; used for walk/run/bike)
 
     private var oneEuroLat = OneEuro1D()
     private var oneEuroLon = OneEuro1D()
+    private var oneEuroEnabled: Bool = false
+    private var oneEuroBaseMinCutoff: Double = 1.2
 
     private struct OneEuro1D {
         var prevX: Double?
@@ -278,8 +314,11 @@ final class TrackingService: ObservableObject {
     private func oneEuroFilteredCoord(_ loc: CLLocation) -> CLLocationCoordinate2D {
         // Adaptive minCutoff from accuracy: worse accuracy => stronger smoothing
         let acc = max(5.0, loc.horizontalAccuracy)
-        // 10m -> ~1.25, 30m -> ~0.95, clamp
-        let minCut = max(0.85, min(1.35, 1.35 - (acc - 10.0) / 50.0))
+        // Keep mode/base tuning, then adapt by current GPS accuracy.
+        let base = oneEuroBaseMinCutoff
+        let minBound = max(0.65, base - 0.35)
+        let maxBound = base + 0.25
+        let minCut = max(minBound, min(maxBound, base - (acc - 10.0) / 50.0))
         oneEuroLat.minCutoff = minCut
         oneEuroLon.minCutoff = minCut
 
@@ -296,6 +335,15 @@ final class TrackingService: ObservableObject {
             .sink { [weak self] loc in
                 guard let self else { return }
                 self.ingest(loc)
+            }
+            .store(in: &bag)
+
+        hub.$headingDegrees
+            .removeDuplicates { abs($0 - $1) < 1.0 }
+            .sink { [weak self] heading in
+                guard let self else { return }
+                let h = heading.truncatingRemainder(dividingBy: 360)
+                self.headingDegrees = h >= 0 ? h : (h + 360)
             }
             .store(in: &bag)
 
@@ -342,14 +390,15 @@ final class TrackingService: ObservableObject {
     // MARK: - Public APIs
 
     func startNewJourney(mode: TrackingMode = .daily) {
-        startLiveActivity()
         // 设置追踪模式
         trackingMode = mode
+        startLiveActivity()
         
         // 根据模式应用配置
         let config = TrackingModeConfig.config(for: mode)
         applyModeConfig(config)
         
+        rawCoords.removeAll()
         coords.removeAll()
         totalDistance = 0
         totalAscent = 0
@@ -376,17 +425,32 @@ final class TrackingService: ObservableObject {
         internalSegmentsForMap.removeAll()
         resetSegmentSwitchState()
 
+        latestRenderSegmentsForMap.removeAll()
+        latestRenderUnifiedSegmentsForMap.removeAll()
+        latestRenderLiveTailForMap.removeAll()
         renderSegmentsForMap.removeAll()
         renderUnifiedSegmentsForMap.removeAll()
         renderLiveTailForMap.removeAll()
         lastRenderCoordCount = 0
         lastRenderSegPointCount = 0
         pendingRenderWork?.cancel()
+        pendingPublishWork?.cancel()
 
         needsRefreshAfterBackground = false
         isRealtimeRenderingEnabled = true
+        trackingStartedAt = Date()
+        accumulatedPausedDuration = 0
+        currentPauseStartedAt = nil
+        refreshDurations()
+        droppedByAccuracyCount = 0
+        droppedByJumpCount = 0
+        droppedByStationaryCount = 0
+        missingSegmentCount = 0
 
         resetOneEuro()
+        resetLongStationaryReminderState()
+        requestLongStationaryNotificationPermissionIfNeeded()
+        flushPublishedState(force: true)
 
         // ✅ 根据模式选择启动方式
         if mode == .sport {
@@ -448,13 +512,34 @@ final class TrackingService: ObservableObject {
         
         gapSecondsThreshold = config.gapSecondsThreshold
         gapDistanceThreshold = config.gapDistanceThreshold
+        applyTurnKeepAngles(baseTurnAngle: config.turnKeepAngle)
         
         // OneEuro配置
-        if config.enableOneEuroFilter {
+        oneEuroEnabled = config.enableOneEuroFilter
+        oneEuroBaseMinCutoff = config.oneEuroMinCutoff
+        if oneEuroEnabled {
             oneEuroLat.minCutoff = config.oneEuroMinCutoff
             oneEuroLat.beta = config.oneEuroBeta
             oneEuroLon.minCutoff = config.oneEuroMinCutoff
             oneEuroLon.beta = config.oneEuroBeta
+        } else {
+            resetOneEuro()
+        }
+    }
+
+    private func applyTurnKeepAngles(baseTurnAngle: Double) {
+        let fgBaseDefault = max(1, defaultTurnKeepAngleForeground[.unknown] ?? 20)
+        let bgBaseDefault = max(1, defaultTurnKeepAngleBackground[.unknown] ?? 16)
+        let fgScale = max(0.4, min(2.2, baseTurnAngle / fgBaseDefault))
+        let bgScale = max(0.4, min(2.2, max(6, baseTurnAngle - 2) / bgBaseDefault))
+
+        turnKeepAngleForeground = defaultTurnKeepAngleForeground.mapValues { value in
+            guard value < 180 else { return value }
+            return min(170, max(8, value * fgScale))
+        }
+        turnKeepAngleBackground = defaultTurnKeepAngleBackground.mapValues { value in
+            guard value < 180 else { return value }
+            return min(170, max(8, value * bgScale))
         }
     }
     private func startForegroundHighPowerSport() {
@@ -471,23 +556,26 @@ final class TrackingService: ObservableObject {
     private func startForegroundHighPowerDaily() {
         if hub.isUsingMock { return }
         hub.requestPermissionIfNeeded()
-        
-        // 日常模式使用稍低的精度
-        if let source = hub as? LocationHub {
-            // 需要在LocationHub中添加startHighPowerDaily方法
-            source.startRealTime()  // 暂时用同样的
-        }
+        hub.startRealTimeDaily()
         
         isInForegroundStationaryPowerMode = false
         stationarySince = nil
     }
 
 
-    func resumeJourney() {
+    func resumeJourney(startTime: Date? = nil, restoredPausedDuration: TimeInterval = 0) {
         isTracking = true
         isPaused = false
+        lastLocation = nil
+        lastRecordedLocationForStationary = nil
         stationarySince = nil
         isInForegroundStationaryPowerMode = false
+        resetLongStationaryReminderState()
+        requestLongStationaryNotificationPermissionIfNeeded()
+        trackingStartedAt = startTime ?? trackingStartedAt ?? Date()
+        accumulatedPausedDuration = max(0, restoredPausedDuration)
+        currentPauseStartedAt = nil
+        refreshDurations()
         startForegroundHighPower()
     }
 
@@ -503,24 +591,40 @@ final class TrackingService: ObservableObject {
         if !hub.isUsingMock {
             hub.enterLowPower()
         }
+        resetLongStationaryReminderState()
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [longStationaryNotificationID])
         wasExplicitlyPaused = false  // ✅ 结束时重置
+        refreshDurations()
     }
 
     func pauseJourney() {
-        // ✅ 更新 Live Activity 暂停/继续状态
-        updateLiveActivity(memoriesCount: 0)
         guard isTracking else { return }
         isPaused = true
+        lastLocation = nil
+        lastRecordedLocationForStationary = nil
+        resetLongStationaryReminderState()
         wasExplicitlyPaused = true  // ✅ 标记为主动暂停
+        if currentPauseStartedAt == nil {
+            currentPauseStartedAt = Date()
+        }
+        refreshDurations()
+        updateLiveActivity(memoriesCount: 0)
     }
 
     func resumeFromPause() {
-        // ✅ 更新 Live Activity 暂停/继续状态
-        updateLiveActivity(memoriesCount: 0)
-        
         guard isTracking else { return }
         isPaused = false
+        lastLocation = nil
+        lastRecordedLocationForStationary = nil
+        resetLongStationaryReminderState()
+        requestLongStationaryNotificationPermissionIfNeeded()
         wasExplicitlyPaused = false  // ✅ 恢复后清除标记
+        if let pauseStart = currentPauseStartedAt {
+            accumulatedPausedDuration += max(0, Date().timeIntervalSince(pauseStart))
+            currentPauseStartedAt = nil
+        }
+        refreshDurations()
+        updateLiveActivity(memoriesCount: 0)
     }
 
     func enterLowPowerBackgroundMode() {
@@ -557,22 +661,26 @@ final class TrackingService: ObservableObject {
     func setRealtimeRenderingEnabled(_ enabled: Bool) {
         if isRealtimeRenderingEnabled == enabled { return }
         isRealtimeRenderingEnabled = enabled
-        if enabled { segments = internalSegments }
+        if enabled { flushPublishedState(force: true) }
     }
 
     func syncFromJourneyIfNeeded(_ journey: JourneyRoute) {
-        let ext = journey.coordinates.clCoords
+        let ext = journey.displayRouteCoordinates.clCoords
         guard !ext.isEmpty else { return }
 
         // ✅ key fix: if TrackingService already has a live route, NEVER overwrite it with stale journeyRoute.
-        let hasLiveInMemory = (!coords.isEmpty) || (!internalSegments.isEmpty)
+        let hasLiveInMemory = (!rawCoords.isEmpty) || (!internalSegments.isEmpty)
         if isTracking && journey.endTime == nil && hasLiveInMemory {
             rebuildRenderCache(force: true)
             return
         }
 
-        // only sync when memory is empty (cold start / reopen app)
-        if coords.isEmpty { coords = ext }
+        // For historical/ended journeys we want deterministic playback from snapshot.
+        if !isTracking || journey.endTime != nil {
+            rawCoords = ext
+        } else if rawCoords.isEmpty {
+            rawCoords = ext
+        }
         if totalDistance <= 0, journey.distance > 0 { totalDistance = journey.distance }
         if totalAscent <= 0, journey.elevationGain > 0 { totalAscent = journey.elevationGain }
         if totalDescent <= 0, journey.elevationLoss > 0 { totalDescent = journey.elevationLoss }
@@ -585,7 +693,7 @@ final class TrackingService: ObservableObject {
 
         internalSegments = [RouteSegment(id: UUID().uuidString, style: .solid, coords: ext)]
         rebuildInternalSegmentsForMapFromInternal()
-        if isRealtimeRenderingEnabled { segments = internalSegments }
+        flushPublishedState(force: true)
 
         // ✅ do not reuse old filter state for playback
         resetOneEuro()
@@ -620,7 +728,7 @@ final class TrackingService: ObservableObject {
     private func rebuildRenderCache(force: Bool) {
         guard shouldUpdateRenderCache(force: force) else { return }
 
-        let coordCount = coords.count
+        let coordCount = rawCoords.count
         let segPointCount = internalSegments.reduce(0) { $0 + $1.coords.count }
 
         if !force, coordCount == lastRenderCoordCount, segPointCount == lastRenderSegPointCount {
@@ -630,7 +738,7 @@ final class TrackingService: ObservableObject {
         pendingRenderWork?.cancel()
 
         let segsForMapSnapshot = internalSegmentsForMap
-        let lastWGS = coords.last
+        let lastWGS = rawCoords.last
         let userWGS = userLocation?.coordinate
         let convert = self.convertForMap
 
@@ -651,9 +759,10 @@ final class TrackingService: ObservableObject {
 
             Task { @MainActor in
                 guard self.shouldUpdateRenderCache(force: force) else { return }
-                self.renderSegmentsForMap = segsForMap
-                self.renderUnifiedSegmentsForMap = unifiedSegsForMap
-                self.renderLiveTailForMap = tailForMap
+                self.latestRenderSegmentsForMap = segsForMap
+                self.latestRenderUnifiedSegmentsForMap = unifiedSegsForMap
+                self.latestRenderLiveTailForMap = tailForMap
+                self.flushPublishedState(force: force)
                 self.lastRenderCoordCount = coordCount
                 self.lastRenderSegPointCount = segPointCount
             }
@@ -708,18 +817,12 @@ final class TrackingService: ObservableObject {
         // Always update "blue dot" states
         userLocation = loc
         lastHorizontalAccuracy = loc.horizontalAccuracy
-        if loc.course >= 0 {
-            let h = loc.course.truncatingRemainder(dividingBy: 360)
-            headingDegrees = h >= 0 ? h : (h + 360)
-        }
 
         guard isTracking else { return }
         guard !isPaused else { return } // keep blue dot, stop recording
         if loc.horizontalAccuracy < 0 { return }
 
-        // Mode inference (tuning only)
-        let speed = max(0, loc.speed)
-        updateModeIfNeeded(now: loc.timestamp, speed: speed)
+        evaluateLongStationaryReminder(with: loc)
 
         // Foreground/background knobs
         let isActive = UIApplication.shared.applicationState == .active
@@ -739,6 +842,7 @@ final class TrackingService: ObservableObject {
             // If accuracy is terrible, don't progress lock streak
             if acc > maxAcceptableAccuracy {
                 lockStreak = 0
+                droppedByAccuracyCount += 1
                 return
             }
 
@@ -753,7 +857,7 @@ final class TrackingService: ObservableObject {
             lastLocation = loc
             resetOneEuro() // start filter fresh at lock
 
-            coords.append(loc.coordinate)
+            rawCoords.append(loc.coordinate)
             appendPointToInternalSegments(coord: loc.coordinate, at: loc.timestamp, preferredStyle: .solid)
             lastRecordedLocationForStationary = loc
             stationarySince = nil
@@ -768,7 +872,7 @@ final class TrackingService: ObservableObject {
         guard let last = lastLocation else {
             lastLocation = loc
             resetOneEuro()
-            coords.append(loc.coordinate)
+            rawCoords.append(loc.coordinate)
             appendPointToInternalSegments(coord: loc.coordinate, at: loc.timestamp, preferredStyle: .solid)
             lastRecordedLocationForStationary = loc
             stationarySince = nil
@@ -778,11 +882,12 @@ final class TrackingService: ObservableObject {
         }
 
         let d2d = loc.distance(from: last)
-        let dz = elevationDeltaMeters(from: last, to: loc)
-        let d3d = hypot(d2d, dz)
-        let d = d2d
         let dt = max(0.001, loc.timestamp.timeIntervalSince(last.timestamp))
-        let impliedSpeed = d3d / dt
+        let impliedSpeed = d2d / dt
+        // iOS may report speed = -1 (unknown). Infer from displacement so mode tuning
+        // does not treat unknown speed as stationary.
+        let resolvedSpeed = max(0, (loc.speed >= 0) ? loc.speed : impliedSpeed)
+        updateModeIfNeeded(now: loc.timestamp, speed: resolvedSpeed)
 
         // =========================================================
         // 1.5) Stationary jitter suppression + foreground power saving
@@ -820,6 +925,7 @@ final class TrackingService: ObservableObject {
                 }
 
                 // Don't record a new route point while stationary.
+                droppedByStationaryCount += 1
                 return
             } else if isInForegroundStationaryPowerMode && exitCandidate {
                 // Movement resumed: switch back to high power for responsiveness.
@@ -843,9 +949,9 @@ final class TrackingService: ObservableObject {
             : (turnKeepAngleBackground[mode] ?? 16)
 
         var keepBecauseTurn = false
-        if turnThreshold < 180, coords.count >= 2 {
-            let last2 = coords[coords.count - 2]
-            let last1 = coords[coords.count - 1]
+        if turnThreshold < 180, rawCoords.count >= 2 {
+            let last2 = rawCoords[rawCoords.count - 2]
+            let last1 = rawCoords[rawCoords.count - 1]
             keepBecauseTurn = isTurn(last2: last2, last1: last1, new: loc.coordinate, thresholdDeg: turnThreshold)
         }
 
@@ -856,8 +962,7 @@ final class TrackingService: ObservableObject {
         // This avoids creating dashed/missing segments when the user simply stayed still.
         let isMigrationCandidate: Bool =
             ((dt >= missingGapSecondsThreshold) && (d2d >= 500)) ||
-            (d2d  >= missingGapDistanceThreshold) ||
-            (d2d  >= hardJumpDistance)
+            (d2d  >= missingGapDistanceThreshold)
 
         let isDriftLike: Bool =
             accuracyVeryBad &&
@@ -865,16 +970,25 @@ final class TrackingService: ObservableObject {
             (d2d >= dropJumpDistanceWhenAccuracyBad)
 
         // Drift-like: if NOT turning, drop
-        if isDriftLike && !keepBecauseTurn { return }
+        if isDriftLike && !keepBecauseTurn {
+            droppedByJumpCount += 1
+            return
+        }
 
         // Accuracy hard gate:
         // if too bad and not turning -> drop
-        if acc > maxAcceptableAccuracy && !keepBecauseTurn { return }
+        if acc > maxAcceptableAccuracy && !keepBecauseTurn {
+            droppedByAccuracyCount += 1
+            return
+        }
 
         // Speed-based outlier drop (only when NOT migration candidate)
         if !isMigrationCandidate {
             if d2d > maxJumpDistance && impliedSpeed > maxPlausibleSpeed {
-                if !keepBecauseTurn { return }
+                if !keepBecauseTurn {
+                    droppedByJumpCount += 1
+                    return
+                }
             }
         }
 
@@ -898,7 +1012,8 @@ final class TrackingService: ObservableObject {
         isMissingSegment = (d2d >= missingGapDistanceThreshold) || isMigrationCandidate
         if isMissingSegment {
             isGapLike = true
-            missingFromCoord = coords.last
+            missingFromCoord = rawCoords.last
+            missingSegmentCount += 1
         }
 
         // =========================================================
@@ -909,7 +1024,7 @@ final class TrackingService: ObservableObject {
             if accuracyWeak && dt >= 3.0 {
                 // When accuracy is weak we allow an occasional point so moving curvature doesn't flatten,
                 // but ONLY if we are likely moving (otherwise GPS drift creates scribble lines).
-                let speedGate = max(impliedSpeed, speed) // `speed` was computed earlier from loc.speed
+                let speedGate = max(impliedSpeed, resolvedSpeed)
                 let likelyMoving = (speedGate >= weakAccuracyBypassMinSpeed) || (d2d >= weakAccuracyBypassMinDistance)
                 if !likelyMoving { return }
                 // allow pass
@@ -919,26 +1034,36 @@ final class TrackingService: ObservableObject {
         }
 
         // =========================================================
-        // 5) Distance accumulation (don't add nonsense on very bad accuracy unless migration)
+        // 5) Distance accumulation (2D horizontal distance)
+        //    don't add nonsense on very bad accuracy unless migration
+        //    Daily mode: count missing (dashed) segment mileage as requested.
         // =========================================================
-        if !accuracyVeryBad || isMigrationCandidate {
-            totalDistance += d3d
+        let shouldAccumulateDistance: Bool = {
+            guard (!accuracyVeryBad || isMigrationCandidate) else { return false }
+            if isMissingSegment {
+                return trackingMode == .daily
+            }
+            return true
+        }()
+
+        if shouldAccumulateDistance {
+            totalDistance += d2d
             accumulateElevation(from: last, to: loc)
         }
 
         // =========================================================
-        // 6) Filtering (foreground walk/run only) — NEVER on turns
+        // 6) Filtering (enabled by mode config) — NEVER on turns
         // =========================================================
         let shouldFilter: Bool = {
             if !isActive { return false }
             if keepBecauseTurn { return false }
-            
-            if trackingMode == .sport {
-                // 运动模式: walk/run都启用
-                return mode == .walk || mode == .run
-            } else {
-                // 日常模式: 只有跑步启用
-                return mode == .run
+
+            guard oneEuroEnabled else { return false }
+            switch mode {
+            case .walk, .run, .bike:
+                return true
+            default:
+                return false
             }
         }()
 
@@ -960,7 +1085,7 @@ final class TrackingService: ObservableObject {
         // =========================================================
         // 8) Append point / segment
         // =========================================================
-        coords.append(outCoord)
+        rawCoords.append(outCoord)
 
         if isMissingSegment, let from = missingFromCoord {
             appendMissingConnectionSegment(from: from, to: outCoord, at: loc.timestamp)
@@ -974,7 +1099,98 @@ final class TrackingService: ObservableObject {
         stationarySince = nil
 
         publishIfNeeded()
+        refreshDurations(now: loc.timestamp)
         rebuildRenderCache(force: false)
+    }
+
+    func elapsedDuration(at now: Date = Date()) -> TimeInterval {
+        guard let start = trackingStartedAt else { return 0 }
+        return max(0, now.timeIntervalSince(start))
+    }
+
+    func pausedDuration(at now: Date = Date()) -> TimeInterval {
+        var paused = max(0, accumulatedPausedDuration)
+        if let pauseStart = currentPauseStartedAt {
+            paused += max(0, now.timeIntervalSince(pauseStart))
+        }
+        return paused
+    }
+
+    func movingDuration(at now: Date = Date()) -> TimeInterval {
+        let elapsed = elapsedDuration(at: now)
+        return max(0, elapsed - pausedDuration(at: now))
+    }
+
+    func refreshDurations(now: Date = Date()) {
+        elapsedSeconds = Int(elapsedDuration(at: now))
+        pausedSeconds = Int(pausedDuration(at: now))
+        movingSeconds = Int(movingDuration(at: now))
+    }
+
+    private func resetLongStationaryReminderState() {
+        longStationaryAnchorLocation = nil
+        longStationaryAnchorTime = nil
+    }
+
+    private func requestLongStationaryNotificationPermissionIfNeeded() {
+        guard AppSettings.isLongStationaryReminderEnabled else { return }
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: longStationaryNotificationPermissionAskedKey) else { return }
+        defaults.set(true, forKey: longStationaryNotificationPermissionAskedKey)
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    private func evaluateLongStationaryReminder(with location: CLLocation) {
+        guard AppSettings.isLongStationaryReminderEnabled else {
+            resetLongStationaryReminderState()
+            return
+        }
+        guard location.horizontalAccuracy >= 0, location.horizontalAccuracy <= 120 else { return }
+
+        if longStationaryAnchorLocation == nil || longStationaryAnchorTime == nil {
+            longStationaryAnchorLocation = location
+            longStationaryAnchorTime = location.timestamp
+            return
+        }
+
+        guard let anchor = longStationaryAnchorLocation, let anchorTime = longStationaryAnchorTime else { return }
+        guard location.timestamp >= anchorTime else {
+            longStationaryAnchorLocation = location
+            longStationaryAnchorTime = location.timestamp
+            return
+        }
+
+        let elapsed = location.timestamp.timeIntervalSince(anchorTime)
+        if elapsed < longStationaryWindow { return }
+
+        let startToEnd = location.distance(from: anchor)
+        if startToEnd <= longStationaryThresholdMeters {
+            scheduleLongStationaryReminderNotification()
+        }
+
+        // Whether reminded or not, restart a new 1-hour window from current point.
+        longStationaryAnchorLocation = location
+        longStationaryAnchorTime = location.timestamp
+    }
+
+    private func scheduleLongStationaryReminderNotification() {
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { [longStationaryNotificationID] settings in
+            guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { return }
+
+            let content = UNMutableNotificationContent()
+            content.title = L10n.t("long_stationary_reminder_title")
+            content.body = L10n.t("long_stationary_reminder_body")
+            content.sound = .default
+
+            let request = UNNotificationRequest(
+                identifier: longStationaryNotificationID,
+                content: content,
+                trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+            )
+            center.removePendingNotificationRequests(withIdentifiers: [longStationaryNotificationID])
+            center.add(request)
+        }
     }
 
     private func appendMissingConnectionSegment(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D, at t: Date) {
@@ -987,8 +1203,27 @@ final class TrackingService: ObservableObject {
     private func publishIfNeeded() {
         // ✅ 更新 Live Activity（锁屏追踪卡片）
         updateLiveActivity(memoriesCount: 0)
-        guard isRealtimeRenderingEnabled else { return }
-        segments = internalSegments
+        flushPublishedState(force: false)
+    }
+
+    private func flushPublishedState(force: Bool) {
+        pendingPublishWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.coords = self.rawCoords
+            if self.isRealtimeRenderingEnabled {
+                self.segments = self.internalSegments
+            }
+            self.renderSegmentsForMap = self.latestRenderSegmentsForMap
+            self.renderUnifiedSegmentsForMap = self.latestRenderUnifiedSegmentsForMap
+            self.renderLiveTailForMap = self.latestRenderLiveTailForMap
+        }
+        pendingPublishWork = work
+        if force {
+            DispatchQueue.main.async(execute: work)
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + publishDebounceInterval, execute: work)
+        }
     }
 
     // MARK: - Turn helpers

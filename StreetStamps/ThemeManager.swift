@@ -62,6 +62,19 @@ enum MapAppearanceSettings {
         interfaceStyle(for: resolved(from: raw))
     }
 
+    static func usesMutedStandardMap(for style: MapAppearanceStyle) -> Bool {
+        switch style {
+        case .dark:
+            return true
+        case .light:
+            return false
+        }
+    }
+
+    static func usesMutedStandardMap(for raw: String?) -> Bool {
+        usesMutedStandardMap(for: resolved(from: raw))
+    }
+
     static var routeBaseColor: UIColor {
         routeBaseColor(for: current)
     }

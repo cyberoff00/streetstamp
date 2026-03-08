@@ -1,82 +1,92 @@
 {
-  "version": 1,
+  "version": 2,
   "base": {
     "body": {
-      "front": "avatar_body_front",
-      "right": "avatar_body_side",
+      "front": "front_body0001",
+      "right": null,
       "back": null,
-      "left": "avatar_body_side"
+      "left": null
     },
     "head": {
-      "front": "avatar_head_front",
-      "right": "avatar_head_side",
+      "front": "front_head0001",
+      "right": null,
       "back": null,
-      "left": "avatar_head_side"
+      "left": null
     },
     "baseOutfit": {
-      "front": "avatar_base_top_front",
-      "right": "avatar_base_top_side",
+      "front": "front_upper0001",
+      "right": null,
       "back": null,
-      "left": "avatar_base_top_side"
+      "left": null
     }
   },
   "categories": [
+    {
+      "id": "expression",
+      "titleKey": "equipment_expression",
+      "selectionKey": "expressionId",
+      "items": [
+        { "id": "expr_0001", "nameKey": "Expression 0001", "layer": "expression", "images": { "front": "front_exp0001", "right": null, "back": null, "left": null } },
+        { "id": "expr_0002", "nameKey": "Expression 0002", "layer": "expression", "images": { "front": "front_exp001", "right": null, "back": null, "left": null } },
+        { "id": "expr_0003", "nameKey": "Expression 0003", "layer": "expression", "images": { "front": "front_exp002", "right": null, "back": null, "left": null } },
+        { "id": "expr_0004", "nameKey": "Expression 0004", "layer": "expression", "images": { "front": "front_exp003", "right": null, "back": null, "left": null } },
+        { "id": "expr_0005", "nameKey": "Expression 0005", "layer": "expression", "images": { "front": "front_exp004", "right": null, "back": null, "left": null } }
+      ]
+    },
     {
       "id": "hair",
       "titleKey": "equipment_hair",
       "selectionKey": "hairId",
       "items": [
-        {
-          "id": "hair_boy_default",
-          "nameKey": "equipment_item_hair_boy",
-          "layer": "hair",
-          "images": {
-            "front": "avatar_hair_boy_front",
-            "right": "avatar_hair_boy_side",
-            "back": null,
-            "left": "avatar_hair_boy_side"
-          }
-        },
-        {
-          "id": "hair_girl_default",
-          "nameKey": "equipment_item_hair_girl",
-          "layer": "hair",
-          "images": {
-            "front": "avatar_hair_girl_front",
-            "right": "avatar_hair_girl_side",
-            "back": null,
-            "left": "avatar_hair_girl_side"
-          }
-        }
+        { "id": "hair_0001", "nameKey": "Hair 0001", "layer": "hair", "images": { "front": "front_hair0001", "right": null, "back": null, "left": null } },
+        { "id": "hair_0002", "nameKey": "Hair 0002", "layer": "hair", "images": { "front": "front_hair0002", "right": null, "back": null, "left": null } },
+        { "id": "hair_0003", "nameKey": "Hair 0003", "layer": "hair", "images": { "front": "front_hair001", "right": null, "back": null, "left": null } },
+        { "id": "hair_0004", "nameKey": "Hair 0004", "layer": "hair", "images": { "front": "front_hair002", "right": null, "back": null, "left": null } },
+        { "id": "hair_0005", "nameKey": "Hair 0005", "layer": "hair", "images": { "front": "front_hair003", "right": null, "back": null, "left": null } },
+        { "id": "hair_0006", "nameKey": "Hair 0006", "layer": "hair", "images": { "front": "front_hair004", "right": null, "back": null, "left": null } },
+        { "id": "hair_0007", "nameKey": "Hair 0007", "layer": "hair", "images": { "front": "front_hair0007", "right": null, "back": null, "left": null } }
       ]
     },
     {
-      "id": "outfit",
-      "titleKey": "equipment_outfit",
-      "selectionKey": "outfitId",
+      "id": "suit",
+      "titleKey": "equipment_suit",
+      "selectionKey": "suitId",
       "items": [
-        {
-          "id": "outfit_boy_suit",
-          "nameKey": "equipment_item_outfit_boy_suit",
-          "layer": "outfit",
-          "images": {
-            "front": "avatar_outfit_boy_suit_front",
-            "right": null,
-            "back": null,
-            "left": null
-          }
-        },
-        {
-          "id": "outfit_girl_suit",
-          "nameKey": "equipment_item_outfit_girl_suit",
-          "layer": "outfit",
-          "images": {
-            "front": "avatar_outfit_girl_suit_front",
-            "right": null,
-            "back": null,
-            "left": null
-          }
-        }
+        { "id": "none", "nameKey": "equipment_item_none", "layer": "suit", "images": { "front": null, "right": null, "back": null, "left": null } },
+        { "id": "suit_0001", "nameKey": "Suit 0001", "layer": "suit", "images": { "front": "front_suit001", "right": null, "back": null, "left": null } },
+        { "id": "suit_0002", "nameKey": "Suit 0002", "layer": "suit", "images": { "front": "front_suit002", "right": null, "back": null, "left": null } },
+        { "id": "suit_0003", "nameKey": "Suit 0003", "layer": "suit", "images": { "front": "front_suit003", "right": null, "back": null, "left": null } },
+        { "id": "suit_0004", "nameKey": "Suit 0004", "layer": "suit", "images": { "front": "front_suit004", "right": null, "back": null, "left": null } }
+      ]
+    },
+    {
+      "id": "upper",
+      "titleKey": "equipment_upper",
+      "selectionKey": "upperId",
+      "items": [
+        { "id": "none", "nameKey": "equipment_item_none", "layer": "upper", "images": { "front": null, "right": null, "back": null, "left": null } },
+        { "id": "upper_0001", "nameKey": "Upper 0001", "layer": "upper", "images": { "front": "front_upper0001", "right": null, "back": null, "left": null } },
+        { "id": "upper_0002", "nameKey": "Upper 0002", "layer": "upper", "images": { "front": "front_upper001", "right": null, "back": null, "left": null } },
+        { "id": "upper_0003", "nameKey": "Upper 0003", "layer": "upper", "images": { "front": "front_upper002", "right": null, "back": null, "left": null } },
+        { "id": "upper_0004", "nameKey": "Upper 0004", "layer": "upper", "images": { "front": "front_upper003", "right": null, "back": null, "left": null } },
+        { "id": "upper_0005", "nameKey": "Upper 0005", "layer": "upper", "images": { "front": "front_upper004", "right": null, "back": null, "left": null } },
+        { "id": "upper_0006", "nameKey": "Upper 0006", "layer": "upper", "images": { "front": "front_upper005", "right": null, "back": null, "left": null } },
+        { "id": "upper_0007", "nameKey": "Upper 0007", "layer": "upper", "images": { "front": "front_upper006", "right": null, "back": null, "left": null } },
+        { "id": "upper_0008", "nameKey": "Upper 0008", "layer": "upper", "images": { "front": "front_upper007", "right": null, "back": null, "left": null } }
+      ]
+    },
+    {
+      "id": "under",
+      "titleKey": "equipment_under",
+      "selectionKey": "underId",
+      "items": [
+        { "id": "none", "nameKey": "equipment_item_none", "layer": "under", "images": { "front": null, "right": null, "back": null, "left": null } },
+        { "id": "under_0001", "nameKey": "Under 0001", "layer": "under", "images": { "front": "front_under0001", "right": null, "back": null, "left": null } },
+        { "id": "under_0002", "nameKey": "Under 0002", "layer": "under", "images": { "front": "front_under002", "right": null, "back": null, "left": null } },
+        { "id": "under_0003", "nameKey": "Under 0003", "layer": "under", "images": { "front": "front_under001", "right": null, "back": null, "left": null } },
+        { "id": "under_0004", "nameKey": "Under 0004", "layer": "under", "images": { "front": "front_under003", "right": null, "back": null, "left": null } },
+        { "id": "under_0005", "nameKey": "Under 0005", "layer": "under", "images": { "front": "front_under004", "right": null, "back": null, "left": null } },
+        { "id": "under_0006", "nameKey": "Under 0006", "layer": "under", "images": { "front": "front_under005", "right": null, "back": null, "left": null } }
       ]
     },
     {
@@ -84,46 +94,11 @@
       "titleKey": "equipment_accessory",
       "selectionKey": "accessoryId",
       "items": [
-        {
-          "id": "none",
-          "nameKey": "equipment_item_none",
-          "layer": "accessory",
-          "images": {
-            "front": null,
-            "right": null,
-            "back": null,
-            "left": null
-          }
-        },
-        {
-          "id": "acc_headphone",
-          "nameKey": "equipment_item_acc_headphone",
-          "layer": "accessory",
-          "images": {
-            "front": "avatar_acc_headphone_front",
-            "right": "avatar_acc_headphone_side",
-            "back": null,
-            "left": "avatar_acc_headphone_side"
-          }
-        }
-      ]
-    },
-    {
-      "id": "expression",
-      "titleKey": "equipment_expression",
-      "selectionKey": "expressionId",
-      "items": [
-        {
-          "id": "expr_default",
-          "nameKey": "equipment_item_expr_default",
-          "layer": "expression",
-          "images": {
-            "front": "avatar_expr_default_front",
-            "right": "avatar_expr_default_side",
-            "back": null,
-            "left": "avatar_expr_default_side"
-          }
-        }
+        { "id": "none", "nameKey": "equipment_item_none", "layer": "accessory", "images": { "front": null, "right": null, "back": null, "left": null } },
+        { "id": "acc_0001", "nameKey": "Accessory 0001", "layer": "accessory", "images": { "front": "front_ac001", "right": null, "back": null, "left": null } },
+        { "id": "acc_0002", "nameKey": "Accessory 0002", "layer": "accessory", "images": { "front": "front_ac002", "right": null, "back": null, "left": null } },
+        { "id": "acc_0003", "nameKey": "Accessory 0003", "layer": "accessory", "images": { "front": "front_ac003", "right": null, "back": null, "left": null } },
+        { "id": "acc_0004", "nameKey": "Accessory 0004", "layer": "accessory", "images": { "front": "front_ac004", "right": null, "back": null, "left": null } }
       ]
     }
   ]

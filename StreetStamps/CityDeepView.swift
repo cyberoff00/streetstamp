@@ -20,6 +20,7 @@ struct CityDeepView: View {
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var cache: CityCache
+    @EnvironmentObject private var flow: AppFlowCoordinator
 
     init(city: City) {
         self.city = city
@@ -31,6 +32,7 @@ struct CityDeepView: View {
     @State private var activeCityKey: String
 
     @State private var editingMemory: JourneyMemory? = nil
+    @State private var showMemoriesOnMap = true
 
     @State private var fittedRegion: MKCoordinateRegion? = nil
     @State private var fetchedBoundaryPolygon: [CLLocationCoordinate2D]? = nil
@@ -45,6 +47,7 @@ struct CityDeepView: View {
     @State private var blockedCityLevelSelection: CityPlacemarkResolver.CardLevel?
     @State private var cityLevelLoading = false
     @State private var showCityLevelDowngradeBlocked = false
+    @State private var sidebarHideToken = UUID().uuidString
 
     private var activeCachedCity: CachedCity? {
         cache.cachedCities.first(where: { $0.id == activeCityKey && !($0.isTemporary ?? false) })
@@ -293,7 +296,7 @@ struct CityDeepView: View {
         ZStack(alignment: .top) {
             CityDeepMKMap(
                 segments: styledSegments(),
-                memoryGroups: groupedMemories,
+                memoryGroups: showMemoriesOnMap ? groupedMemories : [],
                 initialRegion: fittedRegion,
                 onTapMemoryGroup: { group in
                     guard let latest = group.items.sorted(by: { $0.timestamp > $1.timestamp }).first else { return }
@@ -308,9 +311,30 @@ struct CityDeepView: View {
             VStack(spacing: 0) {
                 headerBar
 
-                HStack {
+                HStack(alignment: .top) {
                     statsBadge
                     Spacer(minLength: 0)
+                    Button {
+                        showMemoriesOnMap.toggle()
+                        if !showMemoriesOnMap {
+                            editingMemory = nil
+                        }
+                    } label: {
+                        Text(showMemoriesOnMap ? "记忆 开" : "记忆 关")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(UITheme.softBlack)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(UITheme.cardBg)
+                            .clipShape(Capsule())
+                            .overlay(
+                                Capsule()
+                                    .stroke(UITheme.cardStroke, lineWidth: 0.8)
+                            )
+                            .shadow(radius: 2, y: 1)
+                    }
+                    .buttonStyle(CardPressButtonStyle(pressedScale: 0.94, pressedOpacity: 0.88))
+                    .accessibilityLabel(showMemoriesOnMap ? "Hide memories on map" : "Show memories on map")
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
@@ -359,29 +383,22 @@ struct CityDeepView: View {
             }
         }
         .onAppear {
-            Task {
-                if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: activeCityKey),
-                   !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    await MainActor.run { self.displayTitle = cached }
-                    return
-                }
-
-                if let coord = effectiveAnchor ?? currentJourneys.flatMap(\.allCLCoords).first {
-                    let loc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
-                    if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: activeCityKey),
-                       !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        await MainActor.run { self.displayTitle = title }
-                    }
-                }
-            }
             loadReservedLevelSelection()
             initializeReservedLevelProfileIfNeeded(showPickerWhenReady: false)
+            refreshDisplayTitleFromCardKey()
+        }
+        .onAppear {
+            flow.pushSidebarButtonHidden(token: sidebarHideToken)
+        }
+        .onDisappear {
+            flow.popSidebarButtonHidden(token: sidebarHideToken)
         }
         .onChange(of: activeCityKey) { _ in
             fetchedBoundaryPolygon = nil
             refreshRegionAndBoundary()
             loadReservedLevelSelection()
             initializeReservedLevelProfileIfNeeded(showPickerWhenReady: false)
+            refreshDisplayTitleFromCardKey()
         }
         .onChange(of: currentJourneys.count) { _ in
             refreshRegionAndBoundary()
@@ -643,21 +660,8 @@ struct CityDeepView: View {
                 cityLevelLoading = false
             }
 
-            let anchorLoc = CLLocation(latitude: anchor.latitude, longitude: anchor.longitude)
-            if let display = await ReverseGeocodeService.shared.displayTitle(for: anchorLoc, cityKey: targetKey),
-               !display.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                await MainActor.run {
-                    displayTitle = display
-                }
-            } else if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: targetKey),
-                      !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                await MainActor.run {
-                    displayTitle = cached
-                }
-            } else {
-                await MainActor.run {
-                    displayTitle = selectedName
-                }
+            await MainActor.run {
+                refreshDisplayTitleFromCardKey()
             }
         }
     }
@@ -750,6 +754,7 @@ struct CityDeepView: View {
                 cityLevelOptionLabels = canonical.availableLevels
                 cityLevelOptions = options
                 cityLevelCurrentSelection = resolveCurrentLevel(canonical: canonical, options: options)
+                refreshDisplayTitleFromCardKey()
                 cache.updateCityLevelReserveProfile(
                     cityKey: activeCityKey,
                     level: baseLevel,
@@ -814,6 +819,43 @@ struct CityDeepView: View {
         return options.first
     }
 
+    private func isoFromCityKey(_ cityKey: String) -> String {
+        let parts = cityKey.components(separatedBy: "|")
+        guard parts.count > 1 else { return "" }
+        return parts[1].trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
+
+    private func headerBaseCityName() -> String {
+        if let selected = cityLevelCurrentSelection,
+           let selectedName = cityLevelOptionLabels[selected]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !selectedName.isEmpty {
+            return selectedName
+        }
+        let fromKey = cityName(from: activeCityKey).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !fromKey.isEmpty { return fromKey }
+        let cached = effectiveCityName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return cached.isEmpty ? city.name : cached
+    }
+
+    private func formatHeaderTitle(baseName: String) -> String {
+        let base = baseName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !base.isEmpty else { return city.name }
+
+        let iso = (effectiveCountryISO2 ?? isoFromCityKey(activeCityKey)).trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if iso == "US",
+           let admin = cityLevelOptionLabels[.admin]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !admin.isEmpty {
+            if admin.normalizedCityNameForMatching() != base.normalizedCityNameForMatching() {
+                return "\(base), \(admin)"
+            }
+        }
+        return base
+    }
+
+    private func refreshDisplayTitleFromCardKey() {
+        displayTitle = formatHeaderTitle(baseName: headerBaseCityName())
+    }
+
     private func cityName(from cityKey: String) -> String {
         cityKey.components(separatedBy: "|").first ?? cityKey
     }
@@ -865,6 +907,9 @@ struct CityDeepView: View {
         case .island:
             return prefix + (isChineseLocale() ? "Island（整岛）" : "Island") + suffix
         case .country:
+            if shouldDisplayRegionForCurrentCity {
+                return prefix + (isChineseLocale() ? "Region（区域）" : "Region") + suffix
+            }
             return prefix + (isChineseLocale() ? "Country（国家）" : "Country") + suffix
         }
     }
@@ -917,12 +962,18 @@ struct CityDeepView: View {
         case .subAdmin: return "SubAdmin"
         case .admin: return "Admin"
         case .island: return "Island"
-        case .country: return "Country"
+        case .country:
+            return shouldDisplayRegionForCurrentCity ? "Region" : "Country"
         }
     }
 
     private func isChineseLocale() -> Bool {
         Locale.preferredLanguages.first?.hasPrefix("zh") == true
+    }
+
+    private var shouldDisplayRegionForCurrentCity: Bool {
+        let iso = (effectiveCountryISO2 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return ["HK", "MO", "TW"].contains(iso)
     }
 }
 

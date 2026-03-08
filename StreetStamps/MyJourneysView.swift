@@ -10,13 +10,40 @@ struct MyJourneysView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var sessionStore: UserSessionStore
+    @EnvironmentObject private var cityCache: CityCache
     @AppStorage(MapAppearanceSettings.storageKey) private var mapAppearanceRaw = MapAppearanceSettings.current.rawValue
+    let routeDetailReadOnly: Bool
+    let routeDetailHeaderTitle: String?
+    let showHeader: Bool
+    let headerTitle: String?
+
+    init(
+        routeDetailReadOnly: Bool = false,
+        routeDetailHeaderTitle: String? = nil,
+        showHeader: Bool = true,
+        headerTitle: String? = nil
+    ) {
+        self.routeDetailReadOnly = routeDetailReadOnly
+        self.routeDetailHeaderTitle = routeDetailHeaderTitle
+        self.showHeader = showHeader
+        self.headerTitle = headerTitle
+    }
 
     @State private var showFilterPopover = false
     @State private var monthCursor = Date()
     @State private var selectedStartDate: Date? = nil
     @State private var selectedEndDate: Date? = nil
     @State private var likesByJourney: [String: Int] = [:]
+    @State private var visibilityUpdatingIDs: Set<String> = []
+    @State private var localizedCityNameByKey: [String: String] = [:]
+    @State private var permissionJourneyID: String? = nil
+    @State private var likesJourneyID: String? = nil
+    @State private var pendingVisibility: JourneyVisibility = .private
+    @State private var journeyLikersByJourneyID: [String: [JourneyLiker]] = [:]
+    @State private var likersLoadingJourneyID: String? = nil
+    @State private var likersErrorByJourneyID: [String: String] = [:]
+    @State private var showMessage = false
+    @State private var messageText = ""
 
     private var allJourneys: [JourneyRoute] {
         store.journeys
@@ -25,10 +52,10 @@ struct MyJourneysView: View {
     }
 
     private var filteredJourneys: [JourneyRoute] {
-        guard selectedStartDate != nil else { return allJourneys }
+        guard let startDate = selectedStartDate else { return allJourneys }
         let cal = Calendar.current
-        let start = cal.startOfDay(for: selectedStartDate!)
-        let upperBase = selectedEndDate ?? selectedStartDate!
+        let start = cal.startOfDay(for: startDate)
+        let upperBase = selectedEndDate ?? startDate
         let endExclusive = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: upperBase)) ?? upperBase
 
         return allJourneys.filter { j in
@@ -41,9 +68,19 @@ struct MyJourneysView: View {
         allJourneys.map(\.id).sorted().joined(separator: ",")
     }
 
+    private var permissionJourney: JourneyRoute? {
+        guard let permissionJourneyID else { return nil }
+        return store.journeys.first(where: { $0.id == permissionJourneyID })
+    }
+
+    private var likesJourney: JourneyRoute? {
+        guard let likesJourneyID else { return nil }
+        return store.journeys.first(where: { $0.id == likesJourneyID })
+    }
+
     private var filterChipTitle: String {
         let cal = Calendar.current
-        guard let start = selectedStartDate else { return "All time" }
+        guard let start = selectedStartDate else { return L10n.t("all_time") }
         let end = selectedEndDate ?? start
         let df = DateFormatter()
         df.locale = Locale.current
@@ -54,12 +91,19 @@ struct MyJourneysView: View {
         return "\(df.string(from: start)) - \(df.string(from: end))"
     }
 
+    private var resolvedHeaderTitle: String {
+        let trimmed = headerTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? L10n.t("my_journeys_title") : trimmed
+    }
+
     var body: some View {
         ZStack {
             FigmaTheme.background.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                header
+                if showHeader {
+                    header
+                }
                 listSection
             }
         }
@@ -76,6 +120,53 @@ struct MyJourneysView: View {
                 appearanceRaw: mapAppearanceRaw,
                 limit: 8
             )
+        }
+        .task(id: cityLocalizationTaskKey) {
+            await refreshCityLocalizations()
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { permissionJourneyID != nil },
+                set: { if !$0 { permissionJourneyID = nil } }
+            )
+        ) {
+            if let permissionJourney {
+                JourneyVisibilitySheet(
+                    journey: permissionJourney,
+                    pendingVisibility: $pendingVisibility,
+                    isSubmitting: visibilityUpdatingIDs.contains(permissionJourney.id),
+                    onApply: applyPendingVisibilityChange
+                )
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+            }
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { likesJourneyID != nil },
+                set: { if !$0 { likesJourneyID = nil } }
+            )
+        ) {
+            if let likesJourney {
+                JourneyLikesSheet(
+                    journey: likesJourney,
+                    likers: journeyLikersByJourneyID[likesJourney.id] ?? [],
+                    isLoading: likersLoadingJourneyID == likesJourney.id,
+                    errorMessage: likersErrorByJourneyID[likesJourney.id],
+                    onRetry: { loadJourneyLikers(for: likesJourney) },
+                    onEditVisibility: {
+                        likesJourneyID = nil
+                        presentVisibilitySheet(for: likesJourney)
+                    }
+                )
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+            }
+        }
+        .alert(L10n.t("prompt"), isPresented: $showMessage) {
+            Button(L10n.t("ok"), role: .cancel) {}
+        } message: {
+            Text(messageText)
         }
     }
 
@@ -94,7 +185,7 @@ struct MyJourneysView: View {
 
                 Spacer()
 
-                Text("MY JOURNEYS")
+                Text(resolvedHeaderTitle)
                     .appHeaderStyle()
 
                 Spacer()
@@ -141,7 +232,7 @@ struct MyJourneysView: View {
             .padding(.horizontal, 18)
             .padding(.top, 8)
 
-            Text("\(filteredJourneys.count) journeys")
+            Text(String(format: L10n.t("journeys_count"), filteredJourneys.count))
                 .appCaptionStyle()
                 .padding(.bottom, 10)
         }
@@ -157,24 +248,80 @@ struct MyJourneysView: View {
         return "\(mapAppearanceRaw)|\(ids)"
     }
 
+    private var cityLocalizationTaskKey: String {
+        allJourneys
+            .map { "\($0.id)|\($0.startCityKey ?? $0.cityKey)" }
+            .joined(separator: ",")
+    }
+
+    private func refreshCityLocalizations() async {
+        var coordByKey: [String: CLLocationCoordinate2D] = [:]
+        for journey in allJourneys {
+            let key = (journey.startCityKey ?? journey.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty, key != "Unknown|", coordByKey[key] == nil else { continue }
+            if let start = journey.startCoordinate, start.isValid {
+                coordByKey[key] = start
+            }
+        }
+
+        for (key, coord) in coordByKey {
+            if localizedCityNameByKey[key] != nil { continue }
+
+            if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key),
+               !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                await MainActor.run { localizedCityNameByKey[key] = cached }
+                continue
+            }
+
+            let loc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+            if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key),
+               !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                await MainActor.run { localizedCityNameByKey[key] = title }
+            }
+        }
+    }
+
+    private func resolvedDisplayCityName(for journey: JourneyRoute) -> String {
+        let key = (journey.startCityKey ?? journey.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
+        if let localized = localizedCityNameByKey[key], !localized.isEmpty {
+            return localized
+        }
+        return journey.displayCityName
+    }
+
     private var listSection: some View {
         ScrollView(showsIndicators: false) {
-            LazyVStack(spacing: 14) {
+            LazyVStack(spacing: 24) {
                 ForEach(filteredJourneys, id: \.id) { j in
                     NavigationLink {
-                        JourneyRouteDetailView(journeyID: j.id)
+                        JourneyRouteDetailView(
+                            journeyID: j.id,
+                            isReadOnly: routeDetailReadOnly,
+                            headerTitle: routeDetailHeaderTitle
+                        )
                     } label: {
                         JourneyCardRow(
                             journey: j,
-                            likeCount: likesByJourney[j.id] ?? 0
+                            displayCityName: resolvedDisplayCityName(for: j),
+                            likeCount: likesByJourney[j.id] ?? 0,
+                            isVisibilityUpdating: visibilityUpdatingIDs.contains(j.id),
+                            isReadOnly: routeDetailReadOnly,
+                            onActionTap: { tapped in
+                                guard !routeDetailReadOnly else { return }
+                                if tapped.visibility == .private {
+                                    presentVisibilitySheet(for: tapped)
+                                } else {
+                                    presentLikesSheet(for: tapped)
+                                }
+                            }
                         )
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 12)
-            .padding(.bottom, 40)
+            .padding(.horizontal, 18)
+            .padding(.top, 18)
+            .padding(.bottom, 52)
         }
     }
 
@@ -194,11 +341,16 @@ struct MyJourneysView: View {
 
         Task {
             do {
-                let remote = try await BackendAPIClient.shared.fetchJourneyLikeCounts(token: token, journeyIDs: ids)
+                let ownerUserID = sessionStore.accountUserID
+                let remote = try await BackendAPIClient.shared.fetchJourneyLikeStats(
+                    token: token,
+                    journeyIDs: ids,
+                    ownerUserID: ownerUserID
+                )
                 await MainActor.run {
                     var merged = Dictionary(uniqueKeysWithValues: ids.map { ($0, 0) })
-                    for (id, count) in remote {
-                        merged[id] = max(0, count)
+                    for (id, value) in remote {
+                        merged[id] = max(0, value.likes)
                     }
                     likesByJourney = merged
                 }
@@ -208,6 +360,288 @@ struct MyJourneysView: View {
                 }
             }
         }
+    }
+
+    @MainActor
+    private func presentVisibilitySheet(for journey: JourneyRoute) {
+        guard JourneyVisibilityPolicy.canEditVisibility(
+            current: journey.visibility,
+            target: journey.visibility,
+            isLoggedIn: sessionStore.isLoggedIn
+        ) else {
+            showLoginRequiredMessage()
+            return
+        }
+        permissionJourneyID = journey.id
+        pendingVisibility = journey.visibility
+    }
+
+    @MainActor
+    private func presentLikesSheet(for journey: JourneyRoute) {
+        likesJourneyID = journey.id
+        loadJourneyLikers(for: journey)
+    }
+
+    @MainActor
+    private func applyPendingVisibilityChange() {
+        guard let journey = permissionJourney else { return }
+        guard !visibilityUpdatingIDs.contains(journey.id) else { return }
+
+        let target = pendingVisibility
+        let decision = JourneyVisibilityPolicy.evaluateChange(
+            current: journey.visibility,
+            target: target,
+            isLoggedIn: sessionStore.isLoggedIn,
+            journeyDistance: journey.distance,
+            memoryCount: journey.memories.count
+        )
+        guard decision.isAllowed else {
+            permissionJourneyID = nil
+            showVisibilityDeniedMessage(reason: decision.reason)
+            return
+        }
+
+        var updated = journey
+        updated.visibility = target
+
+        visibilityUpdatingIDs.insert(journey.id)
+        store.applyBulkCompletedUpdates([updated])
+        permissionJourneyID = nil
+
+        Task {
+            defer { visibilityUpdatingIDs.remove(journey.id) }
+
+            guard target != .private else { return }
+            guard BackendConfig.isEnabled,
+                  let token = sessionStore.currentAccessToken,
+                  !token.isEmpty else { return }
+
+            do {
+                _ = try await JourneyCloudMigrationService.migrateAll(
+                    sessionStore: sessionStore,
+                    journeyStore: store,
+                    cityCache: cityCache
+                )
+                refreshJourneyLikes()
+            } catch {
+                print("❌ visibility cloud sync failed:", error.localizedDescription)
+            }
+        }
+    }
+
+    @MainActor
+    private func loadJourneyLikers(for journey: JourneyRoute) {
+        guard BackendConfig.isEnabled,
+              let token = sessionStore.currentAccessToken,
+              !token.isEmpty else {
+            journeyLikersByJourneyID[journey.id] = []
+            likersErrorByJourneyID[journey.id] = nil
+            return
+        }
+
+        likersLoadingJourneyID = journey.id
+        likersErrorByJourneyID[journey.id] = nil
+        Task {
+            do {
+                let all = try await BackendAPIClient.shared.fetchNotifications(token: token, unreadOnly: false)
+                let journeyLikes = all
+                    .filter { $0.type == "journey_like" && $0.journeyID == journey.id }
+                    .sorted { $0.createdAt > $1.createdAt }
+
+                var seen = Set<String>()
+                var out: [JourneyLiker] = []
+                for item in journeyLikes {
+                    let key = item.fromUserID ?? item.fromDisplayName ?? item.id
+                    if seen.contains(key) { continue }
+                    seen.insert(key)
+                    let name = (item.fromDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+                        ? (item.fromDisplayName ?? "")
+                        : (item.fromUserID ?? L10n.t("unknown"))
+                    out.append(JourneyLiker(id: key, name: name, likedAt: item.createdAt))
+                }
+
+                await MainActor.run {
+                    journeyLikersByJourneyID[journey.id] = out
+                    likersErrorByJourneyID[journey.id] = nil
+                    if likersLoadingJourneyID == journey.id {
+                        likersLoadingJourneyID = nil
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    journeyLikersByJourneyID[journey.id] = []
+                    likersErrorByJourneyID[journey.id] = error.localizedDescription
+                    if likersLoadingJourneyID == journey.id {
+                        likersLoadingJourneyID = nil
+                    }
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func showLoginRequiredMessage() {
+        messageText = "请先登录后再修改 Journey 权限"
+        showMessage = true
+    }
+
+    @MainActor
+    private func showVisibilityDeniedMessage(reason: JourneyVisibilityPolicy.DenialReason?) {
+        if let reason {
+            messageText = L10n.t(reason.localizationKey)
+        } else {
+            messageText = "无法修改 Journey 权限"
+        }
+        showMessage = true
+    }
+}
+
+private struct JourneyLiker: Identifiable {
+    let id: String
+    let name: String
+    let likedAt: Date
+}
+
+private struct JourneyVisibilitySheet: View {
+    let journey: JourneyRoute
+    @Binding var pendingVisibility: JourneyVisibility
+    let isSubmitting: Bool
+    let onApply: () -> Void
+
+    private var canApply: Bool {
+        return !isSubmitting
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(L10n.t("journey_change_visibility"))
+                .font(.system(size: 20, weight: .bold))
+                .foregroundColor(.black)
+
+            Text(String(format: L10n.t("journey_current_visibility_format"), journey.visibility.localizedTitle))
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(.black.opacity(0.58))
+
+            Picker("权限", selection: $pendingVisibility) {
+                Text(JourneyVisibility.private.localizedTitle).tag(JourneyVisibility.private)
+                Text(JourneyVisibility.friendsOnly.localizedTitle).tag(JourneyVisibility.friendsOnly)
+            }
+            .pickerStyle(.segmented)
+
+            Button(action: onApply) {
+                HStack(spacing: 8) {
+                    if isSubmitting {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .tint(.white)
+                    }
+                    Text(L10n.t("journey_confirm_change"))
+                        .font(.system(size: 15, weight: .bold))
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 46)
+                .background(canApply ? Color.black : Color.black.opacity(0.35))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .disabled(!canApply)
+            .buttonStyle(.plain)
+        }
+        .padding(20)
+        .background(FigmaTheme.background)
+    }
+}
+
+private struct JourneyLikesSheet: View {
+    let journey: JourneyRoute
+    let likers: [JourneyLiker]
+    let isLoading: Bool
+    let errorMessage: String?
+    let onRetry: () -> Void
+    let onEditVisibility: () -> Void
+
+    private var title: String {
+        journey.customTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? (journey.customTitle ?? "")
+            : journey.displayCityName
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(L10n.t("journey_likes_title"))
+                .font(.system(size: 20, weight: .bold))
+                .foregroundColor(.black)
+
+            Text(title)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.black.opacity(0.62))
+                .lineLimit(1)
+
+            Button(action: onEditVisibility) {
+                HStack {
+                    Text(L10n.t("journey_change_permission"))
+                        .font(.system(size: 14, weight: .bold))
+                    Spacer()
+                    Image(systemName: "slider.horizontal.3")
+                }
+                .foregroundColor(.black)
+                .padding(.horizontal, 12)
+                .frame(height: 42)
+                .background(Color.black.opacity(0.05))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
+
+            if isLoading {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text(L10n.t("journey_likes_loading"))
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.black.opacity(0.58))
+                }
+            } else if let errorMessage, !errorMessage.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(String(format: L10n.t("journey_loading_failed_format"), errorMessage))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.red.opacity(0.78))
+                    Button(L10n.t("retry"), action: onRetry)
+                        .font(.system(size: 13, weight: .bold))
+                        .buttonStyle(.plain)
+                }
+            } else if likers.isEmpty {
+                Text(L10n.t("journey_no_likes_yet"))
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.black.opacity(0.58))
+            } else {
+                ScrollView {
+                    VStack(spacing: 8) {
+                        ForEach(likers) { liker in
+                            HStack {
+                                Text(liker.name)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.black)
+                                Spacer()
+                                Text(Self.timeText(from: liker.likedAt))
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(.black.opacity(0.48))
+                            }
+                            .padding(.horizontal, 12)
+                            .frame(height: 40)
+                            .background(Color.black.opacity(0.04))
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+                    }
+                }
+            }
+        }
+        .padding(20)
+        .background(FigmaTheme.background)
+    }
+
+    private static func timeText(from date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: date, relativeTo: Date())
     }
 }
 
@@ -236,7 +670,7 @@ private struct JourneyCalendarRangePopover: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Date Range")
+            Text(L10n.t("date_range"))
                 .font(.system(size: 15, weight: .bold))
                 .foregroundColor(.black)
 
@@ -261,7 +695,7 @@ private struct JourneyCalendarRangePopover: View {
             monthGrid
 
             HStack(spacing: 8) {
-                Button("Clear") {
+                Button(L10n.t("clear")) {
                     onClear()
                 }
                 .font(.system(size: 12, weight: .semibold))
@@ -271,7 +705,7 @@ private struct JourneyCalendarRangePopover: View {
                 .background(Color.black.opacity(0.08))
                 .clipShape(Capsule())
 
-                Button("Apply") {
+                Button(L10n.t("apply")) {
                     onApply()
                 }
                 .font(.system(size: 12, weight: .semibold))
@@ -426,12 +860,16 @@ private struct JourneyCalendarRangePopover: View {
 
 private struct JourneyCardRow: View {
     let journey: JourneyRoute
+    let displayCityName: String
     let likeCount: Int
+    let isVisibilityUpdating: Bool
+    let isReadOnly: Bool
+    let onActionTap: (JourneyRoute) -> Void
 
     @AppStorage(MapAppearanceSettings.storageKey) private var mapAppearanceRaw = MapAppearanceSettings.current.rawValue
 
     private var mergedTitle: String {
-        journey.displayCityName
+        displayCityName
     }
 
     private var datePillText: String {
@@ -466,6 +904,7 @@ private struct JourneyCardRow: View {
             ZStack(alignment: .topLeading) {
                 JourneyRouteSnapshotThumbnail(journey: journey, appearanceRaw: mapAppearanceRaw)
                     .frame(height: 170)
+                    .background(Color.black.opacity(0.06))
 
                 Text(datePillText)
                     .font(.system(size: 14, weight: .heavy, design: .rounded))
@@ -477,7 +916,7 @@ private struct JourneyCardRow: View {
                     .padding(12)
             }
 
-            VStack(alignment: .leading, spacing: 9) {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .top, spacing: 8) {
                     Text(mergedTitle)
                         .font(.system(size: 17, weight: .bold, design: .rounded))
@@ -502,22 +941,52 @@ private struct JourneyCardRow: View {
 
                     Spacer(minLength: 0)
 
-                    HStack(spacing: 6) {
-                        Image(systemName: "heart")
-                            .font(.system(size: 14, weight: .medium))
-                        Text("\(likeCount)")
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                    if isReadOnly {
+                        HStack(spacing: 6) {
+                            Image(systemName: journey.visibility == .private ? "lock" : "globe")
+                                .font(.system(size: 13, weight: .semibold))
+                            Text(journey.visibility.localizedTitle)
+                                .font(.system(size: 13, weight: .bold, design: .rounded))
+                        }
+                        .foregroundColor(visibilityTextColor)
+                        .padding(.horizontal, 12)
+                        .frame(height: 34)
+                        .background(visibilityBackgroundColor)
+                        .clipShape(Capsule())
+                    } else {
+                        Button(action: { onActionTap(journey) }) {
+                            HStack(spacing: 6) {
+                                if isVisibilityUpdating {
+                                    ProgressView()
+                                        .progressViewStyle(.circular)
+                                        .tint(Color.black.opacity(0.58))
+                                        .scaleEffect(0.8)
+                                } else if journey.visibility == .private {
+                                    Image(systemName: "lock")
+                                        .font(.system(size: 13, weight: .semibold))
+                                    Text(JourneyVisibility.private.localizedTitle)
+                                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                                } else {
+                                    Image(systemName: "heart")
+                                        .font(.system(size: 14, weight: .medium))
+                                    Text("\(likeCount)")
+                                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                                }
+                            }
+                            .foregroundColor(visibilityTextColor)
+                            .padding(.horizontal, 12)
+                            .frame(height: 34)
+                            .background(visibilityBackgroundColor)
+                            .clipShape(Capsule())
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(isVisibilityUpdating)
                     }
-                    .foregroundColor(Color(red: 76.0 / 255.0, green: 175.0 / 255.0, blue: 124.0 / 255.0))
-                    .padding(.horizontal, 12)
-                    .frame(height: 34)
-                    .background(Color(red: 230.0 / 255.0, green: 241.0 / 255.0, blue: 233.0 / 255.0))
-                    .clipShape(Capsule())
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.top, 12)
-            .padding(.bottom, 12)
+            .padding(.top, 14)
+            .padding(.bottom, 16)
             .background(Color.white)
         }
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
@@ -546,6 +1015,20 @@ private struct JourneyCardRow: View {
         Rectangle()
             .fill(Color.black.opacity(0.12))
             .frame(width: 1, height: 18)
+    }
+
+    private var visibilityTextColor: Color {
+        if journey.visibility == .private || isVisibilityUpdating {
+            return Color.black.opacity(0.68)
+        }
+        return Color(red: 76.0 / 255.0, green: 175.0 / 255.0, blue: 124.0 / 255.0)
+    }
+
+    private var visibilityBackgroundColor: Color {
+        if journey.visibility == .private || isVisibilityUpdating {
+            return Color.black.opacity(0.08)
+        }
+        return Color(red: 230.0 / 255.0, green: 241.0 / 255.0, blue: 233.0 / 255.0)
     }
 }
 
@@ -580,6 +1063,7 @@ private struct JourneyRouteSnapshotThumbnail: View {
                     )
             }
         }
+        .clipped()
         .onAppear {
             loader.load(journey: journey, appearanceRaw: appearanceRaw)
         }
@@ -618,8 +1102,7 @@ private final class JourneyRouteSnapshotLoader: ObservableObject {
 
                     let img = await JourneySnapshotInFlightStore.shared.image(for: key) {
                         await Task.detached(priority: .utility) {
-                            let renderJourney = snapshotJourney(from: journey)
-                            return makeSnapshot(journey: renderJourney, appearanceRaw: appearanceRaw)
+                            return makeSnapshot(journey: journey, appearanceRaw: appearanceRaw)
                         }.value
                     }
                     guard let img else { return }
@@ -654,8 +1137,7 @@ private final class JourneyRouteSnapshotLoader: ObservableObject {
 
             let img = await JourneySnapshotInFlightStore.shared.image(for: key) {
                 await Task.detached(priority: .utility) {
-                    let renderJourney = Self.snapshotJourney(from: journey)
-                    return Self.makeSnapshot(journey: renderJourney, appearanceRaw: appearanceRaw)
+                    return Self.makeSnapshot(journey: journey, appearanceRaw: appearanceRaw)
                 }.value
             }
             await MainActor.run {
@@ -709,21 +1191,13 @@ private final class JourneyRouteSnapshotLoader: ObservableObject {
         return MKCoordinateRegion(center: center, span: span)
     }
 
-    nonisolated private static func snapshotJourney(from journey: JourneyRoute) -> JourneyRoute {
-        guard !journey.thumbnailCoordinates.isEmpty else { return journey }
-        var compact = journey
-        compact.coordinates = journey.thumbnailCoordinates
-        return compact
-    }
-
     nonisolated private static func makeSnapshot(journey: JourneyRoute, appearanceRaw: String) -> UIImage? {
-        guard let rawRegion = CityDeepRenderEngine.fittedRegion(
-            cityKey: journey.cityKey,
+        let renderCoords = journey.allCLCoords.isEmpty ? journey.allCLThumbnailCoords : journey.allCLCoords
+        guard let rawRegion = JourneySnapshotFraming.region(
+            for: renderCoords,
             countryISO2: journey.countryISO2,
-            journeys: [journey],
-            anchorWGS: journey.allCLCoords.first,
-            effectiveBoundaryWGS: nil,
-            fetchedBoundaryWGS: nil
+            cityKey: journey.cityKey,
+            targetAspectRatio: 1.5
         ),
         let region = clampedRegion(rawRegion) else {
             return nil
@@ -877,23 +1351,41 @@ private actor JourneySnapshotDiskCache {
 
 struct JourneyRouteDetailView: View {
     let journeyID: String
+    let isReadOnly: Bool
+    let headerTitle: String?
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var sessionStore: UserSessionStore
+    @EnvironmentObject private var flow: AppFlowCoordinator
 
     @State private var shareImage: UIImage? = nil
     @State private var showShareSheet = false
     @State private var showDeleteConfirm = false
     @State private var fittedRegion: MKCoordinateRegion? = nil
     @State private var editingMemory: JourneyMemory? = nil
+    @State private var sidebarHideToken = UUID().uuidString
+    @State private var localizedCityTitle: String? = nil
+
+    init(
+        journeyID: String,
+        isReadOnly: Bool = false,
+        headerTitle: String? = nil
+    ) {
+        self.journeyID = journeyID
+        self.isReadOnly = isReadOnly
+        self.headerTitle = headerTitle
+    }
 
     private var journey: JourneyRoute? {
         store.journeys.first(where: { $0.id == journeyID })
     }
 
     private var cityTitle: String {
-        journey?.displayCityName ?? "Unknown"
+        if let localizedCityTitle, !localizedCityTitle.isEmpty {
+            return localizedCityTitle
+        }
+        return journey?.displayCityName ?? L10n.t("unknown")
     }
 
     private var countryTitle: String {
@@ -901,7 +1393,7 @@ struct JourneyRouteDetailView: View {
         if iso.count == 2 {
             return Locale.current.localizedString(forRegionCode: iso) ?? iso
         }
-        return "Unknown"
+        return L10n.t("unknown_country")
     }
 
     private var dateText: String {
@@ -946,25 +1438,6 @@ struct JourneyRouteDetailView: View {
         }
     }
 
-    private var statsBadge: some View {
-        let memoryCount = journey?.memories.count ?? 0
-        return HStack(spacing: 10) {
-            Text(String(format: L10n.t("city_deep_journeys_count"), 1))
-            Text(String(format: L10n.t("city_deep_memories_count"), memoryCount))
-        }
-        .font(.system(size: 12, weight: .semibold))
-        .foregroundColor(UITheme.softBlack)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(UITheme.cardBg)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(UITheme.cardStroke, lineWidth: 0.8)
-        )
-        .shadow(radius: 2, y: 1)
-    }
-
     var body: some View {
         ZStack(alignment: .top) {
             JourneyDetailMap(
@@ -972,6 +1445,7 @@ struct JourneyRouteDetailView: View {
                 memoryGroups: memoryGroups,
                 initialRegion: fittedRegion,
                 onTapMemory: { memory in
+                    guard !isReadOnly else { return }
                     editingMemory = memory
                 }
             )
@@ -986,28 +1460,23 @@ struct JourneyRouteDetailView: View {
             VStack(spacing: 0) {
                 routeHeader
 
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        statsBadge
+                HStack {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("\(cityTitle) · \(countryTitle)")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
 
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text("\(cityTitle) · \(countryTitle)")
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(.white)
-                                .lineLimit(1)
-
-                            Text("\(dateText) · \(durationText) · \(String(format: "%.1f km", max(0, (journey?.distance ?? 0) / 1000.0)))")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(.white.opacity(0.88))
-                                .lineLimit(1)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 9)
-                        .background(Color.black.opacity(0.35))
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        Text("\(dateText) · \(durationText) · \(String(format: "%.1f km", max(0, (journey?.distance ?? 0) / 1000.0)))")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.88))
+                            .lineLimit(1)
                     }
-
-                    Spacer()
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .background(Color.black.opacity(0.35))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
@@ -1016,7 +1485,7 @@ struct JourneyRouteDetailView: View {
             }
         }
         .overlay {
-            if let tappedMemory = editingMemory {
+            if !isReadOnly, let tappedMemory = editingMemory {
                 MemoryEditorSheet(
                     isPresented: Binding(
                         get: { editingMemory != nil },
@@ -1050,13 +1519,22 @@ struct JourneyRouteDetailView: View {
                 .environmentObject(sessionStore)
             }
         }
+        .onAppear {
+            flow.pushSidebarButtonHidden(token: sidebarHideToken)
+        }
+        .task(id: journey?.id) {
+            await refreshLocalizedCityTitle()
+        }
+        .onDisappear {
+            flow.popSidebarButtonHidden(token: sidebarHideToken)
+        }
         .navigationBarBackButtonHidden(true)
-        .confirmationDialog("Delete this journey?", isPresented: $showDeleteConfirm) {
-            Button("Delete", role: .destructive) {
+        .confirmationDialog(L10n.t("delete_journey_confirm_title"), isPresented: $showDeleteConfirm) {
+            Button(L10n.t("delete"), role: .destructive) {
                 store.deleteJourney(id: journeyID)
                 dismiss()
             }
-            Button("Cancel", role: .cancel) {}
+            Button(L10n.t("cancel"), role: .cancel) {}
         }
         .sheet(isPresented: $showShareSheet) {
             if let shareImage {
@@ -1066,46 +1544,51 @@ struct JourneyRouteDetailView: View {
     }
 
     private var routeHeader: some View {
-        HStack {
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.black)
-                    .frame(width: 44, height: 44)
+        ZStack {
+            HStack {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(.black)
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .frame(width: 88, alignment: .leading)
+
+                Spacer(minLength: 0)
+
+                if !isReadOnly {
+                    HStack(spacing: 10) {
+                        Button {
+                            shareCurrent()
+                        } label: {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 18, weight: .regular))
+                                .foregroundColor(.black)
+                                .frame(width: 34, height: 34)
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            showDeleteConfirm = true
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.system(size: 18, weight: .regular))
+                                .foregroundColor(.black)
+                                .frame(width: 34, height: 34)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                } else {
+                    Color.clear.frame(width: 68, height: 34)
+                }
             }
-            .buttonStyle(.plain)
 
-            Spacer()
-
-            Text("Journey Route")
+            Text(headerTitle ?? L10n.t("journey_route_title"))
                 .font(.system(size: 22, weight: .bold))
                 .foregroundColor(.black)
-
-            Spacer()
-
-            HStack(spacing: 10) {
-                Button {
-                    shareCurrent()
-                } label: {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 18, weight: .regular))
-                        .foregroundColor(.black)
-                        .frame(width: 34, height: 34)
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    showDeleteConfirm = true
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 18, weight: .regular))
-                        .foregroundColor(.black)
-                        .frame(width: 34, height: 34)
-                }
-                .buttonStyle(.plain)
-            }
         }
         .padding(.horizontal, 18)
         .padding(.top, 8)
@@ -1132,6 +1615,25 @@ struct JourneyRouteDetailView: View {
             effectiveBoundaryWGS: nil,
             fetchedBoundaryWGS: nil
         )
+    }
+
+    private func refreshLocalizedCityTitle() async {
+        guard let journey else { return }
+        let key = (journey.startCityKey ?? journey.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty, key != "Unknown|" else { return }
+
+        if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key),
+           !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            await MainActor.run { localizedCityTitle = cached }
+            return
+        }
+
+        guard let start = journey.startCoordinate, start.isValid else { return }
+        let loc = CLLocation(latitude: start.latitude, longitude: start.longitude)
+        if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key),
+           !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            await MainActor.run { localizedCityTitle = title }
+        }
     }
 
     private func shareCurrent() {

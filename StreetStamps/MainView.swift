@@ -5,21 +5,19 @@ import CoreLocation
 
 // MARK: - Design Theme
 private struct DesignTheme {
-    static let bg = FigmaTheme.background
     static let accent = FigmaTheme.primary
-    static let text = FigmaTheme.text
-    static let modeBorder = FigmaTheme.secondary
 }
 
 struct MainView: View {
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var locationHub: LocationHub
     @EnvironmentObject private var cityCache: CityCache
+    @EnvironmentObject private var lifelogStore: LifelogStore
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var flow: AppFlowCoordinator
+    @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
     
     @Binding var selectedTab: Int
-    @Binding var showSidebar: Bool
     @StateObject private var tracking = TrackingService.shared
     
     @State private var showMapView = false
@@ -31,11 +29,9 @@ struct MainView: View {
     @State private var didPrefetchAfterFirstCoord = false
     
     @State private var trackingMode: TrackingMode = .daily
-    @State private var showModeSelector = false
     @State private var startPulse = false
     @State private var showTitle = false
     @State private var showStartButton = false
-    @State private var showModeButtonState = false
     @State private var didPlayStartIntro = false
     @State private var ripplePhase = false
     
@@ -54,38 +50,38 @@ struct MainView: View {
                 let topInset = max(12, proxy.safeAreaInsets.top + 6)
                 let circleSize = min(max(220, proxy.size.width * 0.65), 258)
                 let titleTop = compactHeight ? max(120, proxy.size.height * 0.18) : max(156, proxy.size.height * 0.205)
+                let controlLift: CGFloat = compactHeight ? -8 : -12
 
                 VStack(spacing: 0) {
                     Spacer().frame(height: titleTop)
 
-                    Text("JOURNEY")
-                        .font(.system(size: min(72, proxy.size.width * 0.183), weight: .black))
-                        .tracking(-3.2)
-                        .foregroundColor(.black)
+                    Text(L10n.key("main_unlock_new_journey"))
+                        .font(.system(size: 26, weight: .black))
+                        .tracking(-0.6)
+                        .lineSpacing(9)
+                        .foregroundColor(Color.black.opacity(0.8))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .frame(maxWidth: 360)
+                        .padding(.bottom, 64)
                         .opacity(showTitle ? 1 : 0)
                         .offset(y: showTitle ? 0 : 18)
-
-                    Spacer().frame(height: compactHeight ? 40 : 52)
 
                     startButton(circleSize: circleSize)
                         .opacity(showStartButton ? 1 : 0)
                         .scaleEffect(showStartButton ? 1 : 0.96)
-                        .offset(y: showStartButton ? 0 : 20)
-
-                    Spacer().frame(height: compactHeight ? 26 : 32)
-
-                    modeButton
-                        .opacity(showModeButtonState ? 1 : 0)
-                        .offset(y: showModeButtonState ? 0 : 12)
+                        .offset(y: (showStartButton ? 0 : 20) + controlLift)
 
                     Spacer()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .padding(.horizontal, 24)
+                .padding(.bottom, 24)
 
-                SidebarHamburgerButton(showSidebar: $showSidebar, size: 42, iconSize: 20, iconWeight: .semibold, foreground: .black)
-                .padding(.leading, 24)
-                .padding(.top, topInset)
+                Color.clear
+                    .frame(width: 42, height: 42)
+                    .padding(.leading, 24)
+                    .padding(.top, topInset)
 #if DEBUG
                 .onLongPressGesture(minimumDuration: 0.6) {
                     showDebugPanel = true
@@ -129,20 +125,28 @@ struct MainView: View {
                         sharingJourney = nil
                     },
                     onGoToLibrary: {
-                        selectedTab = 1
+                        selectedTab = NavigationTab.cities.rawValue
+                        onboardingGuide.advance(.openCityCards)
                     }
                 )
             } else {
                 Color.clear.onAppear { showSharingCard = false }
             }
         }
-        .overlay {
-            if showModeSelector {
-                modeSelectorOverlay
+        .overlay(alignment: .bottom) {
+            if onboardingGuide.isCurrent(.startJourney) {
+                OnboardingCoachCard(
+                    message: OnboardingGuideStore.Step.startJourney.message,
+                    actionTitle: OnboardingGuideStore.Step.startJourney.actionTitle,
+                    onAction: { startOrContinueJourneyAndOpenMap() },
+                    onLater: { onboardingGuide.pauseForLater() },
+                    onSkip: { onboardingGuide.skipAll() }
+                )
+                .padding(.horizontal, 18)
+                .padding(.bottom, 98)
             }
         }
         .animation(.easeInOut(duration: 0.18), value: showSharingCard)
-        .animation(.easeInOut(duration: 0.18), value: showModeSelector)
         .onChange(of: showSharingCard) { isShowing in
             if !isShowing { sharingJourney = nil }
         }
@@ -151,22 +155,17 @@ struct MainView: View {
             if !didPlayStartIntro {
                 showTitle = false
                 showStartButton = false
-                showModeButtonState = false
                 withAnimation(.easeOut(duration: 0.35)) { showTitle = true }
                 withAnimation(.easeOut(duration: 0.45).delay(0.08)) { showStartButton = true }
-                withAnimation(.easeOut(duration: 0.35).delay(0.16)) { showModeButtonState = true }
                 didPlayStartIntro = true
             } else {
                 showTitle = true
                 showStartButton = true
-                showModeButtonState = true
             }
             ripplePhase = true
             startPulse = false
-            // ✅ 只有 store 加载完成才同步，否则等 onChange 触发
             if store.hasLoaded {
                 syncOngoingFromStore()
-                cityCache.rebuildFromJourneyStore()
             }
             if tracking.isTracking && ongoingJourney.endTime == nil {
                 hasOngoingJourney = true
@@ -184,7 +183,6 @@ struct MainView: View {
         .onChange(of: store.hasLoaded) { loaded in
             if loaded {
                 syncOngoingFromStore()
-                cityCache.rebuildFromJourneyStore()
             }
         }
         .onChange(of: trackingMode) { newMode in
@@ -226,6 +224,10 @@ struct MainView: View {
     }
     
     // MARK: - UI Components
+
+    private var isGuideStartStep: Bool {
+        onboardingGuide.isCurrent(.startJourney)
+    }
     
     private func startButton(circleSize: CGFloat) -> some View {
         Button(action: startOrContinueJourneyAndOpenMap) {
@@ -238,6 +240,13 @@ struct MainView: View {
                     .fill(DesignTheme.accent)
                     .frame(width: circleSize, height: circleSize)
                     .shadow(color: DesignTheme.accent.opacity(0.30), radius: 24, y: 12)
+                    .overlay {
+                        if isGuideStartStep {
+                            Circle()
+                                .stroke(Color.white, lineWidth: 4)
+                                .shadow(color: Color.white.opacity(0.8), radius: 8)
+                        }
+                    }
 
                 Circle()
                     .stroke(DesignTheme.accent.opacity(0.22), lineWidth: 1.5)
@@ -255,47 +264,20 @@ struct MainView: View {
 
                 VStack(spacing: 10) {
                     Image(systemName: "play.fill")
-                        .font(.system(size: 48, weight: .black))
+                        .font(.system(size: 48, weight: .bold))
                         .foregroundColor(.white)
                     Text(buttonText)
-                        .font(.system(size: 40 / 2, weight: .black))
+                        .font(.system(size: 40 / 2, weight: .bold))
                         .tracking(-0.4)
                         .foregroundColor(.white)
                 }
             }
         }
         .buttonStyle(.plain)
+        .scaleEffect(isGuideStartStep ? 1.03 : 1.0)
+        .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: isGuideStartStep)
     }
 
-    private var modeButton: some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.18)) {
-                showModeSelector = true
-            }
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: trackingMode == .sport ? "bolt.fill" : "shoeprints.fill")
-                    .font(.system(size: 13, weight: .black))
-                    .foregroundColor(DesignTheme.modeBorder)
-
-                Text(trackingMode == .sport ? L10n.key("lockscreen_sport_mode") : L10n.key("lockscreen_daily_mode"))
-                    .font(.system(size: 32 / 2, weight: .black))
-                    .tracking(-0.4)
-                    .foregroundColor(DesignTheme.modeBorder)
-            }
-            .padding(.horizontal, 32)
-            .frame(height: 59)
-            .background(Color.white.opacity(0.94))
-            .clipShape(Capsule(style: .continuous))
-            .overlay(
-                Capsule(style: .continuous)
-                    .stroke(DesignTheme.modeBorder, lineWidth: 1.5)
-            )
-            .shadow(color: DesignTheme.modeBorder.opacity(0.12), radius: 10, y: 3)
-        }
-        .buttonStyle(.plain)
-    }
-            
             // MARK: - Mode Selector Popup
             private var buttonText: String {
                 let hasLiveJourney = hasOngoingJourney || (tracking.isTracking && ongoingJourney.endTime == nil)
@@ -312,26 +294,12 @@ struct MainView: View {
                     return L10n.t("in_progress_upper")
                 }
             }
-            private var modeSelectorOverlay: some View {
-                ZStack {
-                    Color.black.opacity(0.35)
-                        .ignoresSafeArea()
-                        .onTapGesture {
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                showModeSelector = false
-                            }
-                        }
-                    
-                    TrackingModeSelector(selectedMode: $trackingMode, isPresented: $showModeSelector)
-                        .frame(maxWidth: 360)
-                        .padding(.horizontal, 28)
-                        .transition(.opacity)
-                }
-            }
-            
             // MARK: - Journey Logic
             
             private func startOrContinueJourneyAndOpenMap() {
+                onboardingGuide.advance(.startJourney)
+                locationHub.requestPermissionIfNeeded()
+
                 if !hasOngoingJourney {
                     ongoingJourney = JourneyRoute()
                     ongoingJourney.startTime = Date()
@@ -361,7 +329,7 @@ struct MainView: View {
                 let t = cityLoc.canonicalCity.trimmingCharacters(in: .whitespacesAndNewlines)
                 return t.isEmpty ? L10n.t("unknown") : t
             }
-            
+
             // MARK: - Sync
             
             private func syncOngoingFromStore() {
@@ -404,6 +372,7 @@ struct MainView: View {
                     route: ended,
                     journeyStore: store,
                     cityCache: cityCache,
+                    lifelogStore: lifelogStore,
                     source: .resumeDeclined
                 ) { updated in
                     ongoingJourney = updated
@@ -448,138 +417,6 @@ struct MainView: View {
         }
     
         
-        // MARK: - Tracking Mode Selector Sheet
-        
-struct TrackingModeSelector: View {
-    @Binding var selectedMode: TrackingMode
-    @Binding var isPresented: Bool
-    
-    var body: some View {
-        VStack(spacing: 0) {
-            // Header bar
-            HStack {
-                Text("SELECT MODE")
-                    .font(.system(size: 16, weight: .bold))
-                    .tracking(1)
-                    .foregroundColor(.white)
-                
-                Spacer()
-                
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        isPresented = false
-                    }
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.9))
-                        .frame(width: 32, height: 32)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 14)
-            .background(DesignTheme.accent)
-            
-            VStack(spacing: 14) {
-                ModeOptionCard(
-                    mode: .sport,
-                    isSelected: selectedMode == .sport,
-                    onSelect: {
-                        selectedMode = .sport
-                        withAnimation(.easeInOut(duration: 0.18)) { isPresented = false }
-                    }
-                )
-                
-                ModeOptionCard(
-                    mode: .daily,
-                    isSelected: selectedMode == .daily,
-                    onSelect: {
-                        selectedMode = .daily
-                        withAnimation(.easeInOut(duration: 0.18)) { isPresented = false }
-                    }
-                )
-            }
-            .padding(18)
-            .background(Color.white)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.black.opacity(0.10), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.18), radius: 18, x: 0, y: 10)
-    }
-}
-    
-struct ModeOptionCard: View {
-    let mode: TrackingMode
-    let isSelected: Bool
-    let onSelect: () -> Void
-    
-    var body: some View {
-        Button(action: onSelect) {
-            HStack(spacing: 16) {
-                // Icon
-                ZStack {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(isSelected ? DesignTheme.accent.opacity(0.15) : Color.black.opacity(0.05))
-                        .frame(width: 48, height: 48)
-                    
-                    Image(systemName: mode == .sport ? "bolt.fill" : "figure.walk")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundColor(isSelected ? DesignTheme.accent : .black.opacity(0.5))
-                }
-                
-                // Text content
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(mode == .sport ? L10n.key("lockscreen_sport_mode") : L10n.key("lockscreen_daily_mode"))
-                        .font(.system(size: 15, weight: .bold))
-                        .tracking(0.8)
-                        .foregroundColor(.black)
-                    
-                    Text(mode == .sport ? L10n.key("sport_mode_desc") : L10n.key("daily_mode_desc"))
-                        .font(.system(size: 12))
-                        .foregroundColor(.black.opacity(0.55))
-                        .lineLimit(3)
-                        .multilineTextAlignment(.leading)
-                    
-                    // Bottom hint row
-                    HStack(spacing: 12) {
-                        if mode == .sport {
-                            Text(L10n.key("hint_precise"))
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundColor(DesignTheme.accent)
-                            Text(L10n.key("hint_battery"))
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.black.opacity(0.35))
-                        } else {
-                            Text(L10n.key("hint_precision"))
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.black.opacity(0.35))
-                            Text(L10n.key("hint_efficient"))
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundColor(DesignTheme.accent)
-                        }
-                    }
-                    .padding(.top, 2)
-                }
-                
-                Spacer()
-            }
-            .padding(16)
-            .background(isSelected ? DesignTheme.bg : Color.white)
-            .cornerRadius(16)
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(isSelected ? DesignTheme.accent : Color.black.opacity(0.10), lineWidth: isSelected ? 2 : 1)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-}
-    
     // MARK: - Debug Panel (kept for development)
 
 #if DEBUG
@@ -597,8 +434,8 @@ private let london   = CLLocationCoordinate2D(latitude: 51.5072, longitude: -0.1
 var body: some View {
     NavigationView {
         List {
-            Section("🇨🇳 中国测试") {
-                NavigationLink("完整测试板块") {
+            Section(L10n.t("debug_cn_test_section")) {
+                NavigationLink(L10n.t("debug_cn_test_full")) {
                     DebugChinaTestModule()
                 }
             }

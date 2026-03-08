@@ -1,14 +1,45 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: streetstamps-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "streetstamps"
+      POSTGRES_USER: "streetstamps"
+      POSTGRES_PASSWORD: "streetstamps"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U streetstamps -d streetstamps"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   api:
     build: .
     container_name: streetstamps-node-v1
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       PORT: "18080"
       JWT_SECRET: "change-me"
+      DATABASE_URL: "postgresql://streetstamps:streetstamps@postgres:5432/streetstamps"
+      PGSSL: "disable"
+      PG_STATE_KEY: "global"
       DATA_FILE: "/app/data/data.json"
       MEDIA_DIR: "/app/media"
       MEDIA_PUBLIC_BASE: "https://api.streetstamps.cyberkkk.cn"
+      AUTH_LINK_BASE: "https://api.streetstamps.cyberkkk.cn"
+      RESEND_API_KEY: ""
+      RESEND_FROM_EMAIL: ""
+      RESEND_API_BASE: "https://api.resend.com"
+      SES_FROM_EMAIL: ""
+      APPLE_AUDIENCES: "com.claire.streetstamps"
+      FIREBASE_AUTH_ENABLED: "0"
       R2_ACCOUNT_ID: ""
       R2_ACCESS_KEY_ID: ""
       R2_SECRET_ACCESS_KEY: ""
@@ -21,3 +52,6 @@ services:
     volumes:
       - ./data:/app/data
       - ./media:/app/media
+
+volumes:
+  postgres_data:

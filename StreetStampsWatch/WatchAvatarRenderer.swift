@@ -74,22 +74,22 @@ struct WatchAvatarRendererView: View {
                 img("avatar_head_front")
                 img("avatar_base_top_front")
 
-                if let outfit = outfitFrontAsset {
-                    img(outfit)
+                if let expr = expressionFrontAsset {
+                    img(expr)
                 }
 
                 if let hair = hairFrontAsset {
                     img(hair)
                 }
 
+                if let outfit = outfitFrontAsset {
+                    img(outfit)
+                }
+
                 ForEach(loadout.accessoryIds, id: \.self) { id in
                     if let asset = accessoryFrontAsset(id) {
                         img(asset)
                     }
-                }
-
-                if let expr = expressionFrontAsset {
-                    img(expr)
                 }
             } else {
                 Image(systemName: "figure.walk.circle.fill")

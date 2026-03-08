@@ -20,6 +20,8 @@ import CoreLocation
 struct JourneyMemoryMainView: View {
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var sessionStore: UserSessionStore
+    @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
+    @Environment(\.dismiss) private var dismiss
     @State private var expandedCities: Set<String> = []
     @State private var showFilterPopover = false
     @State private var monthCursor = Date()
@@ -29,9 +31,23 @@ struct JourneyMemoryMainView: View {
     @State private var localizedCityNameByKey: [String: String] = [:]
     
     @Binding var showSidebar: Bool
+    private let usesSidebarHeader: Bool
+    private let hideLeadingControl: Bool
+    private let readOnly: Bool
+    private let headerTitle: String?
     
-    init(showSidebar: Binding<Bool>) {
+    init(
+        showSidebar: Binding<Bool>,
+        usesSidebarHeader: Bool = true,
+        hideLeadingControl: Bool = false,
+        readOnly: Bool = false,
+        headerTitle: String? = nil
+    ) {
         self._showSidebar = showSidebar
+        self.usesSidebarHeader = usesSidebarHeader
+        self.hideLeadingControl = hideLeadingControl
+        self.readOnly = readOnly
+        self.headerTitle = headerTitle
     }
 
     private var allMemoryJourneys: [JourneyRoute] {
@@ -41,10 +57,10 @@ struct JourneyMemoryMainView: View {
     }
 
     private var filteredMemoryJourneys: [JourneyRoute] {
-        guard selectedStartDate != nil else { return allMemoryJourneys }
+        guard let startDate = selectedStartDate else { return allMemoryJourneys }
         let cal = Calendar.current
-        let start = cal.startOfDay(for: selectedStartDate!)
-        let upperBase = selectedEndDate ?? selectedStartDate!
+        let start = cal.startOfDay(for: startDate)
+        let upperBase = selectedEndDate ?? startDate
         let endExclusive = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: upperBase)) ?? upperBase
 
         return allMemoryJourneys.filter { j in
@@ -53,19 +69,6 @@ struct JourneyMemoryMainView: View {
         }
     }
 
-    private var filterChipTitle: String {
-        let cal = Calendar.current
-        guard let start = selectedStartDate else { return "All time" }
-        let end = selectedEndDate ?? start
-        let df = DateFormatter()
-        df.locale = Locale.current
-        df.dateFormat = "MMM d"
-        if cal.isDate(start, inSameDayAs: end) {
-            return df.string(from: start)
-        }
-        return "\(df.string(from: start)) - \(df.string(from: end))"
-    }
-    
     var body: some View {
         ZStack(alignment: .top) {
             FigmaTheme.background.ignoresSafeArea()
@@ -81,6 +84,7 @@ struct JourneyMemoryMainView: View {
                             CitySection(
                                 city: city,
                                 isExpanded: expandedCities.contains(city.cityKey),
+                                readOnly: readOnly,
                                 onToggle: {
                                     withAnimation(.easeInOut(duration: 0.25)) {
                                         if expandedCities.contains(city.cityKey) {
@@ -106,7 +110,10 @@ struct JourneyMemoryMainView: View {
             }
         }
         .navigationBarBackButtonHidden(true)
-        .onAppear { store.load() }
+        .onAppear {
+            store.load()
+            onboardingGuide.advance(.openMemory)
+        }
         // Keep city names localized to current language (do NOT rely on persisted English titles).
         .task(id: localizationFingerprint) {
             await refreshCityLocalizations()
@@ -156,68 +163,56 @@ struct JourneyMemoryMainView: View {
     // MARK: - Header
     
     private var headerView: some View {
-        VStack(spacing: 2) {
-            HStack(spacing: 12) {
+        UnifiedTabPageHeader(title: resolvedHeaderTitle, titleLevel: usesSidebarHeader ? .primary : .secondary, horizontalPadding: 20, topPadding: 14, bottomPadding: 12) {
+            if hideLeadingControl {
+                Color.clear
+            } else if usesSidebarHeader {
                 SidebarHamburgerButton(showSidebar: $showSidebar, size: 42, iconSize: 20)
-
-                Spacer(minLength: 0)
-
-                Text("MEMORIES")
-                    .appHeaderStyle()
-                    .multilineTextAlignment(.center)
-                    .allowsTightening(true)
-
-                Spacer(minLength: 0)
-
-                VStack(spacing: 2) {
-                    Button {
-                        showFilterPopover.toggle()
-                    } label: {
-                        Image(systemName: selectedStartDate == nil ? "calendar" : "calendar.badge.clock")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundColor(.black)
-                            .frame(width: 42, height: 42)
-                    }
-                    .buttonStyle(.plain)
-                    .popover(isPresented: $showFilterPopover, attachmentAnchor: .point(.bottom), arrowEdge: .top) {
-                        JourneyMemoryCalendarRangePopover(
-                            monthCursor: $monthCursor,
-                            selectedStartDate: $selectedStartDate,
-                            selectedEndDate: $selectedEndDate,
-                            journeys: allMemoryJourneys,
-                            onRangeCompleted: {
-                                showFilterPopover = false
-                            },
-                            onApply: {
-                                showFilterPopover = false
-                            },
-                            onClear: {
-                                selectedStartDate = nil
-                                selectedEndDate = nil
-                                showFilterPopover = false
-                            }
-                        )
-                        .presentationCompactAdaptation(.popover)
-                    }
-
-                    if selectedStartDate != nil {
-                        Text(filterChipTitle)
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.black.opacity(0.58))
-                            .lineLimit(1)
-                    }
+            } else {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(.black)
                 }
+                .buttonStyle(.plain)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 14)
-            .padding(.bottom, 12)
+        } trailing: {
+            Button {
+                showFilterPopover.toggle()
+            } label: {
+                Image(systemName: selectedStartDate == nil ? "calendar" : "calendar.badge.clock")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.black)
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showFilterPopover, attachmentAnchor: .point(.bottom), arrowEdge: .top) {
+                JourneyMemoryCalendarRangePopover(
+                    monthCursor: $monthCursor,
+                    selectedStartDate: $selectedStartDate,
+                    selectedEndDate: $selectedEndDate,
+                    journeys: allMemoryJourneys,
+                    onRangeCompleted: {
+                        showFilterPopover = false
+                    },
+                    onApply: {
+                        showFilterPopover = false
+                    },
+                    onClear: {
+                        selectedStartDate = nil
+                        selectedEndDate = nil
+                        showFilterPopover = false
+                    }
+                )
+                .presentationCompactAdaptation(.popover)
+            }
         }
-        .background(FigmaTheme.card.opacity(0.9))
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(FigmaTheme.border)
-                .frame(height: 1)
-        }
+    }
+
+    private var resolvedHeaderTitle: String {
+        let trimmed = headerTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? L10n.t("memories_title") : trimmed
     }
     
     // MARK: - Empty State
@@ -282,7 +277,7 @@ struct JourneyMemoryMainView: View {
 
             return CityGroupData(
                 cityKey: key,
-                cityName: nameForKey[key] ?? "Unknown",
+                cityName: nameForKey[key] ?? L10n.t("unknown"),
                 countryName: countryForKey[key] ?? "",
                 journeys: js,
                 memoriesByJourney: memsByJourney
@@ -332,7 +327,7 @@ private struct JourneyMemoryCalendarRangePopover: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Date Range")
+            Text(L10n.t("date_range"))
                 .font(.system(size: 15, weight: .bold))
                 .foregroundColor(.black)
 
@@ -357,7 +352,7 @@ private struct JourneyMemoryCalendarRangePopover: View {
             monthGrid
 
             HStack(spacing: 8) {
-                Button("Clear") {
+                Button(L10n.t("clear")) {
                     onClear()
                 }
                 .font(.system(size: 12, weight: .semibold))
@@ -367,7 +362,7 @@ private struct JourneyMemoryCalendarRangePopover: View {
                 .background(Color.black.opacity(0.08))
                 .clipShape(Capsule())
 
-                Button("Apply") {
+                Button(L10n.t("apply")) {
                     onApply()
                 }
                 .font(.system(size: 12, weight: .semibold))
@@ -571,6 +566,7 @@ struct CityGroupData: Identifiable {
 private struct CitySection: View {
     let city: CityGroupData
     let isExpanded: Bool
+    let readOnly: Bool
     let onToggle: () -> Void
     
     @EnvironmentObject private var store: JourneyStore
@@ -620,7 +616,8 @@ private struct CitySection: View {
                                 journey: journey,
                                 memories: memories,
                                 cityName: city.cityName,
-                                countryName: city.countryName
+                                countryName: city.countryName,
+                                readOnly: readOnly
                             )
                             .environmentObject(store)
                             .environmentObject(sessionStore)
@@ -690,7 +687,7 @@ private struct JourneyEntryRow: View {
         let notes = mem.notes.trimmingCharacters(in: .whitespacesAndNewlines)
         if !notes.isEmpty { return notes }
         let title = mem.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return title.isEmpty ? "Tap to view memories" : title
+        return title.isEmpty ? L10n.t("tap_to_view_memories") : title
     }
     
     var body: some View {
@@ -751,9 +748,11 @@ struct JourneyMemoryDetailView: View {
     let memories: [JourneyMemory]
     let cityName: String
     let countryName: String
+    let readOnly: Bool
     
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var sessionStore: UserSessionStore
+    @EnvironmentObject private var flow: AppFlowCoordinator
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     
@@ -780,6 +779,21 @@ struct JourneyMemoryDetailView: View {
     @State private var showPhotoLibrary: Bool = false
     @State private var activeMemoryIndex: Int? = nil
     @State private var mirrorSelfie: Bool = false
+    @State private var sidebarHideToken = UUID().uuidString
+
+    init(
+        journey: JourneyRoute,
+        memories: [JourneyMemory],
+        cityName: String,
+        countryName: String,
+        readOnly: Bool = false
+    ) {
+        self.journey = journey
+        self.memories = memories
+        self.cityName = cityName
+        self.countryName = countryName
+        self.readOnly = readOnly
+    }
     
     
     
@@ -890,7 +904,17 @@ struct JourneyMemoryDetailView: View {
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
         .onAppear {
+            flow.pushSidebarButtonHidden(token: sidebarHideToken)
             let uid = sessionStore.currentUserID
+            if readOnly {
+                draftMemories = sortedMemories
+                snapshotBeforeEdit = sortedMemories
+                draftOverallMemory = journey.overallMemory ?? ""
+                snapshotOverallMemoryBeforeEdit = draftOverallMemory
+                isEditing = false
+                focusedMemoryID = nil
+                return
+            }
             // 1) Restore a saved editing session (tab switch / swipe away / relaunch)
             if JourneyMemoryDetailResumeStore.shouldResume(userID: uid, journeyID: journey.id),
                let saved = JourneyMemoryDetailDraftStore.load(userID: uid, journeyID: journey.id) {
@@ -910,11 +934,14 @@ struct JourneyMemoryDetailView: View {
             }
         }
         .onDisappear {
+            flow.popSidebarButtonHidden(token: sidebarHideToken)
             // ✅ If user leaves while editing (e.g. switches to another tab), keep editing state.
-            persistDetailDraftIfNeeded()
+            if !readOnly {
+                persistDetailDraftIfNeeded()
+            }
         }
         .onChange(of: scenePhase) { phase in
-            if phase != .active {
+            if !readOnly, phase != .active {
                 // ✅ App going to background / may be killed: persist current draft.
                 persistDetailDraftIfNeeded(force: true)
             }
@@ -1007,65 +1034,69 @@ struct JourneyMemoryDetailView: View {
                 Spacer()
 
                 // Right-side actions
-                HStack(spacing: 6) {
-                    if isEditing {
-                        Button {
-                            cancelEditing()
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.black)
-                                .frame(width: 36, height: 36)
-                        }
-                        .buttonStyle(.plain)
-
-                        Button {
-                            saveEditing()
-                        } label: {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.black)
-                                .frame(width: 36, height: 36)
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        Button {
-                            beginEditing()
-                        } label: {
-                            Image(systemName: "square.and.pencil")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.black)
-                                .frame(width: 36, height: 36)
-                        }
-                        .buttonStyle(.plain)
-
-                        Menu {
+                if !readOnly {
+                    HStack(spacing: 6) {
+                        if isEditing {
                             Button {
-                                UIPasteboard.general.string = fullText
+                                cancelEditing()
                             } label: {
-                                Label(L10n.t("copy_all"), systemImage: "doc.on.doc")
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.black)
+                                    .frame(width: 36, height: 36)
                             }
+                            .buttonStyle(.plain)
 
                             Button {
-                                exportLongImage()
+                                saveEditing()
                             } label: {
-                                Label(L10n.t("export_long_image"), systemImage: "square.and.arrow.up")
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.black)
+                                    .frame(width: 36, height: 36)
                             }
-Divider()
+                            .buttonStyle(.plain)
+                        } else {
+                            Button {
+                                beginEditing()
+                            } label: {
+                                Image(systemName: "square.and.pencil")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.black)
+                                    .frame(width: 36, height: 36)
+                            }
+                            .buttonStyle(.plain)
 
-                            Button(role: .destructive) {
-                                showDeleteAllConfirm = true
+                            Menu {
+                                Button {
+                                    UIPasteboard.general.string = fullText
+                                } label: {
+                                    Label(L10n.t("copy_all"), systemImage: "doc.on.doc")
+                                }
+
+                                Button {
+                                    exportLongImage()
+                                } label: {
+                                    Label(L10n.t("export_long_image"), systemImage: "square.and.arrow.up")
+                                }
+                                Divider()
+
+                                Button(role: .destructive) {
+                                    showDeleteAllConfirm = true
+                                } label: {
+                                    Label(L10n.t("delete_all_notes"), systemImage: "trash")
+                                }
                             } label: {
-                                Label(L10n.t("delete_all_notes"), systemImage: "trash")
+                                Image(systemName: "ellipsis")
+                                    .font(.system(size: 18, weight: .medium))
+                                    .foregroundColor(.black)
+                                    .frame(width: 36, height: 36)
                             }
-                        } label: {
-                            Image(systemName: "ellipsis")
-                                .font(.system(size: 18, weight: .medium))
-                                .foregroundColor(.black)
-                                .frame(width: 36, height: 36)
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
+                } else {
+                    Color.clear.frame(width: 72, height: 36)
                 }
                 
                 
@@ -1097,11 +1128,11 @@ Divider()
         }
         .padding(.horizontal, 32)
         .background(FigmaTheme.background)
-        .overlay(
+        .overlay(alignment: .bottom) {
             Rectangle()
-                .inset(by: 0.5)
-                .stroke(Color(red: 0.90, green: 0.91, blue: 0.92), lineWidth: 0.5)
-        )
+                .fill(Color(red: 0.90, green: 0.91, blue: 0.92))
+                .frame(height: 0.5)
+        }
     }
     
     // MARK: - Memories Timeline
@@ -1139,19 +1170,19 @@ Divider()
 
     private var overallMemorySection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("OVERALL MEMORY")
+            Text(L10n.t("overall_memory"))
                 .font(.system(size: 12, weight: .bold))
                 .tracking(1.2)
                 .foregroundColor(Color(red: 0.60, green: 0.63, blue: 0.69))
 
             if isEditing {
-                TextField("记录这段旅程的整体感受", text: $draftOverallMemory, axis: .vertical)
+                TextField(L10n.t("overall_memory_placeholder"), text: $draftOverallMemory, axis: .vertical)
                     .lineLimit(4...8)
                     .textFieldStyle(.plain)
                     .font(.system(size: 14))
                     .foregroundColor(Color(red: 0.21, green: 0.26, blue: 0.32))
                     .padding(12)
-                    .background(Color.white.opacity(0.88))
+                    .background(FigmaTheme.background)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             } else {
                 Text(draftOverallMemory)
@@ -1160,7 +1191,7 @@ Divider()
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .frame(minHeight: 52, alignment: .topLeading)
                     .padding(12)
-                    .background(Color.white.opacity(0.88))
+                    .background(FigmaTheme.background)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
@@ -1174,10 +1205,8 @@ Divider()
         snapshotBeforeEdit = draftMemories
         snapshotOverallMemoryBeforeEdit = draftOverallMemory
         isEditing = true
-        // Put focus on the first memory by default, and ensure scroll follows.
-        if focusedMemoryID == nil {
-            focusedMemoryID = draftMemories.first?.id
-        }
+        // Enter edit mode without auto-focusing any field; user controls scroll position.
+        focusedMemoryID = nil
     }
 
     private func cancelEditing() {
@@ -1254,10 +1283,7 @@ Divider()
     }
 
     private func endEditing() {
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
-                                        to: nil,
-                                        from: nil,
-                                        for: nil)
+        endEditingGlobal()
     }
     
     @MainActor
@@ -1288,6 +1314,7 @@ Divider()
         let view = JourneyMemoryDetailExportSnapshotView(
             journey: journey,
             memories: draftMemories,
+            overallMemory: draftOverallMemory,
             cityName: cityName,
             countryName: countryName,
             journeyDate: journeyDate,
@@ -1331,7 +1358,7 @@ private struct ExportMemoryTimelineItem: View {
         let notes = memory.notes.trimmingCharacters(in: .whitespacesAndNewlines)
         if !notes.isEmpty { return notes }
         let title = memory.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return title.isEmpty ? "No Notes" : title
+        return title.isEmpty ? L10n.t("no_notes") : title
     }
 
     var body: some View {
@@ -1341,8 +1368,12 @@ private struct ExportMemoryTimelineItem: View {
                 .tracking(1.2)
                 .foregroundColor(Color(red: 0.60, green: 0.63, blue: 0.69))
 
-            if !memory.imagePaths.isEmpty {
-                MemoryImagesView(imagePaths: memory.imagePaths, userID: userID)
+            if !memory.imagePaths.isEmpty || !memory.remoteImageURLs.isEmpty {
+                MemoryImagesView(
+                    imagePaths: memory.imagePaths,
+                    remoteImageURLs: memory.remoteImageURLs,
+                    userID: userID
+                )
             }
 
             // ✅ 导出用纯 SwiftUI Text，ImageRenderer 能渲出来
@@ -1370,7 +1401,7 @@ struct ReadOnlyMemoryTimelineItem: View {
         let notes = memory.notes.trimmingCharacters(in: .whitespacesAndNewlines)
         if !notes.isEmpty { return notes }
         let title = memory.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return title.isEmpty ? "No Notes" : title
+        return title.isEmpty ? L10n.t("no_notes") : title
     }
 
     var body: some View {
@@ -1382,9 +1413,10 @@ struct ReadOnlyMemoryTimelineItem: View {
                 .foregroundColor(Color(red: 0.60, green: 0.63, blue: 0.69))
 
             // Images（只读态现在也完整展示）
-            if !memory.imagePaths.isEmpty {
+            if !memory.imagePaths.isEmpty || !memory.remoteImageURLs.isEmpty {
                 MemoryImagesView(
                     imagePaths: memory.imagePaths,
+                    remoteImageURLs: memory.remoteImageURLs,
                     userID: userID
                 )
             }
@@ -1423,6 +1455,7 @@ private struct PlainGrowingEditor: View {
 
 private struct MemoryImagesView: View {
     let imagePaths: [String]
+    let remoteImageURLs: [String]
     let userID: String
 
     var body: some View {
@@ -1441,6 +1474,42 @@ private struct MemoryImagesView: View {
                                     lineWidth: 0.5
                                 )
                         )
+                }
+            }
+            ForEach(remoteImageURLs, id: \.self) { rawURL in
+                if let url = URL(string: rawURL) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxWidth: .infinity)
+                                .overlay(
+                                    Rectangle()
+                                        .inset(by: 0.5)
+                                        .stroke(
+                                            Color(red: 0.90, green: 0.91, blue: 0.92),
+                                            lineWidth: 0.5
+                                        )
+                                )
+                        case .failure:
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(Color(red: 0.95, green: 0.95, blue: 0.95))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 140)
+                                .overlay {
+                                    Image(systemName: "exclamationmark.triangle")
+                                        .foregroundColor(.secondary)
+                                }
+                        case .empty:
+                            ProgressView()
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 140)
+                        @unknown default:
+                            EmptyView()
+                        }
+                    }
                 }
             }
         }
@@ -1538,7 +1607,7 @@ private struct EditableMemoryTimelineItem: View {
                 .disabled(memory.imagePaths.count >= maxPhotos)
                 .opacity(memory.imagePaths.count >= maxPhotos ? 0.35 : 1.0)
 
-                Text("照片 \(memory.imagePaths.count)/\(maxPhotos)")
+                Text(String(format: L10n.t("photo_count"), memory.imagePaths.count, maxPhotos))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.gray)
 
@@ -1563,6 +1632,18 @@ private struct EditableMemoryTimelineItem: View {
 private struct ShareImageItem: Identifiable {
     let id = UUID()
     let image: UIImage
+}
+
+struct JourneyMemoryDetailExportPresentation {
+    let overallMemoryText: String
+
+    init(overallMemory: String?) {
+        self.overallMemoryText = overallMemory?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    var shouldShowOverallMemory: Bool {
+        !overallMemoryText.isEmpty
+    }
 }
 
 // =======================================================
@@ -1619,6 +1700,7 @@ struct ActivityView: UIViewControllerRepresentable {
 private struct JourneyMemoryDetailExportSnapshotView: View {
     let journey: JourneyRoute
     let memories: [JourneyMemory]
+    let overallMemory: String
     let cityName: String
     let countryName: String
     let journeyDate: String
@@ -1630,14 +1712,21 @@ private struct JourneyMemoryDetailExportSnapshotView: View {
         memories.sorted(by: { $0.timestamp < $1.timestamp })
     }
 
+    private var presentation: JourneyMemoryDetailExportPresentation {
+        JourneyMemoryDetailExportPresentation(overallMemory: overallMemory)
+    }
+
     var body: some View {
         ZStack {
             FigmaTheme.background
 
             VStack(alignment: .leading, spacing: 24) {
-                        headerCard
-                        memoriesTimeline
-                    }
+                headerCard
+                if presentation.shouldShowOverallMemory {
+                    overallMemorySection
+                }
+                memoriesTimeline
+            }
             .padding(.bottom, 40)
         }
         // 关键：让内容按真实高度撑开，renderer 才能渲出长图
@@ -1716,11 +1805,31 @@ private struct JourneyMemoryDetailExportSnapshotView: View {
         }
         .padding(.horizontal, 32)
         .background(FigmaTheme.background)
-        .overlay(
+        .overlay(alignment: .bottom) {
             Rectangle()
-                .inset(by: 0.5)
-                .stroke(Color(red: 0.90, green: 0.91, blue: 0.92), lineWidth: 0.5)
-        )
+                .fill(Color(red: 0.90, green: 0.91, blue: 0.92))
+                .frame(height: 0.5)
+        }
+    }
+
+    private var overallMemorySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L10n.t("overall_memory"))
+                .font(.system(size: 12, weight: .bold))
+                .tracking(1.2)
+                .foregroundColor(Color(red: 0.60, green: 0.63, blue: 0.69))
+
+            Text(presentation.overallMemoryText)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(Color(red: 0.48, green: 0.54, blue: 0.62))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(minHeight: 52, alignment: .topLeading)
+                .padding(12)
+                .background(FigmaTheme.background)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .padding(.horizontal, 32)
+        .padding(.top, -8)
     }
 
     // MARK: - Memories Timeline (read-only, match spacing)

@@ -10,18 +10,64 @@ import UIKit
 // =======================================================
 
 struct CityStampLibraryView: View {
+    private struct CityDigest: Equatable {
+        let id: String
+        let name: String
+        let countryISO2: String?
+        let journeyIDs: [String]
+        let explorations: Int
+        let memories: Int
+        let thumbnailBasePath: String?
+        let thumbnailRoutePath: String?
+        let boundaryCount: Int
+        let hasAnchor: Bool
+
+        init(_ city: CachedCity) {
+            id = city.id
+            name = city.name
+            countryISO2 = city.countryISO2
+            journeyIDs = city.journeyIds
+            explorations = city.explorations
+            memories = city.memories
+            thumbnailBasePath = city.thumbnailBasePath
+            thumbnailRoutePath = city.thumbnailRoutePath
+            boundaryCount = city.boundary?.count ?? 0
+            hasAnchor = city.anchor != nil
+        }
+    }
+
     @StateObject private var vm = CityLibraryVM()
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var cache: CityCache
+    @State private var digestByCityID: [String: CityDigest] = [:]
 
     // ✅ Delete confirmations
     @State private var cityToDelete: City? = nil
     @State private var showDeleteCityAlert = false
+    @State private var showPublicDetailUnavailableAlert = false
 
+    @Environment(\.dismiss) private var dismiss
     @Binding var showSidebar: Bool
+    private let autoRebuildFromJourneyStore: Bool
+    private let usesSidebarHeader: Bool
+    private let showHeader: Bool
+    private let allowCityDetailNavigation: Bool
+    private let headerTitle: String?
 
-    init(showSidebar: Binding<Bool>) {
+    init(
+        showSidebar: Binding<Bool>,
+        autoRebuildFromJourneyStore: Bool = false,
+        usesSidebarHeader: Bool = true,
+        showHeader: Bool = true,
+        allowCityDetailNavigation: Bool = true,
+        headerTitle: String? = nil
+    ) {
         self._showSidebar = showSidebar
+        self.autoRebuildFromJourneyStore = autoRebuildFromJourneyStore
+        self.usesSidebarHeader = usesSidebarHeader
+        self.showHeader = showHeader
+        self.allowCityDetailNavigation = allowCityDetailNavigation
+        self.headerTitle = headerTitle
     }
 
     var body: some View {
@@ -29,8 +75,10 @@ struct CityStampLibraryView: View {
             UITheme.bg.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                headerBar
-                Color.clear.frame(height: 6)
+                if showHeader {
+                    headerBar
+                    Color.clear.frame(height: 6)
+                }
 
                 GeometryReader { geo in
                     ScrollView {
@@ -50,18 +98,40 @@ struct CityStampLibraryView: View {
         .navigationBarBackButtonHidden(true)
         .onAppear {
             if store.hasLoaded {
-                cache.rebuildFromJourneyStore()
                 vm.load(journeyStore: store, cityCache: cache)
+                digestByCityID = makeDigestMap(from: cache.cachedCities)
             }
         }
         .onChange(of: store.hasLoaded) { loaded in
             if loaded {
-                cache.rebuildFromJourneyStore()
                 vm.load(journeyStore: store, cityCache: cache)
+                digestByCityID = makeDigestMap(from: cache.cachedCities)
             }
         }
-        .onReceive(cache.$cachedCities) { _ in
-            vm.load(journeyStore: store, cityCache: cache)
+        .onReceive(cache.$cachedCities) { nextCities in
+            guard store.hasLoaded else { return }
+
+            let nextDigests = makeDigestMap(from: nextCities)
+            if digestByCityID.isEmpty {
+                vm.load(journeyStore: store, cityCache: cache)
+                digestByCityID = nextDigests
+                return
+            }
+
+            let previousKeys = Set(digestByCityID.keys)
+            let nextKeys = Set(nextDigests.keys)
+
+            let removed = previousKeys.subtracting(nextKeys)
+            for key in removed {
+                vm.removeCity(cityKey: key)
+            }
+
+            let maybeChanged = nextKeys.filter { digestByCityID[$0] != nextDigests[$0] }
+            for key in maybeChanged {
+                vm.upsertCity(cityKey: key, journeyStore: store, cityCache: cache)
+            }
+
+            digestByCityID = nextDigests
         }
         .alert(L10n.t("delete_city_alert_title"), isPresented: $showDeleteCityAlert, presenting: cityToDelete) { city in
             Button(L10n.t("delete"), role: .destructive) {
@@ -72,10 +142,59 @@ struct CityStampLibraryView: View {
         } message: { city in
             Text(String(format: L10n.t("delete_city_alert_message"), locale: Locale.current, (city.displayName ?? city.name)))
         }
+        .alert(L10n.t("details_unavailable_title"), isPresented: $showPublicDetailUnavailableAlert) {
+            Button(L10n.t("ok"), role: .cancel) {}
+        } message: {
+            Text(L10n.t("details_unavailable_message"))
+        }
+    }
+
+    private func makeDigestMap(from cities: [CachedCity]) -> [String: CityDigest] {
+        var out: [String: CityDigest] = [:]
+        for city in cities where !(city.isTemporary ?? false) {
+            out[city.id] = CityDigest(city)
+        }
+        return out
     }
 
     private var headerBar: some View {
-        AppTopHeader(title: "CITIES", showSidebar: $showSidebar)
+        let titleText = (headerTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+            ? (headerTitle ?? "")
+            : L10n.t("collection_segment_cities")
+        return Group {
+            if usesSidebarHeader {
+                AppTopHeader(title: titleText, showSidebar: $showSidebar)
+            } else {
+                HStack(spacing: 10) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(.black)
+                            .frame(width: 42, height: 42)
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+
+                    Text(titleText)
+                        .appHeaderStyle()
+
+                    Spacer()
+
+                    Color.clear.frame(width: 42, height: 42)
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 8)
+                .padding(.bottom, 12)
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(FigmaTheme.border)
+                        .frame(height: 1)
+                }
+            }
+        }
     }
 
     private func cityGrid(cardW: CGFloat, colGap: CGFloat, rowGap: CGFloat) -> some View {
@@ -88,17 +207,26 @@ struct CityStampLibraryView: View {
                 spacing: rowGap
             ) {
                 ForEach(vm.cities) { city in
-                    NavigationLink(destination: CityDeepView(city: city)) {
-                        CityStampCard(city: city, cardWidth: cardW)
-                    }
-                    .buttonStyle(.plain)
-                    .contextMenu {
-                        Button(role: .destructive) {
-                            cityToDelete = city
-                            showDeleteCityAlert = true
-                        } label: {
-                            Label(L10n.t("delete"), systemImage: "trash")
+                    if allowCityDetailNavigation {
+                        NavigationLink(destination: CityDeepView(city: city)) {
+                            CityStampCard(city: city, cardWidth: cardW)
                         }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                cityToDelete = city
+                                showDeleteCityAlert = true
+                            } label: {
+                                Label(L10n.t("delete"), systemImage: "trash")
+                            }
+                        }
+                    } else {
+                        Button {
+                            showPublicDetailUnavailableAlert = true
+                        } label: {
+                            CityStampCard(city: city, cardWidth: cardW)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }

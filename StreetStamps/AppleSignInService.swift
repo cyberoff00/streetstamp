@@ -2,18 +2,24 @@ import Foundation
 import AuthenticationServices
 import UIKit
 
+struct AppleSignInPayload: Equatable {
+    let idToken: String
+}
+
 @MainActor
 enum AppleSignInService {
-    static func signIn() async throws -> String {
+    static func signIn() async throws -> AppleSignInPayload {
         try await withCheckedThrowingContinuation { continuation in
-            let req = ASAuthorizationAppleIDProvider().createRequest()
-            req.requestedScopes = [.fullName, .email]
+            let request = ASAuthorizationAppleIDProvider().createRequest()
+            request.requestedScopes = [.fullName, .email]
 
-            let controller = ASAuthorizationController(authorizationRequests: [req])
+            let controller = ASAuthorizationController(authorizationRequests: [request])
             let delegate = Delegate { result in
                 switch result {
-                case .success(let token): continuation.resume(returning: token)
-                case .failure(let error): continuation.resume(throwing: error)
+                case .success(let payload):
+                    continuation.resume(returning: payload)
+                case .failure(let error):
+                    continuation.resume(throwing: error)
                 }
             }
 
@@ -26,7 +32,7 @@ enum AppleSignInService {
 
     private final class Delegate: NSObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
         enum Result {
-            case success(String)
+            case success(AppleSignInPayload)
             case failure(Error)
         }
 
@@ -39,7 +45,17 @@ enum AppleSignInService {
 
         func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
             let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-            return scenes.flatMap { $0.windows }.first(where: { $0.isKeyWindow }) ?? ASPresentationAnchor()
+            let activeScenes = scenes.filter { $0.activationState == .foregroundActive }
+            if let keyWindow = activeScenes.flatMap(\.windows).first(where: { $0.isKeyWindow }) {
+                return keyWindow
+            }
+            if let anyActiveWindow = activeScenes.flatMap(\.windows).first {
+                return anyActiveWindow
+            }
+            if let fallbackWindow = scenes.flatMap(\.windows).first(where: { $0.isKeyWindow }) ?? scenes.flatMap(\.windows).first {
+                return fallbackWindow
+            }
+            return ASPresentationAnchor()
         }
 
         func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
@@ -51,7 +67,7 @@ enum AppleSignInService {
                 onResult(.failure(BackendAPIError.server("Apple 登录未返回 idToken")))
                 return
             }
-            onResult(.success(token))
+            onResult(.success(AppleSignInPayload(idToken: token)))
         }
 
         func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {

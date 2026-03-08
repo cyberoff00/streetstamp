@@ -93,25 +93,36 @@ enum CityPlacemarkResolver {
         let candidates = makeLevelCandidates(from: pm, preferredISO2: preferredISO2)
         let preferred = CityLevelPreferenceStore.shared.preferredLevel(for: candidates.parentRegionKey)
         let level = decideLevel(candidates: candidates, preferred: preferred)
+        let useRegionInsteadOfCountry = isRegionStyledISO(candidates.iso2)
 
         var title: String = L10n.t("unknown")
         var subtitle: String? = nil
 
         switch level {
         case .country:
-            title = localizedSpecialCountryNameIfNeeded(iso2: candidates.iso2, fallbackCountry: candidates.country) ?? (candidates.country ?? L10n.t("unknown"))
+            if useRegionInsteadOfCountry {
+                title = regionFallbackName(from: candidates) ?? (candidates.country ?? L10n.t("unknown"))
+            } else {
+                title = localizedSpecialCountryNameIfNeeded(iso2: candidates.iso2, fallbackCountry: candidates.country) ?? (candidates.country ?? L10n.t("unknown"))
+            }
 
         case .admin:
             title = candidates.admin ?? candidates.subAdmin ?? candidates.locality ?? (candidates.country ?? L10n.t("unknown"))
-            subtitle = candidates.country
+            subtitle = useRegionInsteadOfCountry
+                ? regionSubtitle(from: candidates, title: title)
+                : candidates.country
 
         case .subAdmin:
             title = candidates.subAdmin ?? candidates.locality ?? candidates.admin ?? (candidates.country ?? L10n.t("unknown"))
-            subtitle = candidates.country
+            subtitle = useRegionInsteadOfCountry
+                ? regionSubtitle(from: candidates, title: title)
+                : candidates.country
 
         case .island:
             title = candidates.island ?? candidates.locality ?? candidates.subAdmin ?? candidates.admin ?? (candidates.country ?? L10n.t("unknown"))
-            subtitle = candidates.country
+            subtitle = useRegionInsteadOfCountry
+                ? regionSubtitle(from: candidates, title: title)
+                : candidates.country
 
         case .locality:
             if candidates.iso2 == "CN" {
@@ -128,7 +139,9 @@ enum CityPlacemarkResolver {
                 title = "\(city), \(st)"
                 subtitle = nil
             } else {
-                subtitle = candidates.country
+                subtitle = useRegionInsteadOfCountry
+                    ? regionSubtitle(from: candidates, title: title)
+                    : candidates.country
             }
         }
 
@@ -275,6 +288,34 @@ enum CityPlacemarkResolver {
         case "SG": return fallbackCountry ?? "Singapore"
         default: return fallbackCountry
         }
+    }
+
+    private static func isRegionStyledISO(_ iso2: String?) -> Bool {
+        guard let iso2 else { return false }
+        return ["HK", "MO", "TW"].contains(iso2.uppercased())
+    }
+
+    private static func regionFallbackName(from candidates: LevelCandidates) -> String? {
+        candidates.admin ?? candidates.subAdmin ?? candidates.locality ?? candidates.country
+    }
+
+    private static func regionSubtitle(from candidates: LevelCandidates, title: String) -> String? {
+        let normalizedTitle = normalizeForMatching(title)
+        let regionCandidates = [candidates.admin, candidates.subAdmin, candidates.locality]
+        for candidate in regionCandidates {
+            let trimmed = (candidate ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            if normalizeForMatching(trimmed) != normalizedTitle {
+                return trimmed
+            }
+        }
+        return nil
+    }
+
+    private static func normalizeForMatching(_ input: String) -> String {
+        input.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .lowercased()
     }
 
     private static func clean(_ s: String?) -> String? {
