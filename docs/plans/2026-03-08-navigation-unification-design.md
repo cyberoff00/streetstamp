@@ -26,6 +26,7 @@ This creates three user-facing problems:
 ### Product requirements
 
 - Root pages show a hamburger menu and never show a back button.
+- Sidebar-launched quick actions do not show a hamburger menu.
 - Pushed detail pages show a back button and never show a hamburger menu.
 - Back buttons show icon only: `chevron.left`.
 - The navigation bar never shows "Back" text or parent-page titles.
@@ -98,12 +99,14 @@ That rule is simple enough to enforce across the entire app and easy for future 
 
 ### 1. Hierarchy
 
-- Level 1: tab-root pages only
+- Level 1: channel root pages, including tab-root pages and sidebar-promoted primary destinations
 - Level 2+: any destination entered from a root page or another detail page
+- Quick actions launched from the sidebar are not Level 1 pages
 
 ### 2. Leading control
 
 - Level 1 uses hamburger only
+- Sidebar quick actions use back/close semantics only
 - Level 2+ uses `chevron.left` only
 - Menu and back cannot appear together on the same screen
 
@@ -143,7 +146,7 @@ This yields one navigation primitive for all app screens rather than separate im
 
 ### Root pages
 
-Pages hosted directly under the main tab structure remain root pages and render the menu affordance.
+Pages hosted directly under the main tab structure remain root pages and render the menu affordance. Sidebar-promoted primary destinations also count as root pages.
 
 Examples from current code:
 
@@ -152,6 +155,7 @@ Examples from current code:
 - collection
 - memory root
 - lifelog root
+- postcards root
 
 ### Detail pages
 
@@ -163,12 +167,95 @@ Examples from current code:
 - add friend
 - social notifications
 - postcard inbox
+- postcard composer
 - settings detail pages
 - profile/equipment detail pages
+- notifications
 
 ### Sheet usage
 
 Sheets should be reserved for flows that are truly modal. Presenting app sections such as settings/profile/equipment from the sidebar via sheet keeps creating a parallel navigation model. Those destinations should be evaluated and moved into the same navigation hierarchy where practical.
+
+Sidebar quick actions are allowed to launch a modal flow, but they still must use the unified header semantics for non-root pages. A modal task flow must not reintroduce a hamburger button simply because it originated from the sidebar.
+
+## Sidebar Model
+
+The sidebar should be split into two explicit groups.
+
+### Primary destinations
+
+These are channel-level roots and should follow Level 1 navigation rules:
+
+- home
+- memory
+- cities
+- friends
+- lifelog
+- profile
+- settings
+- postcards
+
+### Quick actions
+
+These are shortcut entry points into a task flow. They are launched from the sidebar, but they are not treated as root navigation destinations:
+
+- invite friend
+
+Quick actions must open with the unified non-root header treatment, using `chevron.left` or an equivalent dismiss/back affordance, never a hamburger menu.
+
+## Page-Specific Decisions
+
+### Postcards
+
+`Postcards` should be promoted into the sidebar as a primary destination. It functions as a content center with repeat visitation and should not remain only a secondary sheet-driven surface.
+
+Navigation treatment:
+
+- sidebar entry allowed
+- root-page treatment
+- hamburger at Level 1
+- deeper postcard flows use `chevron.left`
+
+### Invite Friend
+
+`Invite Friend` should be added to the sidebar as a quick action rather than a primary destination.
+
+Navigation treatment:
+
+- sidebar shortcut allowed
+- not a root page
+- no hamburger on entry
+- use the unified non-root header treatment
+
+### Notifications
+
+The notifications experience is not a root page. It should not use its own sheet toolbar style and should not show a hamburger menu.
+
+Navigation treatment:
+
+- no hamburger
+- icon-only `chevron.left`
+- unified title bar styling
+
+### Postcard Inbox
+
+The postcard inbox is a destination/content page but not a top-level navigation root in the proposed structure.
+
+Navigation treatment:
+
+- no hamburger
+- icon-only `chevron.left`
+- unified title bar styling
+
+### Postcard Composer
+
+The postcard composer is a task flow and must follow non-root navigation rules.
+
+Navigation treatment:
+
+- no hamburger
+- icon-only `chevron.left`
+- unified title bar styling
 
 ## Screen Migration Priorities
 
