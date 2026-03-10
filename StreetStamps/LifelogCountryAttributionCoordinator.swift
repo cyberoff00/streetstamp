@@ -35,8 +35,8 @@ actor LifelogCountryAttributionCoordinator {
         guard !points.isEmpty else { return }
 
         let cellsByID = Dictionary(uniqueKeysWithValues: snapshot.cells.map { ($0.cellID, $0) })
-        var pointsByID = Dictionary(uniqueKeysWithValues: snapshot.points.map { ($0.pointID, $0) })
         var didChange = false
+        var earliestChangedPointIndex: Int?
 
         for point in points {
             let resolvedISO2 = cellsByID[point.cellID]?.iso2
@@ -46,9 +46,17 @@ actor LifelogCountryAttributionCoordinator {
                 iso2: resolvedISO2
             )
 
-            if pointsByID[point.pointID] != next {
-                pointsByID[point.pointID] = next
+            if let existingIndex = snapshot.points.firstIndex(where: { $0.pointID == point.pointID }) {
+                if snapshot.points[existingIndex] != next {
+                    snapshot.points[existingIndex] = next
+                    didChange = true
+                    earliestChangedPointIndex = min(earliestChangedPointIndex ?? existingIndex, existingIndex)
+                }
+            } else {
+                snapshot.points.append(next)
                 didChange = true
+                let insertedIndex = snapshot.points.count - 1
+                earliestChangedPointIndex = min(earliestChangedPointIndex ?? insertedIndex, insertedIndex)
             }
 
             if cellsByID[point.cellID] == nil && !unresolvedCellIDs.contains(point.cellID) {
@@ -56,8 +64,8 @@ actor LifelogCountryAttributionCoordinator {
             }
         }
 
-        if didChange {
-            snapshot.points = pointsByID.values.sorted { $0.pointID < $1.pointID }
+        if didChange, let earliestChangedPointIndex {
+            rebuildRuns(fromPointIndex: earliestChangedPointIndex)
             persistSnapshot()
         }
 
@@ -120,7 +128,20 @@ actor LifelogCountryAttributionCoordinator {
             guard point.cellID == cellID else { return point }
             return LifelogPointCountryRecord(pointID: point.pointID, cellID: point.cellID, iso2: iso2)
         }
+        rebuildRuns(fromPointIndex: firstPointIndex(forCellID: cellID) ?? 0)
         persistSnapshot()
+    }
+
+    private func firstPointIndex(forCellID cellID: String) -> Int? {
+        snapshot.points.firstIndex { $0.cellID == cellID }
+    }
+
+    private func rebuildRuns(fromPointIndex pointIndex: Int) {
+        snapshot.runs = LifelogCountryRunBuilder.rebuildRuns(
+            existingRuns: snapshot.runs,
+            points: snapshot.points,
+            fromPointIndex: pointIndex
+        )
     }
 
     private func persistSnapshot() {
