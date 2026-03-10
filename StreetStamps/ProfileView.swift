@@ -12,6 +12,7 @@ import CoreLocation
 import AVFoundation
 
 struct ProfileView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var sessionStore: UserSessionStore
@@ -140,6 +141,16 @@ struct ProfileView: View {
             }
             await refreshDisplayNameIfNeeded()
             await refreshSocialNotifications(showToastForLatestUnread: true)
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 25 * 1_000_000_000)
+                await refreshSocialNotifications(showToastForLatestUnread: true)
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task {
+                await refreshSocialNotifications(showToastForLatestUnread: true)
+            }
         }
         .onChange(of: sessionStore.currentAccessToken) { _, _ in
             Task {
@@ -802,9 +813,8 @@ struct ProfileView: View {
         do {
             let all = try await BackendAPIClient.shared.fetchNotifications(token: token, unreadOnly: false)
             PostcardNotificationBridge.shared.surfaceUnreadPostcardNotifications(all)
-            let supportedTypes: Set<String> = ["journey_like", "profile_stomp", "postcard_received"]
             let socialItems = all
-                .filter { supportedTypes.contains($0.type) }
+                .filter { SocialNotificationPolicy.supports(type: $0.type) }
                 .sorted(by: { $0.createdAt > $1.createdAt })
             socialNotifications = socialItems
 

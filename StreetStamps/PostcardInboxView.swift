@@ -115,24 +115,32 @@ struct PostcardInboxView: View {
             emptyState(text: L10n.t("postcard_sent_empty"))
         } else {
             ForEach(postcardCenter.sentItems) { item in
+                let recipientLabel = PostcardInboxPresentation.recipientLabel(
+                    toDisplayName: item.toDisplayName,
+                    toUserID: item.toUserID
+                )
                 PostcardCardRow(
                     cityName: item.cityName,
                     nickname: myDisplayName.uppercased(),
                     messageText: item.messageText,
                     photoSource: photoSource(for: item),
                     sentDate: item.sentAt,
-                    metaLabel: "\(L10n.t("postcard_to_prefix"))\(item.toDisplayName ?? item.toUserID)"
+                    metaLabel: "\(L10n.t("postcard_to_prefix"))\(recipientLabel)"
                 )
             }
 
             ForEach(visibleDrafts) { draft in
+                let recipientLabel = PostcardInboxPresentation.recipientLabel(
+                    toDisplayName: draft.toDisplayName,
+                    toUserID: draft.toUserID
+                )
                 PostcardCardRow(
                     cityName: draft.cityName,
                     nickname: myDisplayName.uppercased(),
                     messageText: draft.message,
                     photoSource: draftPhotoSource(draft),
                     sentDate: draft.sentAt ?? draft.updatedAt,
-                    metaLabel: "\(L10n.t("postcard_to_prefix"))\(draft.toUserID)",
+                    metaLabel: "\(L10n.t("postcard_to_prefix"))\(recipientLabel)",
                     statusBadge: draft.status == .sending ? L10n.t("postcard_sending") : nil
                 )
             }
@@ -147,13 +155,17 @@ struct PostcardInboxView: View {
             emptyState(text: L10n.t("postcard_received_empty"))
         } else {
             ForEach(postcardCenter.receivedItems) { item in
+                let senderLabel = PostcardInboxPresentation.senderLabel(
+                    fromDisplayName: item.fromDisplayName,
+                    fromUserID: item.fromUserID
+                )
                 PostcardCardRow(
                     cityName: item.cityName,
-                    nickname: (item.fromDisplayName ?? item.fromUserID).uppercased(),
+                    nickname: senderLabel.uppercased(),
                     messageText: item.messageText,
                     photoSource: photoSource(for: item),
                     sentDate: item.sentAt,
-                    metaLabel: "\(L10n.t("postcard_from_prefix"))\(item.fromDisplayName ?? item.fromUserID)"
+                    metaLabel: "\(L10n.t("postcard_from_prefix"))\(senderLabel)"
                 )
             }
         }

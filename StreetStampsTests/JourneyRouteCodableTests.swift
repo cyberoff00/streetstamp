@@ -16,4 +16,22 @@ final class JourneyRouteCodableTests: XCTestCase {
         XCTAssertEqual(decoded.overallMemory, "Windy bridge walk")
         XCTAssertEqual(decoded.overallMemoryImagePaths, ["overall-1.jpg", "overall-2.jpg"])
     }
+
+    func test_hasJourneyMemoryListContent_isTrueForTrimmedOverallMemoryWithoutJourneyMemories() {
+        let route = JourneyRoute(
+            memories: [],
+            overallMemory: "  Quiet sunset by the river  "
+        )
+
+        XCTAssertTrue(route.hasJourneyMemoryListContent)
+    }
+
+    func test_hasJourneyMemoryListContent_isFalseWhenNoJourneyMemoriesAndOverallMemoryIsBlank() {
+        let route = JourneyRoute(
+            memories: [],
+            overallMemory: " \n "
+        )
+
+        XCTAssertFalse(route.hasJourneyMemoryListContent)
+    }
 }

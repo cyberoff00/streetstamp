@@ -52,7 +52,7 @@ struct JourneyMemoryMainView: View {
 
     private var allMemoryJourneys: [JourneyRoute] {
         store.journeys
-            .filter { !$0.memories.isEmpty }
+            .filter(\.hasJourneyMemoryListContent)
             .sorted { ($0.endTime ?? $0.startTime ?? .distantPast) > ($1.endTime ?? $1.startTime ?? .distantPast) }
     }
 
@@ -683,7 +683,10 @@ private struct JourneyEntryRow: View {
     }
 
     private var previewText: String {
-        guard let mem = firstMemory else { return "" }
+        guard let mem = firstMemory else {
+            let overallMemory = journey.overallMemory?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return overallMemory.isEmpty ? L10n.t("tap_to_view_memories") : overallMemory
+        }
         let notes = mem.notes.trimmingCharacters(in: .whitespacesAndNewlines)
         if !notes.isEmpty { return notes }
         let title = mem.title.trimmingCharacters(in: .whitespacesAndNewlines)

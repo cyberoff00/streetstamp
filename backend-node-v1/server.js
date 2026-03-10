@@ -31,6 +31,15 @@ const PGDATABASE = (process.env.PGDATABASE || "").trim();
 const PGSSL = String(process.env.PGSSL || "").trim().toLowerCase();
 const PG_STATE_KEY = (process.env.PG_STATE_KEY || "global").trim();
 const PG_MAX_CLIENTS = Number(process.env.PG_MAX_CLIENTS || 10);
+const JSON_BODY_LIMIT_MB = Number(process.env.JSON_BODY_LIMIT_MB || 6);
+const MEDIA_UPLOAD_MAX_BYTES = Number(process.env.MEDIA_UPLOAD_MAX_BYTES || 10 * 1024 * 1024);
+const CORS_ALLOWED_ORIGINS = String(process.env.CORS_ALLOWED_ORIGINS || "").trim();
+const AUTH_RATE_LIMIT_WINDOW_MS = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000);
+const AUTH_RATE_LIMIT_MAX = Number(process.env.AUTH_RATE_LIMIT_MAX || 20);
+const WRITE_RATE_LIMIT_WINDOW_MS = Number(process.env.WRITE_RATE_LIMIT_WINDOW_MS || 60 * 1000);
+const WRITE_RATE_LIMIT_MAX = Number(process.env.WRITE_RATE_LIMIT_MAX || 40);
+const UPLOAD_RATE_LIMIT_WINDOW_MS = Number(process.env.UPLOAD_RATE_LIMIT_WINDOW_MS || 60 * 1000);
+const UPLOAD_RATE_LIMIT_MAX = Number(process.env.UPLOAD_RATE_LIMIT_MAX || 10);
 const TEST_EMAIL_OUTBOX_FILE = (process.env.TEST_EMAIL_OUTBOX_FILE || "").trim();
 const AUTH_LINK_BASE = (process.env.AUTH_LINK_BASE || MEDIA_PUBLIC_BASE || "").trim();
 const SES_FROM_EMAIL = (process.env.SES_FROM_EMAIL || "").trim();
@@ -58,8 +67,20 @@ const FIREBASE_LEGACY_APP_USER_ID = (process.env.FIREBASE_LEGACY_APP_USER_ID || 
 const visibilityPrivate = "private";
 const visibilityFriendsOnly = "friendsOnly";
 const visibilityPublic = "public";
+const allowedOrigins = CORS_ALLOWED_ORIGINS
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: Number.isFinite(MEDIA_UPLOAD_MAX_BYTES) && MEDIA_UPLOAD_MAX_BYTES > 0
+      ? MEDIA_UPLOAD_MAX_BYTES
+      : 10 * 1024 * 1024
+  }
+});
+const rateLimitState = new Map();
 
 const pgEnabled = Boolean(DATABASE_URL || (PGHOST && PGUSER && PGDATABASE));
 let pgPool = null;
@@ -131,6 +152,50 @@ function parseTruthy(raw) {
   if (typeof raw === "boolean") return raw;
   const value = String(raw || "").trim().toLowerCase();
   return value === "true" || value === "1";
+}
+
+function corsConfigured() {
+  return allowedOrigins.length > 0;
+}
+
+function originAllowed(origin) {
+  if (!origin) return true;
+  if (!corsConfigured()) return true;
+  return allowedOrigins.includes(origin);
+}
+
+function applySecurityHeaders(res) {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "same-origin");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+}
+
+function applyHTMLSecurityHeaders(res) {
+  applySecurityHeaders(res);
+  res.setHeader("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https:;");
+}
+
+function makeRateLimiter({ keyPrefix, windowMs, maxHits }) {
+  return function rateLimiter(req, res, next) {
+    const now = Date.now();
+    const safeWindow = Number.isFinite(windowMs) && windowMs > 0 ? windowMs : 60 * 1000;
+    const safeMax = Number.isFinite(maxHits) && maxHits > 0 ? maxHits : 20;
+    const clientKey = `${keyPrefix}:${req.ip || req.socket?.remoteAddress || "unknown"}`;
+    const existing = rateLimitState.get(clientKey);
+    if (!existing || existing.resetAt <= now) {
+      rateLimitState.set(clientKey, { hits: 1, resetAt: now + safeWindow });
+      return next();
+    }
+    existing.hits += 1;
+    if (existing.hits > safeMax) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((existing.resetAt - now) / 1000));
+      res.setHeader("Retry-After", String(retryAfterSeconds));
+      return res.status(429).json({ message: "too many requests" });
+    }
+    return next();
+  };
 }
 
 function firebaseAuthConfigError() {
@@ -301,6 +366,10 @@ function genInviteCode() {
   return randHex(4).toUpperCase();
 }
 
+function normalizeInviteCode(raw) {
+  return String(raw || "").trim().toUpperCase();
+}
+
 function isStrongPassword(password) {
   const value = String(password || "");
   if (value.length < 8) return false;
@@ -393,7 +462,7 @@ async function deliverVerificationEmail(email, token) {
 }
 
 async function deliverPasswordResetEmail(email, token) {
-  const resetURL = `streetstamps://reset-password?token=${encodeURIComponent(token)}`;
+  const resetURL = `${AUTH_LINK_BASE || "http://localhost"}/reset-password?token=${encodeURIComponent(token)}`;
   if (TEST_EMAIL_OUTBOX_FILE) {
     await appendTestEmailOutbox({
       kind: "password_reset",
@@ -408,6 +477,169 @@ async function deliverPasswordResetEmail(email, token) {
     return;
   }
   await deliverEmailViaSES({ to: email, subject, text });
+}
+
+async function consumeEmailVerificationToken(rawToken) {
+  const token = String(rawToken || "").trim();
+  if (!token) return { ok: false, status: 400, message: "token required" };
+
+  const tokenHash = hashSHA256(token);
+  const tokenRecord = Object.values(db.emailVerificationTokens || {}).find((item) => item.tokenHash === tokenHash);
+  if (!tokenRecord) return { ok: false, status: 400, message: "invalid token" };
+  if (tokenRecord.usedAt) return { ok: false, status: 400, message: "token already used" };
+  if (Number(tokenRecord.expiresAt || 0) < nowUnix()) return { ok: false, status: 400, message: "token expired" };
+
+  const identity = Object.values(db.authIdentities || {}).find((item) => (
+    item.provider === "email_password"
+      && item.userID === tokenRecord.userID
+      && item.email === tokenRecord.email
+  ));
+  if (!identity) return { ok: false, status: 400, message: "identity not found" };
+
+  tokenRecord.usedAt = nowUnix();
+  identity.emailVerified = true;
+  identity.updatedAt = nowUnix();
+  await saveDB();
+  return { ok: true, status: 200, email: tokenRecord.email };
+}
+
+function inspectPasswordResetToken(rawToken) {
+  const token = String(rawToken || "").trim();
+  if (!token) return { ok: false, status: 400, message: "token required" };
+
+  const tokenHash = hashSHA256(token);
+  const tokenRecord = Object.values(db.passwordResetTokens || {}).find((item) => item.tokenHash === tokenHash);
+  if (!tokenRecord) return { ok: false, status: 400, message: "invalid token" };
+  if (tokenRecord.usedAt) return { ok: false, status: 400, message: "token already used" };
+  if (Number(tokenRecord.expiresAt || 0) < nowUnix()) return { ok: false, status: 400, message: "token expired" };
+  return { ok: true, status: 200, token, tokenRecord };
+}
+
+function renderEmailVerificationHTML({ ok, title, body }) {
+  const safeTitle = escapeHTML(title);
+  const safeBody = escapeHTML(body);
+  const accent = ok ? "#136f63" : "#9f2d2d";
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${safeTitle}</title>
+  <style>
+    :root { color-scheme: light; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #f7efe5 0%, #fffdf9 100%);
+      color: #1f1f1f;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    main {
+      width: min(100%, 480px);
+      background: rgba(255,255,255,0.96);
+      border: 1px solid rgba(31,31,31,0.08);
+      border-radius: 24px;
+      padding: 28px 24px;
+      box-shadow: 0 18px 50px rgba(31,31,31,0.08);
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 28px;
+      line-height: 1.1;
+      color: ${accent};
+    }
+    p {
+      margin: 0 0 14px;
+      font-size: 16px;
+      line-height: 1.55;
+    }
+    .hint {
+      color: #555;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>${safeTitle}</h1>
+    <p>${safeBody}</p>
+    <p class="hint">Return to the StreetStamps app. If this link failed, request a new verification email and try again.</p>
+  </main>
+</body>
+</html>`;
+}
+
+function renderPasswordResetHTML({ ok, title, body, deepLink = "" }) {
+  const safeTitle = escapeHTML(title);
+  const safeBody = escapeHTML(body);
+  const safeDeepLink = escapeHTML(deepLink);
+  const accent = ok ? "#136f63" : "#9f2d2d";
+  const launchMarkup = ok ? `<p><a href="${safeDeepLink}">Open StreetStamps</a></p>` : "";
+  const scriptMarkup = ok ? `<script>
+    const target = ${JSON.stringify(deepLink)};
+    window.setTimeout(() => { window.location.href = target; }, 120);
+  </script>` : "";
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${safeTitle}</title>
+  <style>
+    :root { color-scheme: light; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #f7efe5 0%, #fffdf9 100%);
+      color: #1f1f1f;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    main {
+      width: min(100%, 480px);
+      background: rgba(255,255,255,0.96);
+      border: 1px solid rgba(31,31,31,0.08);
+      border-radius: 24px;
+      padding: 28px 24px;
+      box-shadow: 0 18px 50px rgba(31,31,31,0.08);
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 28px;
+      line-height: 1.1;
+      color: ${accent};
+    }
+    p {
+      margin: 0 0 14px;
+      font-size: 16px;
+      line-height: 1.55;
+    }
+    a {
+      color: #136f63;
+      font-weight: 600;
+      text-decoration: none;
+    }
+    .hint {
+      color: #555;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>${safeTitle}</h1>
+    <p>${safeBody}</p>
+    ${launchMarkup}
+    <p class="hint">If the app does not open, return to StreetStamps and request another password reset email.</p>
+  </main>
+  ${scriptMarkup}
+</body>
+</html>`;
 }
 
 function issueEmailVerificationToken(userID, email) {
@@ -519,6 +751,53 @@ function createDefaultUser(provider, email = "") {
   setUserHandle(uid, null, { strict: false });
   db.inviteIndex[invite] = uid;
   return user;
+}
+
+function ensureUserInviteCode(uid, user) {
+  const owner = existingUserID(uid);
+  if (!owner || !user) return "";
+  if (!db.inviteIndex || typeof db.inviteIndex !== "object") {
+    db.inviteIndex = {};
+  }
+
+  let code = normalizeInviteCode(user.inviteCode);
+  if (!code) {
+    code = genInviteCode();
+  } else {
+    const indexedOwner = existingUserID(db.inviteIndex[code]);
+    if (indexedOwner && indexedOwner !== owner) {
+      const indexedUser = db.users[indexedOwner];
+      if (normalizeInviteCode(indexedUser?.inviteCode) === code) {
+        code = genInviteCode();
+      }
+    }
+  }
+
+  user.inviteCode = code;
+  db.inviteIndex[code] = owner;
+  return code;
+}
+
+function resolveUserByInviteCode(rawCode) {
+  const code = normalizeInviteCode(rawCode);
+  if (!code) return null;
+
+  const indexedOwner = existingUserID(db.inviteIndex?.[code]);
+  if (indexedOwner) {
+    const indexedUser = db.users[indexedOwner];
+    if (indexedUser && normalizeInviteCode(indexedUser.inviteCode) === code) {
+      ensureUserInviteCode(indexedOwner, indexedUser);
+      return indexedUser;
+    }
+  }
+
+  for (const [uid, user] of Object.entries(db.users || {})) {
+    if (normalizeInviteCode(user?.inviteCode) !== code) continue;
+    ensureUserInviteCode(uid, user);
+    return user;
+  }
+
+  return null;
 }
 
 function upsertAppleAuthIdentity(userID, subject, email, emailVerified) {
@@ -844,6 +1123,8 @@ function defaultLoadout() {
     underId: "under_0001",
     savedUpperIdForSuit: "upper_0001",
     savedUnderIdForSuit: "under_0001",
+    hatId: null,
+    glassId: null,
     accessoryIds: [],
     expressionId: "expr_0001",
     hairColorHex: "#2B2A28",
@@ -905,6 +1186,8 @@ function normalizeLoadout(raw, fallbackRaw) {
   const savedUpperIdForSuit = firstString(src.savedUpperIdForSuit, upperId, fallback.savedUpperIdForSuit, "upper_0001");
   const savedUnderIdForSuit = firstString(src.savedUnderIdForSuit, underId, fallback.savedUnderIdForSuit, "under_0001");
   const suitId = src.suitId == null ? null : firstString(src.suitId);
+  const hatId = src.hatId == null ? null : firstString(src.hatId);
+  const glassId = src.glassId == null ? null : firstString(src.glassId);
 
   return {
     bodyId: firstString(src.bodyId, fallback.bodyId, "body"),
@@ -915,6 +1198,8 @@ function normalizeLoadout(raw, fallbackRaw) {
     underId,
     savedUpperIdForSuit,
     savedUnderIdForSuit,
+    hatId,
+    glassId,
     accessoryIds,
     expressionId,
     hairColorHex: firstString(src.hairColorHex, fallback.hairColorHex, "#2B2A28"),
@@ -1610,6 +1895,7 @@ async function main() {
   db = await loadDB();
   console.log(`[streetstamps-node-v1] storage=${pgPool ? "postgresql" : "file"}`);
   db.handleIndex = {};
+  db.inviteIndex = {};
   if (!db.likesIndex || typeof db.likesIndex !== "object") {
     db.likesIndex = {};
   }
@@ -1619,6 +1905,7 @@ async function main() {
   ensurePostcardIndex();
   for (const [uid, user] of Object.entries(db.users || {})) {
     setUserHandle(uid, user.handle || user.displayName || uid, { strict: false });
+    ensureUserInviteCode(uid, user);
     if (!user.profileVisibility) user.profileVisibility = visibilityFriendsOnly;
     if (typeof user.handleChangeUsed !== "boolean") {
       user.handleChangeUsed = false;
@@ -1643,8 +1930,30 @@ async function main() {
 
   const app = express();
   app.set("trust proxy", true);
-  app.use(cors({ origin: "*" }));
-  app.use(express.json({ limit: "20mb" }));
+  app.disable("x-powered-by");
+  app.use((req, res, next) => {
+    applySecurityHeaders(res);
+    const origin = String(req.headers.origin || "").trim();
+    if (!originAllowed(origin)) {
+      return res.status(403).json({ message: "origin not allowed" });
+    }
+    if (origin) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Vary", "Origin");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+      res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS");
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+    } else if (!corsConfigured()) {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+    }
+    if (req.method === "OPTIONS") {
+      return res.status(204).end();
+    }
+    return next();
+  });
+  app.use(express.json({
+    limit: `${Number.isFinite(JSON_BODY_LIMIT_MB) && JSON_BODY_LIMIT_MB > 0 ? JSON_BODY_LIMIT_MB : 6}mb`
+  }));
   app.use("/media", express.static(MEDIA_DIR));
   app.use(async (req, _res, next) => {
     const header = String(req.headers.authorization || "");
@@ -1658,8 +1967,24 @@ async function main() {
     }
     return next();
   });
+  const authRateLimiter = makeRateLimiter({
+    keyPrefix: "auth",
+    windowMs: AUTH_RATE_LIMIT_WINDOW_MS,
+    maxHits: AUTH_RATE_LIMIT_MAX
+  });
+  const writeRateLimiter = makeRateLimiter({
+    keyPrefix: "write",
+    windowMs: WRITE_RATE_LIMIT_WINDOW_MS,
+    maxHits: WRITE_RATE_LIMIT_MAX
+  });
+  const uploadRateLimiter = makeRateLimiter({
+    keyPrefix: "upload",
+    windowMs: UPLOAD_RATE_LIMIT_WINDOW_MS,
+    maxHits: UPLOAD_RATE_LIMIT_MAX
+  });
 
   app.get("/open/invite", (req, res) => {
+    applyHTMLSecurityHeaders(res);
     const inviteCode = String(req.query?.code || "").trim().toUpperCase();
     const handle = String(req.query?.handle || "").trim().replace(/^@+/, "");
 
@@ -1729,9 +2054,19 @@ async function main() {
 </html>`);
   });
 
-  app.get("/v1/health", (_req, res) => res.status(200).json({ status: "ok" }));
+  app.get("/v1/health", (_req, res) => res.status(200).json({
+    status: "ok",
+    storage: pgPool ? "postgresql" : "file",
+    cors: corsConfigured() ? "allowlist" : "open",
+    media: {
+      maxUploadBytes: Number.isFinite(MEDIA_UPLOAD_MAX_BYTES) && MEDIA_UPLOAD_MAX_BYTES > 0
+        ? MEDIA_UPLOAD_MAX_BYTES
+        : 10 * 1024 * 1024,
+      objectStorage: Boolean(r2Client)
+    }
+  }));
 
-  app.post("/v1/auth/register", async (req, res) => {
+  app.post("/v1/auth/register", authRateLimiter, async (req, res) => {
     try {
       const email = String(req.body?.email || "").trim().toLowerCase();
       const password = String(req.body?.password || "");
@@ -1796,34 +2131,85 @@ async function main() {
     }
   });
 
-  app.post("/v1/auth/verify-email", async (req, res) => {
+  app.post("/v1/auth/verify-email", authRateLimiter, async (req, res) => {
     try {
-      const rawToken = String(req.body?.token || "").trim();
-      if (!rawToken) return res.status(400).json({ message: "token required" });
-      const tokenHash = hashSHA256(rawToken);
-      const tokenRecord = Object.values(db.emailVerificationTokens || {}).find((item) => item.tokenHash === tokenHash);
-      if (!tokenRecord) return res.status(400).json({ message: "invalid token" });
-      if (tokenRecord.usedAt) return res.status(400).json({ message: "token already used" });
-      if (Number(tokenRecord.expiresAt || 0) < nowUnix()) return res.status(400).json({ message: "token expired" });
-
-      const identity = Object.values(db.authIdentities || {}).find((item) => (
-        item.provider === "email_password"
-          && item.userID === tokenRecord.userID
-          && item.email === tokenRecord.email
-      ));
-      if (!identity) return res.status(400).json({ message: "identity not found" });
-
-      tokenRecord.usedAt = nowUnix();
-      identity.emailVerified = true;
-      identity.updatedAt = nowUnix();
-      await saveDB();
-      return res.status(200).json({ ok: true, email: tokenRecord.email });
+      const result = await consumeEmailVerificationToken(req.body?.token);
+      if (!result.ok) return res.status(result.status).json({ message: result.message });
+      return res.status(200).json({ ok: true, email: result.email });
     } catch {
       return res.status(500).json({ message: "internal error" });
     }
   });
 
-  app.post("/v1/auth/resend-verification", async (req, res) => {
+  app.get("/verify-email", async (req, res) => {
+    try {
+      applyHTMLSecurityHeaders(res);
+      const result = await consumeEmailVerificationToken(req.query?.token);
+      if (!result.ok) {
+        res.status(result.status);
+        res.type("html");
+        return res.send(renderEmailVerificationHTML({
+          ok: false,
+          title: "Verification link failed",
+          body: result.message === "token expired"
+            ? "This verification link has expired."
+            : "This verification link is invalid or has already been used."
+        }));
+      }
+      res.status(200);
+      res.type("html");
+      return res.send(renderEmailVerificationHTML({
+        ok: true,
+        title: "Email verified",
+        body: "Your StreetStamps email has been verified. You can return to the app and sign in."
+      }));
+    } catch {
+      res.status(500);
+      res.type("html");
+      return res.send(renderEmailVerificationHTML({
+        ok: false,
+        title: "Verification link failed",
+        body: "We could not verify your email right now."
+      }));
+    }
+  });
+
+  app.get("/reset-password", (req, res) => {
+    try {
+      applyHTMLSecurityHeaders(res);
+      const result = inspectPasswordResetToken(req.query?.token);
+      if (!result.ok) {
+        res.status(result.status);
+        res.type("html");
+        return res.send(renderPasswordResetHTML({
+          ok: false,
+          title: "Reset link failed",
+          body: result.message === "token expired"
+            ? "This password reset link has expired."
+            : "This password reset link is invalid or has already been used."
+        }));
+      }
+      const deepLink = `streetstamps://reset-password?token=${encodeURIComponent(result.token)}`;
+      res.status(200);
+      res.type("html");
+      return res.send(renderPasswordResetHTML({
+        ok: true,
+        title: "Open StreetStamps",
+        body: "Continue in the StreetStamps app to choose a new password.",
+        deepLink
+      }));
+    } catch {
+      res.status(500);
+      res.type("html");
+      return res.send(renderPasswordResetHTML({
+        ok: false,
+        title: "Reset link failed",
+        body: "We could not open the password reset flow right now."
+      }));
+    }
+  });
+
+  app.post("/v1/auth/resend-verification", authRateLimiter, async (req, res) => {
     try {
       const email = normalizeEmail(req.body?.email);
       if (!email) return res.status(200).json({ ok: true });
@@ -1844,7 +2230,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/auth/login", async (req, res) => {
+  app.post("/v1/auth/login", authRateLimiter, async (req, res) => {
     try {
       const email = String(req.body?.email || "").trim().toLowerCase();
       const password = String(req.body?.password || "");
@@ -1873,7 +2259,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/auth/refresh", async (req, res) => {
+  app.post("/v1/auth/refresh", authRateLimiter, async (req, res) => {
     try {
       const rawToken = String(req.body?.refreshToken || "").trim();
       const payload = parseRefreshToken(rawToken);
@@ -1892,7 +2278,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/auth/logout", async (req, res) => {
+  app.post("/v1/auth/logout", authRateLimiter, async (req, res) => {
     try {
       const rawToken = String(req.body?.refreshToken || "").trim();
       if (!rawToken) return res.status(400).json({ message: "refresh token required" });
@@ -1909,7 +2295,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/auth/forgot-password", async (req, res) => {
+  app.post("/v1/auth/forgot-password", authRateLimiter, async (req, res) => {
     try {
       const email = String(req.body?.email || "").trim().toLowerCase();
       if (!email.includes("@")) {
@@ -1929,7 +2315,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/auth/reset-password", async (req, res) => {
+  app.post("/v1/auth/reset-password", authRateLimiter, async (req, res) => {
     try {
       const rawToken = String(req.body?.token || "").trim();
       const newPassword = String(req.body?.newPassword || "");
@@ -1965,7 +2351,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/auth/apple", async (req, res) => {
+  app.post("/v1/auth/apple", authRateLimiter, async (req, res) => {
     try {
       const idToken = String(req.body?.idToken || "").trim();
       if (!idToken) return res.status(400).json({ message: "idToken required" });
@@ -2060,7 +2446,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/auth/email/register", async (req, res) => {
+  app.post("/v1/auth/email/register", authRateLimiter, async (req, res) => {
     try {
       const email = String(req.body?.email || "").trim().toLowerCase();
       const password = String(req.body?.password || "");
@@ -2113,7 +2499,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/auth/email/login", (req, res) => {
+  app.post("/v1/auth/email/login", authRateLimiter, (req, res) => {
     try {
       const email = String(req.body?.email || "").trim().toLowerCase();
       const password = String(req.body?.password || "");
@@ -2127,7 +2513,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/auth/oauth", async (req, res) => {
+  app.post("/v1/auth/oauth", authRateLimiter, async (req, res) => {
     try {
       const provider = String(req.body?.provider || "").trim().toLowerCase();
       const idToken = String(req.body?.idToken || "").trim();
@@ -2254,7 +2640,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/friends", async (req, res) => {
+  app.post("/v1/friends", writeRateLimiter, async (req, res) => {
     try {
       const uid = parseBearer(req);
       if (!db.users[uid]) return res.status(404).json({ message: "user not found" });
@@ -2282,7 +2668,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/friends/requests", async (req, res) => {
+  app.post("/v1/friends/requests", writeRateLimiter, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -2298,9 +2684,7 @@ async function main() {
 
       let target = null;
       if (inviteCodeRaw) {
-        const code = inviteCodeRaw.toUpperCase();
-        const targetID = db.inviteIndex[code];
-        if (targetID) target = db.users[targetID] || null;
+        target = resolveUserByInviteCode(inviteCodeRaw);
       }
       const requestedHandle = normalizeHandle(handleRaw || displayName);
       if (!target && requestedHandle) {
@@ -2359,7 +2743,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/friends/requests/:requestID/accept", async (req, res) => {
+  app.post("/v1/friends/requests/:requestID/accept", writeRateLimiter, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -2393,7 +2777,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/friends/requests/:requestID/reject", async (req, res) => {
+  app.post("/v1/friends/requests/:requestID/reject", writeRateLimiter, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -2413,7 +2797,7 @@ async function main() {
     }
   });
 
-  app.delete("/v1/friends/:friendID", async (req, res) => {
+  app.delete("/v1/friends/:friendID", writeRateLimiter, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -2432,7 +2816,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/journeys/migrate", async (req, res) => {
+  app.post("/v1/journeys/migrate", writeRateLimiter, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -2450,7 +2834,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/journeys/likes/batch", (req, res) => {
+  app.post("/v1/journeys/likes/batch", writeRateLimiter, (req, res) => {
     try {
       const viewerID = parseBearer(req);
       const viewer = db.users[viewerID];
@@ -2492,7 +2876,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/journeys/:ownerUserID/:journeyID/like", async (req, res) => {
+  app.post("/v1/journeys/:ownerUserID/:journeyID/like", writeRateLimiter, async (req, res) => {
     try {
       const viewerID = parseBearer(req);
       const ownerUserID = String(req.params.ownerUserID || "").trim();
@@ -2527,7 +2911,7 @@ async function main() {
     }
   });
 
-  app.delete("/v1/journeys/:ownerUserID/:journeyID/like", async (req, res) => {
+  app.delete("/v1/journeys/:ownerUserID/:journeyID/like", writeRateLimiter, async (req, res) => {
     try {
       const viewerID = parseBearer(req);
       const ownerUserID = String(req.params.ownerUserID || "").trim();
@@ -2554,7 +2938,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/postcards/send", async (req, res) => {
+  app.post("/v1/postcards/send", writeRateLimiter, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -2695,7 +3079,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/notifications/read", async (req, res) => {
+  app.post("/v1/notifications/read", writeRateLimiter, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -2736,7 +3120,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/profile/:userID/stomp", async (req, res) => {
+  app.post("/v1/profile/:userID/stomp", writeRateLimiter, async (req, res) => {
     try {
       const viewerID = parseBearer(req);
       const targetID = String(req.params.userID || "").trim();
@@ -2885,7 +3269,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/media/upload", upload.single("file"), async (req, res) => {
+  app.post("/v1/media/upload", uploadRateLimiter, upload.single("file"), async (req, res) => {
     try {
       const uid = parseBearer(req);
       if (!db.users[uid]) return res.status(404).json({ message: "user not found" });
@@ -2913,6 +3297,19 @@ async function main() {
     } catch {
       return res.status(401).json({ message: "unauthorized" });
     }
+  });
+
+  app.use((err, _req, res, _next) => {
+    if (err && (err.type === "entity.too.large" || err.status === 413)) {
+      return res.status(413).json({ message: "payload too large" });
+    }
+    if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
+      return res.status(413).json({ message: "payload too large" });
+    }
+    if (err) {
+      console.error("request error:", err && err.message ? err.message : err);
+    }
+    return res.status(500).json({ message: "internal error" });
   });
 
   app.listen(PORT, () => {

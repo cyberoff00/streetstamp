@@ -266,7 +266,7 @@ struct AuthEntryView: View {
                 .foregroundColor(accent)
                 .fontWeight(.bold)
             } else {
-                Text("Remembered your password?")
+                Text(L10n.t("auth_remembered_password"))
                     .foregroundColor(.black.opacity(0.56))
                 Button(L10n.t("auth_sign_in_lower")) {
                     withAnimation(.easeInOut(duration: 0.16)) {

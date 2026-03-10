@@ -5,8 +5,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test tests/postcard-rules.test.mjs tests/oauth-account-unification.test.mjs",
+    "test": "node --test tests/postcard-rules.test.mjs tests/oauth-account-unification.test.mjs tests/security-hardening.test.mjs",
     "test:api-contract": "node tests/postcard-api.contract.mjs",
+    "test:security-hardening": "node --test tests/security-hardening.test.mjs",
     "test:oauth-account-unification": "node --test tests/oauth-account-unification.test.mjs"
   },
   "dependencies": {

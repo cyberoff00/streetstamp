@@ -8,6 +8,8 @@ final class UserScopedProfileStateStoreTests: XCTestCase {
             hairId: "hair_0009",
             upperId: "upper_0003",
             underId: "under_0005",
+            hatId: "hat_001",
+            glassId: "glass_001",
             accessoryIds: ["glasses_0001"],
             expressionId: "expr_0004"
         )
@@ -45,6 +47,8 @@ final class UserScopedProfileStateStoreTests: XCTestCase {
             hairId: "hair_account",
             upperId: "upper_account",
             underId: "under_account",
+            hatId: "hat_account",
+            glassId: "glass_account",
             accessoryIds: ["hat_account"],
             expressionId: "expr_account"
         )
@@ -78,6 +82,8 @@ final class UserScopedProfileStateStoreTests: XCTestCase {
             hairId: "hair_pending",
             upperId: "upper_pending",
             underId: "under_pending",
+            hatId: "hat_pending",
+            glassId: "glass_pending",
             accessoryIds: ["hat_pending"],
             expressionId: "expr_pending"
         )
@@ -106,6 +112,8 @@ final class UserScopedProfileStateStoreTests: XCTestCase {
             hairId: "hair_saved",
             upperId: "upper_saved",
             underId: "under_saved",
+            hatId: "hat_saved",
+            glassId: "glass_saved",
             accessoryIds: ["hat_saved"],
             expressionId: "expr_saved"
         )
@@ -123,6 +131,24 @@ final class UserScopedProfileStateStoreTests: XCTestCase {
             try decodeLoadout(from: defaults, key: UserScopedProfileStateStore.globalAvatarLoadoutKey),
             loadout.normalizedForCurrentAvatar()
         )
+    }
+
+    func test_decodeLoadoutMigratesRemovedHair009ToHair0007() throws {
+        let legacyLoadout = RobotLoadout(
+            hairId: "hair_009",
+            upperId: "upper_0003",
+            underId: "under_0005",
+            hatId: "hat_004",
+            glassId: "glass_004",
+            accessoryIds: ["acc_004"],
+            expressionId: "expr_0004"
+        )
+
+        let decoded = try JSONDecoder().decode(RobotLoadout.self, from: JSONEncoder().encode(legacyLoadout))
+
+        XCTAssertEqual(decoded.hairId, "hair_0007")
+        XCTAssertEqual(decoded.hatId, "hat_004")
+        XCTAssertEqual(decoded.glassId, "glass_004")
     }
 
     func test_firebaseAuthSessionExposesCurrentIdentityAndToken() async throws {

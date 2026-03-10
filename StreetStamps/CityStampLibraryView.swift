@@ -39,6 +39,7 @@ struct CityStampLibraryView: View {
     @StateObject private var vm = CityLibraryVM()
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var cache: CityCache
+    @EnvironmentObject private var renderCacheStore: CityRenderCacheStore
     @State private var digestByCityID: [String: CityDigest] = [:]
 
     // ✅ Delete confirmations
@@ -100,12 +101,14 @@ struct CityStampLibraryView: View {
             if store.hasLoaded {
                 vm.load(journeyStore: store, cityCache: cache)
                 digestByCityID = makeDigestMap(from: cache.cachedCities)
+                StartupWarmupService.shared.start(cities: vm.cities, appearanceRaw: MapAppearanceSettings.current.rawValue, renderCacheStore: renderCacheStore, limit: 16)
             }
         }
         .onChange(of: store.hasLoaded) { loaded in
             if loaded {
                 vm.load(journeyStore: store, cityCache: cache)
                 digestByCityID = makeDigestMap(from: cache.cachedCities)
+                StartupWarmupService.shared.start(cities: vm.cities, appearanceRaw: MapAppearanceSettings.current.rawValue, renderCacheStore: renderCacheStore, limit: 16)
             }
         }
         .onReceive(cache.$cachedCities) { nextCities in
@@ -132,6 +135,7 @@ struct CityStampLibraryView: View {
             }
 
             digestByCityID = nextDigests
+            StartupWarmupService.shared.start(cities: vm.cities, appearanceRaw: MapAppearanceSettings.current.rawValue, renderCacheStore: renderCacheStore, limit: 16)
         }
         .alert(L10n.t("delete_city_alert_title"), isPresented: $showDeleteCityAlert, presenting: cityToDelete) { city in
             Button(L10n.t("delete"), role: .destructive) {
@@ -366,6 +370,7 @@ struct CityThumbnailView: View {
     let routePath: String?
 
     @AppStorage(MapAppearanceSettings.storageKey) private var mapAppearanceRaw = MapAppearanceSettings.current.rawValue
+    @EnvironmentObject private var renderCacheStore: CityRenderCacheStore
     @StateObject private var loader = CityThumbnailLoader()
 
     init(city: City? = nil, basePath: String?, routePath: String?) {
@@ -401,19 +406,19 @@ struct CityThumbnailView: View {
             }
         }
         .onAppear {
-            loader.load(city: city, routePath: routePath, basePath: basePath, appearanceRaw: mapAppearanceRaw)
+            loader.load(city: city, routePath: routePath, basePath: basePath, appearanceRaw: mapAppearanceRaw, renderCacheStore: renderCacheStore)
         }
         .onChange(of: routePath) { _ in
-            loader.load(city: city, routePath: routePath, basePath: basePath, appearanceRaw: mapAppearanceRaw)
+            loader.load(city: city, routePath: routePath, basePath: basePath, appearanceRaw: mapAppearanceRaw, renderCacheStore: renderCacheStore)
         }
         .onChange(of: basePath) { _ in
-            loader.load(city: city, routePath: routePath, basePath: basePath, appearanceRaw: mapAppearanceRaw)
+            loader.load(city: city, routePath: routePath, basePath: basePath, appearanceRaw: mapAppearanceRaw, renderCacheStore: renderCacheStore)
         }
         .onChange(of: city?.id ?? "") { _ in
-            loader.load(city: city, routePath: routePath, basePath: basePath, appearanceRaw: mapAppearanceRaw)
+            loader.load(city: city, routePath: routePath, basePath: basePath, appearanceRaw: mapAppearanceRaw, renderCacheStore: renderCacheStore)
         }
         .onChange(of: mapAppearanceRaw) { _ in
-            loader.load(city: city, routePath: routePath, basePath: basePath, appearanceRaw: mapAppearanceRaw)
+            loader.load(city: city, routePath: routePath, basePath: basePath, appearanceRaw: mapAppearanceRaw, renderCacheStore: renderCacheStore)
         }
         .onDisappear {
             loader.cancel()
@@ -437,14 +442,25 @@ final class CityThumbnailLoader: ObservableObject {
     private nonisolated static let boundaryTrustMaxDistanceMeters: CLLocationDistance = 120_000
     private nonisolated static let boundaryTrustMaxSpanDegrees: CLLocationDegrees = 3.0
 
-    func load(city: City?, routePath: String?, basePath: String?, appearanceRaw: String) {
-        // City cards always use live deep-view snapshot rendering.
+    func load(city: City?, routePath: String?, basePath: String?, appearanceRaw: String, renderCacheStore: CityRenderCacheStore) {
+        // City cards use render-keyed persistent caching first, then render on miss.
         if let city {
-            let ids = city.journeys.map(\.id).sorted().joined(separator: ",")
-            let renderKey = "render|\(city.id)|\(appearanceRaw)|\(ids)"
+            let renderKey = Self.renderCacheKey(for: city, appearanceRaw: appearanceRaw)
             if currentKey == renderKey, image != nil { return }
             currentKey = renderKey
-            renderOnDemand(city: city, appearanceRaw: appearanceRaw, key: renderKey)
+            if let cached = CityImageMemoryCache.shared.image(forKey: renderKey) {
+                image = cached
+                return
+            }
+
+            if let diskCached = renderCacheStore.image(forKey: renderKey) {
+                CityImageMemoryCache.shared.set(diskCached, forKey: renderKey)
+                image = diskCached
+                return
+            }
+
+            image = nil
+            renderOnDemand(city: city, appearanceRaw: appearanceRaw, key: renderKey, renderCacheStore: renderCacheStore)
             return
         }
 
@@ -503,26 +519,84 @@ final class CityThumbnailLoader: ObservableObject {
         currentKey = nil
     }
 
-    private func renderOnDemand(city: City, appearanceRaw: String, key: String) {
-        if let cached = CityImageMemoryCache.shared.image(forKey: key) {
-            image = cached
+    nonisolated static func renderCacheKey(for city: City, appearanceRaw: String) -> String {
+        let journeySignature = city.journeys
+            .sorted { $0.id < $1.id }
+            .map(journeySignature)
+            .joined(separator: "~")
+        let boundarySignature = polygonSignature(city.boundaryPolygon ?? [])
+        let anchorSignature = coordinateSignature(city.anchor.map { [$0] } ?? [])
+        return "render|\(city.id)|\(appearanceRaw)|\(journeySignature)|\(boundarySignature)|\(anchorSignature)"
+    }
+
+    nonisolated static func renderCacheRelativePath(forKey key: String) -> String {
+        "city_\(safeFilenameComponent(key)).jpg"
+    }
+
+    nonisolated static func ensurePersistentCache(for city: City, appearanceRaw: String, renderCacheStore: CityRenderCacheStore) async {
+        let key = renderCacheKey(for: city, appearanceRaw: appearanceRaw)
+        if CityImageMemoryCache.shared.image(forKey: key) != nil { return }
+        if let diskCached = renderCacheStore.image(forKey: key) {
+            CityImageMemoryCache.shared.set(diskCached, forKey: key)
             return
         }
 
-        Task.detached(priority: .utility) { [city, appearanceRaw, key] in
-            let fetchedBoundary = await CityBoundaryService.shared.boundaryPolygon(
-                cityKey: city.id,
-                cityName: city.displayName ?? city.name,
-                countryISO2: city.countryISO2,
-                anchor: city.anchor ?? city.journeys.first?.allCLCoords.first
-            )
-            let img = Self.makeSnapshot(city: city, appearanceRaw: appearanceRaw, fetchedBoundary: fetchedBoundary)
+        let fetchedBoundary = await CityBoundaryService.shared.boundaryPolygon(
+            cityKey: city.id,
+            cityName: city.displayName ?? city.name,
+            countryISO2: city.countryISO2,
+            anchor: city.anchor ?? city.journeys.first?.allCLCoords.first
+        )
+        guard let img = Self.makeSnapshot(city: city, appearanceRaw: appearanceRaw, fetchedBoundary: fetchedBoundary) else { return }
+
+        CityImageMemoryCache.shared.set(img, forKey: key)
+        renderCacheStore.save(img, forKey: key)
+    }
+
+    private func renderOnDemand(city: City, appearanceRaw: String, key: String, renderCacheStore: CityRenderCacheStore) {
+        Task(priority: .utility) { [city, appearanceRaw, key] in
+            await Self.ensurePersistentCache(for: city, appearanceRaw: appearanceRaw, renderCacheStore: renderCacheStore)
+            let img = CityImageMemoryCache.shared.image(forKey: key) ?? renderCacheStore.image(forKey: key)
             await MainActor.run {
                 guard self.currentKey == key else { return }
                 self.image = img
-                if let img { CityImageMemoryCache.shared.set(img, forKey: key) }
             }
         }
+    }
+
+    nonisolated private static func journeySignature(_ journey: JourneyRoute) -> String {
+        let coords = journey.allCLThumbnailCoords
+        let distanceRounded = Int(journey.distance.rounded())
+        let endedAt = Int(journey.endTime?.timeIntervalSince1970 ?? 0)
+        return "\(journey.id):\(endedAt):\(distanceRounded):\(coords.count):\(coordinateSignature(coords))"
+    }
+
+    nonisolated private static func polygonSignature(_ coords: [CLLocationCoordinate2D]) -> String {
+        "\(coords.count):\(coordinateSignature(coords))"
+    }
+
+    nonisolated private static func coordinateSignature(_ coords: [CLLocationCoordinate2D]) -> String {
+        guard !coords.isEmpty else { return "empty" }
+
+        func sample(_ idx: Int) -> String {
+            let c = coords[min(max(idx, 0), coords.count - 1)]
+            let lat = Int((c.latitude * 10_000).rounded())
+            let lon = Int((c.longitude * 10_000).rounded())
+            return "\(lat)_\(lon)"
+        }
+
+        let first = sample(0)
+        let middle = sample(coords.count / 2)
+        let last = sample(coords.count - 1)
+        return "\(first)-\(middle)-\(last)"
+    }
+
+    nonisolated private static func safeFilenameComponent(_ value: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(.init(charactersIn: "-_"))
+        return value.unicodeScalars.map { scalar in
+            allowed.contains(scalar) ? String(Character(scalar)) : "_"
+        }
+        .joined()
     }
 
     private func candidateKeys(from preferred: String, appearanceRaw: String) -> [String] {

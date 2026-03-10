@@ -9,6 +9,7 @@
 
 import Foundation
 import SwiftUI
+import UIKit
 
 // MARK: - Facing (kept for backward compatibility)
 
@@ -34,6 +35,15 @@ struct RobotLoadout: Codable, Equatable, Hashable {
     static let defaultHairColorHex = "#2B2A28"
     static let defaultBodyColorHex = "#E8BE9C"
 
+    static func normalizedHairId(_ hairId: String) -> String {
+        switch hairId {
+        case "hair_009":
+            return "hair_0007"
+        default:
+            return hairId
+        }
+    }
+
     // base character
     var bodyId: String = "body"
     var headId: String = "head"
@@ -45,6 +55,8 @@ struct RobotLoadout: Codable, Equatable, Hashable {
     var underId: String = "under_0001"
     var savedUpperIdForSuit: String = "upper_0001"
     var savedUnderIdForSuit: String = "under_0001"
+    var hatId: String? = nil
+    var glassId: String? = nil
     var accessoryIds: [String] = []
 
     // expression
@@ -63,6 +75,8 @@ struct RobotLoadout: Codable, Equatable, Hashable {
         case underId
         case savedUpperIdForSuit
         case savedUnderIdForSuit
+        case hatId
+        case glassId
         case accessoryIds
         case legacyAccessoryId = "accessoryId"
         case expressionId
@@ -79,6 +93,8 @@ struct RobotLoadout: Codable, Equatable, Hashable {
         underId: String = "under_0001",
         savedUpperIdForSuit: String = "upper_0001",
         savedUnderIdForSuit: String = "under_0001",
+        hatId: String? = nil,
+        glassId: String? = nil,
         accessoryIds: [String] = [],
         expressionId: String = "expr_0001",
         hairColorHex: String = defaultHairColorHex,
@@ -86,12 +102,14 @@ struct RobotLoadout: Codable, Equatable, Hashable {
     ) {
         self.bodyId = bodyId
         self.headId = headId
-        self.hairId = hairId
+        self.hairId = Self.normalizedHairId(hairId)
         self.suitId = suitId
         self.upperId = upperId
         self.underId = underId
         self.savedUpperIdForSuit = savedUpperIdForSuit
         self.savedUnderIdForSuit = savedUnderIdForSuit
+        self.hatId = hatId
+        self.glassId = glassId
         self.accessoryIds = accessoryIds
         self.expressionId = expressionId
         self.hairColorHex = hairColorHex
@@ -102,12 +120,14 @@ struct RobotLoadout: Codable, Equatable, Hashable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         bodyId = try c.decodeIfPresent(String.self, forKey: .bodyId) ?? "body"
         headId = try c.decodeIfPresent(String.self, forKey: .headId) ?? "head"
-        hairId = try c.decodeIfPresent(String.self, forKey: .hairId) ?? "hair_0001"
+        hairId = Self.normalizedHairId(try c.decodeIfPresent(String.self, forKey: .hairId) ?? "hair_0001")
         suitId = try c.decodeIfPresent(String.self, forKey: .suitId)
         upperId = try c.decodeIfPresent(String.self, forKey: .upperId) ?? "upper_0001"
         underId = try c.decodeIfPresent(String.self, forKey: .underId) ?? "under_0001"
         savedUpperIdForSuit = try c.decodeIfPresent(String.self, forKey: .savedUpperIdForSuit) ?? upperId
         savedUnderIdForSuit = try c.decodeIfPresent(String.self, forKey: .savedUnderIdForSuit) ?? underId
+        hatId = try c.decodeIfPresent(String.self, forKey: .hatId)
+        glassId = try c.decodeIfPresent(String.self, forKey: .glassId)
         let decodedAccessoryIds = try c.decodeIfPresent([String].self, forKey: .accessoryIds)
         if let decodedAccessoryIds {
             accessoryIds = decodedAccessoryIds.filter { !$0.isEmpty && $0 != "none" }
@@ -133,6 +153,8 @@ struct RobotLoadout: Codable, Equatable, Hashable {
         try c.encode(underId, forKey: .underId)
         try c.encode(savedUpperIdForSuit, forKey: .savedUpperIdForSuit)
         try c.encode(savedUnderIdForSuit, forKey: .savedUnderIdForSuit)
+        try c.encode(hatId, forKey: .hatId)
+        try c.encode(glassId, forKey: .glassId)
         try c.encode(accessoryIds, forKey: .accessoryIds)
         try c.encode(accessoryIds.first, forKey: .legacyAccessoryId)
         try c.encode(expressionId, forKey: .expressionId)
@@ -150,6 +172,8 @@ struct RobotLoadout: Codable, Equatable, Hashable {
             underId: "under_0001",
             savedUpperIdForSuit: "upper_0001",
             savedUnderIdForSuit: "under_0001",
+            hatId: nil,
+            glassId: nil,
             accessoryIds: [],
             expressionId: "expr_0001",
             hairColorHex: defaultHairColorHex,
@@ -159,6 +183,7 @@ struct RobotLoadout: Codable, Equatable, Hashable {
 
     func normalizedForCurrentAvatar() -> RobotLoadout {
         var next = self
+        next.hairId = Self.normalizedHairId(next.hairId)
         // Keep suit support. When suit is equipped, hide upper/under.
         if next.suitId != nil {
             if next.upperId != "none" {
@@ -184,6 +209,53 @@ struct RobotLoadout: Codable, Equatable, Hashable {
 
 // MARK: - Renderer
 
+struct AvatarAssetLayout {
+    static func imageRect(imageSize: CGSize, in containerSize: CGSize) -> CGRect {
+        guard imageSize.width > 0, imageSize.height > 0, containerSize.width > 0, containerSize.height > 0 else {
+            return CGRect(origin: .zero, size: containerSize)
+        }
+
+        let scale = max(containerSize.width / imageSize.width, containerSize.height / imageSize.height)
+        let scaledSize = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
+        let origin = CGPoint(
+            x: (containerSize.width - scaledSize.width) / 2,
+            y: containerSize.height - scaledSize.height
+        )
+        return CGRect(origin: origin, size: scaledSize)
+    }
+}
+
+private struct AvatarLayerImage: View {
+    let imageName: String
+    var tintColor: Color? = nil
+
+    private var imageSize: CGSize {
+        UIImage(named: imageName)?.size ?? .zero
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let rect = AvatarAssetLayout.imageRect(imageSize: imageSize, in: proxy.size)
+
+            Group {
+                if let tintColor {
+                    Image(imageName)
+                        .renderingMode(.template)
+                        .resizable()
+                        .interpolation(.none)
+                        .foregroundColor(tintColor)
+                } else {
+                    Image(imageName)
+                        .resizable()
+                        .interpolation(.none)
+                }
+            }
+            .frame(width: rect.width, height: rect.height)
+            .position(x: rect.midX, y: rect.midY)
+        }
+    }
+}
+
 /// Renders a pixel character by stacking image layers.
 /// All images use `.interpolation(.none)` to keep the pixel edges crisp.
 struct RobotRendererView: View {
@@ -196,19 +268,11 @@ struct RobotRendererView: View {
     private var hairTint: Color { Color(hexRGB: loadout.hairColorHex, fallback: .white) }
 
     private func img(_ name: String) -> some View {
-        Image(name)
-            .resizable()
-            .interpolation(.none)
-            .scaledToFit()
+        AvatarLayerImage(imageName: name)
     }
 
     private func maskTintedImg(_ name: String, color: Color) -> some View {
-        Image(name)
-            .renderingMode(.template)
-            .resizable()
-            .interpolation(.none)
-            .scaledToFit()
-            .foregroundColor(color)
+        AvatarLayerImage(imageName: name, tintColor: color)
     }
 
     // MARK: Asset mapping (ids -> asset names)
@@ -238,6 +302,18 @@ struct RobotRendererView: View {
 
     private func accessoryAsset(itemId: String, face: RobotFace) -> String? {
         guard let item = catalogStore.item(categoryId: "accessory", itemId: itemId) else { return nil }
+        return catalogStore.imageName(item.images, face: face)
+    }
+
+    private func hatAsset(face: RobotFace) -> String? {
+        guard let hatId = loadout.hatId,
+              let item = catalogStore.item(categoryId: "hat", itemId: hatId) else { return nil }
+        return catalogStore.imageName(item.images, face: face)
+    }
+
+    private func glassAsset(face: RobotFace) -> String? {
+        guard let glassId = loadout.glassId,
+              let item = catalogStore.item(categoryId: "glass", itemId: glassId) else { return nil }
         return catalogStore.imageName(item.images, face: face)
     }
 
@@ -463,6 +539,46 @@ private var hairLayer: some View {
         }
     }
 
+    @ViewBuilder
+    private var glassLayer: some View {
+        singleAccessoryLayer(front: glassAsset(face: .front), right: glassAsset(face: .right), left: glassAsset(face: .left), back: glassAsset(face: .back))
+    }
+
+    @ViewBuilder
+    private var hatLayer: some View {
+        singleAccessoryLayer(front: hatAsset(face: .front), right: hatAsset(face: .right), left: hatAsset(face: .left), back: hatAsset(face: .back))
+    }
+
+    @ViewBuilder
+    private func singleAccessoryLayer(front: String?, right: String?, left: String?, back: String?) -> some View {
+        if let front {
+            switch face {
+            case .front:
+                img(front)
+            case .right:
+                if let right {
+                    img(right)
+                } else {
+                    img(front).opacity(0.20)
+                }
+            case .left:
+                if let left = left ?? right {
+                    img(left).scaleEffect(x: -1, y: 1)
+                } else {
+                    img(front).scaleEffect(x: -1, y: 1).opacity(0.20)
+                }
+            case .back:
+                if let back {
+                    img(back)
+                } else {
+                    img(front).opacity(0.20)
+                }
+            }
+        } else {
+            EmptyView()
+        }
+    }
+
 var body: some View {
         ZStack {
             bodyLayer
@@ -473,6 +589,8 @@ var body: some View {
             upperLayer
             suitLayer
             accessoryLayer
+            glassLayer
+            hatLayer
 
             if face == .back {
                 Text(L10n.t("avatar_placeholder_back"))

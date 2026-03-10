@@ -2,6 +2,17 @@ import XCTest
 @testable import StreetStamps
 
 final class LocalizationCoverageTests: XCTestCase {
+    func test_lifelogTitleUsesUpdatedEnglishAndSimplifiedChineseCopy() throws {
+        let appRoot = projectRoot().appendingPathComponent("StreetStamps", isDirectory: true)
+        let english = try loadStringsFile(at: appRoot.appendingPathComponent("en.lproj/Localizable.strings"))
+        let simplifiedChinese = try loadStringsFile(at: appRoot.appendingPathComponent("zh-Hans.lproj/Localizable.strings"))
+
+        XCTAssertEqual(english["tab_lifelog"], "LIFELOG")
+        XCTAssertEqual(english["lifelog_title"], "LIFELOG")
+        XCTAssertEqual(simplifiedChinese["tab_lifelog"], "足迹")
+        XCTAssertEqual(simplifiedChinese["lifelog_title"], "足迹")
+    }
+
     func test_requiredFormalUserFacingKeysExistInEnglishAndSimplifiedChinese() throws {
         let appRoot = projectRoot().appendingPathComponent("StreetStamps", isDirectory: true)
         let english = try loadStringsFile(at: appRoot.appendingPathComponent("en.lproj/Localizable.strings"))
@@ -42,11 +53,20 @@ final class LocalizationCoverageTests: XCTestCase {
             "settings_notifications_title",
             "settings_edit_name_title",
             "settings_private_transfer_title",
+            "settings_private_transfer_intro",
             "settings_transfer_old_device",
             "settings_transfer_new_device",
             "settings_transfer_generate_qr",
             "settings_transfer_scan_import",
+            "settings_transfer_scan_hint",
+            "settings_transfer_same_wifi_hint",
             "settings_import_failed_title",
+            "settings_check_updates_title",
+            "settings_check_updates_placeholder",
+            "settings_about_us_title",
+            "settings_about_us_placeholder",
+            "settings_privacy_policy_title",
+            "settings_privacy_policy_placeholder",
             "settings_sign_in_title",
             "settings_sign_in_subtitle",
             "guest_mode",
@@ -70,14 +90,22 @@ final class LocalizationCoverageTests: XCTestCase {
             "equipment_unowned_items",
             "equipment_total_price_format",
             "equipment_buy_all_and_apply",
+            "equipment_hat",
+            "equipment_glass",
             "postcard_sync_error_format",
             "details_unavailable_title",
             "details_unavailable_message",
             "verify_your_email",
+            "auth_remembered_password",
             "resend_verification_email",
             "i_verified_my_email",
             "verification_email_sent",
             "email_still_unverified",
+            "splash_tagline",
+            "intro_skip",
+            "postcard_greetings_from",
+            "postcard_brand_street",
+            "postcard_brand_stamps",
             "main_unlock_new_journey",
             "discard_changes_title",
             "long_stationary_reminder_title",

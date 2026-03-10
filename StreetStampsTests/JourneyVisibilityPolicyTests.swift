@@ -53,4 +53,12 @@ final class JourneyVisibilityPolicyTests: XCTestCase {
         XCTAssertTrue(decision.isAllowed)
         XCTAssertNil(decision.reason)
     }
+
+    func test_visibility_sheet_option_presentations_expose_private_then_friends_cards() {
+        let options = JourneyVisibilitySheetPresentation.optionPresentations
+
+        XCTAssertEqual(options.map(\.visibility), [.private, .friendsOnly])
+        XCTAssertEqual(options.map(\.symbolName), ["lock.fill", "person.2.fill"])
+        XCTAssertEqual(options.map(\.accentStyle), [.neutral, .accent])
+    }
 }

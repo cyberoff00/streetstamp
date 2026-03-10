@@ -35,21 +35,7 @@ final class CityLibraryVM: ObservableObject {
     @Published var cities: [City] = []
 
     func load(journeyStore: JourneyStore, cityCache: CityCache) {
-        let byId = Dictionary(uniqueKeysWithValues: journeyStore.journeys.map { ($0.id, $0) })
-        let cached = cityCache.cachedCities.filter { !($0.isTemporary ?? false) }
-
-        var out: [City] = []
-        out.reserveCapacity(cached.count)
-        for c in cached {
-            out.append(makeCity(from: c, journeysById: byId))
-        }
-
-        out.sort {
-            if $0.explorations != $1.explorations { return $0.explorations > $1.explorations }
-            return $0.name < $1.name
-        }
-
-        self.cities = out
+        self.cities = Self.buildCities(journeyStore: journeyStore, cityCache: cityCache)
     }
 
     func upsertCity(cityKey: String, journeyStore: JourneyStore, cityCache: CityCache) {
@@ -93,6 +79,36 @@ final class CityLibraryVM: ObservableObject {
             if $0.explorations != $1.explorations { return $0.explorations > $1.explorations }
             return $0.name < $1.name
         }
+    }
+
+    static func buildCities(journeyStore: JourneyStore, cityCache: CityCache) -> [City] {
+        let byId = Dictionary(uniqueKeysWithValues: journeyStore.journeys.map { ($0.id, $0) })
+        let cached = cityCache.cachedCities.filter { !($0.isTemporary ?? false) }
+
+        var out: [City] = []
+        out.reserveCapacity(cached.count)
+        for c in cached {
+            out.append(
+                City(
+                    id: c.id,
+                    name: c.name,
+                    countryISO2: c.countryISO2,
+                    journeys: c.journeyIds.compactMap { byId[$0] }.filter { $0.isCompleted },
+                    boundaryPolygon: c.boundary?.map { $0.cl },
+                    anchor: c.anchor?.cl,
+                    explorations: c.explorations,
+                    memories: c.memories,
+                    thumbnailBasePath: c.thumbnailBasePath,
+                    thumbnailRoutePath: c.thumbnailRoutePath
+                )
+            )
+        }
+
+        out.sort {
+            if $0.explorations != $1.explorations { return $0.explorations > $1.explorations }
+            return $0.name < $1.name
+        }
+        return out
     }
 
     // MARK: - City name localization

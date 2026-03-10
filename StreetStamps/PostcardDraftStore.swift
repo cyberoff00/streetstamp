@@ -11,6 +11,7 @@ struct PostcardDraft: Codable, Identifiable, Equatable {
     var draftID: String
     var clientDraftID: String
     var toUserID: String
+    var toDisplayName: String?
     var cityID: String
     var cityName: String
     var photoLocalPath: String

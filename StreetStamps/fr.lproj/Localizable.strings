@@ -216,6 +216,8 @@
 "equipment_status_owned" = "POSSÉDÉ";
 "equipment_buy_short" = "ACHETER %d";
 "equipment_hair" = "Cheveux";
+"equipment_hat" = "Chapeau";
+"equipment_glass" = "Lunettes";
 "equipment_outfit" = "Tenue";
 "equipment_accessory" = "Accessoires";
 "equipment_coming_soon" = "Bientôt";
@@ -419,6 +421,8 @@
 "visibility_public" = "Public";
 "journey_change_visibility" = "Change Journey Visibility";
 "journey_current_visibility_format" = "Current: %@";
+"journey_visibility_private_description" = "Vous seul pouvez voir ce voyage.";
+"journey_visibility_friends_description" = "Vos amis peuvent voir ce voyage et laisser des likes.";
 "journey_visibility_login_required" = "Unable to switch to Friends. Please sign in first.";
 "journey_visibility_requires_distance_or_memory" = "Unable to switch to Friends. The journey must be at least 2 km or include a memory.";
 "unknown_id" = "unknown_id";

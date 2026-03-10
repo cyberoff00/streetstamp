@@ -18,7 +18,7 @@
 "tab_start" = "Start";
 "tab_cities" = "Cities";
 "tab_memory" = "Memory";
-"tab_lifelog" = "Lifelog";
+"tab_lifelog" = "LIFELOG";
 "globe_view"="Globe View";
 "profile"="Profile";
 "toast_city_added" = "Created a %@ city card and added it to City Library";
@@ -226,6 +226,8 @@
 "equipment_suit" = "Suit";
 "equipment_upper" = "Upper";
 "equipment_under" = "Under";
+"equipment_hat" = "Hat";
+"equipment_glass" = "Glasses";
 "equipment_outfit" = "Outfit";
 "equipment_accessory" = "Accessories";
 "equipment_coming_soon" = "Coming soon";
@@ -277,6 +279,7 @@
 "settings_logout_confirm_message" = "You will switch back to guest mode on this device.";
 "auth_full_name" = "FULL NAME";
 "auth_have_account" = "Already have an account?";
+"auth_remembered_password" = "Remembered your password?";
 "auth_no_account" = "Don't have an account?";
 "auth_password" = "PASSWORD";
 "auth_password_mismatch" = "Passwords do not match";
@@ -316,7 +319,7 @@
 "friends_badge_city" = "CITY";
 "friends_badge_journey" = "JOURNEY";
 "friends_badge_memory" = "MEMORY";
-"friends_delete" = "Delete Friend";
+"friends_delete_friend" = "Delete Friend";
 "friends_empty_activity" = "No friend activity yet";
 "friends_empty_all" = "No friends yet, tap + to add";
 "friends_event_added_memories" = "Added %d new memories";
@@ -382,6 +385,12 @@
 "settings_level_rules_3" = "Journeys required per level increase gradually (Lv1→Lv2 needs 2, Lv2→Lv3 needs 3).";
 "settings_level_rules_4" = "Profile, Lifelog, and Globe show real-time level progress.";
 "settings_level_rules_intro" = "Current level rules";
+"settings_check_updates_title" = "CHECK FOR\nUPDATES";
+"settings_check_updates_placeholder" = "Check for Updates";
+"settings_about_us_title" = "ABOUT US";
+"settings_about_us_placeholder" = "About Us";
+"settings_privacy_policy_title" = "PRIVACY POLICY";
+"settings_privacy_policy_placeholder" = "Privacy Policy";
 "settings_lifelog_bg_mode_desc" = "Affects passive Lifelog recording only. High precision is more continuous but uses more battery; low precision saves battery with sparser routes.";
 "settings_lifelog_bg_mode_high" = "High Precision";
 "settings_lifelog_bg_mode_low" = "Low Precision";
@@ -440,6 +449,7 @@
 "gpx_import_choose_detected_city" = "Choose one detected city:";
 "gpx_import_no_detected_city" = "No city was detected from this GPX track.";
 "app_name" = "Worldo";
+"splash_tagline" = "Map your Journey. Pin your memories.";
 "visibility_private" = "Private";
 "visibility_friends_only" = "Friends";
 "visibility_public" = "Public";
@@ -453,6 +463,9 @@
 "postcard_profile_title" = "Postcards";
 "postcard_profile_subtitle" = "Sent · Received";
 "postcard_nav_title" = "Postcards";
+"postcard_greetings_from" = "GREETINGS FROM";
+"postcard_brand_street" = "STREET";
+"postcard_brand_stamps" = "STAMPS";
 "postcard_box_sent" = "Sent";
 "postcard_box_received" = "Received";
 "postcard_sent_empty" = "No sent postcards yet";
@@ -480,7 +493,7 @@
 
 "tab_home" = "Start";
 "tab_friends" = "Friends";
-"tab_collection" = "W";
+"tab_collection" = "Worldo";
 "tab_memory" = "Memory";
 "main_resume_onboarding" = "Resume Onboarding";
 "open_sidebar" = "Open sidebar";
@@ -494,13 +507,15 @@
 "verification_email_description" = "We sent a verification link to your email. Verify it first, then come back here to continue.";
 "verification_email_sent" = "Verification email sent.";
 "email_still_unverified" = "This email is still unverified.";
-"main_unlock_new_journey" = "RECORD YOUR NEW MEMORIES IN WORLDO";
+"main_unlock_new_journey" = "START MY JOURNEY IN WORLDO";
 "discard_changes_title" = "Discard changes?";
 "postcard_sync_error_format" = "Postcard sync error: %@";
 "details_unavailable_title" = "Details unavailable";
 "details_unavailable_message" = "Only public thumbnails are available for this friend's city cards right now.";
 "journey_change_visibility" = "Change Journey Visibility";
 "journey_current_visibility_format" = "Current: %@";
+"journey_visibility_private_description" = "Only you can view this journey.";
+"journey_visibility_friends_description" = "Friends can browse this journey and leave likes.";
 "journey_visibility_login_required" = "Unable to switch to Friends. Please sign in first.";
 "journey_visibility_requires_distance_or_memory" = "Unable to switch to Friends. The journey must be at least 2 km or include a memory.";
 "journey_confirm_change" = "Confirm Change";
@@ -626,14 +641,18 @@
 "settings_section_level_rules" = "LEVEL RULES";
 "settings_section_information" = "INFORMATION";
 "settings_private_transfer_title" = "Private Data Transfer";
+"settings_private_transfer_intro" = "For public journeys, sign in and restore from the cloud. This transfer only moves local private Journey / Memory photos and Lifelog data. Keep both devices on the same Wi-Fi.";
 "settings_transfer_old_device" = "Old Device (Export)";
 "settings_transfer_stop_export" = "Stop Export";
 "settings_transfer_generate_qr" = "Generate Transfer QR Code";
+"settings_transfer_scan_hint" = "Scan the transfer QR code shown on the old device";
+"settings_transfer_same_wifi_hint" = "Keep both devices on the same Wi-Fi";
 "settings_transfer_new_device" = "New Device (Import)";
 "settings_transfer_scan_import" = "Scan and Import";
 "settings_device_transfer_title" = "Device Transfer";
 "settings_transfer_alert_title" = "Transfer";
 "settings_import_failed_title" = "Import Failed";
+"intro_skip" = "Skip";
 "gpx_import_not_enough_points" = "GPX track does not contain enough points (at least 2 are required).";
 "unknown_parse_error" = "Unknown parse error";
 "gpx_import_parse_failed_format" = "GPX parsing failed: %@";

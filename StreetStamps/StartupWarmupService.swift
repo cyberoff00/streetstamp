@@ -1,60 +1,40 @@
 import Foundation
-import UIKit
 
 @MainActor
 final class StartupWarmupService {
     static let shared = StartupWarmupService()
 
-    private var hasStarted = false
+    private var warmedRenderKeys = Set<String>()
 
     private init() {}
 
-    func start(cityCache: CityCache, limit: Int = 24) {
-        guard !hasStarted else { return }
-        hasStarted = true
-
-        let selected = Self.selectThumbnailPaths(from: cityCache.cachedCities, limit: limit)
+    func start(cities: [City], appearanceRaw: String, renderCacheStore: CityRenderCacheStore, limit: Int = 24) {
+        let selected = Self.selectCities(from: cities, limit: limit)
         guard !selected.isEmpty else { return }
 
-        Task.detached(priority: .utility) {
-            for relativePath in selected {
-                guard let fullPath = CityThumbnailCache.resolveFullPath(relativePath),
-                      FileManager.default.fileExists(atPath: fullPath),
-                      let image = UIImage(contentsOfFile: fullPath) else {
-                    continue
-                }
+        let citiesToWarm = selected.filter {
+            let key = CityThumbnailLoader.renderCacheKey(for: $0, appearanceRaw: appearanceRaw)
+            return warmedRenderKeys.insert(key).inserted
+        }
+        guard !citiesToWarm.isEmpty else { return }
 
-                CityImageMemoryCache.shared.set(image, forKey: relativePath)
+        Task(priority: .utility) {
+            for city in citiesToWarm {
+                await CityThumbnailLoader.ensurePersistentCache(for: city, appearanceRaw: appearanceRaw, renderCacheStore: renderCacheStore)
             }
         }
     }
 
-    nonisolated static func selectThumbnailPaths(from cities: [CachedCity], limit: Int) -> [String] {
+    nonisolated static func selectCities(from cities: [City], limit: Int) -> [City] {
         guard limit > 0 else { return [] }
 
-        let prioritized = cities
-            .filter { !($0.isTemporary ?? false) }
+        return cities
             .sorted { lhs, rhs in
                 if lhs.explorations != rhs.explorations { return lhs.explorations > rhs.explorations }
                 if lhs.memories != rhs.memories { return lhs.memories > rhs.memories }
                 return lhs.name < rhs.name
             }
-
-        var result: [String] = []
-        var seen = Set<String>()
-
-        for city in prioritized {
-            let candidates = [city.thumbnailRoutePath, city.thumbnailBasePath]
-            for item in candidates {
-                guard let item, !item.isEmpty else { continue }
-                guard seen.insert(item).inserted else { continue }
-                result.append(item)
-                if result.count >= limit {
-                    return result
-                }
-            }
-        }
-
-        return result
+            .prefix(limit)
+            .map { $0 }
     }
 }

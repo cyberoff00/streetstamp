@@ -841,10 +841,9 @@ struct FriendsHubView: View {
         do {
             let all = try await BackendAPIClient.shared.fetchNotifications(token: token, unreadOnly: false)
             PostcardNotificationBridge.shared.surfaceUnreadPostcardNotifications(all)
-            let promptTypes: Set<String> = ["journey_like", "profile_stomp", "postcard_received"]
             let cutoff = Date().addingTimeInterval(-3 * 24 * 60 * 60)
             let fetched = all
-                .filter({ promptTypes.contains($0.type) })
+                .filter({ SocialNotificationPolicy.supports(type: $0.type) })
                 .filter({ $0.createdAt >= cutoff })
                 .sorted(by: { $0.createdAt > $1.createdAt })
             var mergedByID: [String: BackendNotificationItem] = [:]
@@ -999,13 +998,13 @@ struct FriendsHubView: View {
                 if notificationsLoading && socialNotifications.isEmpty {
                     VStack(spacing: 12) {
                         ProgressView()
-                        Text("加载通知中...")
+                        Text(L10n.t("profile_notifications_loading"))
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(FigmaTheme.subtext)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if socialNotifications.isEmpty {
-                    Text("暂时还没有互动通知")
+                    Text(L10n.t("profile_notifications_empty"))
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(FigmaTheme.subtext)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1026,7 +1025,7 @@ struct FriendsHubView: View {
             .safeAreaInset(edge: .top, spacing: 0) {
                 UnifiedNavigationHeader(
                     chrome: NavigationChrome(
-                        title: "互动通知",
+                        title: L10n.t("profile_notifications_title"),
                         leadingAccessory: .back,
                         titleLevel: .secondary
                     ),
@@ -1046,7 +1045,7 @@ struct FriendsHubView: View {
                             .frame(width: 42, height: 42)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("全部已读")
+                    .accessibilityLabel(L10n.t("friends_mark_all_read"))
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
@@ -2181,6 +2180,7 @@ private final class FriendMirrorContext: ObservableObject {
     let paths: StoragePath
     let journeyStore: JourneyStore
     let cityCache: CityCache
+    let renderCacheStore: CityRenderCacheStore
 
     private var lastSignature: String = ""
     private var applyTask: Task<Void, Never>?
@@ -2192,6 +2192,7 @@ private final class FriendMirrorContext: ObservableObject {
         try? paths.ensureBaseDirectoriesExist()
         self.journeyStore = JourneyStore(paths: paths)
         self.cityCache = CityCache(paths: paths, journeyStore: journeyStore)
+        self.renderCacheStore = CityRenderCacheStore(rootDir: paths.thumbnailsDir)
     }
 
     static func signature(for snapshot: FriendProfileSnapshot) -> String {
@@ -2221,6 +2222,7 @@ private final class FriendMirrorContext: ObservableObject {
             guard !Task.isCancelled, let self else { return }
             self.journeyStore.rebind(paths: targetPaths)
             self.cityCache.rebind(paths: targetPaths)
+            self.renderCacheStore.rebind(rootDir: targetPaths.thumbnailsDir)
             self.journeyStore.load()
         }
     }
@@ -2438,6 +2440,7 @@ private struct FriendCitiesScreen: View {
                 )
                     .environmentObject(mirror.journeyStore)
                     .environmentObject(mirror.cityCache)
+                    .environmentObject(mirror.renderCacheStore)
                     .task(id: FriendMirrorContext.signature(for: friend)) {
                         mirror.apply(snapshot: friend)
                     }
@@ -2500,6 +2503,8 @@ private struct FriendEquipmentScreen: View {
                             FriendEquipmentRow(title: "Hair", value: equippedName(categoryID: "hair", itemID: friend.loadout.hairId))
                             FriendEquipmentRow(title: "Upper", value: equippedName(categoryID: "upper", itemID: friend.loadout.upperId))
                             FriendEquipmentRow(title: "Under", value: equippedName(categoryID: "under", itemID: friend.loadout.underId))
+                            FriendEquipmentRow(title: "Hat", value: equippedName(categoryID: "hat", itemID: friend.loadout.hatId))
+                            FriendEquipmentRow(title: "Glasses", value: equippedName(categoryID: "glass", itemID: friend.loadout.glassId))
                             FriendEquipmentRow(title: "Accessory", value: equippedAccessoryNames(friend.loadout.accessoryIds))
                             FriendEquipmentRow(title: "Expression", value: equippedName(categoryID: "expression", itemID: friend.loadout.expressionId))
                         }

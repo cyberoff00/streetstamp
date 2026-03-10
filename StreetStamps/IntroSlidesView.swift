@@ -75,7 +75,7 @@ struct IntroSlidesView: View {
             Spacer()
 
             if page < slides.count - 1 {
-                Button("跳过") {
+                Button(L10n.t("intro_skip")) {
                     onFinish()
                 }
                 .font(.system(size: 14, weight: .semibold))

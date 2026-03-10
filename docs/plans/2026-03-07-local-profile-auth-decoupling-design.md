@@ -216,6 +216,13 @@ On a new device:
 - after login, restore account-backed cloud data into that local profile
 - do not create or switch into `account_<appUserID>` as the primary runtime root
 
+### Automatic Local Recovery Source Boundaries
+
+Startup local recovery should distinguish between guest and legacy account sources:
+
+- local `guest_*` directories physically present in the current device sandbox may be considered for automatic recovery into the active `local_*` profile even if old binding metadata has a mismatched `sourceDevice`
+- legacy `account_*` directories remain device-scoped and should only be considered when the guest-to-account binding matches both the current `guestID` and current `sourceDevice`
+
 ## Risks
 
 ### 1. Duplicate or Conflicting Legacy Data

@@ -4,19 +4,19 @@ import Combine
 struct MainTabLayout {
     struct Item: Equatable {
         let tab: NavigationTab
-        let systemImage: String
+        let iconAssetName: String
     }
 
     static let bottomTabs: [Item] = [
-        Item(tab: .start, systemImage: "point.bottomleft.forward.to.point.topright.scurvepath"),
-        Item(tab: .memory, systemImage: "heart.fill"),
-        Item(tab: .cities, systemImage: "square.grid.2x2.fill"),
-        Item(tab: .lifelog, systemImage: "house.fill"),
-        Item(tab: .friends, systemImage: "person.2.fill")
+        Item(tab: .start, iconAssetName: "tab_start_icon"),
+        Item(tab: .memory, iconAssetName: "tab_memory_icon"),
+        Item(tab: .cities, iconAssetName: "tab_cities_icon"),
+        Item(tab: .lifelog, iconAssetName: "tab_lifelog_icon"),
+        Item(tab: .friends, iconAssetName: "tab_friends_icon")
     ]
 
-    static func systemImage(for tab: NavigationTab) -> String {
-        bottomTabs.first(where: { $0.tab == tab })?.systemImage ?? tab.icon
+    static func iconAssetName(for tab: NavigationTab) -> String {
+        bottomTabs.first(where: { $0.tab == tab })?.iconAssetName ?? tab.icon
     }
 }
 
@@ -202,7 +202,9 @@ struct MainTabView: View {
             ))
             .tag(NavigationTab.start)
             .tabItem {
-                Label(L10n.t("tab_home"), systemImage: MainTabLayout.systemImage(for: .start))
+                Image(MainTabLayout.iconAssetName(for: .start))
+                    .renderingMode(.template)
+                Text(L10n.t("tab_home"))
             }
 
             NavigationStack {
@@ -218,7 +220,9 @@ struct MainTabView: View {
             }
             .tag(NavigationTab.memory)
             .tabItem {
-                Label(L10n.t("tab_memory"), systemImage: MainTabLayout.systemImage(for: .memory))
+                Image(MainTabLayout.iconAssetName(for: .memory))
+                    .renderingMode(.template)
+                Text(L10n.t("tab_memory"))
             }
 
             NavigationStack {
@@ -230,7 +234,9 @@ struct MainTabView: View {
             }
             .tag(NavigationTab.cities)
             .tabItem {
-                Label(L10n.t("tab_collection"), systemImage: MainTabLayout.systemImage(for: .cities))
+                Image(MainTabLayout.iconAssetName(for: .cities))
+                    .renderingMode(.template)
+                Text(L10n.t("tab_collection"))
             }
 
             Group {
@@ -242,7 +248,9 @@ struct MainTabView: View {
             }
                 .tag(NavigationTab.lifelog)
                 .tabItem {
-                    Label(L10n.t("tab_lifelog"), systemImage: MainTabLayout.systemImage(for: .lifelog))
+                    Image(MainTabLayout.iconAssetName(for: .lifelog))
+                        .renderingMode(.template)
+                    Text(L10n.t("tab_lifelog"))
                 }
 
             NavigationStack {
@@ -254,7 +262,9 @@ struct MainTabView: View {
             }
             .tag(NavigationTab.friends)
             .tabItem {
-                Label(L10n.t("tab_friends"), systemImage: MainTabLayout.systemImage(for: .friends))
+                Image(MainTabLayout.iconAssetName(for: .friends))
+                    .renderingMode(.template)
+                Text(L10n.t("tab_friends"))
             }
         }
         .tint(FigmaTheme.primary)

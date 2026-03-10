@@ -81,7 +81,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		B53E1F902F24FA2D00055ED1 /* Exceptions for "TrackingWidge" folder in "TrackingWidgeExtension" target */ = {
+		A1B2C3D42F64000100AA0001 /* Exceptions for "TrackingWidge" folder in "TrackingWidgeExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
@@ -89,14 +89,14 @@
 			);
 			target = B53E1F772F24FA2C00055ED1 /* TrackingWidgeExtension */;
 		};
-		B5F75DC32F0D642100FEF837 /* Exceptions for "StreetStamps" folder in "StreetStamps" target */ = {
+		A1B2C3D42F64000100AA0002 /* Exceptions for "StreetStamps" folder in "StreetStamps" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
 			target = B5F75DB52F0D641D00FEF837 /* StreetStamps */;
 		};
-		C1A100012F30000100AA0006 /* Exceptions for "StreetStampsWatch" folder in "StreetStampsWatch" target */ = {
+		A1B2C3D42F64000100AA0003 /* Exceptions for "StreetStampsWatch" folder in "StreetStampsWatch" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
@@ -109,7 +109,7 @@
 		B53E1F7D2F24FA2C00055ED1 /* TrackingWidge */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				B53E1F902F24FA2D00055ED1 /* Exceptions for "TrackingWidge" folder in "TrackingWidgeExtension" target */,
+				A1B2C3D42F64000100AA0001 /* Exceptions for "TrackingWidge" folder in "TrackingWidgeExtension" target */,
 			);
 			path = TrackingWidge;
 			sourceTree = "<group>";
@@ -117,7 +117,7 @@
 		B5F75DB82F0D641D00FEF837 /* StreetStamps */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				B5F75DC32F0D642100FEF837 /* Exceptions for "StreetStamps" folder in "StreetStamps" target */,
+				A1B2C3D42F64000100AA0002 /* Exceptions for "StreetStamps" folder in "StreetStamps" target */,
 			);
 			path = StreetStamps;
 			sourceTree = "<group>";
@@ -125,7 +125,7 @@
 		C1A100012F30000100AA0007 /* StreetStampsWatch */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				C1A100012F30000100AA0006 /* Exceptions for "StreetStampsWatch" folder in "StreetStampsWatch" target */,
+				A1B2C3D42F64000100AA0003 /* Exceptions for "StreetStampsWatch" folder in "StreetStampsWatch" target */,
 			);
 			path = StreetStampsWatch;
 			sourceTree = "<group>";

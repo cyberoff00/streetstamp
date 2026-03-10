@@ -78,6 +78,13 @@ struct MyJourneysView: View {
         return store.journeys.first(where: { $0.id == likesJourneyID })
     }
 
+    private var likesSheetDetents: Set<PresentationDetent> {
+        guard let likesJourney else { return [.height(276), .large] }
+        let likerCount = journeyLikersByJourneyID[likesJourney.id]?.count ?? 0
+        let compactHeight = min(520, max(276, 194 + CGFloat(max(likerCount, 1)) * 56))
+        return [.height(compactHeight), .large]
+    }
+
     private var filterChipTitle: String {
         let cal = Calendar.current
         guard let start = selectedStartDate else { return L10n.t("all_time") }
@@ -137,7 +144,9 @@ struct MyJourneysView: View {
                     isSubmitting: visibilityUpdatingIDs.contains(permissionJourney.id),
                     onApply: applyPendingVisibilityChange
                 )
-                .presentationDetents([.medium, .large])
+                .presentationBackground(FigmaTheme.background)
+                .presentationCornerRadius(28)
+                .presentationDetents([.height(352)])
                 .presentationDragIndicator(.visible)
             }
         }
@@ -159,7 +168,9 @@ struct MyJourneysView: View {
                         presentVisibilitySheet(for: likesJourney)
                     }
                 )
-                .presentationDetents([.medium, .large])
+                .presentationBackground(FigmaTheme.background)
+                .presentationCornerRadius(28)
+                .presentationDetents(likesSheetDetents)
                 .presentationDragIndicator(.visible)
             }
         }
@@ -502,6 +513,41 @@ private struct JourneyLiker: Identifiable {
     let likedAt: Date
 }
 
+enum JourneyVisibilitySheetAccentStyle: Equatable {
+    case neutral
+    case accent
+}
+
+struct JourneyVisibilitySheetOptionPresentation: Equatable {
+    let visibility: JourneyVisibility
+    let symbolName: String
+    let eyebrow: String
+    let title: String
+    let description: String
+    let accentStyle: JourneyVisibilitySheetAccentStyle
+}
+
+enum JourneyVisibilitySheetPresentation {
+    static let optionPresentations: [JourneyVisibilitySheetOptionPresentation] = [
+        JourneyVisibilitySheetOptionPresentation(
+            visibility: .private,
+            symbolName: "lock.fill",
+            eyebrow: "PRIVATE",
+            title: L10n.t("visibility_private"),
+            description: L10n.t("journey_visibility_private_description"),
+            accentStyle: .neutral
+        ),
+        JourneyVisibilitySheetOptionPresentation(
+            visibility: .friendsOnly,
+            symbolName: "person.2.fill",
+            eyebrow: "FRIENDS",
+            title: L10n.t("visibility_friends_only"),
+            description: L10n.t("journey_visibility_friends_description"),
+            accentStyle: .accent
+        )
+    ]
+}
+
 private struct JourneyVisibilitySheet: View {
     let journey: JourneyRoute
     @Binding var pendingVisibility: JourneyVisibility
@@ -512,21 +558,24 @@ private struct JourneyVisibilitySheet: View {
         return !isSubmitting
     }
 
+    private var selectedPresentation: JourneyVisibilitySheetOptionPresentation? {
+        JourneyVisibilitySheetPresentation.optionPresentations.first { $0.visibility == pendingVisibility }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(L10n.t("journey_change_visibility"))
-                .font(.system(size: 20, weight: .bold))
-                .foregroundColor(.black)
+        JourneySheetScaffold(
+            title: L10n.t("journey_change_visibility"),
+            subtitle: String(format: L10n.t("journey_current_visibility_format"), journey.visibility.localizedTitle)
+        ) {
+            lightweightVisibilityToggle
 
-            Text(String(format: L10n.t("journey_current_visibility_format"), journey.visibility.localizedTitle))
-                .font(.system(size: 13, weight: .medium))
-                .foregroundColor(.black.opacity(0.58))
-
-            Picker("权限", selection: $pendingVisibility) {
-                Text(JourneyVisibility.private.localizedTitle).tag(JourneyVisibility.private)
-                Text(JourneyVisibility.friendsOnly.localizedTitle).tag(JourneyVisibility.friendsOnly)
+            if let selectedPresentation {
+                Text(selectedPresentation.description)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(FigmaTheme.subtext)
+                    .lineSpacing(1.5)
+                    .padding(.horizontal, 2)
             }
-            .pickerStyle(.segmented)
 
             Button(action: onApply) {
                 HStack(spacing: 8) {
@@ -540,15 +589,95 @@ private struct JourneyVisibilitySheet: View {
                 }
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity)
-                .frame(height: 46)
-                .background(canApply ? Color.black : Color.black.opacity(0.35))
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .frame(height: 50)
+                .background(canApply ? UITheme.softBlack : Color.black.opacity(0.28))
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
             .disabled(!canApply)
             .buttonStyle(.plain)
         }
-        .padding(20)
-        .background(FigmaTheme.background)
+    }
+
+    private var lightweightVisibilityToggle: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(pendingVisibility == .friendsOnly ? UITheme.accent.opacity(0.12) : Color.black.opacity(0.05))
+                    .frame(width: 34, height: 34)
+
+                Image(systemName: pendingVisibility == .friendsOnly ? "person.2.fill" : "lock.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(pendingVisibility == .friendsOnly ? UITheme.accent : UITheme.softBlack)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(L10n.t("journey_change_visibility"))
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(UITheme.softBlack)
+
+                Text(pendingVisibility.localizedTitle)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(FigmaTheme.subtext)
+            }
+
+            Spacer(minLength: 12)
+
+            Toggle("", isOn: friendsVisibilityBinding)
+                .labelsHidden()
+                .tint(UITheme.accent)
+                .scaleEffect(0.88)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.black.opacity(0.02), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.black.opacity(0.05), lineWidth: 1)
+        )
+    }
+
+    private var friendsVisibilityBinding: Binding<Bool> {
+        Binding(
+            get: { pendingVisibility == .friendsOnly },
+            set: { isOn in
+                pendingVisibility = isOn ? .friendsOnly : .private
+            }
+        )
+    }
+}
+
+private struct JourneySheetScaffold<Content: View>: View {
+    let title: String
+    let subtitle: String?
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        ZStack {
+            FigmaTheme.background.ignoresSafeArea()
+
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title)
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundColor(UITheme.softBlack)
+
+                    if let subtitle, !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(FigmaTheme.subtext)
+                    }
+                }
+
+                content
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 18)
+            .padding(.bottom, 14)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
     }
 }
 
@@ -567,75 +696,107 @@ private struct JourneyLikesSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(L10n.t("journey_likes_title"))
-                .font(.system(size: 20, weight: .bold))
-                .foregroundColor(.black)
-
-            Text(title)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(.black.opacity(0.62))
-                .lineLimit(1)
-
+        JourneySheetScaffold(title: L10n.t("journey_likes_title"), subtitle: title) {
             Button(action: onEditVisibility) {
                 HStack {
                     Text(L10n.t("journey_change_permission"))
-                        .font(.system(size: 14, weight: .bold))
+                        .font(.system(size: 14, weight: .semibold))
                     Spacer()
-                    Image(systemName: "slider.horizontal.3")
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .bold))
                 }
-                .foregroundColor(.black)
-                .padding(.horizontal, 12)
-                .frame(height: 42)
-                .background(Color.black.opacity(0.05))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .foregroundColor(UITheme.softBlack)
+                .padding(.horizontal, 14)
+                .frame(height: 44)
+                .background(Color.black.opacity(0.03))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(Color.black.opacity(0.05), lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
             .buttonStyle(.plain)
 
             if isLoading {
-                HStack(spacing: 8) {
-                    ProgressView()
-                    Text(L10n.t("journey_likes_loading"))
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(.black.opacity(0.58))
-                }
+                statusCard(icon: "clock", text: L10n.t("journey_likes_loading"))
             } else if let errorMessage, !errorMessage.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 12) {
                     Text(String(format: L10n.t("journey_loading_failed_format"), errorMessage))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.red.opacity(0.78))
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(Color.red.opacity(0.82))
                     Button(L10n.t("retry"), action: onRetry)
-                        .font(.system(size: 13, weight: .bold))
+                        .font(.system(size: 13, weight: .semibold))
                         .buttonStyle(.plain)
+                        .foregroundColor(UITheme.softBlack)
                 }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.red.opacity(0.04), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(Color.red.opacity(0.10), lineWidth: 1)
+                )
             } else if likers.isEmpty {
-                Text(L10n.t("journey_no_likes_yet"))
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.black.opacity(0.58))
+                statusCard(icon: "heart", text: L10n.t("journey_no_likes_yet"))
             } else {
                 ScrollView {
-                    VStack(spacing: 8) {
+                    VStack(spacing: 10) {
                         ForEach(likers) { liker in
-                            HStack {
+                            HStack(spacing: 12) {
+                                Circle()
+                                    .fill(Color.black.opacity(0.05))
+                                    .frame(width: 36, height: 36)
+                                    .overlay {
+                                        Text(String(liker.name.prefix(1)).uppercased())
+                                            .font(.system(size: 13, weight: .bold))
+                                            .foregroundColor(UITheme.softBlack.opacity(0.75))
+                                    }
+
                                 Text(liker.name)
                                     .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(.black)
+                                    .foregroundColor(UITheme.softBlack)
                                 Spacer()
                                 Text(Self.timeText(from: liker.likedAt))
                                     .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.black.opacity(0.48))
+                                    .foregroundColor(FigmaTheme.subtext)
                             }
-                            .padding(.horizontal, 12)
-                            .frame(height: 40)
-                            .background(Color.black.opacity(0.04))
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .padding(.horizontal, 14)
+                            .frame(height: 54)
+                            .background(Color.black.opacity(0.02))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .stroke(Color.black.opacity(0.05), lineWidth: 1)
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                         }
                     }
+                    .padding(.bottom, 8)
                 }
             }
         }
-        .padding(20)
-        .background(FigmaTheme.background)
+    }
+
+    private func statusCard(icon: String, text: String) -> some View {
+        HStack(spacing: 10) {
+            if icon == "clock" {
+                ProgressView()
+                    .scaleEffect(0.9)
+            } else {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            Text(text)
+                .font(.system(size: 13, weight: .medium))
+        }
+        .foregroundColor(FigmaTheme.subtext)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.black.opacity(0.03), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.black.opacity(0.05), lineWidth: 1)
+        )
     }
 
     private static func timeText(from date: Date) -> String {
@@ -1364,6 +1525,7 @@ struct JourneyRouteDetailView: View {
     @State private var showDeleteConfirm = false
     @State private var fittedRegion: MKCoordinateRegion? = nil
     @State private var editingMemory: JourneyMemory? = nil
+    @State private var viewingMemory: JourneyMemory? = nil
     @State private var sidebarHideToken = UUID().uuidString
     @State private var localizedCityTitle: String? = nil
 
@@ -1445,8 +1607,12 @@ struct JourneyRouteDetailView: View {
                 memoryGroups: memoryGroups,
                 initialRegion: fittedRegion,
                 onTapMemory: { memory in
-                    guard !isReadOnly else { return }
-                    editingMemory = memory
+                    switch JourneyRouteDetailInteractionPolicy.destinationForMemoryTap(isReadOnly: isReadOnly) {
+                    case .editMemory:
+                        editingMemory = memory
+                    case .viewMemory:
+                        viewingMemory = memory
+                    }
                 }
             )
             .ignoresSafeArea()
@@ -1485,7 +1651,18 @@ struct JourneyRouteDetailView: View {
             }
         }
         .overlay {
-            if !isReadOnly, let tappedMemory = editingMemory {
+            if let tappedMemory = viewingMemory {
+                MemoryDetailPage(
+                    memory: tappedMemory,
+                    isPresented: Binding(
+                        get: { viewingMemory != nil },
+                        set: { if !$0 { viewingMemory = nil } }
+                    ),
+                    allowsEditing: false,
+                    onUpdated: { _ in }
+                )
+                .environmentObject(sessionStore)
+            } else if !isReadOnly, let tappedMemory = editingMemory {
                 MemoryEditorSheet(
                     isPresented: Binding(
                         get: { editingMemory != nil },

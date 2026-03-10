@@ -18,10 +18,10 @@
 "tab_start" = "开始";
 "tab_cities" = "城市卡片";
 "tab_memory" = "旅程记忆";
-"tab_lifelog" = "Lifelog";
+"tab_lifelog" = "足迹";
 "globe_view"="全球视图";
 "profile"="个人主页";
-"toast_city_added" = "已创建 %@ 城市卡并加入 City Library";
+"toast_city_added" = "已创建 %@ 城市卡并加入城市库";
 
 "start_upper" = "开始";
 "resume_upper" = "继续";
@@ -93,7 +93,7 @@
 
 "unlock_city_title_cn" = "解锁新城市探索卡";
 "unlock_city_desc_1" = "你刚刚完成了在 %@ 的探索。";
-"unlock_city_desc_2" = "这张卡会出现在 City Library 里，随时回顾你的足迹。";
+"unlock_city_desc_2" = "这张卡会出现在城市库里，随时回顾你的足迹。";
 "got_it" = "知道了";
 "go_see" = "去看看";
 
@@ -202,7 +202,7 @@
 "debug_start" = "开始";
 "debug_recommended_mode" = "推荐模式：";
 "debug_stop_test" = "停止测试";
-"debug_clear_all_journeys" = "清除所有 Journey（测试用）";
+"debug_clear_all_journeys" = "清除所有旅程（测试用）";
 "debug_test_geocode_shanghai" = "测试上海 Geocode";
 "debug_test_geocode_beijing" = "测试北京 Geocode";
 "debug_test_geocode_hangzhou" = "测试杭州 Geocode";
@@ -226,6 +226,8 @@
 "equipment_suit" = "连体衣";
 "equipment_upper" = "上身";
 "equipment_under" = "下身";
+"equipment_hat" = "帽子";
+"equipment_glass" = "眼镜";
 "equipment_outfit" = "衣服";
 "equipment_accessory" = "配饰";
 "equipment_coming_soon" = "敬请期待";
@@ -277,6 +279,7 @@
 "settings_logout_confirm_message" = "退出后将切回游客模式，本地数据会保留在当前设备。";
 "auth_full_name" = "昵称";
 "auth_have_account" = "已有账号？";
+"auth_remembered_password" = "想起密码了？";
 "auth_no_account" = "还没有账号？";
 "auth_password" = "密码";
 "auth_password_mismatch" = "两次密码不一致";
@@ -318,7 +321,6 @@
 "friends_badge_city" = "城市";
 "friends_badge_journey" = "旅程";
 "friends_badge_memory" = "记忆";
-"friends_delete" = "删除好友";
 "friends_empty_activity" = "还没有好友动态";
 "friends_empty_all" = "还没有好友，点击 + 添加";
 "friends_event_added_memories" = "新增 %d 条记忆";
@@ -328,6 +330,7 @@
 "friends_tab_activity" = "动态";
 "friends_tab_all" = "好友";
 "friends_title" = "好友";
+"friends_delete_friend" = "删除好友";
 "globe_view_title" = "全球视图";
 "gpx_import_choose_city_card" = "选择要迁移到的城市卡：";
 "gpx_import_create_city_card" = "创建新城市卡";
@@ -360,7 +363,7 @@
 "lifelog_permission_settings_action" = "去设置开启";
 "lifelog_permission_settings_message" = "开启“始终允许”后才可以离线记录轨迹。所有轨迹仅保存在本机，无需担心隐私问题。";
 "lifelog_permission_settings_title" = "需要“始终允许”权限";
-"lifelog_title" = "LIFELOG";
+"lifelog_title" = "足迹";
 "memories_title" = "记忆";
 "my_journey_title_upper" = "我的旅程";
 "my_journeys_title" = "我的旅程";
@@ -384,6 +387,12 @@
 "settings_level_rules_3" = "每次升级所需旅程数逐级增加（Lv1→Lv2 需 2 次，Lv2→Lv3 需 3 次）。";
 "settings_level_rules_4" = "Profile、Lifelog、Globe 会显示实时等级与进度。";
 "settings_level_rules_intro" = "当前等级规则";
+"settings_check_updates_title" = "检查\n更新";
+"settings_check_updates_placeholder" = "检查更新";
+"settings_about_us_title" = "关于我们";
+"settings_about_us_placeholder" = "关于我们";
+"settings_privacy_policy_title" = "隐私政策";
+"settings_privacy_policy_placeholder" = "隐私政策";
 "settings_map_appearance_desc" = "应用到所有地图与路线渲染";
 "settings_lifelog_bg_mode_desc" = "仅影响 Lifelog 被动记录。高精度更连续但更耗电，低精度更省电但轨迹更稀疏。";
 "settings_lifelog_bg_mode_high" = "高精度";
@@ -442,6 +451,7 @@
 "gpx_import_choose_detected_city" = "请选择一个识别出的城市：";
 "gpx_import_no_detected_city" = "未从该 GPX 轨迹识别到城市。";
 "app_name" = "Worldo";
+"splash_tagline" = "记录生活，地图珍藏回忆。";
 "visibility_private" = "私密";
 "visibility_friends_only" = "好友可见";
 "visibility_public" = "公开";
@@ -455,6 +465,9 @@
 "postcard_profile_title" = "明信片";
 "postcard_profile_subtitle" = "我寄出的 · 我收到的";
 "postcard_nav_title" = "明信片";
+"postcard_greetings_from" = "来自";
+"postcard_brand_street" = "STREET";
+"postcard_brand_stamps" = "STAMPS";
 "postcard_box_sent" = "寄出";
 "postcard_box_received" = "收到";
 "postcard_sent_empty" = "暂时还没有寄出明信片";
@@ -482,11 +495,11 @@
 
 "tab_home" = "开始";
 "tab_friends" = "好友";
-"tab_collection" = "W";
+"tab_collection" = "WORLDO";
 "tab_memory" = "记忆";
 "main_resume_onboarding" = "继续引导";
 "open_sidebar" = "打开侧边栏";
-"collection_title" = "我的Worldo";
+"collection_title" = "我的WORLDO";
 "collection_segment_cities" = "城市";
 "collection_segment_journeys" = "旅程";
 "verify_your_email" = "验证你的邮箱";
@@ -496,13 +509,15 @@
 "verification_email_description" = "我们已向你的邮箱发送验证链接。请先完成验证，再返回这里继续。";
 "verification_email_sent" = "验证邮件已发送。";
 "email_still_unverified" = "该邮箱仍未验证。";
-"main_unlock_new_journey" = "开启新的Worldo旅程";
+"main_unlock_new_journey" = "开启我的Worldo旅程";
 "discard_changes_title" = "丢弃更改？";
 "postcard_sync_error_format" = "明信片同步异常：%@";
 "details_unavailable_title" = "暂不支持查看详情";
 "details_unavailable_message" = "目前仅支持浏览该好友城市卡的公开缩略图。";
 "journey_change_visibility" = "更改旅程权限";
 "journey_current_visibility_format" = "当前：%@";
+"journey_visibility_private_description" = "仅你自己可以查看这段旅程。";
+"journey_visibility_friends_description" = "好友可以浏览这段旅程并留下喜欢。";
 "journey_visibility_login_required" = "无法切换为好友可见，请先登录。";
 "journey_visibility_requires_distance_or_memory" = "无法切换为好友可见，旅程需达到 2 公里或包含至少一条记忆。";
 "journey_confirm_change" = "确认修改";
@@ -628,19 +643,23 @@
 "settings_section_level_rules" = "等级规则";
 "settings_section_information" = "信息";
 "settings_private_transfer_title" = "私密数据迁移";
+"settings_private_transfer_intro" = "公开 Journey 建议登录后从云端恢复；此处仅迁移本地私密 Journey / Memory 图片与 Lifelog。两台设备保持在同一 Wi-Fi。";
 "settings_transfer_old_device" = "旧设备（导出）";
 "settings_transfer_stop_export" = "停止导出";
 "settings_transfer_generate_qr" = "生成扫码迁移二维码";
+"settings_transfer_scan_hint" = "扫描旧设备显示的迁移二维码";
+"settings_transfer_same_wifi_hint" = "请保持两台设备在同一 Wi-Fi 下";
 "settings_transfer_new_device" = "新设备（导入）";
 "settings_transfer_scan_import" = "扫码并导入";
 "settings_device_transfer_title" = "设备迁移";
 "settings_transfer_alert_title" = "迁移提示";
 "settings_import_failed_title" = "导入失败";
+"intro_skip" = "跳过";
 "gpx_import_not_enough_points" = "GPX 轨迹点不足（至少需要 2 个点）。";
 "unknown_parse_error" = "未知解析错误";
 "gpx_import_parse_failed_format" = "GPX 解析失败：%@";
 "transfer_error_source_missing" = "未找到本地私密数据目录。";
-"transfer_error_no_private_data" = "当前没有可迁移的私密 Journey 或 Lifelog 数据。";
+"transfer_error_no_private_data" = "当前没有可迁移的足迹数据。";
 "transfer_error_package_encode" = "私密数据打包失败。";
 "transfer_error_package_decode" = "私密数据包解析失败。";
 "transfer_error_server_start" = "本地迁移服务启动失败。";
@@ -651,7 +670,7 @@
 "transfer_hosting_hint_idle" = "点击生成二维码后，保持此页面常亮，等待新设备扫码。";
 "transfer_import_status_idle" = "点击“扫码并导入”，扫描旧设备上的二维码。";
 "transfer_hosting_preparing" = "正在准备私密数据包…";
-"transfer_hosting_ready_format" = "二维码已生成（%@，私密 Journey %d 条，照片 %d 张%@）。请在新设备扫码并保持两台设备处于同一 Wi‑Fi。";
+"transfer_hosting_ready_format" = "二维码已生成（%@，私密旅程 %d 条，照片 %d 张%@）。请在新设备扫码并保持两台设备处于同一 Wi‑Fi。";
 "transfer_hosting_includes_lifelog" = "，含 Lifelog";
 "transfer_import_connecting" = "正在连接旧设备…";
 "transfer_import_downloading" = "正在下载私密数据包…";
@@ -659,7 +678,7 @@
 "transfer_import_refreshing" = "正在刷新本地数据…";
 "transfer_import_done" = "导入完成。";
 "transfer_import_failed" = "导入失败。";
-"transfer_import_done_alert_format" = "导入完成：新增 Journey %d 条，照片 %d 个，Lifelog %@。";
+"transfer_import_done_alert_format" = "导入完成：新增旅程 %d 条，照片 %d 个，足迹 %@。";
 "transfer_lifelog_replaced" = "已替换为更完整版本";
 "transfer_lifelog_not_replaced" = "无需替换";
 "long_stationary_reminder_title" = "长时间低位移提醒";
@@ -692,7 +711,7 @@
 "watch_status_background_resume_failed_format" = "恢复后台会话失败：%@";
 "watch_status_segment_resumed" = "已自动分段继续记录";
 "watch_status_auto_ended" = "已达到24小时上限，自动结束";
-"watch_inactivity_message" = "近60分钟首尾位移不足100m，是否暂停？";
+"watch_inactivity_message" = "近60分钟位移不足100m，是否暂停？";
 "watch_status_found_unfinished" = "检测到未完成旅程，正在恢复";
 "watch_status_paused_recovered" = "已暂停（已恢复）";
 "watch_status_workout_failed_format" = "Workout 会话失败：%@";
@@ -703,7 +722,7 @@
 "提示" = "提示";
 "好" = "好";
 "昵称（可重复）" = "昵称（可重复）";
-"公开 Journey 建议登录后从云端恢复；此处仅迁移本地私密 Journey / Memory 图片与 Lifelog。两台设备保持在同一 Wi-Fi。" = "公开 Journey 建议登录后从云端恢复；此处仅迁移本地私密 Journey / Memory 图片与 Lifelog。两台设备保持在同一 Wi‑Fi。";
+"公开旅程建议登录后从云端恢复；此处仅迁移本地私密旅程和实时足迹。两台设备保持在同一 Wi-Fi。" = "公开旅程登录后可自动从云端恢复；此处仅迁移本地私密旅程和实时足迹。两台设备保持在同一 Wi-Fi。";
 "扫描旧设备显示的迁移二维码" = "扫描旧设备显示的迁移二维码";
 "请保持两台设备在同一 Wi-Fi 下" = "请保持两台设备在同一 Wi‑Fi 下";
 "扫码失败" = "扫码失败";

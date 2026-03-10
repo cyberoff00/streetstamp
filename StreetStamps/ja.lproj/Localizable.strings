@@ -216,6 +216,8 @@
 "equipment_status_owned" = "所持済み";
 "equipment_buy_short" = "購入 %d";
 "equipment_hair" = "髪";
+"equipment_hat" = "帽子";
+"equipment_glass" = "メガネ";
 "equipment_outfit" = "服";
 "equipment_accessory" = "アクセ";
 "equipment_coming_soon" = "準備中";
@@ -419,6 +421,8 @@
 "visibility_public" = "公開";
 "journey_change_visibility" = "旅程の公開範囲を変更";
 "journey_current_visibility_format" = "現在：%@";
+"journey_visibility_private_description" = "この旅程を見られるのは自分だけです。";
+"journey_visibility_friends_description" = "友だちはこの旅程を見て、いいねを残せます。";
 "journey_visibility_login_required" = "友だち公開に切り替えるには、先にログインしてください。";
 "journey_visibility_requires_distance_or_memory" = "友だち公開に切り替えるには、旅程が2km以上、または記憶が1件以上必要です。";
 "unknown_id" = "unknown_id";

@@ -127,7 +127,7 @@ struct PostcardFrontFaceView: View {
                     Spacer()
                     HStack(alignment: .bottom) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("GREETINGS FROM")
+                            Text(L10n.t("postcard_greetings_from"))
                                 .font(.system(size: 8, weight: .bold, design: .monospaced))
                                 .tracking(2)
                                 .foregroundColor(.white.opacity(0.7))
@@ -382,10 +382,10 @@ struct PostcardBackFaceView: View {
             RobotRendererView(size: 36, face: .front, loadout: avatarLoadout)
                 .frame(width: 36, height: 36)
 
-            Text("STREET")
+            Text(L10n.t("postcard_brand_street"))
                 .font(.system(size: 5, weight: .heavy, design: .monospaced))
                 .foregroundColor(lightInk)
-            Text("STAMPS")
+            Text(L10n.t("postcard_brand_stamps"))
                 .font(.system(size: 5, weight: .heavy, design: .monospaced))
                 .foregroundColor(lightInk)
         }

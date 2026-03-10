@@ -96,6 +96,20 @@ struct BackendNotificationItem: Codable, Identifiable {
     var messageText: String?
 }
 
+enum SocialNotificationPolicy {
+    static let supportedTypes: Set<String> = [
+        "journey_like",
+        "profile_stomp",
+        "postcard_received",
+        "friend_request",
+        "friend_request_accepted"
+    ]
+
+    static func supports(type: String) -> Bool {
+        supportedTypes.contains(type)
+    }
+}
+
 struct BackendNotificationsResponse: Codable {
     var items: [BackendNotificationItem]
 }

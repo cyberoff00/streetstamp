@@ -13,6 +13,7 @@ struct StreetStampsApp: App {
     @StateObject private var sessionStore: UserSessionStore
     @StateObject private var journeyStore: JourneyStore
     @StateObject private var cityCache: CityCache
+    @StateObject private var cityRenderCache: CityRenderCacheStore
     @StateObject private var lifelogStore: LifelogStore
     @StateObject private var trackTileStore: TrackTileStore
     @StateObject private var lifelogRenderCache: LifelogRenderCacheCoordinator
@@ -64,6 +65,7 @@ struct StreetStampsApp: App {
         let jStore = JourneyStore(paths: paths)
         _journeyStore = StateObject(wrappedValue: jStore)
         _cityCache = StateObject(wrappedValue: CityCache(paths: paths, journeyStore: jStore))
+        _cityRenderCache = StateObject(wrappedValue: CityRenderCacheStore(rootDir: paths.thumbnailsDir))
         let llStore = LifelogStore(paths: paths)
         _lifelogStore = StateObject(wrappedValue: llStore)
         _trackTileStore = StateObject(wrappedValue: TrackTileStore(paths: paths))
@@ -97,6 +99,7 @@ struct StreetStampsApp: App {
             .environmentObject(sessionStore)
             .environmentObject(journeyStore)
             .environmentObject(cityCache)
+            .environmentObject(cityRenderCache)
             .environmentObject(lifelogStore)
             .environmentObject(trackTileStore)
             .environmentObject(lifelogRenderCache)
@@ -147,6 +150,12 @@ struct StreetStampsApp: App {
                     paths: StoragePath(userID: startupUserID)
                 )
                 journeyStore.load()
+                StartupWarmupService.shared.start(
+                    cities: CityLibraryVM.buildCities(journeyStore: journeyStore, cityCache: cityCache),
+                    appearanceRaw: MapAppearanceSettings.current.rawValue,
+                    renderCacheStore: cityRenderCache,
+                    limit: 16
+                )
                 lifelogStore.load()
                 lifelogStore.bind(to: locationHub)
                 lifelogRenderCache.reset()
@@ -204,6 +213,13 @@ struct StreetStampsApp: App {
                     journeyStore.rebind(paths: paths)
                     journeyStore.load()
                     cityCache.rebind(paths: paths)
+                    cityRenderCache.rebind(rootDir: paths.thumbnailsDir)
+                    StartupWarmupService.shared.start(
+                        cities: CityLibraryVM.buildCities(journeyStore: journeyStore, cityCache: cityCache),
+                        appearanceRaw: MapAppearanceSettings.current.rawValue,
+                        renderCacheStore: cityRenderCache,
+                        limit: 16
+                    )
                     lifelogStore.rebind(paths: paths)
                     lifelogStore.load()
                     lifelogStore.bind(to: locationHub)

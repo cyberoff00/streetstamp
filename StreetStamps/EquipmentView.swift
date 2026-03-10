@@ -9,6 +9,32 @@
 //
 
 import SwiftUI
+import UIKit
+
+enum EquipmentCategoryIconAssetResolver {
+    static func assetName(for categoryId: String) -> String? {
+        switch categoryId {
+        case "expression":
+            return "equipment_icon_expression"
+        case "hair":
+            return "equipment_icon_hair"
+        case "suit":
+            return "equipment_icon_suit"
+        case "upper":
+            return "equipment_icon_upper"
+        case "under":
+            return "equipment_icon_under"
+        case "hat":
+            return "equipment_icon_hat"
+        case "glass":
+            return "equipment_icon_glass"
+        case "accessory":
+            return "equipment_icon_accessory 1"
+        default:
+            return nil
+        }
+    }
+}
 
 struct EquipmentView: View {
     @Environment(\.dismiss) private var dismiss
@@ -313,7 +339,7 @@ struct EquipmentView: View {
 
     private var orderedCategories: [GearCategory] {
         let map = Dictionary(uniqueKeysWithValues: store.catalog.categories.map { ($0.id, $0) })
-        let preferred = ["expression", "hair", "suit", "upper", "under", "accessory"]
+        let preferred = ["expression", "hair", "suit", "upper", "under", "hat", "glass", "accessory"]
         let preferredItems = preferred.compactMap { map[$0] }
         let rest = store.catalog.categories.filter { !preferred.contains($0.id) }
         return preferredItems + rest
@@ -412,8 +438,12 @@ struct EquipmentView: View {
             return "tshirt.fill"
         case "under":
             return "figure.walk"
-        case "accessory":
+        case "hat":
+            return "graduationcap.fill"
+        case "glass":
             return "eyeglasses"
+        case "accessory":
+            return "fanblades.fill"
         default:
             return "circle.grid.2x2"
         }
@@ -434,22 +464,7 @@ struct EquipmentView: View {
     }
 
     private func categoryIconAssetName(for categoryId: String) -> String? {
-        switch categoryId {
-        case "expression":
-            return "equipment_icon_expression"
-        case "hair":
-            return "equipment_icon_hair"
-        case "suit":
-            return "equipment_icon_suit"
-        case "upper":
-            return "equipment_icon_upper"
-        case "under":
-            return "equipment_icon_under"
-        case "accessory":
-            return "equipment_icon_accessory"
-        default:
-            return nil
-        }
+        EquipmentCategoryIconAssetResolver.assetName(for: categoryId)
     }
 
     private func colorSwatch(hex: String, isSelected: Bool, onTap: @escaping () -> Void) -> some View {
@@ -468,13 +483,14 @@ struct EquipmentView: View {
     @ViewBuilder
     private var itemGrid: some View {
         if let category = store.catalog.categories.first(where: { $0.id == selectedCategoryId }) {
+            let visibleItems = EquipmentGridDisplay.items(for: category)
             let columns = [
                 GridItem(.flexible(), spacing: 10, alignment: .top),
                 GridItem(.flexible(), spacing: 10, alignment: .top),
                 GridItem(.flexible(), spacing: 10, alignment: .top)
             ]
             LazyVGrid(columns: columns, spacing: 10) {
-                ForEach(category.items) { item in
+                ForEach(visibleItems) { item in
                     let ownership = ownershipState(category: category, item: item)
 
                     Button {
@@ -525,6 +541,10 @@ struct EquipmentView: View {
                     target.upperId = "none"
                 case "underId":
                     target.underId = "none"
+                case "hatId":
+                    target.hatId = nil
+                case "glassId":
+                    target.glassId = nil
                 case "accessoryId":
                     if let idx = target.accessoryIds.firstIndex(of: item.id) {
                         target.accessoryIds.remove(at: idx)
@@ -624,21 +644,23 @@ struct EquipmentView: View {
                     .foregroundColor(FigmaTheme.text)
 
                 LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 56), spacing: 10)],
+                    columns: [GridItem(.adaptive(minimum: EquipmentPreviewMetrics.tryOnCellSize), spacing: 10)],
                     alignment: .leading,
                     spacing: 10
                 ) {
                     ForEach(items, id: \.self) { item in
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .fill(Color(red: 231.0 / 255.0, green: 245.0 / 255.0, blue: 236.0 / 255.0))
-                            .frame(height: 56)
+                            .frame(
+                                width: EquipmentPreviewMetrics.tryOnCellSize,
+                                height: EquipmentPreviewMetrics.tryOnCellSize
+                            )
                             .overlay {
                                 if let imageName = item.imageName {
-                                    Image(imageName)
-                                        .resizable()
-                                        .interpolation(.none)
-                                        .scaledToFit()
-                                        .padding(8)
+                                    EquipmentPreviewImage(
+                                        imageName: imageName,
+                                        padding: EquipmentPreviewMetrics.tryOnPreviewPadding
+                                    )
                                 } else {
                                     Image(systemName: "questionmark")
                                         .font(.system(size: 14, weight: .bold))
@@ -730,6 +752,12 @@ struct EquipmentView: View {
         case "underId":
             if item.id == "none" { return current.underId == "none" }
             return current.underId == item.id
+        case "hatId":
+            if item.id == "none" { return current.hatId == nil }
+            return current.hatId == item.id
+        case "glassId":
+            if item.id == "none" { return current.glassId == nil }
+            return current.glassId == item.id
         case "accessoryId":
             if item.id == "none" { return current.accessoryIds.isEmpty }
             return current.accessoryIds.contains(item.id)
@@ -788,6 +816,10 @@ struct EquipmentView: View {
                     target.savedUnderIdForSuit = item.id
                     target.suitId = nil
                 }
+            case "hatId":
+                target.hatId = (item.id == "none") ? nil : item.id
+            case "glassId":
+                target.glassId = (item.id == "none") ? nil : item.id
             case "accessoryId":
                 if item.id == "none" {
                     target.accessoryIds = []
@@ -825,6 +857,8 @@ struct EquipmentView: View {
         appendIfMissing(categoryId: "suit", itemId: loadout.suitId)
         appendIfMissing(categoryId: "upper", itemId: loadout.upperId)
         appendIfMissing(categoryId: "under", itemId: loadout.underId)
+        appendIfMissing(categoryId: "hat", itemId: loadout.hatId)
+        appendIfMissing(categoryId: "glass", itemId: loadout.glassId)
         for accessoryId in loadout.accessoryIds {
             appendIfMissing(categoryId: "accessory", itemId: accessoryId)
         }
@@ -849,10 +883,71 @@ private struct TryOnPurchasePlan: Equatable {
     let missingItems: [TryOnMissingItem]
 }
 
+private enum EquipmentPreviewMetrics {
+    static let gridImageSize: CGFloat = 90
+    static let gridPreviewHeight: CGFloat = 106
+    static let tryOnCellSize: CGFloat = 64
+    static let tryOnPreviewPadding: CGFloat = 6
+}
+
 private enum GearOwnership {
     case equipped
     case owned
     case locked
+}
+
+enum EquipmentGridDisplay {
+    static func items(for category: GearCategory) -> [GearItem] {
+        category.items.filter { $0.id != "none" }
+    }
+}
+
+struct EquipmentPreviewLayout {
+    static func imageRect(imageSize: CGSize, in containerSize: CGSize) -> CGRect {
+        guard imageSize.width > 0, imageSize.height > 0, containerSize.width > 0, containerSize.height > 0 else {
+            return CGRect(origin: .zero, size: containerSize)
+        }
+
+        let scale = max(containerSize.width / imageSize.width, containerSize.height / imageSize.height)
+        let scaledSize = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
+        let origin = CGPoint(
+            x: (containerSize.width - scaledSize.width) / 2,
+            y: (containerSize.height - scaledSize.height) / 2
+        )
+        return CGRect(origin: origin, size: scaledSize)
+    }
+}
+
+private struct EquipmentPreviewImage: View {
+    let imageName: String
+    var opacity: Double = 1
+    var padding: CGFloat = 0
+
+    private var imageSize: CGSize {
+        UIImage(named: imageName)?.size ?? .zero
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let availableWidth = max(0, proxy.size.width - padding * 2)
+            let availableHeight = max(0, proxy.size.height - padding * 2)
+            let rect = EquipmentPreviewLayout.imageRect(
+                imageSize: imageSize,
+                in: CGSize(width: availableWidth, height: availableHeight)
+            )
+
+            Image(imageName)
+                .resizable()
+                .interpolation(.none)
+                .frame(width: rect.width, height: rect.height)
+                .position(
+                    x: padding + rect.midX,
+                    y: padding + rect.midY
+                )
+                .opacity(opacity)
+        }
+        .clipped()
+    }
 }
 
 private struct GearCard: View {
@@ -870,13 +965,12 @@ private struct GearCard: View {
                         : Color(red: 245.0 / 255.0, green: 245.0 / 255.0, blue: 247.0 / 255.0))
 
                 if let imageName {
-                    Image(imageName)
-                        .resizable()
-                        .interpolation(.none)
-                        .scaledToFit()
-                        .frame(width: 82, height: 82, alignment: .center)
+                    EquipmentPreviewImage(imageName: imageName, opacity: isLocked ? 0.45 : 1)
+                        .frame(
+                            width: EquipmentPreviewMetrics.gridImageSize,
+                            height: EquipmentPreviewMetrics.gridImageSize
+                        )
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                        .opacity(isLocked ? 0.45 : 1)
                 } else {
                     Image(systemName: "minus")
                         .font(.system(size: 16, weight: .bold))
@@ -884,7 +978,7 @@ private struct GearCard: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .frame(height: 98)
+            .frame(height: EquipmentPreviewMetrics.gridPreviewHeight)
             .overlay(alignment: .topLeading) {
                 if isLocked {
                     Image(systemName: "lock.fill")
@@ -978,7 +1072,15 @@ private struct EquipmentEconomy: Codable, Equatable {
         markOwned(categoryId: "upper", itemId: loadout.upperId)
         markOwned(categoryId: "under", itemId: loadout.underId)
         markOwned(categoryId: "expression", itemId: loadout.expressionId)
+        markOwned(categoryId: "hat", itemId: "none")
+        markOwned(categoryId: "glass", itemId: "none")
         markOwned(categoryId: "accessory", itemId: "none")
+        if let hatId = loadout.hatId {
+            markOwned(categoryId: "hat", itemId: hatId)
+        }
+        if let glassId = loadout.glassId {
+            markOwned(categoryId: "glass", itemId: glassId)
+        }
 
         for accessoryId in loadout.accessoryIds {
             markOwned(categoryId: "accessory", itemId: accessoryId)
@@ -1006,6 +1108,10 @@ private struct EquipmentEconomy: Codable, Equatable {
             return loadout.upperId
         case "underId":
             return loadout.underId
+        case "hatId":
+            return loadout.hatId
+        case "glassId":
+            return loadout.glassId
         case "accessoryId":
             return loadout.accessoryIds.first
         case "expressionId":

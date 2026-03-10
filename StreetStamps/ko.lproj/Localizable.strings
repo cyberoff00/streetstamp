@@ -215,6 +215,8 @@
 "equipment_status_owned" = "보유";
 "equipment_buy_short" = "구매 %d";
 "equipment_hair" = "헤어";
+"equipment_hat" = "모자";
+"equipment_glass" = "안경";
 "equipment_outfit" = "의상";
 "equipment_accessory" = "액세서리";
 "equipment_coming_soon" = "준비중";
@@ -418,6 +420,8 @@
 "visibility_public" = "공개";
 "journey_change_visibility" = "여정 공개 범위 변경";
 "journey_current_visibility_format" = "현재: %@";
+"journey_visibility_private_description" = "이 여정은 나만 볼 수 있습니다.";
+"journey_visibility_friends_description" = "친구들이 이 여정을 보고 좋아요를 남길 수 있습니다.";
 "journey_visibility_login_required" = "친구 공개로 전환할 수 없습니다. 먼저 로그인해 주세요.";
 "journey_visibility_requires_distance_or_memory" = "친구 공개로 전환할 수 없습니다. 여행 거리가 2km 이상이거나 추억이 최소 1개 있어야 합니다.";
 "unknown_id" = "unknown_id";

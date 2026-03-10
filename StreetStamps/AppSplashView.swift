@@ -51,7 +51,7 @@ struct AppSplashView: View {
                         .opacity(showWordmark ? 1 : 0)
                         .offset(y: showWordmark ? 0 : 20)
 
-                    Text("Log your life. Map your memories.")
+                    Text(L10n.t("splash_tagline"))
                         .font(.system(size: 18, weight: .medium))
                         .foregroundColor(Color.white.opacity(0.9))
                         .padding(.top, 12)

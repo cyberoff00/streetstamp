@@ -4,12 +4,14 @@ import UIKit
 import HealthKit
 
 enum LifelogRenderModeSelector {
-    static let nearModeDistanceThresholdMeters: CLLocationDistance = 2_000
+    static let nearModeLatitudeDeltaThreshold: CLLocationDegrees = 0.03
+    static let nearModeLongitudeDeltaThreshold: CLLocationDegrees = 0.03
     static let footprintStepMeters: CLLocationDistance = 50
 
-    static func isNearMode(viewportMaxSpanMeters: CLLocationDistance?) -> Bool {
-        guard let viewportMaxSpanMeters else { return false }
-        return viewportMaxSpanMeters <= nearModeDistanceThresholdMeters
+    static func isNearMode(_ region: MKCoordinateRegion?) -> Bool {
+        guard let region else { return false }
+        return abs(region.span.latitudeDelta) <= nearModeLatitudeDeltaThreshold &&
+            abs(region.span.longitudeDelta) <= nearModeLongitudeDeltaThreshold
     }
 
     static func viewportMaxSpanMeters(for region: MKCoordinateRegion) -> CLLocationDistance {
@@ -220,12 +222,8 @@ struct LifelogView: View {
     private var isDarkAppearance: Bool { mapAppearance == .dark }
     private var panelBackground: Color { isDarkAppearance ? Color.black.opacity(0.80) : FigmaTheme.card.opacity(0.96) }
     private var panelText: Color { isDarkAppearance ? .white : .black }
-    private var viewportMaxSpanMeters: CLLocationDistance? {
-        guard let region = cameraRegion ?? visibleRegion else { return nil }
-        return LifelogRenderModeSelector.viewportMaxSpanMeters(for: region)
-    }
     private var isNearFootprintMode: Bool {
-        LifelogRenderModeSelector.isNearMode(viewportMaxSpanMeters: viewportMaxSpanMeters)
+        LifelogRenderModeSelector.isNearMode(cameraRegion ?? visibleRegion)
     }
 
     private var renderViewportRefreshKey: String {

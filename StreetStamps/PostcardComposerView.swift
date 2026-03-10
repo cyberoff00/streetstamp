@@ -219,7 +219,7 @@ struct PostcardComposerView: View {
                           let uiImage = UIImage(data: data) else { return }
                     let filename = "postcard_\(UUID().uuidString).jpg"
                     let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
-                    if let jpeg = uiImage.jpegData(compressionQuality: 0.88) {
+                    if let jpeg = MediaUploadPreparation.preparePostcardUploadData(image: uiImage) {
                         try jpeg.write(to: url, options: .atomic)
                         selectedImage = uiImage
                         localImagePath = url.path

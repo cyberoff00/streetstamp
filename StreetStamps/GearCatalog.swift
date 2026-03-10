@@ -35,7 +35,7 @@ struct PartImages: Codable, Equatable {
 struct GearCategory: Codable, Equatable, Identifiable {
     var id: String
     var titleKey: String
-    /// Which property of RobotLoadout this category controls (hairId / suitId / upperId / underId / accessoryId / expressionId).
+    /// Which property of RobotLoadout this category controls (hairId / suitId / upperId / underId / hatId / glassId / accessoryId / expressionId).
     var selectionKey: String
     var items: [GearItem]
 }
@@ -76,7 +76,13 @@ final class AvatarCatalogStore: ObservableObject {
     }
 
     func item(categoryId: String, itemId: String) -> GearItem? {
-        catalog.categories.first(where: { $0.id == categoryId })?.items.first(where: { $0.id == itemId })
+        let normalizedItemId: String
+        if categoryId == "hair" {
+            normalizedItemId = RobotLoadout.normalizedHairId(itemId)
+        } else {
+            normalizedItemId = itemId
+        }
+        return catalog.categories.first(where: { $0.id == categoryId })?.items.first(where: { $0.id == normalizedItemId })
     }
 
     func imageName(_ images: PartImages, face: RobotFace) -> String? {
@@ -156,7 +162,25 @@ final class AvatarCatalogStore: ObservableObject {
                             id: "hair_0007",
                             nameKey: "Hair 0007",
                             layer: "hair",
-                            images: .init(front: "front_hair0007", right: nil, back: nil, left: nil)
+                            images: .init(front: "front_hair005", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "hair_0008",
+                            nameKey: "Hair 0008",
+                            layer: "hair",
+                            images: .init(front: "front_hair006", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "hair_0010",
+                            nameKey: "Hair 0010",
+                            layer: "hair",
+                            images: .init(front: "front_hair007", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "hair_0011",
+                            nameKey: "Hair 0011",
+                            layer: "hair",
+                            images: .init(front: "front_hair008", right: nil, back: nil, left: nil)
                         )
                     ]
                 ),
@@ -194,6 +218,24 @@ final class AvatarCatalogStore: ObservableObject {
                             nameKey: "Suit 0004",
                             layer: "suit",
                             images: .init(front: "front_suit004", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "suit_0005",
+                            nameKey: "Suit 0005",
+                            layer: "suit",
+                            images: .init(front: "front_suit005", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "suit_0006",
+                            nameKey: "Suit 0006",
+                            layer: "suit",
+                            images: .init(front: "front_suit006", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "suit_0007",
+                            nameKey: "Suit 0007",
+                            layer: "suit",
+                            images: .init(front: "front_suit007", right: nil, back: nil, left: nil)
                         )
                     ]
                 ),
@@ -213,6 +255,24 @@ final class AvatarCatalogStore: ObservableObject {
                             nameKey: "Upper 0001",
                             layer: "upper",
                             images: .init(front: "front_upper0001", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "upper_0009",
+                            nameKey: "Upper 0009",
+                            layer: "upper",
+                            images: .init(front: "front_upper8", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "upper_0010",
+                            nameKey: "Upper 0010",
+                            layer: "upper",
+                            images: .init(front: "front_upper009", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "upper_0011",
+                            nameKey: "Upper 0011",
+                            layer: "upper",
+                            images: .init(front: "front_upper010", right: nil, back: nil, left: nil)
                         )
                     ]
                 ),
@@ -236,6 +296,44 @@ final class AvatarCatalogStore: ObservableObject {
                     ]
                 ),
                 .init(
+                    id: "hat",
+                    titleKey: "equipment_hat",
+                    selectionKey: "hatId",
+                    items: [
+                        .init(
+                            id: "none",
+                            nameKey: "equipment_item_none",
+                            layer: "hat",
+                            images: .init(front: nil, right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "hat_001",
+                            nameKey: "Hat 001",
+                            layer: "hat",
+                            images: .init(front: "front_hat001", right: nil, back: nil, left: nil)
+                        )
+                    ]
+                ),
+                .init(
+                    id: "glass",
+                    titleKey: "equipment_glass",
+                    selectionKey: "glassId",
+                    items: [
+                        .init(
+                            id: "none",
+                            nameKey: "equipment_item_none",
+                            layer: "glass",
+                            images: .init(front: nil, right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "glass_001",
+                            nameKey: "Glass 001",
+                            layer: "glass",
+                            images: .init(front: "front_glass001", right: nil, back: nil, left: nil)
+                        )
+                    ]
+                ),
+                .init(
                     id: "accessory",
                     titleKey: "equipment_accessory",
                     selectionKey: "accessoryId",
@@ -247,10 +345,34 @@ final class AvatarCatalogStore: ObservableObject {
                             images: .init(front: nil, right: nil, back: nil, left: nil)
                         ),
                         .init(
-                            id: "acc_0001",
-                            nameKey: "Accessory 0001",
+                            id: "acc_001",
+                            nameKey: "Accessory 001",
                             layer: "accessory",
                             images: .init(front: "front_ac001", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "acc_002",
+                            nameKey: "Accessory 002",
+                            layer: "accessory",
+                            images: .init(front: "front_ac002", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "acc_003",
+                            nameKey: "Accessory 003",
+                            layer: "accessory",
+                            images: .init(front: "front_ac003", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "acc_004",
+                            nameKey: "Accessory 004",
+                            layer: "accessory",
+                            images: .init(front: "front_ac004", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "acc_005",
+                            nameKey: "Accessory 005",
+                            layer: "accessory",
+                            images: .init(front: "front_ac005", right: nil, back: nil, left: nil)
                         )
                     ]
                 )

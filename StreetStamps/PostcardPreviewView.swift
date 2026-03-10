@@ -162,6 +162,7 @@ struct PostcardPreviewView: View {
         let photoPathForSend = downsampledPhotoPath() ?? localImagePath
         let draft = postcardCenter.createDraft(
             toUserID: friendID,
+            toDisplayName: friendName,
             cityID: selectedCityID,
             cityName: selectedCityName,
             photoLocalPath: photoPathForSend,
@@ -189,7 +190,7 @@ struct PostcardPreviewView: View {
     /// Save the downsampled raw photo to a temp file for upload.
     private func downsampledPhotoPath() -> String? {
         guard let image = downsampledImage ?? selectedImage,
-              let data = image.jpegData(compressionQuality: 0.82) else {
+              let data = MediaUploadPreparation.preparePostcardUploadData(image: image) else {
             return nil
         }
         let fileName = "postcard_photo_\(UUID().uuidString).jpg"

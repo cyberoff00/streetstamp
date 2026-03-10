@@ -887,13 +887,11 @@ final class UserSessionStore: ObservableObject {
         guestID: String,
         sourceDevice: String
     ) -> [String] {
-        let bindings = loadLegacyBindings()
-            .filter { $0.guestID == guestID && $0.sourceDevice == sourceDevice }
-            .map(\.legacyUserID)
+        let guestCandidates = localGuestRecoverySourceUserIDs(currentGuestScopedUserID: "guest_\(guestID)")
         let accountBindings = loadGuestAccountBindings()
             .filter { $0.guestID == guestID && $0.sourceDevice == sourceDevice }
             .map { "account_\($0.accountUserID)" }
-        let explicitCandidates = [currentGuestScopedUserID] + bindings + accountBindings
+        let explicitCandidates = guestCandidates + accountBindings
         return orderedRecoverableSourceUserIDs(
             explicitCandidates,
             targetUserID: targetUserID,
@@ -906,18 +904,44 @@ final class UserSessionStore: ObservableObject {
         guestID: String,
         sourceDevice: String
     ) -> [String] {
-        let bindings = loadLegacyBindingsWorker()
-            .filter { $0.guestID == guestID && $0.sourceDevice == sourceDevice }
-            .map(\.legacyUserID)
+        let guestCandidates = localGuestRecoverySourceUserIDsWorker(currentGuestScopedUserID: "guest_\(guestID)")
         let accountBindings = loadGuestAccountBindingsWorker()
             .filter { $0.guestID == guestID && $0.sourceDevice == sourceDevice }
             .map { "account_\($0.accountUserID)" }
-        let explicitCandidates = ["guest_\(guestID)"] + bindings + accountBindings
+        let explicitCandidates = guestCandidates + accountBindings
         return orderedRecoverableSourceUserIDsWorker(
             explicitCandidates,
             targetUserID: targetUserID,
             hasRecoverableData: hasRecoverableDataWorker(at:)
         )
+    }
+
+    private func localGuestRecoverySourceUserIDs(currentGuestScopedUserID: String) -> [String] {
+        Self.localGuestRecoverySourceUserIDsWorker(currentGuestScopedUserID: currentGuestScopedUserID)
+    }
+
+    nonisolated private static func localGuestRecoverySourceUserIDsWorker(
+        currentGuestScopedUserID: String
+    ) -> [String] {
+        let fm = FileManager.default
+        let usersRoot = StoragePath(userID: currentGuestScopedUserID).userRoot.deletingLastPathComponent()
+        guard fm.fileExists(atPath: usersRoot.path),
+              let entries = try? fm.contentsOfDirectory(
+                at: usersRoot,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+              ) else {
+            return [currentGuestScopedUserID]
+        }
+
+        let discoveredGuests = entries.compactMap { url -> String? in
+            guard (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { return nil }
+            let userID = url.lastPathComponent
+            guard userID.hasPrefix("guest_") else { return nil }
+            return userID
+        }
+
+        return Array(Set(discoveredGuests + [currentGuestScopedUserID]))
     }
 
     private func orderedRecoverableSourceUserIDs(

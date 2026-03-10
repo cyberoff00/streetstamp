@@ -293,6 +293,14 @@ final class CityThumbnailCache {
         return FileManager.default.fileExists(atPath: fullPath)
     }
 
+    static func storeRenderedImage(_ image: UIImage, relativePath: String) {
+        guard let fullPath = resolveFullPath(relativePath),
+              let data = image.jpegData(compressionQuality: 0.82) else { return }
+        let url = URL(fileURLWithPath: fullPath)
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: nil)
+        try? data.write(to: url, options: [.atomic])
+    }
+
     /// `dir` should be user-scoped (e.g. .../<userID>/Thumbnails)
     init(dir: URL) {
         self.dir = dir
@@ -331,6 +339,57 @@ final class CityThumbnailCache {
         return s.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" }
             .map(String.init)
             .joined()
+    }
+}
+
+final class CityRenderCacheStore: ObservableObject {
+    private let fm: FileManager
+    private var rootDir: URL
+
+    init(rootDir: URL, fm: FileManager = .default) {
+        self.rootDir = rootDir
+        self.fm = fm
+        ensureDirectoryExists()
+    }
+
+    func rebind(rootDir: URL) {
+        self.rootDir = rootDir
+        ensureDirectoryExists()
+    }
+
+    func relativePath(forKey key: String) -> String {
+        CityThumbnailLoader.renderCacheRelativePath(forKey: key)
+    }
+
+    func fullPath(forKey key: String) -> String {
+        rootDir.appendingPathComponent(relativePath(forKey: key), isDirectory: false).path
+    }
+
+    func fullPath(forRelativePath relativePath: String) -> String {
+        rootDir.appendingPathComponent(relativePath, isDirectory: false).path
+    }
+
+    func exists(forKey key: String) -> Bool {
+        fm.fileExists(atPath: fullPath(forKey: key))
+    }
+
+    func image(forKey key: String) -> UIImage? {
+        let path = fullPath(forKey: key)
+        guard fm.fileExists(atPath: path) else { return nil }
+        return UIImage(contentsOfFile: path)
+    }
+
+    func save(_ image: UIImage, forKey key: String) {
+        guard let data = image.jpegData(compressionQuality: 0.82) else { return }
+        let url = rootDir.appendingPathComponent(relativePath(forKey: key), isDirectory: false)
+        try? fm.createDirectory(at: rootDir, withIntermediateDirectories: true, attributes: nil)
+        try? data.write(to: url, options: [.atomic])
+    }
+
+    private func ensureDirectoryExists() {
+        if !fm.fileExists(atPath: rootDir.path) {
+            try? fm.createDirectory(at: rootDir, withIntermediateDirectories: true, attributes: nil)
+        }
     }
 }
 

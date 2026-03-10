@@ -232,6 +232,86 @@ final class GuestDataRecoveryServiceTests: XCTestCase {
         try? fm.removeItem(at: accountPaths.userRoot)
     }
 
+    @MainActor
+    func test_bootstrapFileSystemAsync_importsRecoverableGuestSourceEvenWhenBindingSourceDeviceDiffers() async throws {
+        let store = UserSessionStore()
+        store.logoutToGuest()
+        store.clearPendingGuestMigrationMarker()
+
+        let fm = FileManager.default
+        let localPaths = StoragePath(userID: store.activeLocalProfileID)
+        let recoverableGuestUserID = "guest_legacy_recover_\(UUID().uuidString)"
+        let recoverableGuestPaths = StoragePath(userID: recoverableGuestUserID)
+        let recoveredJourneyID = "journey-\(UUID().uuidString)"
+
+        try? fm.removeItem(at: localPaths.userRoot)
+        try? fm.removeItem(at: recoverableGuestPaths.userRoot)
+        try localPaths.ensureBaseDirectoriesExist()
+        try recoverableGuestPaths.ensureBaseDirectoriesExist()
+        try writeJourney(
+            id: recoveredJourneyID,
+            coordinatesCount: 5,
+            to: recoverableGuestPaths,
+            modifiedAt: Date(timeIntervalSince1970: 1_900_000_000)
+        )
+        try saveLegacyGuestBindings([
+            LegacyGuestBinding(
+                legacyUserID: recoverableGuestUserID,
+                guestID: store.guestID,
+                migratedAt: Date(),
+                sourceDevice: "other-device"
+            )
+        ])
+
+        await store.bootstrapFileSystemAsync()
+
+        XCTAssertEqual(loadJourneyCoordinatesCount(id: recoveredJourneyID, from: localPaths), 5)
+
+        try? fm.removeItem(at: localPaths.userRoot)
+        try? fm.removeItem(at: recoverableGuestPaths.userRoot)
+        clearRecoveryMetadata()
+    }
+
+    @MainActor
+    func test_bootstrapFileSystemAsync_doesNotImportAccountSourceWhenBindingSourceDeviceDiffers() async throws {
+        let store = UserSessionStore()
+        store.logoutToGuest()
+        store.clearPendingGuestMigrationMarker()
+
+        let fm = FileManager.default
+        let localPaths = StoragePath(userID: store.activeLocalProfileID)
+        let accountUserID = "mismatched-device-\(UUID().uuidString)"
+        let accountPaths = StoragePath(userID: "account_\(accountUserID)")
+        let accountJourneyID = "journey-\(UUID().uuidString)"
+
+        try? fm.removeItem(at: localPaths.userRoot)
+        try? fm.removeItem(at: accountPaths.userRoot)
+        try localPaths.ensureBaseDirectoriesExist()
+        try accountPaths.ensureBaseDirectoriesExist()
+        try writeJourney(
+            id: accountJourneyID,
+            coordinatesCount: 7,
+            to: accountPaths,
+            modifiedAt: Date(timeIntervalSince1970: 1_910_000_000)
+        )
+        try saveGuestAccountBindings([
+            GuestAccountBinding(
+                guestID: store.guestID,
+                accountUserID: accountUserID,
+                boundAt: Date(),
+                sourceDevice: "other-device"
+            )
+        ])
+
+        await store.bootstrapFileSystemAsync()
+
+        XCTAssertEqual(loadJourneyCoordinatesCount(id: accountJourneyID, from: localPaths), 0)
+
+        try? fm.removeItem(at: localPaths.userRoot)
+        try? fm.removeItem(at: accountPaths.userRoot)
+        clearRecoveryMetadata()
+    }
+
     private func writeMoodFile(value: String, to paths: StoragePath) throws {
         let moodKey = dayKey(Calendar.current.startOfDay(for: Date()))
         let moodURL = paths.cachesDir.appendingPathComponent("lifelog_mood.json", isDirectory: false)
@@ -303,6 +383,22 @@ final class GuestDataRecoveryServiceTests: XCTestCase {
             components.month ?? 1,
             components.day ?? 1
         )
+    }
+
+    private func saveLegacyGuestBindings(_ bindings: [LegacyGuestBinding]) throws {
+        let data = try JSONEncoder().encode(bindings)
+        UserDefaults.standard.set(data, forKey: "streetstamps.legacy_guest_bindings.v1")
+    }
+
+    private func saveGuestAccountBindings(_ bindings: [GuestAccountBinding]) throws {
+        let data = try JSONEncoder().encode(bindings)
+        UserDefaults.standard.set(data, forKey: "streetstamps.guest_account_bindings.v1")
+    }
+
+    private func clearRecoveryMetadata() {
+        UserDefaults.standard.removeObject(forKey: "streetstamps.legacy_guest_bindings.v1")
+        UserDefaults.standard.removeObject(forKey: "streetstamps.guest_account_bindings.v1")
+        UserDefaults.standard.removeObject(forKey: "streetstamps.auto_recovered_guest_sources.v1")
     }
 }
 

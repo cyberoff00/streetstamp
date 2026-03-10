@@ -54,6 +54,16 @@ async function requestJSON(port, method, pathName, token, body) {
   return { status: resp.status, data };
 }
 
+async function requestText(port, pathName) {
+  const resp = await fetch(`http://127.0.0.1:${port}${pathName}`);
+  const text = await resp.text();
+  return {
+    status: resp.status,
+    contentType: resp.headers.get("content-type") || "",
+    text
+  };
+}
+
 async function readOutbox(outboxFile) {
   try {
     return JSON.parse(await fs.readFile(outboxFile, "utf8"));
@@ -125,12 +135,21 @@ async function run() {
     const resetMail = forgotOutbox.find((item) => item.kind === "password_reset" && item.to === "reset-me@example.com");
     assert.ok(resetMail, "expected password reset email");
     assert.equal(
-      resetMail.resetURL.startsWith("streetstamps://reset-password?token="),
+      resetMail.resetURL.startsWith(`http://127.0.0.1:${PORT}/reset-password?token=`),
       true,
-      "expected password reset link to use the app deep link scheme"
+      "expected password reset link to use the browser landing route"
     );
     const resetToken = extractToken(resetMail.resetURL);
     assert.ok(resetToken);
+
+    const resetPage = await requestText(PORT, `/reset-password?token=${encodeURIComponent(resetToken)}`);
+    assert.equal(resetPage.status, 200);
+    assert.match(resetPage.contentType, /text\/html/i);
+    assert.match(resetPage.text, /streetstamps:\/\/reset-password\?token=/i);
+
+    const invalidResetPage = await requestText(PORT, "/reset-password?token=invalid-token");
+    assert.equal(invalidResetPage.status, 400);
+    assert.match(invalidResetPage.text, /invalid|expired|reset/i);
 
     const reset = await requestJSON(PORT, "POST", "/v1/auth/reset-password", null, {
       token: resetToken,

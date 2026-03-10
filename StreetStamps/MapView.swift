@@ -211,6 +211,16 @@ extension UIImage {
     }
 }
 
+enum MediaUploadPreparation {
+    static let postcardMaxPixel: CGFloat = 2048
+    static let postcardCompressionQuality: CGFloat = 0.85
+
+    static func preparePostcardUploadData(image: UIImage) -> Data? {
+        let prepared = image.downscaled(maxPixel: postcardMaxPixel)
+        return prepared.jpegData(compressionQuality: postcardCompressionQuality)
+    }
+}
+
 // =======================================================
 // MARK: - Journey merge helper
 // =======================================================
@@ -321,6 +331,12 @@ struct JourneyRoute: Codable {
     }
 
     var isCompleted: Bool { endTime != nil && startTime != nil }
+
+    var hasJourneyMemoryListContent: Bool {
+        if !memories.isEmpty { return true }
+        let trimmedOverallMemory = overallMemory?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return !trimmedOverallMemory.isEmpty
+    }
 
     var displayCityName: String {
         let unknownLocalized = L10n.t("unknown")
@@ -960,30 +976,11 @@ struct MapView: View {
                         showModeSelector = true
                     }
                 } label: {
-                    HStack(spacing: pillPresentation.horizontalSpacing) {
-                        Image(systemName: pillPresentation.symbolName)
-                            .font(.system(size: pillPresentation.iconFontSize, weight: .medium))
-                            .foregroundColor(FigmaTheme.text.opacity(pillPresentation.foregroundOpacity))
-                        Text(journeyRoute.trackingMode == .sport ? L10n.key("lockscreen_sport_mode") : L10n.key("lockscreen_daily_mode"))
-                            .font(.system(size: 11, weight: .semibold))
-                            .lineLimit(1)
-                            .foregroundColor(FigmaTheme.text.opacity(pillPresentation.foregroundOpacity))
-                    }
-                    .padding(.horizontal, 13)
-                    .frame(height: 34)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(.ultraThinMaterial)
-                    )
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .fill(FigmaTheme.background.opacity(pillPresentation.backgroundOpacity))
-                    )
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .stroke(FigmaTheme.text.opacity(pillPresentation.borderOpacity), lineWidth: 0.8)
-                    )
-                    .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
+                    Image(systemName: pillPresentation.symbolName)
+                        .font(.system(size: pillPresentation.iconFontSize, weight: .medium))
+                        .foregroundColor(FigmaTheme.text.opacity(pillPresentation.foregroundOpacity))
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
@@ -1692,6 +1689,7 @@ struct MemoryDetailPage: View {
     @EnvironmentObject private var sessionStore: UserSessionStore
     let memory: JourneyMemory
     @Binding var isPresented: Bool
+    let allowsEditing: Bool
     let onUpdated: (JourneyMemory?) -> Void
 
     @State private var showViewer: Bool = false
@@ -1713,10 +1711,12 @@ struct MemoryDetailPage: View {
                     Spacer()
 
                     HStack(spacing: 10) {
-                        Button { showEditor = true } label: {
-                            Image(systemName: "square.and.pencil")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.gray)
+                        if allowsEditing {
+                            Button { showEditor = true } label: {
+                                Image(systemName: "square.and.pencil")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.gray)
+                            }
                         }
 
                         Button { isPresented = false } label: {

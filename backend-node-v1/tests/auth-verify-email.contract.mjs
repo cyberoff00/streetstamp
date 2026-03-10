@@ -57,6 +57,16 @@ async function requestJSON(port, method, pathName, body) {
   return { status: resp.status, data };
 }
 
+async function requestText(port, pathName) {
+  const resp = await fetch(`http://127.0.0.1:${port}${pathName}`);
+  const text = await resp.text();
+  return {
+    status: resp.status,
+    contentType: resp.headers.get("content-type") || "",
+    text
+  };
+}
+
 async function readOutbox(outboxFile) {
   try {
     const raw = await fs.readFile(outboxFile, "utf8");
@@ -120,20 +130,19 @@ async function run() {
     assert.ok(resentToken, "expected token in resent verification link");
     assert.notEqual(resentToken, issuedToken, "expected resend to issue a fresh token");
 
-    const verified = await requestJSON(PORT, "POST", "/v1/auth/verify-email", {
-      token: issuedToken
-    });
-    assert.equal(verified.status, 200);
+    const verifiedPage = await requestText(PORT, `/verify-email?token=${encodeURIComponent(issuedToken)}`);
+    assert.equal(verifiedPage.status, 200);
+    assert.match(verifiedPage.contentType, /text\/html/i);
+    assert.match(verifiedPage.text, /email verified/i);
 
     let state = JSON.parse(await fs.readFile(dataFile, "utf8"));
     let identity = Object.values(state.authIdentities).find((item) => item.email === "verify-me@example.com");
     assert.ok(identity, "expected persisted email identity");
     assert.equal(identity.emailVerified, true);
 
-    const reused = await requestJSON(PORT, "POST", "/v1/auth/verify-email", {
-      token: issuedToken
-    });
-    assert.equal(reused.status, 400);
+    const reusedPage = await requestText(PORT, `/verify-email?token=${encodeURIComponent(issuedToken)}`);
+    assert.equal(reusedPage.status, 400);
+    assert.match(reusedPage.text, /invalid|expired|used/i);
 
     const expiredCreated = await requestJSON(PORT, "POST", "/v1/auth/register", {
       email: "expired@example.com",
@@ -158,10 +167,9 @@ async function run() {
     child = startServer({ port: PORT, dataFile, mediaDir, outboxFile });
     await waitForHealth(PORT);
 
-    const expired = await requestJSON(PORT, "POST", "/v1/auth/verify-email", {
-      token: expiredToken
-    });
-    assert.equal(expired.status, 400);
+    const expiredPage = await requestText(PORT, `/verify-email?token=${encodeURIComponent(expiredToken)}`);
+    assert.equal(expiredPage.status, 400);
+    assert.match(expiredPage.text, /invalid|expired|used/i);
 
     console.log("auth verify email contract: PASS");
   } finally {

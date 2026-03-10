@@ -29,6 +29,7 @@ final class PostcardCenter: ObservableObject {
 
     func createDraft(
         toUserID: String,
+        toDisplayName: String?,
         cityID: String,
         cityName: String,
         photoLocalPath: String,
@@ -40,6 +41,7 @@ final class PostcardCenter: ObservableObject {
             draftID: id,
             clientDraftID: id,
             toUserID: toUserID,
+            toDisplayName: toDisplayName,
             cityID: cityID,
             cityName: cityName,
             photoLocalPath: photoLocalPath,

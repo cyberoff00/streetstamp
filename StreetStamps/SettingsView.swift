@@ -658,21 +658,21 @@ struct SettingsView: View {
 
             VStack(spacing: 10) {
                 settingsRow(
-                    title: "CHECK FOR\nUPDATES",
+                    title: L10n.t("settings_check_updates_title"),
                     icon: "sparkles",
                     iconColor: FigmaTheme.secondary,
                     badgeText: appVersionText,
                     rowHeight: 88
                 ) {
-                    showPlaceholder("Check for Updates")
+                    showPlaceholder(L10n.t("settings_check_updates_placeholder"))
                 }
 
-                settingsRow(title: "ABOUT US", icon: "info.circle", iconColor: .black.opacity(0.75)) {
-                    showPlaceholder("About Us")
+                settingsRow(title: L10n.t("settings_about_us_title"), icon: "info.circle", iconColor: .black.opacity(0.75)) {
+                    showPlaceholder(L10n.t("settings_about_us_placeholder"))
                 }
 
-                settingsRow(title: "PRIVACY POLICY", icon: "shield", iconColor: .black.opacity(0.75)) {
-                    showPlaceholder("Privacy Policy")
+                settingsRow(title: L10n.t("settings_privacy_policy_title"), icon: "shield", iconColor: .black.opacity(0.75)) {
+                    showPlaceholder(L10n.t("settings_privacy_policy_placeholder"))
                 }
             }
         }
@@ -686,7 +686,7 @@ struct SettingsView: View {
                         .font(.system(size: 20, weight: .bold))
                         .foregroundColor(FigmaTheme.text)
 
-                    Text("公开 Journey 建议登录后从云端恢复；此处仅迁移本地私密 Journey / Memory 图片与 Lifelog。两台设备保持在同一 Wi-Fi。")
+                    Text(L10n.t("settings_private_transfer_intro"))
                         .font(.system(size: 14, weight: .regular))
                         .foregroundColor(FigmaTheme.subtext)
                 }
@@ -2304,10 +2304,10 @@ private struct QRCodeScannerSheet: View {
                 .ignoresSafeArea()
 
                 VStack(spacing: 8) {
-                    Text("扫描旧设备显示的迁移二维码")
+                    Text(L10n.t("settings_transfer_scan_hint"))
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(.white)
-                    Text("请保持两台设备在同一 Wi-Fi 下")
+                    Text(L10n.t("settings_transfer_same_wifi_hint"))
                         .font(.system(size: 12, weight: .regular))
                         .foregroundColor(.white.opacity(0.9))
                 }

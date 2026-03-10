@@ -3,6 +3,12 @@ set -euo pipefail
 
 BASE_URL="${BASE_URL:-https://api.streetstamps.cyberkkk.cn}"
 
+if [[ "$BASE_URL" == "https://api.streetstamps.cyberkkk.cn" && "${ALLOW_PROD_MUTATION:-0}" != "1" ]]; then
+  echo "[FAIL] Refusing to run mutating smoke checks against production without ALLOW_PROD_MUTATION=1"
+  echo "[FAIL] Use ./scripts/readonly_prod_check.sh for read-only production verification"
+  exit 1
+fi
+
 json_get() {
   local path="$1"
   python3 -c 'import json,sys

@@ -17,4 +17,9 @@ final class ProfileHeaderPresentationTests: XCTestCase {
             "还差 3 段旅程升级"
         )
     }
+
+    func test_social_notification_policy_includes_friend_request_events() {
+        XCTAssertTrue(SocialNotificationPolicy.supports(type: "friend_request"))
+        XCTAssertTrue(SocialNotificationPolicy.supports(type: "friend_request_accepted"))
+    }
 }
