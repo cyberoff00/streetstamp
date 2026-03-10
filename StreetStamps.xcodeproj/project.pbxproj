@@ -19,6 +19,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		A7A100102F70000100AA0001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B5F75DAE2F0D641D00FEF837 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B5F75DB52F0D641D00FEF837;
+			remoteInfo = StreetStamps;
+		};
 		B53E1F892F24FA2D00055ED1 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = B5F75DAE2F0D641D00FEF837 /* Project object */;
@@ -71,6 +78,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A7A100112F70000100AA0001 /* StreetStampsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = StreetStampsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B53E1F782F24FA2C00055ED1 /* TrackingWidgeExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TrackingWidgeExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		B53E1F792F24FA2C00055ED1 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		B53E1F7B2F24FA2C00055ED1 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
@@ -106,6 +114,11 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		A7A100122F70000100AA0001 /* StreetStampsTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = StreetStampsTests;
+			sourceTree = "<group>";
+		};
 		B53E1F7D2F24FA2C00055ED1 /* TrackingWidge */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -133,6 +146,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		A7A100132F70000100AA0001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B53E1F752F24FA2C00055ED1 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -176,6 +196,7 @@
 			isa = PBXGroup;
 			children = (
 				B5F75DB82F0D641D00FEF837 /* StreetStamps */,
+				A7A100122F70000100AA0001 /* StreetStampsTests */,
 				C1A100012F30000100AA0007 /* StreetStampsWatch */,
 				B53E1F7D2F24FA2C00055ED1 /* TrackingWidge */,
 				B5C3186F2F14F17000397BE9 /* Frameworks */,
@@ -189,6 +210,7 @@
 			isa = PBXGroup;
 			children = (
 				B5F75DB62F0D641D00FEF837 /* StreetStamps.app */,
+				A7A100112F70000100AA0001 /* StreetStampsTests.xctest */,
 				C1A100012F30000100AA0005 /* StreetStampsWatch.app */,
 				B53E1F782F24FA2C00055ED1 /* TrackingWidgeExtension.appex */,
 			);
@@ -198,6 +220,29 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		A7A100142F70000100AA0001 /* StreetStampsTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A7A1001B2F70000100AA0001 /* Build configuration list for PBXNativeTarget "StreetStampsTests" */;
+			buildPhases = (
+				A7A100152F70000100AA0001 /* Sources */,
+				A7A100132F70000100AA0001 /* Frameworks */,
+				A7A100162F70000100AA0001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A7A100172F70000100AA0001 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				A7A100122F70000100AA0001 /* StreetStampsTests */,
+			);
+			name = StreetStampsTests;
+			packageProductDependencies = (
+			);
+			productName = StreetStampsTests;
+			productReference = A7A100112F70000100AA0001 /* StreetStampsTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		B53E1F772F24FA2C00055ED1 /* TrackingWidgeExtension */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = B53E1F8F2F24FA2D00055ED1 /* Build configuration list for PBXNativeTarget "TrackingWidgeExtension" */;
@@ -283,6 +328,10 @@
 				LastSwiftUpdateCheck = 2620;
 				LastUpgradeCheck = 2620;
 				TargetAttributes = {
+					A7A100142F70000100AA0001 = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = B5F75DB52F0D641D00FEF837;
+					};
 					B53E1F772F24FA2C00055ED1 = {
 						CreatedOnToolsVersion = 26.2;
 					};
@@ -321,6 +370,7 @@
 			projectRoot = "";
 			targets = (
 				B5F75DB52F0D641D00FEF837 /* StreetStamps */,
+				A7A100142F70000100AA0001 /* StreetStampsTests */,
 				C1A100012F30000100AA000B /* StreetStampsWatch */,
 				B53E1F772F24FA2C00055ED1 /* TrackingWidgeExtension */,
 			);
@@ -328,6 +378,13 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		A7A100162F70000100AA0001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B53E1F762F24FA2C00055ED1 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -353,6 +410,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		A7A100152F70000100AA0001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B53E1F742F24FA2C00055ED1 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -377,6 +441,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		A7A100172F70000100AA0001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B5F75DB52F0D641D00FEF837 /* StreetStamps */;
+			targetProxy = A7A100102F70000100AA0001 /* PBXContainerItemProxy */;
+		};
 		B53E1F8A2F24FA2D00055ED1 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = B53E1F772F24FA2C00055ED1 /* TrackingWidgeExtension */;
@@ -390,6 +459,53 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		A7A100182F70000100AA0001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = XNPB3GQ7SF;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.claire.streetstamps.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/StreetStamps.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/StreetStamps";
+			};
+			name = Debug;
+		};
+		A7A100192F70000100AA0001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = XNPB3GQ7SF;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.claire.streetstamps.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/StreetStamps.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/StreetStamps";
+			};
+			name = Release;
+		};
 		B53E1F8D2F24FA2D00055ED1 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -714,6 +830,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		A7A1001B2F70000100AA0001 /* Build configuration list for PBXNativeTarget "StreetStampsTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A7A100182F70000100AA0001 /* Debug */,
+				A7A100192F70000100AA0001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		B53E1F8F2F24FA2D00055ED1 /* Build configuration list for PBXNativeTarget "TrackingWidgeExtension" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

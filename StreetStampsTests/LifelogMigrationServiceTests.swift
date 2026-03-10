@@ -38,19 +38,25 @@ final class LifelogMigrationServiceTests: XCTestCase {
     }
 
     private func makePayload(pointCount: Int) -> Data {
-        let points = (0..<pointCount).map { idx in
-            [
-                "lat": 37.0 + Double(idx) * 0.001,
-                "lon": -122.0 - Double(idx) * 0.001,
+        var points: [[String: Double]] = []
+        points.reserveCapacity(pointCount)
+        var coordinates: [[String: Double]] = []
+        coordinates.reserveCapacity(pointCount)
+
+        for idx in 0..<pointCount {
+            let lat = 37.0 + Double(idx) * 0.001
+            let lon = -122.0 - Double(idx) * 0.001
+            points.append([
+                "lat": lat,
+                "lon": lon,
                 "timestamp": 793_972_000.0 + Double(idx) * 30.0
-            ]
+            ])
+            coordinates.append([
+                "lat": lat,
+                "lon": lon
+            ])
         }
-        let coordinates = (0..<pointCount).map { idx in
-            [
-                "lat": 37.0 + Double(idx) * 0.001,
-                "lon": -122.0 - Double(idx) * 0.001
-            ]
-        }
+
         let payload: [String: Any] = [
             "points": points,
             "coordinates": coordinates,

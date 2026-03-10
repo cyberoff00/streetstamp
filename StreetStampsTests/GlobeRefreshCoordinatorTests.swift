@@ -2,6 +2,39 @@ import XCTest
 @testable import StreetStamps
 
 final class GlobeRefreshCoordinatorTests: XCTestCase {
+    func test_routeResolver_passiveMixedCountrySegments_needIndependentCountryMetadata() {
+        let day = Date(timeIntervalSince1970: 1_700_000_000)
+        let segments = [
+            TrackTileSegment(
+                sourceType: .passive,
+                coordinates: [
+                    CoordinateCodable(lat: 51.5074, lon: -0.1278),
+                    CoordinateCodable(lat: 51.5078, lon: -0.1270)
+                ],
+                startTimestamp: day,
+                endTimestamp: day.addingTimeInterval(60)
+            ),
+            TrackTileSegment(
+                sourceType: .passive,
+                coordinates: [
+                    CoordinateCodable(lat: 39.9042, lon: 116.4074),
+                    CoordinateCodable(lat: 39.9046, lon: 116.4080)
+                ],
+                startTimestamp: day.addingTimeInterval(120),
+                endTimestamp: day.addingTimeInterval(180)
+            )
+        ]
+
+        let resolved = GlobeRouteResolver.resolve(
+            externalJourneys: nil,
+            summaryJourneys: [],
+            segments: segments,
+            countryISO2: "CN"
+        )
+
+        XCTAssertEqual(Set(resolved.compactMap(\.countryISO2)), Set(["GB", "CN"]), "Expected globe passive routes to preserve independent country attribution instead of inheriting one request-level country.")
+    }
+
     func test_refreshGate_queuesSecondRefreshWhileBusy() {
         var gate = GlobeRefreshGate()
 
