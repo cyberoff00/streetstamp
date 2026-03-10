@@ -58,6 +58,9 @@ struct StoragePath: Sendable {
     var lifelogLegacyRouteURL: URL { cachesDir.appendingPathComponent("lifelog_route.json", isDirectory: false) }
     var lifelogPassiveRouteURL: URL { cachesDir.appendingPathComponent("lifelog_passive_route.json", isDirectory: false) }
     var lifelogRouteURL: URL { lifelogPassiveRouteURL }
+    var lifelogCountryCellsURL: URL { cachesDir.appendingPathComponent("lifelog_country_cells.json", isDirectory: false) }
+    var lifelogPointCountriesURL: URL { cachesDir.appendingPathComponent("lifelog_point_countries.json", isDirectory: false) }
+    var lifelogCountryRunsURL: URL { cachesDir.appendingPathComponent("lifelog_country_runs.json", isDirectory: false) }
 
     /// Legacy route cache file - only used for V3 migration from older versions.
     /// Can be removed in a future version once all users have migrated.

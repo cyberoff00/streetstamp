@@ -3,6 +3,8 @@ import XCTest
 @testable import StreetStamps
 
 final class LifelogStoreBehaviorTests: XCTestCase {
+    private let attributionResolvedAt = Date(timeIntervalSince1970: 1_700_000_000)
+
     private struct PersistedLifelogPoint: Codable {
         let lat: Double
         let lon: Double
@@ -471,6 +473,46 @@ final class LifelogStoreBehaviorTests: XCTestCase {
         let roundTrip = LifelogStepSnapshotCache(rawValue: cache.rawValue)
         XCTAssertEqual(roundTrip.value(forDayKey: "2026-03-03"), 1234)
         XCTAssertEqual(roundTrip.value(forDayKey: "2026-03-04"), 2222)
+    }
+
+    func test_countryAttributionStore_roundTripsCellPointAndRunSnapshots() throws {
+        let userID = "lifelog-country-attribution-\(UUID().uuidString)"
+        let paths = StoragePath(userID: userID)
+        try? FileManager.default.removeItem(at: paths.userRoot)
+        try paths.ensureBaseDirectoriesExist()
+
+        let snapshot = LifelogCountryAttributionSnapshot(
+            cells: [
+                LifelogCellCountryRecord(
+                    cellID: "12990:29640",
+                    iso2: "CN",
+                    source: .reverseGeocode,
+                    confidence: 1.0,
+                    resolvedAt: attributionResolvedAt
+                )
+            ],
+            points: [
+                LifelogPointCountryRecord(
+                    pointID: "point-1",
+                    cellID: "12990:29640",
+                    iso2: "CN"
+                )
+            ],
+            runs: [
+                LifelogCountryRunRecord(
+                    startPointID: "point-1",
+                    endPointID: "point-4",
+                    iso2: "CN"
+                )
+            ]
+        )
+
+        let store = LifelogCountryAttributionStore(paths: paths)
+        try store.save(snapshot)
+
+        let loaded = try store.load()
+
+        XCTAssertEqual(loaded, snapshot)
     }
 
     @MainActor
