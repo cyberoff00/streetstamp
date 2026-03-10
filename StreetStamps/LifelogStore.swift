@@ -26,24 +26,61 @@ final class LifelogStore: ObservableObject {
     }
 
     private struct LifelogTrackPoint: Codable {
+        var id: String
         var lat: Double
         var lon: Double
         var timestamp: Date
+        var accuracy: Double?
+        var cellID: String
 
-        init(lat: Double, lon: Double, timestamp: Date) {
+        init(
+            id: String = UUID().uuidString,
+            lat: Double,
+            lon: Double,
+            timestamp: Date,
+            accuracy: Double? = nil,
+            cellID: String? = nil
+        ) {
+            self.id = id
             self.lat = lat
             self.lon = lon
             self.timestamp = timestamp
+            self.accuracy = accuracy
+            self.cellID = cellID ?? TrackPointCellID.make(lat: lat, lon: lon)
         }
 
-        init(_ coord: CoordinateCodable, timestamp: Date) {
-            self.lat = coord.lat
-            self.lon = coord.lon
-            self.timestamp = timestamp
+        init(_ coord: CoordinateCodable, timestamp: Date, accuracy: Double? = nil) {
+            self.init(
+                lat: coord.lat,
+                lon: coord.lon,
+                timestamp: timestamp,
+                accuracy: accuracy,
+                cellID: TrackPointCellID.make(for: coord)
+            )
         }
 
         var coord: CoordinateCodable {
             CoordinateCodable(lat: lat, lon: lon)
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case id
+            case lat
+            case lon
+            case timestamp
+            case accuracy
+            case cellID
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+            lat = try container.decode(Double.self, forKey: .lat)
+            lon = try container.decode(Double.self, forKey: .lon)
+            timestamp = try container.decode(Date.self, forKey: .timestamp)
+            accuracy = try container.decodeIfPresent(Double.self, forKey: .accuracy)
+            cellID = try container.decodeIfPresent(String.self, forKey: .cellID)
+                ?? TrackPointCellID.make(lat: lat, lon: lon)
         }
     }
 
@@ -428,7 +465,11 @@ final class LifelogStore: ObservableObject {
             cachedDistanceMeters += b.distance(from: a)
         }
 
-        let appendedPoint = LifelogTrackPoint(c, timestamp: loc.timestamp)
+        let appendedPoint = LifelogTrackPoint(
+            c,
+            timestamp: loc.timestamp,
+            accuracy: loc.horizontalAccuracy
+        )
         points.append(appendedPoint)
         coordinates.append(c)
         invalidatePolylineCaches()

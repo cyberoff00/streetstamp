@@ -63,3 +63,17 @@ struct TrackTileBucket: Codable, Equatable, Sendable {
 struct TrackTileBuildOutput: Codable, Equatable, Sendable {
     var tiles: [TrackTileKey: TrackTileBucket]
 }
+
+enum TrackPointCellID {
+    private static let bucketScale: Double = 100
+
+    static func make(lat: Double, lon: Double) -> String {
+        let latBucket = Int(floor((lat + 90.0) * bucketScale))
+        let lonBucket = Int(floor((lon + 180.0) * bucketScale))
+        return "\(latBucket):\(lonBucket)"
+    }
+
+    static func make(for coord: CoordinateCodable) -> String {
+        make(lat: coord.lat, lon: coord.lon)
+    }
+}

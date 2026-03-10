@@ -9,6 +9,19 @@ final class LifelogStoreBehaviorTests: XCTestCase {
         let timestamp: Date
     }
 
+    private struct PersistedAttributedLifelogPoint: Codable {
+        let lat: Double
+        let lon: Double
+        let timestamp: Date
+        let cellID: String
+    }
+
+    private struct PersistedAttributedLifelogPayload: Codable {
+        let points: [PersistedAttributedLifelogPoint]
+        let coordinates: [CoordinateCodable]
+        let isEnabled: Bool
+    }
+
     private struct PersistedLifelogPayload: Codable {
         let points: [PersistedLifelogPoint]
         let coordinates: [CoordinateCodable]
@@ -133,6 +146,34 @@ final class LifelogStoreBehaviorTests: XCTestCase {
 
         let bumped = await waitUntil(timeout: 1.0) { store.trackTileRevision == 1 }
         XCTAssertTrue(bumped, "Track tile revision should bump once after debounce window.")
+    }
+
+    @MainActor
+    func test_importExternalTrack_persistsCellIDWithoutChangingRawCoordinateFields() async throws {
+        let userID = "lifelog-cell-id-\(UUID().uuidString)"
+        let paths = StoragePath(userID: userID)
+        try? FileManager.default.removeItem(at: paths.userRoot)
+        try paths.ensureBaseDirectoriesExist()
+
+        let store = LifelogStore(paths: paths)
+        store.load()
+
+        let loaded = await waitUntil(timeout: 1.0) { store.hasLoaded }
+        XCTAssertTrue(loaded)
+
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
+        let coord = CoordinateCodable(lat: 39.9042, lon: 116.4074)
+
+        store.importExternalTrack(points: [(coord: coord, timestamp: timestamp)])
+        store.flushPersistNow()
+
+        let payload = try await waitForPayload(at: paths.lifelogRouteURL, timeout: 1.5)
+
+        XCTAssertEqual(payload.points.count, 1)
+        XCTAssertEqual(payload.points[0].lat, coord.lat, accuracy: 0.000_000_1)
+        XCTAssertEqual(payload.points[0].lon, coord.lon, accuracy: 0.000_000_1)
+        XCTAssertEqual(payload.points[0].timestamp, timestamp)
+        XCTAssertFalse(payload.points[0].cellID.isEmpty)
     }
 
     @MainActor
@@ -443,6 +484,23 @@ final class LifelogStoreBehaviorTests: XCTestCase {
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
         return check()
+    }
+
+    private func waitForPayload(
+        at url: URL,
+        timeout: TimeInterval
+    ) async throws -> PersistedAttributedLifelogPayload {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let data = try? Data(contentsOf: url),
+               let payload = try? JSONDecoder().decode(PersistedAttributedLifelogPayload.self, from: data) {
+                return payload
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        let data = try Data(contentsOf: url)
+        return try JSONDecoder().decode(PersistedAttributedLifelogPayload.self, from: data)
     }
 
     private func dayKey(_ day: Date) -> String {
