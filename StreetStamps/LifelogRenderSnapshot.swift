@@ -2,6 +2,31 @@ import Foundation
 import CoreLocation
 import MapKit
 
+struct LifelogAttributedCoordinateRun: Equatable, Sendable {
+    let sourceType: TrackSourceType
+    let coordsWGS84: [CLLocationCoordinate2D]
+    let countryISO2: String?
+    let cityKey: String?
+    let startTimestamp: Date
+    let endTimestamp: Date
+
+    init(
+        sourceType: TrackSourceType,
+        coordsWGS84: [CLLocationCoordinate2D],
+        countryISO2: String?,
+        cityKey: String? = nil,
+        startTimestamp: Date,
+        endTimestamp: Date
+    ) {
+        self.sourceType = sourceType
+        self.coordsWGS84 = coordsWGS84
+        self.countryISO2 = countryISO2
+        self.cityKey = cityKey
+        self.startTimestamp = startTimestamp
+        self.endTimestamp = endTimestamp
+    }
+}
+
 struct LifelogRenderSnapshotRequest: Sendable {
     let selectedDay: Date
     let countryISO2: String?
@@ -99,24 +124,36 @@ struct LifelogViewportRenderKey: Hashable, Sendable {
     let viewportBucket: LifelogViewportBucket?
 }
 
+struct LifelogSegmentedRenderGroup: Sendable {
+    let sourceType: TrackSourceType
+    let rawCoordsWGS84: [CLLocationCoordinate2D]
+    let startTimestamp: Date
+    let endTimestamp: Date
+    let farRouteSegments: [RenderRouteSegment]
+    let footprintRun: [CLLocationCoordinate2D]
+}
+
 struct LifelogSegmentedDaySnapshot: Sendable {
     let key: LifelogDaySnapshotKey
     let segments: [TrackTileSegment]
-    let farRouteGroups: [[RenderRouteSegment]]
-    let footprintGroups: [[CLLocationCoordinate2D]]
+    let renderGroups: [LifelogSegmentedRenderGroup]
     let selectedDayCenterCoordinate: CLLocationCoordinate2D?
 
+    var farRouteGroups: [[RenderRouteSegment]] {
+        renderGroups.map(\.farRouteSegments)
+    }
+
+    var footprintGroups: [[CLLocationCoordinate2D]] {
+        renderGroups.map(\.footprintRun)
+    }
+
     var allDayRenderSnapshot: LifelogRenderSnapshot {
-        let runs = segments.map { segment in
-            segment.coordinates.map {
-                CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon)
-            }
-        }
+        let runs = renderGroups.map(\.rawCoordsWGS84)
         return LifelogRenderSnapshot(
             selectedDay: key.day,
             cachedPathCoordsWGS84: runs.flatMap { $0 },
-            farRouteSegments: farRouteGroups.flatMap { $0 },
-            footprintRuns: footprintGroups.filter { !$0.isEmpty },
+            farRouteSegments: renderGroups.flatMap(\.farRouteSegments),
+            footprintRuns: renderGroups.map(\.footprintRun).filter { !$0.isEmpty },
             selectedDayCenterCoordinate: selectedDayCenterCoordinate,
             isHighQuality: true
         )
@@ -125,22 +162,21 @@ struct LifelogSegmentedDaySnapshot: Sendable {
     func renderSnapshot(in viewport: TrackTileViewport?) -> LifelogRenderSnapshot {
         guard let viewport else { return allDayRenderSnapshot }
 
-        let visibleIndices = segments.indices.filter { index in
-            TrackRenderAdapter.segmentIntersectsViewport(segments[index], viewport: viewport)
+        let visibleIndices = renderGroups.indices.filter { index in
+            LifelogRenderSnapshotBuilder.runIntersectsViewport(
+                renderGroups[index].rawCoordsWGS84,
+                viewport: viewport
+            )
         }
 
-        let visibleRuns = visibleIndices.map { index in
-            segments[index].coordinates.map {
-                CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon)
-            }
-        }
+        let visibleRuns = visibleIndices.map { renderGroups[$0].rawCoordsWGS84 }
 
         return LifelogRenderSnapshot(
             selectedDay: key.day,
             cachedPathCoordsWGS84: visibleRuns.flatMap { $0 },
-            farRouteSegments: visibleIndices.flatMap { farRouteGroups[$0] },
+            farRouteSegments: visibleIndices.flatMap { renderGroups[$0].farRouteSegments },
             footprintRuns: visibleIndices.compactMap { index in
-                let run = footprintGroups[index]
+                let run = renderGroups[index].footprintRun
                 return run.isEmpty ? nil : run
             },
             selectedDayCenterCoordinate: selectedDayCenterCoordinate,
@@ -191,35 +227,54 @@ enum LifelogSegmentIncrementalMergePlanner {
 enum LifelogRenderSnapshotBuilder {
     static func buildDaySnapshot(
         key: LifelogDaySnapshotKey,
-        segments: [TrackTileSegment]
+        segments: [TrackTileSegment],
+        passiveCountryRuns: [LifelogAttributedCoordinateRun] = []
     ) -> LifelogSegmentedDaySnapshot {
-        let runs = TrackRenderAdapter.rawCoordinateRuns(from: segments)
-        let validRuns = runs.filter { $0.count >= 2 }
+        let renderRuns = makeRenderRuns(
+            key: key,
+            segments: segments,
+            passiveCountryRuns: passiveCountryRuns
+        )
+        let validRuns = renderRuns.filter { $0.coordsWGS84.count >= 2 }
         let perRunBudget = max(2, LifelogRenderSnapshotRequest.highQualityRenderMaxPoints / max(1, validRuns.count))
 
-        let farRouteGroups = runs.map { run in
-            buildFarRouteGroup(
-                from: run,
+        let renderGroups = renderRuns.map { run in
+            let farRouteSegments = buildFarRouteGroup(
+                from: run.coordsWGS84,
                 perRunBudget: perRunBudget,
-                countryISO2: key.countryISO2
+                countryISO2: run.countryISO2,
+                cityKey: run.cityKey
+            )
+            let footprintRun = buildFootprintGroup(
+                from: run.coordsWGS84,
+                countryISO2: run.countryISO2,
+                cityKey: run.cityKey
+            )
+            return LifelogSegmentedRenderGroup(
+                sourceType: run.sourceType,
+                rawCoordsWGS84: run.coordsWGS84,
+                startTimestamp: run.startTimestamp,
+                endTimestamp: run.endTimestamp,
+                farRouteSegments: farRouteSegments,
+                footprintRun: footprintRun
             )
         }
-        let footprintGroups = runs.map { run in
-            buildFootprintGroup(
-                from: run,
-                countryISO2: key.countryISO2
-            )
-        }
-        let center = runs
+        let center = renderRuns
             .last?
+            .coordsWGS84
             .last
-            .map { MapCoordAdapter.forMapKit($0, countryISO2: key.countryISO2) }
+            .map {
+                MapCoordAdapter.forMapKit(
+                    $0,
+                    countryISO2: renderRuns.last?.countryISO2,
+                    cityKey: renderRuns.last?.cityKey
+                )
+            }
 
         return LifelogSegmentedDaySnapshot(
             key: key,
             segments: segments,
-            farRouteGroups: farRouteGroups,
-            footprintGroups: footprintGroups,
+            renderGroups: renderGroups,
             selectedDayCenterCoordinate: center
         )
     }
@@ -236,17 +291,34 @@ enum LifelogRenderSnapshotBuilder {
     static func mergeDaySnapshot(
         existing: LifelogSegmentedDaySnapshot,
         latestKey: LifelogDaySnapshotKey,
-        latestSegments: [TrackTileSegment]
+        latestSegments: [TrackTileSegment],
+        passiveCountryRuns: [LifelogAttributedCoordinateRun] = []
     ) -> LifelogSegmentedDaySnapshot {
+        if !passiveCountryRuns.isEmpty || existing.renderGroups.count != existing.segments.count {
+            return buildDaySnapshot(
+                key: latestKey,
+                segments: latestSegments,
+                passiveCountryRuns: passiveCountryRuns
+            )
+        }
+
         guard let reusePrefix = LifelogSegmentIncrementalMergePlanner.reusePrefixCount(
             existing: existing.segments,
             latest: latestSegments
         ) else {
-            return buildDaySnapshot(key: latestKey, segments: latestSegments)
+            return buildDaySnapshot(
+                key: latestKey,
+                segments: latestSegments,
+                passiveCountryRuns: passiveCountryRuns
+            )
         }
 
         if reusePrefix == 0 {
-            return buildDaySnapshot(key: latestKey, segments: latestSegments)
+            return buildDaySnapshot(
+                key: latestKey,
+                segments: latestSegments,
+                passiveCountryRuns: passiveCountryRuns
+            )
         }
 
         let tailSegments = Array(latestSegments.dropFirst(reusePrefix))
@@ -254,31 +326,90 @@ enum LifelogRenderSnapshotBuilder {
             return LifelogSegmentedDaySnapshot(
                 key: latestKey,
                 segments: existing.segments,
-                farRouteGroups: existing.farRouteGroups,
-                footprintGroups: existing.footprintGroups,
+                renderGroups: existing.renderGroups,
                 selectedDayCenterCoordinate: existing.selectedDayCenterCoordinate
             )
         }
 
-        let tailSnapshot = buildDaySnapshot(key: latestKey, segments: tailSegments)
+        let tailSnapshot = buildDaySnapshot(
+            key: latestKey,
+            segments: tailSegments,
+            passiveCountryRuns: passiveCountryRuns
+        )
         let mergedSegments = Array(existing.segments.prefix(reusePrefix)) + tailSegments
-        let mergedFarGroups = Array(existing.farRouteGroups.prefix(reusePrefix)) + tailSnapshot.farRouteGroups
-        let mergedFootprintGroups = Array(existing.footprintGroups.prefix(reusePrefix)) + tailSnapshot.footprintGroups
+        let mergedRenderGroups = Array(existing.renderGroups.prefix(reusePrefix)) + tailSnapshot.renderGroups
         let center = tailSnapshot.selectedDayCenterCoordinate ?? existing.selectedDayCenterCoordinate
 
         return LifelogSegmentedDaySnapshot(
             key: latestKey,
             segments: mergedSegments,
-            farRouteGroups: mergedFarGroups,
-            footprintGroups: mergedFootprintGroups,
+            renderGroups: mergedRenderGroups,
             selectedDayCenterCoordinate: center
         )
+    }
+
+    fileprivate static func runIntersectsViewport(
+        _ run: [CLLocationCoordinate2D],
+        viewport: TrackTileViewport
+    ) -> Bool {
+        let temp = TrackTileSegment(
+            sourceType: .passive,
+            coordinates: run.map { CoordinateCodable(lat: $0.latitude, lon: $0.longitude) }
+        )
+        return TrackRenderAdapter.segmentIntersectsViewport(temp, viewport: viewport)
+    }
+
+    private static func makeRenderRuns(
+        key: LifelogDaySnapshotKey,
+        segments: [TrackTileSegment],
+        passiveCountryRuns: [LifelogAttributedCoordinateRun]
+    ) -> [LifelogAttributedCoordinateRun] {
+        let journeyRuns = segments
+            .filter { $0.sourceType != .passive }
+            .map { segment in
+                LifelogAttributedCoordinateRun(
+                    sourceType: segment.sourceType,
+                    coordsWGS84: segment.coordinates.map {
+                        CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon)
+                    },
+                    countryISO2: key.countryISO2,
+                    startTimestamp: segment.startTimestamp,
+                    endTimestamp: segment.endTimestamp
+                )
+            }
+
+        let passiveRuns: [LifelogAttributedCoordinateRun]
+        if passiveCountryRuns.isEmpty {
+            passiveRuns = segments
+                .filter { $0.sourceType == .passive }
+                .map { segment in
+                    LifelogAttributedCoordinateRun(
+                        sourceType: .passive,
+                        coordsWGS84: segment.coordinates.map {
+                            CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon)
+                        },
+                        countryISO2: key.countryISO2,
+                        startTimestamp: segment.startTimestamp,
+                        endTimestamp: segment.endTimestamp
+                    )
+                }
+        } else {
+            passiveRuns = passiveCountryRuns
+        }
+
+        return (journeyRuns + passiveRuns).sorted {
+            if $0.startTimestamp != $1.startTimestamp {
+                return $0.startTimestamp < $1.startTimestamp
+            }
+            return $0.endTimestamp < $1.endTimestamp
+        }
     }
 
     private static func buildFarRouteGroup(
         from run: [CLLocationCoordinate2D],
         perRunBudget: Int,
-        countryISO2: String?
+        countryISO2: String?,
+        cityKey: String?
     ) -> [RenderRouteSegment] {
         guard run.count >= 2 else { return [] }
         let sampled = uniformSampledCoords(run, maxPoints: perRunBudget)
@@ -286,17 +417,19 @@ enum LifelogRenderSnapshotBuilder {
             coordsWGS84: sampled,
             applyGCJForChina: false,
             gapDistanceMeters: 8_000,
-            countryISO2: countryISO2
+            countryISO2: countryISO2,
+            cityKey: cityKey
         )
         return RouteRenderingPipeline.buildSegments(input, surface: .mapKit).segments
     }
 
     private static func buildFootprintGroup(
         from run: [CLLocationCoordinate2D],
-        countryISO2: String?
+        countryISO2: String?,
+        cityKey: String?
     ) -> [CLLocationCoordinate2D] {
         guard run.count > 1 else {
-            return MapCoordAdapter.forMapKit(run, countryISO2: countryISO2)
+            return MapCoordAdapter.forMapKit(run, countryISO2: countryISO2, cityKey: cityKey)
         }
 
         let sampled = LifelogFootprintSampler.sample(
@@ -304,7 +437,7 @@ enum LifelogRenderSnapshotBuilder {
             stepMeters: LifelogRenderModeSelector.footprintStepMeters,
             gapBreakMeters: 8_000
         )
-        return MapCoordAdapter.forMapKit(sampled, countryISO2: countryISO2)
+        return MapCoordAdapter.forMapKit(sampled, countryISO2: countryISO2, cityKey: cityKey)
     }
 
     private static func uniformSampledCoords(

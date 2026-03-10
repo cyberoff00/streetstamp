@@ -3,7 +3,127 @@ import MapKit
 @testable import StreetStamps
 
 final class LifelogRenderSnapshotTests: XCTestCase {
-    func test_daySnapshot_passiveMixedCountryPath_cannotSplitChinaAndNonChinaRunsYet() {
+    func test_daySnapshot_passiveCountryRuns_splitAndConvertOnlyConfirmedChinaRuns() {
+        let day = Date(timeIntervalSince1970: 1_700_000_000)
+        let key = LifelogDaySnapshotKey(
+            day: day,
+            countryISO2: "GB",
+            journeyRevision: 11,
+            lifelogRevision: 22
+        )
+        let segments = [
+            TrackTileSegment(
+                sourceType: .passive,
+                coordinates: [
+                    CoordinateCodable(lat: 51.5074, lon: -0.1278),
+                    CoordinateCodable(lat: 51.5078, lon: -0.1270),
+                    CoordinateCodable(lat: 39.9042, lon: 116.4074),
+                    CoordinateCodable(lat: 39.9046, lon: 116.4080)
+                ],
+                startTimestamp: day,
+                endTimestamp: day.addingTimeInterval(180)
+            )
+        ]
+        let passiveCountryRuns = [
+            LifelogAttributedCoordinateRun(
+                sourceType: .passive,
+                coordsWGS84: [
+                    CLLocationCoordinate2D(latitude: 51.5074, longitude: -0.1278),
+                    CLLocationCoordinate2D(latitude: 51.5078, longitude: -0.1270)
+                ],
+                countryISO2: "GB",
+                startTimestamp: day,
+                endTimestamp: day.addingTimeInterval(60)
+            ),
+            LifelogAttributedCoordinateRun(
+                sourceType: .passive,
+                coordsWGS84: [
+                    CLLocationCoordinate2D(latitude: 39.9042, longitude: 116.4074),
+                    CLLocationCoordinate2D(latitude: 39.9046, longitude: 116.4080)
+                ],
+                countryISO2: "CN",
+                startTimestamp: day.addingTimeInterval(120),
+                endTimestamp: day.addingTimeInterval(180)
+            )
+        ]
+
+        let snapshot = LifelogRenderSnapshotBuilder.buildDaySnapshot(
+            key: key,
+            segments: segments,
+            passiveCountryRuns: passiveCountryRuns
+        )
+
+        XCTAssertEqual(snapshot.footprintGroups.count, 2)
+        XCTAssertEqual(snapshot.farRouteGroups.count, 2)
+
+        let london = snapshot.footprintGroups[0]
+        XCTAssertEqual(london.first?.latitude ?? 0, 51.5074, accuracy: 0.000_001)
+        XCTAssertEqual(london.first?.longitude ?? 0, -0.1278, accuracy: 0.000_001)
+
+        let beijing = snapshot.footprintGroups[1]
+        let expectedGCJ = CLLocationCoordinate2D(latitude: 39.9042, longitude: 116.4074).wgs2gcj
+        XCTAssertEqual(beijing.first?.latitude ?? 0, expectedGCJ.latitude, accuracy: 0.000_8)
+        XCTAssertEqual(beijing.first?.longitude ?? 0, expectedGCJ.longitude, accuracy: 0.000_8)
+    }
+
+    func test_daySnapshot_passiveCountryRuns_leaveUnknownAndNonChinaInWGS84() {
+        let day = Date(timeIntervalSince1970: 1_700_000_000)
+        let key = LifelogDaySnapshotKey(
+            day: day,
+            countryISO2: "CN",
+            journeyRevision: 11,
+            lifelogRevision: 22
+        )
+        let segments = [
+            TrackTileSegment(
+                sourceType: .passive,
+                coordinates: [
+                    CoordinateCodable(lat: 34.0522, lon: -118.2437),
+                    CoordinateCodable(lat: 34.0525, lon: -118.2430),
+                    CoordinateCodable(lat: 48.8566, lon: 2.3522),
+                    CoordinateCodable(lat: 48.8569, lon: 2.3529)
+                ],
+                startTimestamp: day,
+                endTimestamp: day.addingTimeInterval(180)
+            )
+        ]
+        let passiveCountryRuns = [
+            LifelogAttributedCoordinateRun(
+                sourceType: .passive,
+                coordsWGS84: [
+                    CLLocationCoordinate2D(latitude: 34.0522, longitude: -118.2437),
+                    CLLocationCoordinate2D(latitude: 34.0525, longitude: -118.2430)
+                ],
+                countryISO2: nil,
+                startTimestamp: day,
+                endTimestamp: day.addingTimeInterval(60)
+            ),
+            LifelogAttributedCoordinateRun(
+                sourceType: .passive,
+                coordsWGS84: [
+                    CLLocationCoordinate2D(latitude: 48.8566, longitude: 2.3522),
+                    CLLocationCoordinate2D(latitude: 48.8569, longitude: 2.3529)
+                ],
+                countryISO2: "FR",
+                startTimestamp: day.addingTimeInterval(120),
+                endTimestamp: day.addingTimeInterval(180)
+            )
+        ]
+
+        let snapshot = LifelogRenderSnapshotBuilder.buildDaySnapshot(
+            key: key,
+            segments: segments,
+            passiveCountryRuns: passiveCountryRuns
+        )
+
+        XCTAssertEqual(snapshot.footprintGroups.count, 2)
+        XCTAssertEqual(snapshot.footprintGroups[0].first?.latitude ?? 0, 34.0522, accuracy: 0.000_001)
+        XCTAssertEqual(snapshot.footprintGroups[0].first?.longitude ?? 0, -118.2437, accuracy: 0.000_001)
+        XCTAssertEqual(snapshot.footprintGroups[1].first?.latitude ?? 0, 48.8566, accuracy: 0.000_001)
+        XCTAssertEqual(snapshot.footprintGroups[1].first?.longitude ?? 0, 2.3522, accuracy: 0.000_001)
+    }
+
+    func test_daySnapshot_requestLevelCountryDoesNotSplitPassivePathWithoutAttributedRuns() {
         let day = Date(timeIntervalSince1970: 1_700_000_000)
         let key = LifelogDaySnapshotKey(
             day: day,
@@ -30,7 +150,7 @@ final class LifelogRenderSnapshotTests: XCTestCase {
             segments: segments
         )
 
-        XCTAssertEqual(snapshot.footprintGroups.count, 2, "Expected separate render runs for non-China and China portions of one passive path.")
+        XCTAssertEqual(snapshot.footprintGroups.count, 1)
     }
 
     func test_daySnapshot_keepsSeparateRuns_forFarAndFootprint() {

@@ -3,6 +3,24 @@ import MapKit
 @testable import StreetStamps
 
 final class LifelogFootprintRenderPlannerTests: XCTestCase {
+    func test_runsSignature_changesWhenCountrySplitChangesRunBoundaries() {
+        let flattened = [
+            CLLocationCoordinate2D(latitude: 51.5074, longitude: -0.1278),
+            CLLocationCoordinate2D(latitude: 51.5078, longitude: -0.1270),
+            CLLocationCoordinate2D(latitude: 39.9042, longitude: 116.4074),
+            CLLocationCoordinate2D(latitude: 39.9046, longitude: 116.4080)
+        ]
+        let splitRuns = [
+            Array(flattened.prefix(2)),
+            Array(flattened.suffix(2))
+        ]
+
+        XCTAssertNotEqual(
+            LifelogFootprintRenderPlanner.runsSignature([flattened]),
+            LifelogFootprintRenderPlanner.runsSignature(splitRuns)
+        )
+    }
+
     func test_plannedMarkers_clipToViewportBuffer() {
         let region = MKCoordinateRegion(
             center: CLLocationCoordinate2D(latitude: 0, longitude: 0),
