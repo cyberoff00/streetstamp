@@ -132,6 +132,8 @@ final class LifelogStore: ObservableObject {
     private var passiveMotionState: PassiveMotionState = .moving
     private var passiveMotionAnchor: CLLocation?
     private var passiveMotionAnchorTimestamp: Date = .distantPast
+    private let attributionCoordinatorFactory: (StoragePath) -> LifelogCountryAttributionCoordinator
+    private var attributionCoordinator: LifelogCountryAttributionCoordinator
 
     private struct IndexedCoord {
         let idx: Int
@@ -149,7 +151,13 @@ final class LifelogStore: ObservableObject {
         let y: Int
     }
 
-    init(paths: StoragePath, trackTileRevisionDebounce: TimeInterval = 1.5) {
+    init(
+        paths: StoragePath,
+        trackTileRevisionDebounce: TimeInterval = 1.5,
+        attributionCoordinatorFactory: @escaping (StoragePath) -> LifelogCountryAttributionCoordinator = {
+            LifelogCountryAttributionCoordinator(paths: $0)
+        }
+    ) {
         self.userID = paths.userID
         self.persistURL = paths.lifelogRouteURL
         self.deltaURL = paths.lifelogRouteURL
@@ -157,6 +165,8 @@ final class LifelogStore: ObservableObject {
             .appendingPathExtension("delta.jsonl")
         self.moodPersistURL = paths.cachesDir.appendingPathComponent("lifelog_mood.json", isDirectory: false)
         self.trackTileRevisionDebounce = max(0, trackTileRevisionDebounce)
+        self.attributionCoordinatorFactory = attributionCoordinatorFactory
+        self.attributionCoordinator = attributionCoordinatorFactory(paths)
     }
 
     func rebind(paths: StoragePath) {
@@ -195,6 +205,7 @@ final class LifelogStore: ObservableObject {
         countryISO2 = nil
         trackTileRevision = 0
         hasLoaded = false
+        attributionCoordinator = attributionCoordinatorFactory(paths)
         bumpTrackTileRevision()
     }
 
@@ -472,6 +483,7 @@ final class LifelogStore: ObservableObject {
         )
         points.append(appendedPoint)
         coordinates.append(c)
+        enqueueCountryAttribution(for: [appendedPoint])
         invalidatePolylineCaches()
         lastAccepted = loc
         insertAvailableDayIfNeeded(loc.timestamp)
@@ -582,6 +594,7 @@ final class LifelogStore: ObservableObject {
         }
 
         guard !appended.isEmpty else { return }
+        enqueueCountryAttribution(for: appended)
         invalidatePolylineCaches()
         mergeAvailableDays(from: appended.map(\.timestamp))
         appendDelta(points: appended)
@@ -901,6 +914,21 @@ final class LifelogStore: ObservableObject {
 
     private func dayKey(_ day: Date) -> String {
         Self.dayKeyString(for: day)
+    }
+
+    private func enqueueCountryAttribution(for appended: [LifelogTrackPoint]) {
+        guard !appended.isEmpty else { return }
+        let inputs = appended.map {
+            LifelogCountryAttributionPointInput(
+                pointID: $0.id,
+                cellID: $0.cellID,
+                coordinate: $0.coord
+            )
+        }
+        let coordinator = attributionCoordinator
+        Task(priority: .utility) {
+            await coordinator.enqueue(points: inputs)
+        }
     }
 
     private nonisolated static func dayKeyString(for day: Date) -> String {

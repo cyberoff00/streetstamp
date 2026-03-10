@@ -5,6 +5,18 @@ import XCTest
 final class LifelogStoreBehaviorTests: XCTestCase {
     private let attributionResolvedAt = Date(timeIntervalSince1970: 1_700_000_000)
 
+    private actor ResolverCallLog {
+        private(set) var coordinates: [CLLocationCoordinate2D] = []
+
+        func record(_ coordinate: CLLocationCoordinate2D) {
+            coordinates.append(coordinate)
+        }
+
+        func count() -> Int {
+            coordinates.count
+        }
+    }
+
     private struct PersistedLifelogPoint: Codable {
         let lat: Double
         let lon: Double
@@ -516,6 +528,101 @@ final class LifelogStoreBehaviorTests: XCTestCase {
     }
 
     @MainActor
+    func test_importExternalTrack_enqueuesBackgroundCountryResolutionByUniqueCellID() async throws {
+        let userID = "lifelog-country-resolution-\(UUID().uuidString)"
+        let paths = StoragePath(userID: userID)
+        try? FileManager.default.removeItem(at: paths.userRoot)
+        try paths.ensureBaseDirectoriesExist()
+
+        let callLog = ResolverCallLog()
+        let coordinator = LifelogCountryAttributionCoordinator(
+            paths: paths,
+            resolveCanonical: { location in
+                await callLog.record(location.coordinate)
+                if location.coordinate.longitude > 0 {
+                    return ReverseGeocodeService.CanonicalResult(
+                        cityName: "Beijing",
+                        iso2: "CN",
+                        cityKey: "Beijing|CN",
+                        level: .locality,
+                        parentRegionKey: "Beijing Municipality|CN",
+                        availableLevels: [.locality: "Beijing"]
+                    )
+                }
+                return ReverseGeocodeService.CanonicalResult(
+                    cityName: "San Francisco",
+                    iso2: "US",
+                    cityKey: "San Francisco|US",
+                    level: .locality,
+                    parentRegionKey: "California|US",
+                    availableLevels: [.locality: "San Francisco"]
+                )
+            }
+        )
+
+        let store = LifelogStore(paths: paths) { _ in coordinator }
+        store.load()
+
+        let loaded = await waitUntil(timeout: 1.0) { store.hasLoaded }
+        XCTAssertTrue(loaded)
+
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
+        store.importExternalTrack(points: [
+            (coord: CoordinateCodable(lat: 39.90420, lon: 116.40740), timestamp: timestamp),
+            (coord: CoordinateCodable(lat: 39.90425, lon: 116.40745), timestamp: timestamp.addingTimeInterval(5)),
+            (coord: CoordinateCodable(lat: 37.77490, lon: -122.41940), timestamp: timestamp.addingTimeInterval(10))
+        ])
+
+        let snapshot = try await waitForAttributionSnapshot(at: paths, timeout: 1.5) {
+            $0.points.count == 3 && $0.cells.count == 2
+        }
+
+        let resolveCount = await callLog.count()
+        XCTAssertEqual(resolveCount, 2, "Expected unique cells to resolve once each.")
+        XCTAssertEqual(snapshot.cells.map(\.iso2).sorted(), ["CN", "US"])
+        XCTAssertEqual(snapshot.points.compactMap(\.iso2).sorted(), ["CN", "CN", "US"])
+    }
+
+    @MainActor
+    func test_countryAttributionCoordinator_leavesUnknownPointsWhenResolutionUnavailable() async throws {
+        let userID = "lifelog-country-unknown-\(UUID().uuidString)"
+        let paths = StoragePath(userID: userID)
+        try? FileManager.default.removeItem(at: paths.userRoot)
+        try paths.ensureBaseDirectoriesExist()
+
+        let callLog = ResolverCallLog()
+        let coordinator = LifelogCountryAttributionCoordinator(
+            paths: paths,
+            resolveCanonical: { location in
+                await callLog.record(location.coordinate)
+                return nil
+            }
+        )
+
+        await coordinator.enqueue(points: [
+            LifelogCountryAttributionPointInput(
+                pointID: "point-1",
+                cellID: "12990:29640",
+                coordinate: CoordinateCodable(lat: 39.9042, lon: 116.4074)
+            ),
+            LifelogCountryAttributionPointInput(
+                pointID: "point-2",
+                cellID: "12990:29640",
+                coordinate: CoordinateCodable(lat: 39.90425, lon: 116.40745)
+            )
+        ])
+
+        let snapshot = try await waitForAttributionSnapshot(at: paths, timeout: 1.0) {
+            $0.points.count == 2
+        }
+
+        let resolveCount = await callLog.count()
+        XCTAssertEqual(resolveCount, 1, "Expected unresolved cells to dedupe while resolution is in flight.")
+        XCTAssertTrue(snapshot.cells.isEmpty)
+        XCTAssertEqual(snapshot.points.map(\.iso2), [nil, nil])
+    }
+
+    @MainActor
     private func waitUntil(
         timeout: TimeInterval,
         check: @escaping @MainActor () -> Bool
@@ -543,6 +650,25 @@ final class LifelogStoreBehaviorTests: XCTestCase {
 
         let data = try Data(contentsOf: url)
         return try JSONDecoder().decode(PersistedAttributedLifelogPayload.self, from: data)
+    }
+
+    private func waitForAttributionSnapshot(
+        at paths: StoragePath,
+        timeout: TimeInterval,
+        until check: @escaping (LifelogCountryAttributionSnapshot) -> Bool
+    ) async throws -> LifelogCountryAttributionSnapshot {
+        let deadline = Date().addingTimeInterval(timeout)
+        let store = LifelogCountryAttributionStore(paths: paths)
+        while Date() < deadline {
+            if let snapshot = try? store.load(), check(snapshot) {
+                return snapshot
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        let snapshot = try store.load()
+        XCTAssertTrue(check(snapshot), "Timed out waiting for attribution snapshot to match expectation.")
+        return snapshot
     }
 
     private func dayKey(_ day: Date) -> String {
