@@ -24,6 +24,7 @@ struct GlobeViewScreen: View {
     @EnvironmentObject private var lifelogStore: LifelogStore
     @EnvironmentObject private var trackTileStore: TrackTileStore
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
+    @ObservedObject private var globeRefreshCoordinator = GlobeRefreshCoordinator.shared
 
     @State private var dummyPresented: Bool = true
     @State private var shareItem: GlobeShareImageItem? = nil
@@ -31,6 +32,7 @@ struct GlobeViewScreen: View {
     @State private var visitedCountries: [String] = []
     @State private var isPreparingData = false
     @State private var refreshGate = GlobeRefreshGate()
+    @State private var didRequestInitialRefresh = false
 
     var body: some View {
         ZStack {
@@ -64,25 +66,11 @@ struct GlobeViewScreen: View {
             }
         }
         .task {
-            guard journeysForRender.isEmpty else { return }
-            refreshGlobeData()
+            guard !didRequestInitialRefresh else { return }
+            didRequestInitialRefresh = true
+            globeRefreshCoordinator.requestRefresh(reason: .globePageEntered)
         }
-        .onChange(of: store.trackTileRevision) { _ in
-            refreshGlobeData()
-        }
-        .onChange(of: lifelogStore.trackTileRevision) { _ in
-            refreshGlobeData()
-        }
-        .onChange(of: cityCache.cachedCities.count) { _ in
-            refreshGlobeData()
-        }
-        .onChange(of: trackTileStore.refreshRevision) { _ in
-            refreshGlobeData()
-        }
-        .onChange(of: store.hasLoaded) { _ in
-            refreshGlobeData()
-        }
-        .onChange(of: lifelogStore.hasLoaded) { _ in
+        .onChange(of: globeRefreshCoordinator.revision) { _ in
             refreshGlobeData()
         }
     }
@@ -124,7 +112,8 @@ struct GlobeViewScreen: View {
         let cardContent = ProfileSummaryCardContent(
             level: levelProgress.level,
             cityCount: cityCount,
-            memoryCount: totalMemories
+            memoryCount: totalMemories,
+            locale: .current
         )
 
         return HStack(spacing: 14) {
@@ -210,29 +199,36 @@ struct GlobeViewScreen: View {
             .filter { $0.isTemporary != true }
             .compactMap { $0.countryISO2?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
             .filter { $0.count == 2 }
-        let previewRoutes = GlobeRouteResolver.resolve(
-            externalJourneys: external,
-            summaryJourneys: summary,
-            segments: tileSegments,
-            countryISO2: countryISO2
-        )
-        let previewCountries = Self.resolveVisitedCountries(routes: previewRoutes, cityISO2: cityISO2)
-        journeysForRender = previewRoutes
-        visitedCountries = previewCountries
-
-        let shouldFetchUnifiedSegments = GlobeRouteResolver.shouldFetchUnifiedSegments(tileSegments: tileSegments)
-        guard shouldFetchUnifiedSegments else {
-            var gate = refreshGate
-            let shouldRefreshAgain = gate.finish()
-            refreshGate = gate
-            isPreparingData = false
-            if shouldRefreshAgain {
-                refreshGlobeData()
-            }
-            return
-        }
-
         Task(priority: .userInitiated) {
+            let passiveCountryRuns = await lifelogStore.passiveCountryRuns()
+            let previewRoutes = GlobeRouteResolver.resolve(
+                externalJourneys: external,
+                summaryJourneys: summary,
+                segments: tileSegments,
+                passiveCountryRuns: passiveCountryRuns,
+                countryISO2: countryISO2
+            )
+            let previewCountries = Self.resolveVisitedCountries(routes: previewRoutes, cityISO2: cityISO2)
+
+            await MainActor.run {
+                journeysForRender = previewRoutes
+                visitedCountries = previewCountries
+            }
+
+            let shouldFetchUnifiedSegments = GlobeRouteResolver.shouldFetchUnifiedSegments(tileSegments: tileSegments)
+            guard shouldFetchUnifiedSegments else {
+                await MainActor.run {
+                    var gate = refreshGate
+                    let shouldRefreshAgain = gate.finish()
+                    refreshGate = gate
+                    isPreparingData = false
+                    if shouldRefreshAgain {
+                        refreshGlobeData()
+                    }
+                }
+                return
+            }
+
             let segments = await UnifiedLifelogRenderProvider.segmentsAsync(
                 journeyStore: store,
                 lifelogStore: lifelogStore,
@@ -242,6 +238,7 @@ struct GlobeViewScreen: View {
                 externalJourneys: external,
                 summaryJourneys: summary,
                 segments: segments,
+                passiveCountryRuns: passiveCountryRuns,
                 countryISO2: countryISO2
             )
             let countries = Self.resolveVisitedCountries(routes: routes, cityISO2: cityISO2)

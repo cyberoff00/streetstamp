@@ -1,4 +1,31 @@
 import Foundation
+import Combine
+
+@MainActor
+final class GlobeRefreshCoordinator: ObservableObject {
+    enum Reason: Equatable {
+        case globePageEntered
+        case journeySaved
+        case passiveDayRolledOver
+    }
+
+    static let shared = GlobeRefreshCoordinator()
+
+    @Published private(set) var revision: Int = 0
+    private(set) var lastReason: Reason?
+
+    private init() {}
+
+    func requestRefresh(reason: Reason) {
+        revision &+= 1
+        lastReason = reason
+    }
+
+    func resetForTesting() {
+        revision = 0
+        lastReason = nil
+    }
+}
 
 struct GlobeRefreshGate {
     private(set) var isRefreshing = false
@@ -31,9 +58,14 @@ enum GlobeRouteResolver {
         externalJourneys: [JourneyRoute]?,
         summaryJourneys: [JourneyRoute],
         segments: [TrackTileSegment],
+        passiveCountryRuns: [LifelogAttributedCoordinateRun] = [],
         countryISO2: String?
     ) -> [JourneyRoute] {
-        let routes = TrackRenderAdapter.globeJourneys(from: segments, countryISO2: countryISO2)
+        let routes = TrackRenderAdapter.globeJourneys(
+            from: segments,
+            passiveCountryRuns: passiveCountryRuns,
+            countryISO2: countryISO2
+        )
         if !routes.isEmpty {
             return routes
         }

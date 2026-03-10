@@ -9,6 +9,11 @@ extension Notification.Name {
 
 @MainActor
 final class LifelogStore: ObservableObject {
+    enum ExternalTrackImportSource {
+        case passiveRecovery
+        case archive
+    }
+
     private(set) var coordinates: [CoordinateCodable] = []
     @Published private(set) var currentLocation: CLLocation?
     @Published private(set) var isEnabled: Bool = true
@@ -486,7 +491,12 @@ final class LifelogStore: ObservableObject {
         enqueueCountryAttribution(for: [appendedPoint])
         invalidatePolylineCaches()
         lastAccepted = loc
-        insertAvailableDayIfNeeded(loc.timestamp)
+        let hadTrackedDays = !availableDayKeys.isEmpty
+        let didInsertDay = insertAvailableDayIfNeeded(loc.timestamp)
+        requestGlobeRefreshForPassiveDayRolloverIfNeeded(
+            hadTrackedDays: hadTrackedDays,
+            didInsertDay: didInsertDay
+        )
         scheduleBackgroundDayIndexBuild()
         appendDelta(points: [appendedPoint])
         persistAsync()
@@ -560,7 +570,7 @@ final class LifelogStore: ObservableObject {
         if !coords.isEmpty {
             let timeline = timestampsForJourney(journey, count: coords.count)
             let imported = zip(coords, timeline).map { (coord: $0.0, timestamp: $0.1) }
-            importExternalTrack(points: imported)
+            importExternalTrack(points: imported, source: .archive)
         }
 
         archivedJourneyIDs.insert(journeyID)
@@ -568,7 +578,10 @@ final class LifelogStore: ObservableObject {
         return true
     }
 
-    func importExternalTrack(points imported: [(coord: CoordinateCodable, timestamp: Date)]) {
+    func importExternalTrack(
+        points imported: [(coord: CoordinateCodable, timestamp: Date)],
+        source: ExternalTrackImportSource = .archive
+    ) {
         guard !imported.isEmpty else { return }
         var appended: [LifelogTrackPoint] = []
         for item in imported {
@@ -596,7 +609,14 @@ final class LifelogStore: ObservableObject {
         guard !appended.isEmpty else { return }
         enqueueCountryAttribution(for: appended)
         invalidatePolylineCaches()
-        mergeAvailableDays(from: appended.map(\.timestamp))
+        let hadTrackedDays = !availableDayKeys.isEmpty
+        let didInsertDay = mergeAvailableDays(from: appended.map(\.timestamp))
+        if source == .passiveRecovery {
+            requestGlobeRefreshForPassiveDayRolloverIfNeeded(
+                hadTrackedDays: hadTrackedDays,
+                didInsertDay: didInsertDay
+            )
+        }
         appendDelta(points: appended)
         persistAsync()
         scheduleBackgroundDayIndexBuild()
@@ -877,8 +897,9 @@ final class LifelogStore: ObservableObject {
         return out
     }
 
-    private func mergeAvailableDays(from timestamps: [Date]) {
-        guard !timestamps.isEmpty else { return }
+    @discardableResult
+    private func mergeAvailableDays(from timestamps: [Date]) -> Bool {
+        guard !timestamps.isEmpty else { return false }
         var didInsert = false
         for timestamp in timestamps {
             didInsert = insertAvailableDayIfNeeded(timestamp) || didInsert
@@ -886,6 +907,7 @@ final class LifelogStore: ObservableObject {
         if didInsert {
             availableDays.sort(by: >)
         }
+        return didInsert
     }
 
     @discardableResult
@@ -914,6 +936,14 @@ final class LifelogStore: ObservableObject {
 
     private func dayKey(_ day: Date) -> String {
         Self.dayKeyString(for: day)
+    }
+
+    private func requestGlobeRefreshForPassiveDayRolloverIfNeeded(
+        hadTrackedDays: Bool,
+        didInsertDay: Bool
+    ) {
+        guard hadTrackedDays, didInsertDay else { return }
+        GlobeRefreshCoordinator.shared.requestRefresh(reason: .passiveDayRolledOver)
     }
 
     private func enqueueCountryAttribution(for appended: [LifelogTrackPoint]) {
@@ -1172,12 +1202,61 @@ final class LifelogStore: ObservableObject {
         }.value
     }
 
+    func passiveCountryRuns(day: Date? = nil) async -> [LifelogAttributedCoordinateRun] {
+        let pointsSnapshot = points
+        let attributionSnapshot = await attributionCoordinator.loadSnapshot()
+        return await Task.detached(priority: .utility) {
+            Self.makePassiveCountryRuns(
+                from: pointsSnapshot,
+                attribution: attributionSnapshot,
+                day: day
+            )
+        }.value
+    }
+
     private nonisolated static func makeTrackRenderEvents(from points: [LifelogTrackPoint]) -> [TrackRenderEvent] {
         points.map {
             TrackRenderEvent(
                 sourceType: .passive,
                 timestamp: $0.timestamp,
                 coordinate: $0.coord
+            )
+        }
+    }
+
+    private nonisolated static func makePassiveCountryRuns(
+        from points: [LifelogTrackPoint],
+        attribution: LifelogCountryAttributionSnapshot,
+        day: Date?
+    ) -> [LifelogAttributedCoordinateRun] {
+        guard !points.isEmpty else { return [] }
+
+        let calendar = Calendar.current
+        let targetDay = day.map { calendar.startOfDay(for: $0) }
+        let indexByPointID = Dictionary(uniqueKeysWithValues: points.enumerated().map { ($0.element.id, $0.offset) })
+
+        return attribution.runs.compactMap { run in
+            guard let startIndex = indexByPointID[run.startPointID],
+                  let endIndex = indexByPointID[run.endPointID] else {
+                return nil
+            }
+
+            let lower = min(startIndex, endIndex)
+            let upper = max(startIndex, endIndex)
+            var slice = Array(points[lower...upper])
+            if let targetDay {
+                slice = slice.filter { calendar.startOfDay(for: $0.timestamp) == targetDay }
+            }
+            guard slice.count >= 2 else { return nil }
+
+            return LifelogAttributedCoordinateRun(
+                sourceType: .passive,
+                coordsWGS84: slice.map {
+                    CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon)
+                },
+                countryISO2: run.iso2,
+                startTimestamp: slice.first?.timestamp ?? .distantPast,
+                endTimestamp: slice.last?.timestamp ?? .distantPast
             )
         }
     }

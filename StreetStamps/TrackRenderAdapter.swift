@@ -134,24 +134,53 @@ enum TrackRenderAdapter {
         globeSegments(from: events, zoom: zoom, sourceFilter: [.passive])
     }
 
-    static func globeJourneys(from segments: [TrackTileSegment], countryISO2: String?) -> [JourneyRoute] {
-        let filtered = segments.filter { $0.coordinates.count >= 2 }
-        guard !filtered.isEmpty else { return [] }
-
+    static func globeJourneys(
+        from segments: [TrackTileSegment],
+        passiveCountryRuns: [LifelogAttributedCoordinateRun] = [],
+        countryISO2: String?
+    ) -> [JourneyRoute] {
         let lifelogName = L10n.t("tab_lifelog")
-        return filtered.enumerated().map { index, segment in
-            var route = JourneyRoute()
-            route.id = "track.tile.segment.\(segment.sourceType.rawValue).\(index)"
-            route.cityName = lifelogName
-            route.currentCity = lifelogName
-            route.canonicalCity = lifelogName
-            route.cityKey = "\(lifelogName)|"
-            route.countryISO2 = countryISO2
-            route.coordinates = segment.coordinates
-            route.thumbnailCoordinates = segment.coordinates
-            route.distance = totalDistanceMeters(for: segment.coordinates)
-            return route
+
+        if passiveCountryRuns.isEmpty {
+            let filtered = segments.filter { $0.coordinates.count >= 2 }
+            guard !filtered.isEmpty else { return [] }
+            return filtered.enumerated().map { index, segment in
+                makeGlobeJourney(
+                    id: "track.tile.segment.\(segment.sourceType.rawValue).\(index)",
+                    lifelogName: lifelogName,
+                    countryISO2: countryISO2,
+                    coordinates: segment.coordinates
+                )
+            }
         }
+
+        let nonPassiveRoutes = segments
+            .filter { $0.sourceType != .passive && $0.coordinates.count >= 2 }
+            .enumerated()
+            .map { index, segment in
+                makeGlobeJourney(
+                    id: "track.tile.segment.\(segment.sourceType.rawValue).\(index)",
+                    lifelogName: lifelogName,
+                    countryISO2: countryISO2,
+                    coordinates: segment.coordinates
+                )
+            }
+
+        let passiveRoutes = passiveCountryRuns
+            .filter { $0.coordsWGS84.count >= 2 }
+            .enumerated()
+            .map { index, run in
+                makeGlobeJourney(
+                    id: "track.tile.segment.passive.\(index)",
+                    lifelogName: lifelogName,
+                    countryISO2: run.countryISO2,
+                    coordinates: run.coordsWGS84.map {
+                        CoordinateCodable(lat: $0.latitude, lon: $0.longitude)
+                    }
+                )
+            }
+
+        return nonPassiveRoutes + passiveRoutes
     }
 
     static func polylineCoordinates(
@@ -317,6 +346,25 @@ enum TrackRenderAdapter {
             total += b.distance(from: a)
         }
         return total
+    }
+
+    private static func makeGlobeJourney(
+        id: String,
+        lifelogName: String,
+        countryISO2: String?,
+        coordinates: [CoordinateCodable]
+    ) -> JourneyRoute {
+        var route = JourneyRoute()
+        route.id = id
+        route.cityName = lifelogName
+        route.currentCity = lifelogName
+        route.canonicalCity = lifelogName
+        route.cityKey = "\(lifelogName)|"
+        route.countryISO2 = countryISO2
+        route.coordinates = coordinates
+        route.thumbnailCoordinates = coordinates
+        route.distance = totalDistanceMeters(for: coordinates)
+        return route
     }
 
     private static func downsample(coords: [CoordinateCodable], maxPoints: Int) -> [CoordinateCodable] {
