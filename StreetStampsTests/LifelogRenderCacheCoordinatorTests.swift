@@ -2,6 +2,58 @@ import XCTest
 @testable import StreetStamps
 
 final class LifelogRenderCacheCoordinatorTests: XCTestCase {
+    @MainActor
+    func test_noteCountryAttributionRefresh_invalidatesTodayOnlyAndUpdatesWarmupCountry() {
+        let coordinator = LifelogRenderCacheCoordinator()
+        let today = Calendar.current.startOfDay(for: Date())
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: today) ?? today
+
+        let todayKey = LifelogDaySnapshotKey(day: today, countryISO2: "US", journeyRevision: 1, lifelogRevision: 1)
+        let yesterdayKey = LifelogDaySnapshotKey(day: yesterday, countryISO2: "US", journeyRevision: 1, lifelogRevision: 1)
+
+        coordinator.seedDaySnapshotForTesting(
+            LifelogRenderSnapshotBuilder.buildDaySnapshot(
+                key: todayKey,
+                segments: [
+                    TrackTileSegment(
+                        sourceType: .passive,
+                        coordinates: [
+                            CoordinateCodable(lat: 37.7749, lon: -122.4194),
+                            CoordinateCodable(lat: 37.7752, lon: -122.4190)
+                        ],
+                        startTimestamp: today,
+                        endTimestamp: today.addingTimeInterval(60)
+                    )
+                ]
+            )
+        )
+        coordinator.seedDaySnapshotForTesting(
+            LifelogRenderSnapshotBuilder.buildDaySnapshot(
+                key: yesterdayKey,
+                segments: [
+                    TrackTileSegment(
+                        sourceType: .passive,
+                        coordinates: [
+                            CoordinateCodable(lat: 48.8566, lon: 2.3522),
+                            CoordinateCodable(lat: 48.8569, lon: 2.3529)
+                        ],
+                        startTimestamp: yesterday,
+                        endTimestamp: yesterday.addingTimeInterval(60)
+                    )
+                ]
+            )
+        )
+        coordinator.scheduleWarmupRecentDays(anchorDay: today, countryISO2: "US")
+
+        coordinator.noteCountryAttributionRefresh(countryISO2: "CN")
+
+        XCTAssertFalse(coordinator.hasCachedDaySnapshotForTesting(todayKey))
+        XCTAssertTrue(coordinator.hasCachedDaySnapshotForTesting(yesterdayKey))
+        XCTAssertEqual(coordinator.pendingWarmupRequestForTesting?.countryISO2, "CN")
+        XCTAssertEqual(coordinator.todayDirtyCountryISO2ForTesting, "CN")
+        XCTAssertTrue(coordinator.hasDirtyTodayForTesting)
+    }
+
     func test_countryAttributionCoordinator_buildsRunsFromResolvedAndUnknownPoints() async throws {
         let userID = "lifelog-country-runs-\(UUID().uuidString)"
         let paths = StoragePath(userID: userID)

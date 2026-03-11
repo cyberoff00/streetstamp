@@ -130,6 +130,11 @@ actor LifelogCountryAttributionCoordinator {
         }
         rebuildRuns(fromPointIndex: firstPointIndex(forCellID: cellID) ?? 0)
         persistSnapshot()
+        NotificationCenter.default.post(
+            name: .lifelogCountryAttributionDidChange,
+            object: nil,
+            userInfo: ["countryISO2": iso2]
+        )
     }
 
     private func firstPointIndex(forCellID cellID: String) -> Int? {

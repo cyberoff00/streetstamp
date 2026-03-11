@@ -2,6 +2,10 @@ import Foundation
 import CoreLocation
 import Combine
 
+extension Notification.Name {
+    static let lifelogCountryAttributionDidChange = Notification.Name("lifelogCountryAttributionDidChange")
+}
+
 @MainActor
 final class LifelogRenderCacheCoordinator: ObservableObject {
     private static let recentDayCount = 7
@@ -160,6 +164,12 @@ final class LifelogRenderCacheCoordinator: ObservableObject {
         guard hasDirtyToday else { return }
         guard todayRefreshTask == nil else { return }
         scheduleTodayRefresh(countryISO2: countryISO2, delayNanoseconds: 0)
+    }
+
+    func noteCountryAttributionRefresh(countryISO2: String?) {
+        invalidateDaySnapshots(day: Date())
+        markTodayDirty(countryISO2: countryISO2)
+        scheduleWarmupRecentDays(anchorDay: Date(), countryISO2: countryISO2)
     }
 
     func markTodayDirty(countryISO2: String?) {
@@ -336,6 +346,27 @@ final class LifelogRenderCacheCoordinator: ObservableObject {
         }
     }
 
+    private func invalidateDaySnapshots(day: Date) {
+        let targetDay = Calendar.current.startOfDay(for: day)
+        let removedKeys = Set(
+            daySnapshots.keys.filter { Calendar.current.isDate($0.day, inSameDayAs: targetDay) }
+        )
+        guard !removedKeys.isEmpty else { return }
+
+        daySnapshots = daySnapshots.filter { !removedKeys.contains($0.key) }
+        viewportSnapshots = viewportSnapshots.filter { !removedKeys.contains($0.key.dayKey) }
+        viewportLRU.removeAll { removedKeys.contains($0.dayKey) }
+        removedKeys.forEach { key in
+            inFlightDayTasks[key]?.cancel()
+            inFlightDayTasks.removeValue(forKey: key)
+        }
+        let viewportKeys = inFlightViewportTasks.keys.filter { removedKeys.contains($0.dayKey) }
+        viewportKeys.forEach { key in
+            inFlightViewportTasks[key]?.cancel()
+            inFlightViewportTasks.removeValue(forKey: key)
+        }
+    }
+
     private func launchPendingWarmupIfPossible() {
         guard let request = pendingWarmupRequest else { return }
         guard let trackTileStore else { return }
@@ -386,3 +417,27 @@ final class LifelogRenderCacheCoordinator: ObservableObject {
         return "(zoom:\(manifest.zoom),j:\(manifest.journeyRevision),p:\(manifest.passiveRevision))"
     }
 }
+
+#if DEBUG
+extension LifelogRenderCacheCoordinator {
+    func seedDaySnapshotForTesting(_ snapshot: LifelogSegmentedDaySnapshot) {
+        daySnapshots[snapshot.key] = snapshot
+    }
+
+    func hasCachedDaySnapshotForTesting(_ key: LifelogDaySnapshotKey) -> Bool {
+        daySnapshots[key] != nil
+    }
+
+    var pendingWarmupRequestForTesting: (anchorDay: Date, countryISO2: String?)? {
+        pendingWarmupRequest
+    }
+
+    var todayDirtyCountryISO2ForTesting: String? {
+        todayDirtyCountryISO2
+    }
+
+    var hasDirtyTodayForTesting: Bool {
+        hasDirtyToday
+    }
+}
+#endif

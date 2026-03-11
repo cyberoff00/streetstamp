@@ -133,7 +133,7 @@ struct StreetStampsApp: App {
             }
     }
 
-    private var appContent: some View {
+    private var appContentWithLifecycleHandlers: some View {
         appContentWithPresentation
             .task {
                 guard showSplash else { return }
@@ -299,6 +299,14 @@ struct StreetStampsApp: App {
                     countryISO2: lifelogStore.countryISO2 ?? locationHub.countryISO2
                 )
             }
+            .onReceive(NotificationCenter.default.publisher(for: .lifelogCountryAttributionDidChange)) { notification in
+                let countryISO2 = notification.userInfo?["countryISO2"] as? String
+                lifelogRenderCache.noteCountryAttributionRefresh(countryISO2: countryISO2)
+            }
+    }
+
+    private var appContent: some View {
+        appContentWithLifecycleHandlers
             .onOpenURL { url in
                 guard deepLinkStore.handleIncomingURL(url) else { return }
                 if deepLinkStore.pendingPasswordResetToken != nil {
