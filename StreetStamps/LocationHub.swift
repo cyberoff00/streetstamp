@@ -11,6 +11,22 @@ import Combine
 
 @MainActor
 final class LocationHub: ObservableObject {
+    struct CountryResolutionState: Equatable {
+        private(set) var provisionalISO2: String?
+        private(set) var confirmedISO2: String?
+
+        var renderISO2: String? {
+            confirmedISO2
+        }
+
+        mutating func applyFastGuess(_ iso2: String?) {
+            provisionalISO2 = ChinaCoordinateTransform.normalizedConfirmedISO2(iso2)
+        }
+
+        mutating func applyAuthoritativeISO2(_ iso2: String?) {
+            confirmedISO2 = ChinaCoordinateTransform.normalizedConfirmedISO2(iso2)
+        }
+    }
 
     // MARK: - Persisted last known location (fast UI fallback)
 
@@ -80,6 +96,7 @@ final class LocationHub: ObservableObject {
     /// - "CN" => apply WGS->GCJ for Map rendering
     /// - nil/others => no offset
     @Published private(set) var countryISO2: String? = nil
+    @Published private(set) var provisionalCountryISO2: String? = nil
 
     /// Expose auth + fix state for UI.
     @Published private(set) var authorizationStatus: CLAuthorizationStatus = .notDetermined
@@ -106,6 +123,7 @@ final class LocationHub: ObservableObject {
 
     private var current: LocationSource
     private var cancellables: Set<AnyCancellable> = []
+    private var countryResolutionState = CountryResolutionState()
 
     // 全 App 统一输出流（可选）
     let locationStream = PassthroughSubject<CLLocation, Never>()
@@ -153,11 +171,8 @@ final class LocationHub: ObservableObject {
                 self.persistLastKnown(loc)
                 self.locationStream.send(loc)
 
-                // ✅ (1) fast gating immediately
-                let fast = self.fastCountryISO2Guess(for: loc.coordinate)
-                if fast != self.countryISO2 {
-                    self.countryISO2 = fast
-                }
+                // ✅ (1) cheap provisional hint for scheduling only
+                self.applyFastCountryGuess(self.fastCountryISO2Guess(for: loc.coordinate))
 
                 // ✅ (2) low-frequency authoritative correction
                 self.maybeReverseGeocodeCountry(for: loc)
@@ -190,6 +205,16 @@ final class LocationHub: ObservableObject {
         return "\(latB)_\(lonB)"
     }
 
+    private func applyFastCountryGuess(_ iso2: String?) {
+        countryResolutionState.applyFastGuess(iso2)
+        provisionalCountryISO2 = countryResolutionState.provisionalISO2
+    }
+
+    private func applyAuthoritativeCountryISO2(_ iso2: String?) {
+        countryResolutionState.applyAuthoritativeISO2(iso2)
+        countryISO2 = countryResolutionState.renderISO2
+    }
+
     private func maybeReverseGeocodeCountry(for loc: CLLocation) {
         // Don't geocode too early / too noisy
         guard loc.horizontalAccuracy >= 0, loc.horizontalAccuracy <= 150 else { return }
@@ -213,10 +238,7 @@ final class LocationHub: ObservableObject {
 
             self.lastGeocodeAt = now
             self.lastGeocodedRegionKey = key
-
-            if self.countryISO2 != iso {
-                self.countryISO2 = iso
-            }
+            self.applyAuthoritativeCountryISO2(iso)
         }
     }
 
