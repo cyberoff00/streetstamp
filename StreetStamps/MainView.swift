@@ -202,6 +202,15 @@ struct MainView: View {
             guard hasOngoingJourney, ongoingJourney.endTime == nil else { return }
             showMapView = true
         }
+        .onChange(of: flow.pendingWidgetCaptureSignal) { signal in
+            guard signal > 0 else { return }
+            syncOngoingFromStore()
+            guard hasOngoingJourney, ongoingJourney.endTime == nil else {
+                flow.consumeWidgetCapture()
+                return
+            }
+            showMapView = true
+        }
         .onChange(of: flow.endOngoingSignal) { _ in
             syncOngoingFromStore()
             guard hasOngoingJourney, ongoingJourney.endTime == nil else { return }

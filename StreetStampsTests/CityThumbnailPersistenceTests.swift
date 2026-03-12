@@ -24,6 +24,33 @@ final class CityThumbnailPersistenceTests: XCTestCase {
         XCTAssertNotEqual(original, updated)
     }
 
+    func test_renderCacheKey_doesNotChangeWhenBoundaryChanges() {
+        let city = makeCity()
+        var changed = makeCity()
+        changed.boundaryPolygon = [
+            CLLocationCoordinate2D(latitude: 51.40, longitude: -0.25),
+            CLLocationCoordinate2D(latitude: 51.40, longitude: 0.02),
+            CLLocationCoordinate2D(latitude: 51.65, longitude: 0.02),
+            CLLocationCoordinate2D(latitude: 51.65, longitude: -0.25)
+        ]
+
+        let original = CityThumbnailLoader.renderCacheKey(for: city, appearanceRaw: MapAppearanceStyle.dark.rawValue)
+        let updated = CityThumbnailLoader.renderCacheKey(for: changed, appearanceRaw: MapAppearanceStyle.dark.rawValue)
+
+        XCTAssertEqual(original, updated)
+    }
+
+    func test_renderCacheKey_doesNotChangeWhenAnchorChanges() {
+        let city = makeCity()
+        var changed = makeCity()
+        changed.anchor = CLLocationCoordinate2D(latitude: 51.5200, longitude: -0.1000)
+
+        let original = CityThumbnailLoader.renderCacheKey(for: city, appearanceRaw: MapAppearanceStyle.dark.rawValue)
+        let updated = CityThumbnailLoader.renderCacheKey(for: changed, appearanceRaw: MapAppearanceStyle.dark.rawValue)
+
+        XCTAssertEqual(original, updated)
+    }
+
     func test_renderCacheRelativePath_isStableAndSanitized() {
         let key = "render|city/London|dark|abc:123"
 
@@ -55,6 +82,24 @@ final class CityThumbnailPersistenceTests: XCTestCase {
 
         XCTAssertNotNil(storeA.image(forKey: key))
         XCTAssertNil(storeB.image(forKey: key))
+    }
+
+    func test_existingPersistentCache_returnsDiskImageWhenMemoryCacheIsEmpty() throws {
+        let root = makeTemporaryDirectory(named: "render-cache-disk-hit")
+        let store = CityRenderCacheStore(rootDir: root)
+        let city = makeCity()
+        let key = CityThumbnailLoader.renderCacheKey(for: city, appearanceRaw: MapAppearanceStyle.dark.rawValue)
+        let image = makeImage()
+
+        store.save(image, forKey: key)
+
+        let cached = CityThumbnailLoader.existingPersistentCache(
+            for: city,
+            appearanceRaw: MapAppearanceStyle.dark.rawValue,
+            renderCacheStore: store
+        )
+
+        XCTAssertNotNil(cached)
     }
 
     private func makeCity() -> City {

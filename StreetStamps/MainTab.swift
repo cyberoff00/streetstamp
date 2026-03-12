@@ -47,11 +47,11 @@ enum MainSidebarDestination: String, Identifiable, CaseIterable {
         case .settings:
             return NavigationChrome(title: L10n.t("settings_title"), leadingAccessory: .none, titleLevel: .secondary)
         case .equipment:
-            return NavigationChrome(title: L10n.t("equipment_title"), leadingAccessory: .none, titleLevel: .secondary)
+            return NavigationChrome(title: L10n.upper("equipment_title"), leadingAccessory: .none, titleLevel: .secondary)
         case .postcards:
-            return NavigationChrome(title: L10n.t("postcard_nav_title"), leadingAccessory: .back, titleLevel: .secondary)
+            return NavigationChrome(title: L10n.upper("postcard_nav_title"), leadingAccessory: .back, titleLevel: .secondary)
         case .inviteFriend:
-            return NavigationChrome(title: L10n.t("profile_invite_friends"), leadingAccessory: .back, titleLevel: .secondary)
+            return NavigationChrome(title: L10n.upper("profile_invite_friends"), leadingAccessory: .back, titleLevel: .secondary)
         }
     }
 }
@@ -174,6 +174,12 @@ struct MainTabView: View {
             guard let tab else { return }
             selectedTab = tab
             flow.clearRequestedTab()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openCaptureFromWidget)) { _ in
+            selectedTab = .start
+            flow.requestSelectTab(.start)
+            flow.requestResumeOngoing()
+            flow.requestWidgetCapture()
         }
         .alert(L10n.t("resume_prompt_title"), isPresented: Binding(
             get: { pendingResumeJourney != nil },
@@ -378,10 +384,10 @@ private struct MainSidebarMenuView: View {
     
     private let sidebarItems: [(title: String, icon: String, destination: MainSidebarDestination)] = [
         (L10n.t("profile_title"), "person", .profile),
-        (L10n.t("equipment_title"), "tshirt", .equipment),
+        (L10n.upper("equipment_title"), "tshirt", .equipment),
         (L10n.t("settings_title"), "gearshape", .settings),
-        (L10n.t("postcard_nav_title"), "envelope", .postcards),
-        (L10n.t("profile_invite_friends"), "person.badge.plus", .inviteFriend)
+        (L10n.upper("postcard_nav_title"), "envelope", .postcards),
+        (L10n.upper("profile_invite_friends"), "person.badge.plus", .inviteFriend)
     ]
 
     private var displayName: String {
@@ -426,7 +432,7 @@ private struct MainSidebarMenuView: View {
                         Divider()
                             .overlay(Color.black.opacity(0.06))
 
-                        Text(L10n.t("journey_diary_version"))
+                        Text(L10n.t("app_name"))
                             .font(.system(size: 10, weight: .semibold))
                             .tracking(0.6)
                             .foregroundColor(FigmaTheme.text.opacity(0.5))

@@ -4,6 +4,23 @@ extension Notification.Name {
     static let postcardSentGoToInbox = Notification.Name("postcardSentGoToInbox")
 }
 
+enum PostcardSendErrorPresentation {
+    static func message(for error: Error, localize: (String) -> String = L10n.t) -> String {
+        guard let backendError = error as? BackendAPIError else {
+            return localize("postcard_send_failed")
+        }
+
+        switch backendError.responseCode {
+        case "city_friend_quota_exceeded":
+            return localize("postcard_quota_friend_limit_reached")
+        case "city_total_quota_exceeded":
+            return localize("postcard_quota_city_limit_reached")
+        default:
+            return localize("postcard_send_failed")
+        }
+    }
+}
+
 @MainActor
 final class PostcardCenter: ObservableObject {
     @Published private(set) var drafts: [PostcardDraft] = []
@@ -158,7 +175,7 @@ final class PostcardCenter: ObservableObject {
             guard let currentIndex = drafts.firstIndex(where: { $0.draftID == draftID }) else { return }
             var current = drafts[currentIndex]
             current.status = .failed
-            current.lastError = error.localizedDescription
+            current.lastError = PostcardSendErrorPresentation.message(for: error)
             current.updatedAt = Date()
             drafts[currentIndex] = current
             persist()

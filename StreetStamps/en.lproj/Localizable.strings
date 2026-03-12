@@ -7,7 +7,7 @@
 "finished" = "Finish";
 "continue_background" = "Continue in Background (Low Power)";
 "journey_paused" = "Journey paused";
-"go_to_library" = "Go to City Library";
+"go_to_library" = "Go to City Cards";
 "close" = "Close";
 "share" = "Share";
 "save" = "Save";
@@ -21,7 +21,7 @@
 "tab_lifelog" = "LIFELOG";
 "globe_view"="Globe View";
 "profile"="Profile";
-"toast_city_added" = "Created a %@ city card and added it to City Library";
+"toast_city_added" = "Created a %@ city card and added it to City Cards";
 
 "start_upper" = "START";
 "resume_upper" = "RESUME";
@@ -87,13 +87,19 @@
 
 "journey_memory" = "Journey Memory";
 "journey_memories" = "Journey Memory";
+"friend_city_cards_title" = "City Cards";
+"friend_profile_stat_trips" = "TRIPS";
+"friend_profile_stat_memories" = "MEMORIES";
+"friend_profile_stat_cities" = "CITIES";
+"friend_journey_detail_title" = "Journey";
+"friend_section_title_format" = "%1$@ · %2$@";
 "memories_for_city" = "Memories in %@: %d";
 "no_memories_yet" = "No memories yet";
 "no_memories_desc" = "After you finish a journey, your memories will be saved here.";
 
 "unlock_city_title_cn" = "New City Card Unlocked";
 "unlock_city_desc_1" = "You just finished exploring %@.";
-"unlock_city_desc_2" = "This card will appear in City Library, so you can revisit your footprints anytime.";
+"unlock_city_desc_2" = "This card will appear in City Cards, so you can revisit your footprints anytime.";
 "got_it" = "Got it";
 "go_see" = "Take a look";
 
@@ -107,7 +113,7 @@
 /* Card stats */
 "city_stats_line" = "%d explorations · %d memories";
 
-"library_city_title" = "Your City Stamps";
+"library_city_title" = "City Cards";
 "library_empty_title" = "No city stamps yet";
 "library_empty_subtitle" = "Generate a city card, or finish a journey to unlock your first city.";
 "city_card_stats" = "%d explorations · %d memories";
@@ -150,7 +156,7 @@
 
 /* Added for full localization - 2026-01-31 */
 "delete_city_alert_title" = "Delete this city card?";
-"delete_city_alert_message" = "“%@” will be removed from your City Library. This can't be undone.";
+"delete_city_alert_message" = "“%@” will be removed from your City Cards. This can't be undone.";
 "delete" = "Delete";
 "cancel" = "Cancel";
 "profile_tagline_travel_enthusiastic" = "Travel Enthusiastic";
@@ -385,8 +391,11 @@
 "settings_level_rules_3" = "Journeys required per level increase gradually (Lv1→Lv2 needs 2, Lv2→Lv3 needs 3).";
 "settings_level_rules_4" = "Profile, Lifelog, and Globe show real-time level progress.";
 "settings_level_rules_intro" = "Current level rules";
-"settings_check_updates_title" = "CHECK FOR\nUPDATES";
+"settings_check_updates_title" = "CHECK FOR UPDATES";
 "settings_check_updates_placeholder" = "Check for Updates";
+"settings_live_activity_title" = "Live Activity";
+"settings_live_activity_desc" = "Show current tracking progress on the Lock Screen and Dynamic Island.";
+"settings_live_activity_system_disabled_desc" = "Turn on Live Activities in Settings -> Worldo -> Live Activities.";
 "settings_about_us_title" = "ABOUT US";
 "settings_about_us_placeholder" = "About Us";
 "settings_privacy_policy_title" = "PRIVACY POLICY";
@@ -484,12 +493,16 @@
 "postcard_to_prefix" = "To: ";
 "postcard_sending" = "Sending...";
 "postcard_send" = "Send";
-"postcard_send_failed" = "Send failed";
+"postcard_send_failed" = "Send failed. Please try again.";
+"postcard_quota_friend_limit_reached" = "You've already sent this friend 2 postcards from this city. Try sending one from another city.";
+"postcard_quota_city_limit_reached" = "Postcards from this city have already been sent to 10 friends. Try another city.";
 "postcard_sent_success_title" = "Postcard sent!";
 "postcard_go_to_sent_box" = "View in Sent Box";
 "postcard_notification_badge" = "Postcard";
 "social_notice_like" = "Like";
-"social_notice_stomp" = "Stomp";
+"social_notice_friend_request" = "Friend Request";
+"social_notice_friend_update" = "Friend Update";
+"social_notice_stomp" = "Visitor";
 
 "tab_home" = "Start";
 "tab_friends" = "Friends";
@@ -632,6 +645,7 @@
 "friends_delete_confirm_message" = "They will be removed from your friends list and must send a new request to reconnect.";
 "friends_delete_failed" = "Remove failed";
 "friends_welcome" = "Welcome!";
+"friends_postcard_prompt" = "bring you a postcard";
 "friends_joined_format" = "Joined %@";
 "settings_section_map_appearance" = "MAP APPEARANCE";
 "settings_section_tracking_assist" = "TRACKING ASSIST";
@@ -653,6 +667,23 @@
 "settings_transfer_alert_title" = "Transfer";
 "settings_import_failed_title" = "Import Failed";
 "intro_skip" = "Skip";
+"intro_next" = "Next";
+"intro_get_started" = "Get Started";
+
+"intro_slide_1_title" = "Start Exploring";
+"intro_slide_1_subtitle" = "One Tap to precisely record your adventures — running, walking, or traveling — your memories are always on the way.";
+
+"intro_slide_2_title" = "Archive Journeys";
+"intro_slide_2_subtitle" = "Unlock new city cards. Every journey generate a blog with photos, notes, and map pins of places you've explored.";
+
+"intro_slide_3_title" = "Background Lifelog";
+"intro_slide_3_subtitle" = "Keep recording your movement even when the app is closed, building your lifelong exploration trail.";
+
+"intro_slide_4_title" = "Publish to Friends";
+"intro_slide_4_subtitle" = "Discover your friends’ journeys and stay connected through their offline life.";
+
+
+
 "gpx_import_not_enough_points" = "GPX track does not contain enough points (at least 2 are required).";
 "unknown_parse_error" = "Unknown parse error";
 "gpx_import_parse_failed_format" = "GPX parsing failed: %@";
@@ -684,6 +715,16 @@
 "postcard_received_title_format" = "%@ sent you a postcard";
 "postcard_received_title_fallback" = "You received a postcard";
 "postcard_received_body_format" = "From %@";
+"notification_journey_like_format" = "%@ liked your journey \"%@\"";
+"notification_profile_stomp_format" = "%@ sat on your sofa";
+"notification_friend_request_format" = "%@ sent you a friend request";
+"notification_friend_request_accepted_format" = "%@ accepted your friend request";
+"notification_friend_request_fallback" = "You received a friend request";
+"friend_profile_cta_idle" = "Take a seat";
+"friend_profile_cta_loading" = "Sitting down...";
+"friend_profile_cta_done" = "Seated";
+"friend_profile_stomp_success_format" = "You sat on %@'s sofa";
+"friend_profile_stomp_failed_format" = "Couldn't sit down: %@";
 "watch_status_permission_needed" = "Allow location access first";
 "watch_status_watch_permission_needed" = "Allow watch location access first";
 "watch_status_permission_unknown" = "Location permission status is unknown";
@@ -729,3 +770,25 @@
 "无法访问摄像头。" = "Unable to access the camera.";
 "相机输入初始化失败。" = "Failed to initialize camera input.";
 "扫码输出初始化失败。" = "Failed to initialize scan output.";
+"city_level_picker_title" = "Choose Hierarchy Level";
+"city_level_picker_cancel" = "Cancel";
+"city_level_locality" = "City";
+"city_level_sub_admin" = "District";
+"city_level_admin" = "State / Province";
+"city_level_island" = "Island";
+"city_level_country" = "Country";
+"city_level_region" = "Region";
+"city_level_confirm_title" = "Confirm Level Change";
+"city_level_confirm_apply" = "Apply";
+"city_level_confirm_upgrade_message" = "After switching, cards from smaller levels in the same parent region will be merged into this level, and future journeys in this region will default to it.";
+"city_level_confirm_future_default_message" = "After switching, future journeys in the same region will default to this level until you change it again.";
+"city_level_downgrade_blocked_title" = "Smaller Level Not Supported";
+"city_level_downgrade_blocked_message_format" = "Only upgrading from a smaller to a larger hierarchy level is supported now. Changing from %@ to %@ is currently blocked.";
+"city_deep_memories_toggle_on" = "Memories On";
+"city_deep_memories_toggle_off" = "Memories Off";
+"city_deep_memories_toggle_show_accessibility" = "Show memories on map";
+"city_deep_memories_toggle_hide_accessibility" = "Hide memories on map";
+"lifelog_mood_option_sad" = "Low";
+"lifelog_mood_option_notbad" = "Okay";
+"lifelog_mood_option_happy" = "Happy";
+"profile_summary_stats_format" = "%d Cities  %d Memories";

@@ -1,6 +1,24 @@
 import Foundation
 import Combine
 
+enum PostcardSidebarVisibilityScope {
+    case composer
+    case preview
+
+    var hidesGlobalSidebarButton: Bool {
+        true
+    }
+
+    var token: String {
+        switch self {
+        case .composer:
+            return "postcard-composer"
+        case .preview:
+            return "postcard-preview"
+        }
+    }
+}
+
 /// App-level flow triggers that should not be tied to any single tab/view lifecycle.
 ///
 /// Why signals?
@@ -10,6 +28,7 @@ import Combine
 final class AppFlowCoordinator: ObservableObject {
     @Published private(set) var resumeOngoingSignal: Int = 0
     @Published private(set) var endOngoingSignal: Int = 0
+    @Published private(set) var pendingWidgetCaptureSignal: Int = 0
     @Published private(set) var sidebarHiddenTokens: Set<String> = []
     @Published private(set) var requestedTab: NavigationTab?
     @Published private(set) var currentTab: NavigationTab = .start
@@ -20,6 +39,14 @@ final class AppFlowCoordinator: ObservableObject {
 
     func requestEndOngoing() {
         endOngoingSignal += 1
+    }
+
+    func requestWidgetCapture() {
+        pendingWidgetCaptureSignal += 1
+    }
+
+    func consumeWidgetCapture() {
+        pendingWidgetCaptureSignal = 0
     }
 
     func requestSelectTab(_ tab: NavigationTab) {

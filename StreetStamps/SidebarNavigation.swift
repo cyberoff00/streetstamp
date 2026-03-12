@@ -102,7 +102,7 @@ struct SidebarMenuView: View {
                         Divider()
                             .overlay(Color.black.opacity(0.06))
 
-                        Text(L10n.t("journey_diary_version"))
+                        Text(L10n.t("app_name"))
                             .font(.system(size: 10, weight: .semibold))
                             .tracking(0.6)
                             .foregroundColor(FigmaTheme.text.opacity(0.5))

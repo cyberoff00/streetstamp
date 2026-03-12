@@ -58,6 +58,81 @@ final class CityCacheIncrementalUpdateTests: XCTestCase {
     }
 
     @MainActor
+    func test_payloadUsesUnifiedDisplayTitleWhenReserveProfileExists() throws {
+        let (cache, _) = try makeCache(userID: "citycache-payload-\(UUID().uuidString)")
+        let parentRegionKey = "cache-payload-parent-\(UUID().uuidString)"
+        CityLevelPreferenceStore.shared.setPreferredLevel(.admin, for: parentRegionKey)
+
+        let journey = makeJourney(
+            id: "journey-1",
+            cityKey: "Xinyi Township|TW",
+            cityName: "Xinyi Township",
+            iso: "TW",
+            memoryCount: 0
+        )
+
+        cache.applyJourneyMutation(oldJourney: nil, newJourney: journey)
+        cache.updateCityLevelReserveProfile(
+            cityKey: "Xinyi Township|TW",
+            level: .locality,
+            parentRegionKey: parentRegionKey,
+            availableLevels: [
+                .locality: "Xinyi Township",
+                .admin: "Taiwan"
+            ],
+            anchor: journey.startCoordinate,
+            force: true
+        )
+
+        let payload = cache.payload(for: "Xinyi Township|TW")
+
+        XCTAssertEqual(payload?.title, "Taiwan")
+    }
+
+    @MainActor
+    func test_updateCityLevelReserveProfileRefreshesLabelsEvenWhenReservedLevelAlreadyExists() throws {
+        let (cache, _) = try makeCache(userID: "citycache-refresh-levels-\(UUID().uuidString)")
+        let journey = makeJourney(
+            id: "journey-1",
+            cityKey: "London|GB",
+            cityName: "London",
+            iso: "GB",
+            memoryCount: 0
+        )
+
+        cache.applyJourneyMutation(oldJourney: nil, newJourney: journey)
+        cache.updateCityLevelReserveProfile(
+            cityKey: "London|GB",
+            level: .locality,
+            parentRegionKey: "England|GB",
+            availableLevels: [
+                .locality: "London",
+                .admin: "England"
+            ],
+            anchor: journey.startCoordinate,
+            force: true
+        )
+
+        cache.updateCityLevelReserveProfile(
+            cityKey: "London|GB",
+            level: .locality,
+            parentRegionKey: "England|GB",
+            availableLevels: [
+                .locality: "伦敦",
+                .admin: "英格兰"
+            ],
+            anchor: journey.startCoordinate,
+            force: false
+        )
+
+        let cached = try XCTUnwrap(cache.cachedCities.first(where: { $0.id == "London|GB" }))
+        XCTAssertEqual(cached.reservedLevelRaw, CityPlacemarkResolver.CardLevel.locality.rawValue)
+        XCTAssertEqual(cached.reservedAvailableLevelNames?[CityPlacemarkResolver.CardLevel.locality.rawValue], "伦敦")
+        XCTAssertEqual(cached.reservedAvailableLevelNames?[CityPlacemarkResolver.CardLevel.admin.rawValue], "英格兰")
+        XCTAssertEqual(cached.reservedAvailableLevelNamesLocaleID, Locale.current.identifier)
+    }
+
+    @MainActor
     private func makeCache(userID: String) throws -> (CityCache, JourneyStore) {
         let paths = StoragePath(userID: userID)
         try? FileManager.default.removeItem(at: paths.userRoot)

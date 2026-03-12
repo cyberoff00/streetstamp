@@ -213,6 +213,7 @@ enum BackendAPIError: LocalizedError {
     case unauthorized
     case invalidResponse
     case server(String)
+    case serverCode(String, String)
 
     var errorDescription: String? {
         switch self {
@@ -220,6 +221,27 @@ enum BackendAPIError: LocalizedError {
         case .unauthorized: return "请先登录"
         case .invalidResponse: return "后端返回格式异常"
         case .server(let msg): return msg
+        case .serverCode(_, let msg): return msg
+        }
+    }
+
+    var serverMessage: String? {
+        switch self {
+        case .server(let msg):
+            return msg
+        case .serverCode(_, let msg):
+            return msg
+        default:
+            return nil
+        }
+    }
+
+    var responseCode: String? {
+        switch self {
+        case .serverCode(let code, _):
+            return code
+        default:
+            return nil
         }
     }
 }
@@ -383,23 +405,67 @@ final class BackendAPIClient {
             guard let retryHTTP = retryResp as? HTTPURLResponse else {
                 throw BackendAPIError.invalidResponse
             }
-            return try validateResponse(data: retryData, http: retryHTTP)
+            return try validateResponse(
+                data: retryData,
+                http: retryHTTP,
+                path: path,
+                usedAuthorizationToken: true
+            )
         }
 
-        return try validateResponse(data: data, http: http)
+        return try validateResponse(
+            data: data,
+            http: http,
+            path: path,
+            usedAuthorizationToken: resolvedToken?.isEmpty == false
+        )
     }
 
     private func shouldSkipAutoRefresh(path: String) -> Bool {
         path.hasPrefix("/v1/auth/")
     }
 
-    private func validateResponse(data: Data, http: HTTPURLResponse) throws -> (Data, HTTPURLResponse) {
-        if http.statusCode == 401 { throw BackendAPIError.unauthorized }
+    private func shouldPreserveUnauthorizedServerMessage(path: String, usedAuthorizationToken: Bool) -> Bool {
+        guard !usedAuthorizationToken else { return false }
+        switch path {
+        case "/v1/auth/login",
+             "/v1/auth/apple",
+             "/v1/auth/oauth",
+             "/v1/auth/email/login":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func validateResponse(
+        data: Data,
+        http: HTTPURLResponse,
+        path: String,
+        usedAuthorizationToken: Bool
+    ) throws -> (Data, HTTPURLResponse) {
+        if http.statusCode == 401 {
+            if shouldPreserveUnauthorizedServerMessage(path: path, usedAuthorizationToken: usedAuthorizationToken) {
+                if let m = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let msg = m["message"] as? String,
+                   !msg.isEmpty {
+                    throw BackendAPIError.server(msg)
+                }
+                let rawMsg = String(data: data, encoding: .utf8) ?? ""
+                throw BackendAPIError.server(normalizeServerMessage(raw: rawMsg, statusCode: http.statusCode))
+            }
+            throw BackendAPIError.unauthorized
+        }
         guard (200..<300).contains(http.statusCode) else {
-            if let m = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let msg = m["message"] as? String,
-               !msg.isEmpty {
-                throw BackendAPIError.server(msg)
+            if let m = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                let msg = (m["message"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let code = (m["code"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if !code.isEmpty, !msg.isEmpty {
+                    throw BackendAPIError.serverCode(code, msg)
+                }
+                if !msg.isEmpty {
+                    throw BackendAPIError.server(msg)
+                }
             }
             let rawMsg = String(data: data, encoding: .utf8) ?? ""
             let msg = normalizeServerMessage(raw: rawMsg, statusCode: http.statusCode)

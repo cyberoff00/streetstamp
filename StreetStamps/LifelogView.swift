@@ -4,8 +4,8 @@ import UIKit
 import HealthKit
 
 enum LifelogRenderModeSelector {
-    static let nearModeLatitudeDeltaThreshold: CLLocationDegrees = 0.03
-    static let nearModeLongitudeDeltaThreshold: CLLocationDegrees = 0.03
+    static let nearModeLatitudeDeltaThreshold: CLLocationDegrees = 0.05
+    static let nearModeLongitudeDeltaThreshold: CLLocationDegrees = 0.05
     static let footprintStepMeters: CLLocationDistance = 50
 
     static func isNearMode(_ region: MKCoordinateRegion?) -> Bool {
@@ -60,6 +60,12 @@ private struct LifelogShareImageItem: Identifiable {
 }
 
 enum LifelogFootprintSampler {
+    private static let turnThresholdDegrees: CLLocationDirection = 24
+    private static let minimumTurnLegMeters: CLLocationDistance = 18
+    private static let maximumStraightSpanMeters: CLLocationDistance = 140
+    private static let fillDistanceThresholds: [CLLocationDistance] = [90, 180, 320]
+    private static let maximumFillPointsPerSpan = 3
+
     static func sample(
         route coords: [CLLocationCoordinate2D],
         stepMeters: CLLocationDistance,
@@ -68,41 +74,16 @@ enum LifelogFootprintSampler {
         guard coords.count > 1 else { return coords }
         guard stepMeters > 0 else { return coords }
 
-        var result: [CLLocationCoordinate2D] = [coords[0]]
-        var distanceFromLastSample: CLLocationDistance = 0
+        let runs = splitRuns(coords, gapBreakMeters: gapBreakMeters)
+        var result: [CLLocationCoordinate2D] = []
+        result.reserveCapacity(coords.count)
 
-        for idx in 1..<coords.count {
-            let start = coords[idx - 1]
-            let end = coords[idx]
-            let startLoc = CLLocation(latitude: start.latitude, longitude: start.longitude)
-            let endLoc = CLLocation(latitude: end.latitude, longitude: end.longitude)
-            let segmentLength = endLoc.distance(from: startLoc)
-
-            if segmentLength <= 0.001 { continue }
-            if segmentLength > gapBreakMeters {
-                if !sameCoordinate(result.last, end) {
-                    result.append(end)
-                }
-                distanceFromLastSample = 0
-                continue
-            }
-
-            var consumedOnSegment: CLLocationDistance = 0
-            while distanceFromLastSample + (segmentLength - consumedOnSegment) >= stepMeters {
-                let needed = stepMeters - distanceFromLastSample
-                let t = (consumedOnSegment + needed) / segmentLength
-                result.append(interpolateCoordinate(from: start, to: end, t: t))
-                consumedOnSegment += needed
-                distanceFromLastSample = 0
-            }
-
-            distanceFromLastSample += max(0, segmentLength - consumedOnSegment)
+        for run in runs {
+            let sampledRun = sampleContinuousRun(run, stepMeters: stepMeters)
+            appendDeduplicating(sampledRun, into: &result)
         }
 
-        if let last = coords.last, !sameCoordinate(result.last, last) {
-            result.append(last)
-        }
-        return result
+        return result.isEmpty ? [coords[0]] : result
     }
 
     private static func interpolateCoordinate(
@@ -114,6 +95,233 @@ enum LifelogFootprintSampler {
         let lat = a.latitude + (b.latitude - a.latitude) * clamped
         let lon = a.longitude + (b.longitude - a.longitude) * clamped
         return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+    }
+
+    private static func sampleContinuousRun(
+        _ run: [CLLocationCoordinate2D],
+        stepMeters: CLLocationDistance
+    ) -> [CLLocationCoordinate2D] {
+        guard run.count > 1 else { return run }
+
+        let anchorIndices = anchorIndices(for: run)
+        guard anchorIndices.count > 1 else { return [run[0], run[run.count - 1]] }
+
+        var result: [CLLocationCoordinate2D] = []
+        result.reserveCapacity(anchorIndices.count * 2)
+
+        for pairIndex in 0..<(anchorIndices.count - 1) {
+            let startIndex = anchorIndices[pairIndex]
+            let endIndex = anchorIndices[pairIndex + 1]
+            let start = run[startIndex]
+            let end = run[endIndex]
+            let pathSlice = Array(run[startIndex...endIndex])
+            let distance = pathDistanceMeters(pathSlice)
+
+            if !sameCoordinate(result.last, start) {
+                result.append(start)
+            }
+
+            let spanAnchors = straightSpanAnchorCount(distance: distance)
+            if spanAnchors > 0 {
+                for anchorIndex in 1...spanAnchors {
+                    let t = Double(anchorIndex) / Double(spanAnchors + 1)
+                    result.append(coordinate(along: pathSlice, progress: t))
+                }
+            } else {
+                let fillCount = fillPointCount(distance: distance, stepMeters: stepMeters)
+                if fillCount > 0 {
+                    for fillIndex in 1...fillCount {
+                        let t = Double(fillIndex) / Double(fillCount + 1)
+                        result.append(coordinate(along: pathSlice, progress: t))
+                    }
+                }
+            }
+
+            if !sameCoordinate(result.last, end) {
+                result.append(end)
+            }
+        }
+
+        return deduplicated(result)
+    }
+
+    private static func splitRuns(
+        _ coords: [CLLocationCoordinate2D],
+        gapBreakMeters: CLLocationDistance
+    ) -> [[CLLocationCoordinate2D]] {
+        guard !coords.isEmpty else { return [] }
+
+        var runs: [[CLLocationCoordinate2D]] = []
+        var current: [CLLocationCoordinate2D] = [coords[0]]
+
+        for idx in 1..<coords.count {
+            let previous = coords[idx - 1]
+            let currentCoord = coords[idx]
+            let distance = distanceMeters(from: previous, to: currentCoord)
+
+            if distance > gapBreakMeters {
+                runs.append(deduplicated(current))
+                current = [currentCoord]
+                continue
+            }
+
+            current.append(currentCoord)
+        }
+
+        if !current.isEmpty {
+            runs.append(deduplicated(current))
+        }
+
+        return runs.filter { !$0.isEmpty }
+    }
+
+    private static func anchorIndices(for run: [CLLocationCoordinate2D]) -> [Int] {
+        guard run.count > 2 else { return Array(run.indices) }
+
+        var anchors = IndexSet()
+        anchors.insert(0)
+        anchors.insert(run.count - 1)
+
+        for idx in 1..<(run.count - 1) {
+            guard isTurnAnchor(at: idx, in: run) else { continue }
+            anchors.insert(idx)
+        }
+
+        return anchors.map(\.self)
+    }
+
+    private static func isTurnAnchor(at index: Int, in run: [CLLocationCoordinate2D]) -> Bool {
+        guard index > 0, index < run.count - 1 else { return false }
+
+        let previous = run[index - 1]
+        let current = run[index]
+        let next = run[index + 1]
+        let incomingDistance = distanceMeters(from: previous, to: current)
+        let outgoingDistance = distanceMeters(from: current, to: next)
+
+        guard incomingDistance >= minimumTurnLegMeters, outgoingDistance >= minimumTurnLegMeters else {
+            return false
+        }
+
+        let incomingHeading = headingDegrees(from: previous, to: current)
+        let outgoingHeading = headingDegrees(from: current, to: next)
+        let delta = headingDeltaDegrees(from: incomingHeading, to: outgoingHeading)
+        return delta >= turnThresholdDegrees
+    }
+
+    private static func straightSpanAnchorCount(distance: CLLocationDistance) -> Int {
+        guard distance > maximumStraightSpanMeters else { return 0 }
+        return max(0, Int(ceil(distance / maximumStraightSpanMeters)) - 1)
+    }
+
+    private static func fillPointCount(
+        distance: CLLocationDistance,
+        stepMeters: CLLocationDistance
+    ) -> Int {
+        let normalizedStep = max(stepMeters, 1)
+        let adjustedThresholds = fillDistanceThresholds.map { max($0, normalizedStep * 1.8) }
+
+        switch distance {
+        case ..<adjustedThresholds[0]:
+            return 0
+        case ..<adjustedThresholds[1]:
+            return 1
+        case ..<adjustedThresholds[2]:
+            return 2
+        default:
+            return maximumFillPointsPerSpan
+        }
+    }
+
+    private static func appendDeduplicating(
+        _ coords: [CLLocationCoordinate2D],
+        into result: inout [CLLocationCoordinate2D]
+    ) {
+        for coord in coords where !sameCoordinate(result.last, coord) {
+            result.append(coord)
+        }
+    }
+
+    private static func deduplicated(_ coords: [CLLocationCoordinate2D]) -> [CLLocationCoordinate2D] {
+        var result: [CLLocationCoordinate2D] = []
+        result.reserveCapacity(coords.count)
+        appendDeduplicating(coords, into: &result)
+        return result
+    }
+
+    private static func distanceMeters(
+        from a: CLLocationCoordinate2D,
+        to b: CLLocationCoordinate2D
+    ) -> CLLocationDistance {
+        CLLocation(latitude: a.latitude, longitude: a.longitude)
+            .distance(from: CLLocation(latitude: b.latitude, longitude: b.longitude))
+    }
+
+    private static func pathDistanceMeters(_ coords: [CLLocationCoordinate2D]) -> CLLocationDistance {
+        guard coords.count > 1 else { return 0 }
+
+        var total: CLLocationDistance = 0
+        for index in 1..<coords.count {
+            total += distanceMeters(from: coords[index - 1], to: coords[index])
+        }
+        return total
+    }
+
+    private static func coordinate(
+        along path: [CLLocationCoordinate2D],
+        progress: Double
+    ) -> CLLocationCoordinate2D {
+        guard path.count > 1 else { return path.first ?? .init() }
+
+        let clamped = min(max(progress, 0), 1)
+        if clamped <= 0 { return path[0] }
+        if clamped >= 1 { return path[path.count - 1] }
+
+        let totalDistance = pathDistanceMeters(path)
+        guard totalDistance > 0 else { return path[0] }
+
+        let targetDistance = totalDistance * clamped
+        var traversed: CLLocationDistance = 0
+
+        for index in 1..<path.count {
+            let start = path[index - 1]
+            let end = path[index]
+            let segmentDistance = distanceMeters(from: start, to: end)
+            guard segmentDistance > 0.001 else { continue }
+
+            if traversed + segmentDistance >= targetDistance {
+                let remaining = targetDistance - traversed
+                let localT = remaining / segmentDistance
+                return interpolateCoordinate(from: start, to: end, t: localT)
+            }
+
+            traversed += segmentDistance
+        }
+
+        return path[path.count - 1]
+    }
+
+    private static func headingDegrees(
+        from a: CLLocationCoordinate2D,
+        to b: CLLocationCoordinate2D
+    ) -> CLLocationDirection {
+        let lat1 = a.latitude * .pi / 180
+        let lon1 = a.longitude * .pi / 180
+        let lat2 = b.latitude * .pi / 180
+        let lon2 = b.longitude * .pi / 180
+        let deltaLon = lon2 - lon1
+        let y = sin(deltaLon) * cos(lat2)
+        let x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(deltaLon)
+        let heading = atan2(y, x) * 180 / .pi
+        return heading.isFinite ? heading : 0
+    }
+
+    private static func headingDeltaDegrees(
+        from lhs: CLLocationDirection,
+        to rhs: CLLocationDirection
+    ) -> CLLocationDirection {
+        let raw = abs(rhs - lhs).truncatingRemainder(dividingBy: 360)
+        return raw > 180 ? 360 - raw : raw
     }
 
     private static func sameCoordinate(_ a: CLLocationCoordinate2D?, _ b: CLLocationCoordinate2D) -> Bool {
@@ -639,7 +847,8 @@ struct LifelogView: View {
         let cardContent = ProfileSummaryCardContent(
             level: levelProgress.level,
             cityCount: cityCount,
-            memoryCount: totalMemories
+            memoryCount: totalMemories,
+            locale: .current
         )
 
         return HStack(spacing: 14) {
@@ -1284,13 +1493,13 @@ struct LifelogView: View {
         let moodValue: String
         let imageAssetName: String
         let fallbackEmoji: String
-        let label: String
+        let labelKey: String
     }
 
     private static let moodOptions: [MoodOption] = [
-        .init(id: "sad", moodValue: "sad", imageAssetName: "Sad", fallbackEmoji: "😢", label: "低落"),
-        .init(id: "notbad", moodValue: "notbad2", imageAssetName: "notbad2", fallbackEmoji: "🙂", label: "一般"),
-        .init(id: "happy", moodValue: "happy", imageAssetName: "Happy", fallbackEmoji: "😄", label: "开心")
+        .init(id: "sad", moodValue: "sad", imageAssetName: "Sad", fallbackEmoji: "😢", labelKey: "lifelog_mood_option_sad"),
+        .init(id: "notbad", moodValue: "notbad2", imageAssetName: "notbad2", fallbackEmoji: "🙂", labelKey: "lifelog_mood_option_notbad"),
+        .init(id: "happy", moodValue: "happy", imageAssetName: "Happy", fallbackEmoji: "😄", labelKey: "lifelog_mood_option_happy")
     ]
 
     @ViewBuilder
@@ -1353,7 +1562,7 @@ struct LifelogView: View {
                         } label: {
                             VStack(spacing: 10) {
                                 moodImageView(option: mood, size: 56, fallbackFontSize: 42)
-                                Text(mood.label)
+                                Text(L10n.t(mood.labelKey))
                                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                             }
                             .foregroundColor(FigmaTheme.text)

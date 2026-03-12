@@ -448,6 +448,104 @@ final class LifelogStore: ObservableObject {
     var hasTrack: Bool { coordinates.count >= 2 }
     var totalDistanceMeters: Double { cachedDistanceMeters }
 
+    /// Call from debug console: `LifelogStore.shared.diagnosePassiveGaps()`
+    /// Prints today's point gap analysis to console.
+    func diagnosePassiveGaps() {
+        let cal = Calendar.current
+        let todayStart = cal.startOfDay(for: Date())
+        let todayPoints = points.filter { $0.timestamp >= todayStart }
+
+        guard todayPoints.count >= 2 else {
+            print("📊 [Lifelog Diag] Today has \(todayPoints.count) points — not enough to analyze.")
+            return
+        }
+
+        var gaps: [(distanceM: Double, timeSec: Double)] = []
+        for i in 1..<todayPoints.count {
+            let prev = todayPoints[i - 1]
+            let curr = todayPoints[i]
+            let a = CLLocation(latitude: prev.lat, longitude: prev.lon)
+            let b = CLLocation(latitude: curr.lat, longitude: curr.lon)
+            let dist = b.distance(from: a)
+            let dt = curr.timestamp.timeIntervalSince(prev.timestamp)
+            gaps.append((dist, dt))
+        }
+
+        let distances = gaps.map(\.distanceM).sorted()
+        let times = gaps.map(\.timeSec).sorted()
+
+        let bigGaps = gaps.filter { $0.distanceM > 200 }
+        let hugeGaps = gaps.filter { $0.distanceM > 500 }
+        let longPauses = gaps.filter { $0.timeSec > 120 }
+
+        let fmt = DateFormatter()
+        fmt.dateFormat = "HH:mm:ss"
+
+        print("📊 ═══════════════════════════════════════════")
+        print("📊 LIFELOG PASSIVE GAP DIAGNOSIS — \(fmt.string(from: todayStart))")
+        print("📊 ═══════════════════════════════════════════")
+        print("📊 Total points today: \(todayPoints.count)")
+        print("📊 Time range: \(fmt.string(from: todayPoints.first!.timestamp)) → \(fmt.string(from: todayPoints.last!.timestamp))")
+        print("📊")
+        print("📊 Distance between consecutive points:")
+        print("📊   Min:    \(String(format: "%.0f", distances.first!))m")
+        print("📊   Median: \(String(format: "%.0f", distances[distances.count / 2]))m")
+        print("📊   P90:    \(String(format: "%.0f", distances[Int(Double(distances.count) * 0.9)]))m")
+        print("📊   P99:    \(String(format: "%.0f", distances[Int(Double(distances.count) * 0.99)]))m")
+        print("📊   Max:    \(String(format: "%.0f", distances.last!))m")
+        print("📊")
+        print("📊 Time between consecutive points:")
+        print("📊   Min:    \(String(format: "%.0f", times.first!))s")
+        print("📊   Median: \(String(format: "%.0f", times[times.count / 2]))s")
+        print("📊   P90:    \(String(format: "%.0f", times[Int(Double(times.count) * 0.9)]))s")
+        print("📊   Max:    \(String(format: "%.0f", times.last!))s")
+        print("📊")
+        print("📊 Gaps > 200m: \(bigGaps.count) / \(gaps.count)")
+        print("📊 Gaps > 500m: \(hugeGaps.count) / \(gaps.count)")
+        print("📊 Pauses > 2min: \(longPauses.count) / \(gaps.count)")
+        print("📊")
+
+        if !bigGaps.isEmpty {
+            print("📊 ── Top 10 biggest distance gaps ──")
+            let topByDist = gaps.enumerated()
+                .sorted { $0.element.distanceM > $1.element.distanceM }
+                .prefix(10)
+            for item in topByDist {
+                let idx = item.offset
+                let g = item.element
+                let t0 = fmt.string(from: todayPoints[idx].timestamp)
+                let t1 = fmt.string(from: todayPoints[idx + 1].timestamp)
+                print("📊   \(t0) → \(t1)  dist=\(String(format: "%.0f", g.distanceM))m  dt=\(String(format: "%.0f", g.timeSec))s")
+            }
+        }
+
+        if !longPauses.isEmpty {
+            print("📊 ── Top 10 longest time gaps ──")
+            let topByTime = gaps.enumerated()
+                .sorted { $0.element.timeSec > $1.element.timeSec }
+                .prefix(10)
+            for item in topByTime {
+                let idx = item.offset
+                let g = item.element
+                let t0 = fmt.string(from: todayPoints[idx].timestamp)
+                let t1 = fmt.string(from: todayPoints[idx + 1].timestamp)
+                print("📊   \(t0) → \(t1)  dist=\(String(format: "%.0f", g.distanceM))m  dt=\(String(format: "%.0f", g.timeSec))s")
+            }
+        }
+
+        print("📊 ═══════════════════════════════════════════")
+        if hugeGaps.count > 0 {
+            print("📊 VERDICT: \(hugeGaps.count) gaps > 500m → iOS is pausing location updates.")
+            print("📊 FIX: Set pausesLocationUpdatesAutomatically = false")
+        } else if bigGaps.count > 3 {
+            print("📊 VERDICT: Multiple 200m+ gaps → distance filter too aggressive.")
+            print("📊 FIX: Lower distanceFilter and adaptive min distance")
+        } else {
+            print("📊 VERDICT: Collection looks OK — issue is likely in rendering pipeline.")
+        }
+        print("📊 ═══════════════════════════════════════════")
+    }
+
     private func ingest(_ loc: CLLocation) {
         currentLocation = loc
         guard isEnabled else { return }

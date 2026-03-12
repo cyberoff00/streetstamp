@@ -314,11 +314,13 @@ struct FriendsHubView: View {
             socialNotificationsSheet
         }
         .sheet(isPresented: $showPostcardInboxSheet) {
+            let initialBox: PostcardInboxView.Box = postcardInboxIntent.box == "sent" ? .sent : .received
             NavigationStack {
                 PostcardInboxView(
-                    initialBox: postcardInboxIntent.box == "sent" ? .sent : .received,
+                    initialBox: initialBox,
                     focusMessageID: postcardInboxIntent.messageID
                 )
+                .id(PostcardInboxView.viewIdentity(initialBox: initialBox, focusMessageID: postcardInboxIntent.messageID))
             }
         }
         .fullScreenCover(isPresented: $showAuthEntry) {
@@ -628,7 +630,7 @@ struct FriendsHubView: View {
                     feedTimestamp(for: $0) < feedTimestamp(for: $1)
                 }
                 for journey in ascending {
-                    let cityKey = normalizeCityKey(journey.title)
+                    let cityKey = resolvedFriendCityID(for: journey, cards: friend.unlockedCityCards)
                     guard !cityKey.isEmpty, map[cityKey] == nil else { continue }
                     map[cityKey] = journey.id
                 }
@@ -637,8 +639,8 @@ struct FriendsHubView: View {
 
             for journey in visibleJourneys.prefix(12) {
                 let eventDate = feedTimestamp(for: journey)
-                let cityName = journey.title.trimmingCharacters(in: .whitespacesAndNewlines)
-                let cityKey = normalizeCityKey(cityName)
+                let cityKey = resolvedFriendCityID(for: journey, cards: friend.unlockedCityCards)
+                let cityName = resolvedFriendCityTitle(for: journey, cards: friend.unlockedCityCards)
                 let memoryCount = journey.memories.count
                 let photoCount = journey.memories.reduce(0) { $0 + $1.imageURLs.count }
                 let unlockedNewCity = !cityKey.isEmpty && firstJourneyByCity[cityKey] == journey.id
@@ -694,8 +696,39 @@ struct FriendsHubView: View {
         return max(memoryDate, journey.endTime ?? journey.startTime ?? .distantPast)
     }
 
-    private func normalizeCityKey(_ raw: String) -> String {
-        raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    private func resolvedFriendCityID(for journey: FriendSharedJourney, cards: [FriendCityCard]) -> String {
+        guard !cards.isEmpty else { return "Unknown|" }
+        let normalizedTitle = journey.title
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .lowercased()
+        if let hit = cards.first(where: {
+            $0.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+                .lowercased() == normalizedTitle
+        }) {
+            return hit.id
+        }
+        if let fuzzy = cards.first(where: {
+            let normalizedName = $0.name
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+                .lowercased()
+            return !normalizedName.isEmpty && !normalizedTitle.isEmpty && (normalizedTitle.contains(normalizedName) || normalizedName.contains(normalizedTitle))
+        }) {
+            return fuzzy.id
+        }
+        return cards[0].id
+    }
+
+    private func resolvedFriendCityTitle(for journey: FriendSharedJourney, cards: [FriendCityCard]) -> String {
+        let cityID = resolvedFriendCityID(for: journey, cards: cards)
+        let cityCard = cards.first(where: { $0.id == cityID })
+        return CityDisplayTitlePresentation.title(
+            cityKey: cityCard?.id ?? cityID,
+            iso2: cityCard?.countryISO2,
+            fallbackTitle: cityCard?.name ?? journey.title
+        )
     }
 
     private func formatDistance(_ meters: Double) -> String {
@@ -864,7 +897,7 @@ struct FriendsHubView: View {
             if showToastForLatestUnread,
                let latest = unread.first,
                latest.id != lastPromptNotificationID {
-                showFeedToast(latest.message, duration: 2.2)
+                showFeedToast(SocialNotificationPresentation.message(for: latest), duration: 2.2)
                 lastPromptNotificationID = latest.id
             }
         } catch {
@@ -1058,7 +1091,7 @@ struct FriendsHubView: View {
     private func socialNotificationRow(_ item: BackendNotificationItem) -> some View {
         let isLike = item.type == "journey_like"
         let isPostcard = item.type == "postcard_received"
-        let badgeTitle = isPostcard ? L10n.t("postcard_notification_badge") : (isLike ? L10n.t("social_notice_like") : L10n.t("social_notice_stomp"))
+        let badgeTitle = SocialNotificationPresentation.badgeTitle(for: item)
         let badgeColor = isPostcard
             ? Color(red: 0.35, green: 0.40, blue: 0.88)
             : (isLike ? Color.red : Color(red: 0.22, green: 0.45, blue: 0.89))
@@ -1088,7 +1121,7 @@ struct FriendsHubView: View {
                         .foregroundColor(FigmaTheme.subtext)
                 }
 
-                Text(item.message)
+                Text(SocialNotificationPresentation.message(for: item))
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(item.read ? FigmaTheme.subtext : FigmaTheme.text)
                     .multilineTextAlignment(.leading)
@@ -1273,7 +1306,7 @@ private struct AllFriendsCard: View {
     }
 
     private var cityLabel: String {
-        "\(friend.stats.totalUnlockedCities) CITIES"
+        "\(friend.stats.totalUnlockedCities) \(L10n.t("friend_profile_stat_cities"))"
     }
 
     var body: some View {
@@ -1528,6 +1561,10 @@ private struct AddFriendSheet: View {
     }
 }
 
+enum FriendProfileLayout {
+    static let topControlsTopPadding: CGFloat = 14
+}
+
 private struct FriendProfileScreen: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var socialStore: SocialGraphStore
@@ -1615,7 +1652,7 @@ private struct FriendProfileScreen: View {
                                         icon: "books.vertical",
                                         iconColor: FigmaTheme.primary,
                                         iconBg: FigmaTheme.primary.opacity(0.14),
-                                        title: "CITY LIBRARY"
+                                        title: L10n.t("friend_city_cards_title")
                                     )
                                 }
                                 .buttonStyle(.plain)
@@ -1627,7 +1664,7 @@ private struct FriendProfileScreen: View {
                                         icon: "book.pages",
                                         iconColor: Color(red: 184 / 255, green: 148 / 255, blue: 125 / 255),
                                         iconBg: Color(red: 184 / 255, green: 148 / 255, blue: 125 / 255).opacity(0.14),
-                                        title: "JOURNEY MEMORY"
+                                        title: L10n.t("journey_memory")
                                     )
                                 }
                                 .buttonStyle(.plain)
@@ -1738,7 +1775,7 @@ private struct FriendProfileScreen: View {
                 }
             }
             .padding(.horizontal, 18)
-            .padding(.top, proxy.safeAreaInsets.top + 8)
+            .padding(.top, FriendProfileLayout.topControlsTopPadding)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .frame(height: 96)
@@ -1830,9 +1867,9 @@ private struct FriendProfileScreen: View {
 
                 ProfileHeroStatsCard(
                     items: [
-                        ProfileHeroStatItem(id: "trips", value: "\(friend.stats.totalJourneys)", title: "TRIPS"),
-                        ProfileHeroStatItem(id: "memories", value: "\(friend.stats.totalMemories)", title: "MEMORIES"),
-                        ProfileHeroStatItem(id: "cities", value: "\(friend.stats.totalUnlockedCities)", title: "CITIES")
+                        ProfileHeroStatItem(id: "trips", value: "\(friend.stats.totalJourneys)", title: L10n.t("friend_profile_stat_trips")),
+                        ProfileHeroStatItem(id: "memories", value: "\(friend.stats.totalMemories)", title: L10n.t("friend_profile_stat_memories")),
+                        ProfileHeroStatItem(id: "cities", value: "\(friend.stats.totalUnlockedCities)", title: L10n.t("friend_profile_stat_cities"))
                     ]
                 )
             }
@@ -1950,9 +1987,9 @@ private struct FriendProfileScreen: View {
         do {
             _ = try await BackendAPIClient.shared.stompProfile(token: token, targetUserID: friend.id)
             isVisitorSeated = true
-            showStompToastMessage("你坐到了 \(friend.displayName) 身边")
+            showStompToastMessage(String(format: L10n.t("friend_profile_stomp_success_format"), friend.displayName))
         } catch {
-            showStompToastMessage("坐一坐失败：\(error.localizedDescription)")
+            showStompToastMessage(String(format: L10n.t("friend_profile_stomp_failed_format"), error.localizedDescription))
         }
     }
 
@@ -2294,7 +2331,11 @@ private final class FriendMirrorContext: ObservableObject {
         let routeCoords = friendJourney.routeCoordinates
         let cityID = resolveCityID(for: friendJourney, cards: cards)
         let cityCard = cards.first(where: { $0.id == cityID })
-        let cityName = cityCard?.name ?? friendJourney.title
+        let cityName = CityDisplayTitlePresentation.title(
+            cityKey: cityCard?.id ?? cityID,
+            iso2: cityCard?.countryISO2,
+            fallbackTitle: cityCard?.name ?? friendJourney.title
+        )
 
         let fallbackCoordinate: CoordinateCodable = routeCoords.first ?? CoordinateCodable(lat: 0, lon: 0)
         let memories: [JourneyMemory] = friendJourney.memories.enumerated().map { idx, memory in
@@ -2368,6 +2409,7 @@ private struct FriendJourneysScreen: View {
     @EnvironmentObject private var socialStore: SocialGraphStore
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var flow: AppFlowCoordinator
+    @Environment(\.locale) private var locale
 
     let friendID: String
 
@@ -2384,8 +2426,8 @@ private struct FriendJourneysScreen: View {
             if let friend = socialStore.friends.first(where: { $0.id == friendID }) {
                 MyJourneysView(
                     routeDetailReadOnly: true,
-                    routeDetailHeaderTitle: "\(friend.displayName) · Journey",
-                    headerTitle: "\(friend.displayName) · Journeys"
+                    routeDetailHeaderTitle: FriendSectionTitleFormatter.sectionTitle(for: .journeyDetail, friendName: friend.displayName, locale: locale),
+                    headerTitle: FriendSectionTitleFormatter.sectionTitle(for: .journeys, friendName: friend.displayName, locale: locale)
                 )
                     .environmentObject(mirror.journeyStore)
                     .environmentObject(sessionStore)
@@ -2418,6 +2460,7 @@ private struct FriendCitiesScreen: View {
     @EnvironmentObject private var socialStore: SocialGraphStore
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var flow: AppFlowCoordinator
+    @Environment(\.locale) private var locale
     let friendID: String
 
     @StateObject private var mirror: FriendMirrorContext
@@ -2436,7 +2479,7 @@ private struct FriendCitiesScreen: View {
                     autoRebuildFromJourneyStore: false,
                     usesSidebarHeader: false,
                     allowCityDetailNavigation: false,
-                    headerTitle: "\(friend.displayName) · City Library"
+                    headerTitle: FriendSectionTitleFormatter.sectionTitle(for: .cityCards, friendName: friend.displayName, locale: locale)
                 )
                     .environmentObject(mirror.journeyStore)
                     .environmentObject(mirror.cityCache)
@@ -2562,6 +2605,7 @@ private struct FriendPublicMemoriesScreen: View {
     @EnvironmentObject private var socialStore: SocialGraphStore
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var flow: AppFlowCoordinator
+    @Environment(\.locale) private var locale
     let friendID: String
 
     @StateObject private var mirror: FriendMirrorContext
@@ -2579,7 +2623,7 @@ private struct FriendPublicMemoriesScreen: View {
                     showSidebar: .constant(false),
                     usesSidebarHeader: false,
                     readOnly: true,
-                    headerTitle: "\(friend.displayName) · Journey Memory"
+                    headerTitle: FriendSectionTitleFormatter.sectionTitle(for: .journeyMemories, friendName: friend.displayName, locale: locale)
                 )
                     .environmentObject(mirror.journeyStore)
                     .environmentObject(sessionStore)
@@ -2612,6 +2656,7 @@ private struct FriendJourneyRouteScreen: View {
     @EnvironmentObject private var socialStore: SocialGraphStore
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var flow: AppFlowCoordinator
+    @Environment(\.locale) private var locale
 
     let friendID: String
     let journeyID: String
@@ -2631,7 +2676,7 @@ private struct FriendJourneyRouteScreen: View {
                 JourneyRouteDetailView(
                     journeyID: journeyID,
                     isReadOnly: true,
-                    headerTitle: "\(friend.displayName) · Journey"
+                    headerTitle: FriendSectionTitleFormatter.sectionTitle(for: .journeyDetail, friendName: friend.displayName, locale: locale)
                 )
                     .environmentObject(mirror.journeyStore)
                     .environmentObject(sessionStore)

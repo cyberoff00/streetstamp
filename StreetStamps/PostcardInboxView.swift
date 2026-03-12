@@ -19,6 +19,7 @@ struct PostcardInboxView: View {
 
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var postcardCenter: PostcardCenter
+    @EnvironmentObject private var socialStore: SocialGraphStore
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
 
     @State private var selectedBox: Box
@@ -30,6 +31,10 @@ struct PostcardInboxView: View {
         _selectedBox = State(initialValue: initialBox)
         _pendingFocusMessageID = State(initialValue: focusMessageID)
         self.focusMessageID = focusMessageID
+    }
+
+    static func viewIdentity(initialBox: Box, focusMessageID: String?) -> String {
+        PostcardInboxPresentation.viewIdentity(initialBox: initialBox, focusMessageID: focusMessageID)
     }
 
     private var myDisplayName: String {
@@ -68,7 +73,7 @@ struct PostcardInboxView: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             UnifiedNavigationHeader(
                 chrome: NavigationChrome(
-                    title: L10n.t("postcard_nav_title"),
+                    title: L10n.upper("postcard_nav_title"),
                     leadingAccessory: .back,
                     titleLevel: .secondary
                 ),
@@ -117,10 +122,11 @@ struct PostcardInboxView: View {
             ForEach(postcardCenter.sentItems) { item in
                 let recipientLabel = PostcardInboxPresentation.recipientLabel(
                     toDisplayName: item.toDisplayName,
-                    toUserID: item.toUserID
+                    toUserID: item.toUserID,
+                    fallbackDisplayName: fallbackDisplayName(for: item.toUserID)
                 )
                 PostcardCardRow(
-                    cityName: item.cityName,
+                    cityName: displayCityName(for: item),
                     nickname: myDisplayName.uppercased(),
                     messageText: item.messageText,
                     photoSource: photoSource(for: item),
@@ -132,10 +138,11 @@ struct PostcardInboxView: View {
             ForEach(visibleDrafts) { draft in
                 let recipientLabel = PostcardInboxPresentation.recipientLabel(
                     toDisplayName: draft.toDisplayName,
-                    toUserID: draft.toUserID
+                    toUserID: draft.toUserID,
+                    fallbackDisplayName: fallbackDisplayName(for: draft.toUserID)
                 )
                 PostcardCardRow(
-                    cityName: draft.cityName,
+                    cityName: displayCityName(for: draft),
                     nickname: myDisplayName.uppercased(),
                     messageText: draft.message,
                     photoSource: draftPhotoSource(draft),
@@ -157,10 +164,11 @@ struct PostcardInboxView: View {
             ForEach(postcardCenter.receivedItems) { item in
                 let senderLabel = PostcardInboxPresentation.senderLabel(
                     fromDisplayName: item.fromDisplayName,
-                    fromUserID: item.fromUserID
+                    fromUserID: item.fromUserID,
+                    fallbackDisplayName: fallbackDisplayName(for: item.fromUserID)
                 )
                 PostcardCardRow(
-                    cityName: item.cityName,
+                    cityName: displayCityName(for: item),
                     nickname: senderLabel.uppercased(),
                     messageText: item.messageText,
                     photoSource: photoSource(for: item),
@@ -198,6 +206,22 @@ struct PostcardInboxView: View {
         return .localPath(path)
     }
 
+    private func displayCityName(for item: BackendPostcardMessageDTO) -> String {
+        CityDisplayTitlePresentation.title(
+            cityKey: item.cityID,
+            iso2: nil,
+            fallbackTitle: item.cityName
+        )
+    }
+
+    private func displayCityName(for draft: PostcardDraft) -> String {
+        CityDisplayTitlePresentation.title(
+            cityKey: draft.cityID,
+            iso2: nil,
+            fallbackTitle: draft.cityName
+        )
+    }
+
     private func autoFocusReceivedIfNeeded() {
         guard let messageID = pendingFocusMessageID, !messageID.isEmpty else { return }
         guard postcardCenter.receivedItems.contains(where: { $0.messageID == messageID }) else {
@@ -211,6 +235,17 @@ struct PostcardInboxView: View {
         }
         selectedBox = .received
         pendingFocusMessageID = nil
+    }
+
+    private func fallbackDisplayName(for userID: String) -> String? {
+        let trimmed = userID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        guard let friend = socialStore.friends.first(where: { $0.id == trimmed }) else {
+            return nil
+        }
+        let displayName = friend.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !displayName.isEmpty else { return nil }
+        return displayName
     }
 
     private func refreshInbox() async {

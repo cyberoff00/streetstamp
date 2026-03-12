@@ -116,11 +116,13 @@ struct ProfileView: View {
             socialNotificationsSheet
         }
         .sheet(isPresented: $showPostcardInboxFromNotification) {
+            let initialBox: PostcardInboxView.Box = postcardInboxIntent.box == "sent" ? .sent : .received
             NavigationStack {
                 PostcardInboxView(
-                    initialBox: postcardInboxIntent.box == "sent" ? .sent : .received,
+                    initialBox: initialBox,
                     focusMessageID: postcardInboxIntent.messageID
                 )
+                .id(PostcardInboxView.viewIdentity(initialBox: initialBox, focusMessageID: postcardInboxIntent.messageID))
             }
         }
         .sheet(isPresented: $showInviteFriendSheet) {
@@ -357,9 +359,9 @@ struct ProfileView: View {
 
             ProfileHeroStatsCard(
                 items: [
-                    ProfileHeroStatItem(id: "trips", value: "\(totalJourneys)", title: "TRIPS"),
-                    ProfileHeroStatItem(id: "memories", value: "\(totalMemories)", title: "MEMORIES"),
-                    ProfileHeroStatItem(id: "cities", value: "\(citiesVisited)", title: "CITIES")
+                    ProfileHeroStatItem(id: "trips", value: "\(totalJourneys)", title: L10n.t("friend_profile_stat_trips")),
+                    ProfileHeroStatItem(id: "memories", value: "\(totalMemories)", title: L10n.t("friend_profile_stat_memories")),
+                    ProfileHeroStatItem(id: "cities", value: "\(citiesVisited)", title: L10n.t("friend_profile_stat_cities"))
                 ]
             )
             .padding(.horizontal, 18)
@@ -569,7 +571,7 @@ struct ProfileView: View {
     private func socialNotificationRow(_ item: BackendNotificationItem) -> some View {
         let isLike = item.type == "journey_like"
         let isPostcard = item.type == "postcard_received"
-        let badgeTitle = isPostcard ? L10n.t("postcard_notification_badge") : (isLike ? L10n.t("social_notice_like") : L10n.t("social_notice_stomp"))
+        let badgeTitle = SocialNotificationPresentation.badgeTitle(for: item)
         let badgeColor = isPostcard
             ? Color(red: 0.35, green: 0.40, blue: 0.88)
             : (isLike ? Color.red : Color(red: 0.22, green: 0.45, blue: 0.89))
@@ -599,7 +601,7 @@ struct ProfileView: View {
                         .foregroundColor(FigmaTheme.subtext)
                 }
 
-                Text(item.message)
+                Text(SocialNotificationPresentation.message(for: item))
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(item.read ? FigmaTheme.subtext : FigmaTheme.text)
                     .multilineTextAlignment(.leading)
@@ -823,7 +825,7 @@ struct ProfileView: View {
 
             if showToastForLatestUnread,
                let latest = unread.first {
-                showToastMessage(latest.message)
+                showToastMessage(SocialNotificationPresentation.message(for: latest))
             }
         } catch {
             // Keep profile view responsive even if notification poll fails.
@@ -947,6 +949,14 @@ struct InviteFriendSheet: View {
     @State private var showRequestMessage = false
     @State private var showScannerSheet = false
 
+    private var presentation: InviteFriendPresentation {
+        InviteFriendPresentation(
+            displayName: displayName,
+            exclusiveID: exclusiveID,
+            inviteCode: inviteCode
+        )
+    }
+
     private var inviteDeepLink: String {
         var components = URLComponents()
         components.scheme = "streetstamps"
@@ -1008,20 +1018,23 @@ struct InviteFriendSheet: View {
                                 }
                         }
 
-                        Text(displayName.uppercased())
+                        Text(presentation.titleText)
                             .font(.system(size: 18, weight: .bold))
                             .foregroundColor(FigmaTheme.text)
-                        Text("@\(exclusiveID)")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(FigmaTheme.subtext)
+
+                        if let visibleExclusiveIDText = presentation.visibleExclusiveIDText {
+                            Text(visibleExclusiveIDText)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(FigmaTheme.subtext)
+                        }
 
                         HStack(spacing: 10) {
-                            Text(inviteCode)
+                            Text(presentation.codeText)
                                 .font(.system(size: 34, weight: .black, design: .rounded))
                                 .foregroundColor(FigmaTheme.text)
                                 .tracking(1.6)
                             Button {
-                                copyText(inviteCode, success: L10n.t("profile_invite_code_copied"))
+                                copyText(presentation.codeText, success: L10n.t("profile_invite_code_copied"))
                             } label: {
                                 Image(systemName: "doc.on.doc")
                                     .font(.system(size: 16, weight: .semibold))
@@ -1131,7 +1144,7 @@ struct InviteFriendSheet: View {
             .safeAreaInset(edge: .top, spacing: 0) {
                 UnifiedNavigationHeader(
                     chrome: NavigationChrome(
-                        title: L10n.t("profile_invite_friends"),
+                        title: L10n.upper("profile_invite_friends"),
                         leadingAccessory: .back,
                         titleLevel: .secondary
                     ),
@@ -1290,6 +1303,14 @@ private struct InviteShareCardView: View {
     let loadout: RobotLoadout
     let qrImage: UIImage
 
+    private var presentation: InviteFriendPresentation {
+        InviteFriendPresentation(
+            displayName: displayName,
+            exclusiveID: exclusiveID,
+            inviteCode: inviteCode
+        )
+    }
+
     var body: some View {
         ZStack {
             LinearGradient(
@@ -1311,12 +1332,15 @@ private struct InviteShareCardView: View {
                         .clipShape(Circle())
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(displayName.uppercased())
+                        Text(presentation.titleText)
                             .font(.system(size: 20, weight: .bold))
                             .foregroundColor(FigmaTheme.text)
-                        Text("@\(exclusiveID)")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(FigmaTheme.subtext)
+
+                        if let visibleExclusiveIDText = presentation.visibleExclusiveIDText {
+                            Text(visibleExclusiveIDText)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(FigmaTheme.subtext)
+                        }
                     }
                     Spacer()
                 }
@@ -1330,7 +1354,7 @@ private struct InviteShareCardView: View {
                     .background(Color.white)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
 
-                Text(inviteCode)
+                Text(presentation.codeText)
                     .font(.system(size: 38, weight: .black, design: .rounded))
                     .foregroundColor(FigmaTheme.text)
                     .tracking(1.8)
@@ -1680,6 +1704,7 @@ struct StatNavRow: View {
 
 struct RecentJourneysView: View {
     @EnvironmentObject private var store: JourneyStore
+    @EnvironmentObject private var cityCache: CityCache
     @Environment(\.dismiss) private var dismiss
     @State private var localizedCityNameByKey: [String: String] = [:]
 
@@ -1736,6 +1761,14 @@ struct RecentJourneysView: View {
             .joined(separator: ",")
     }
 
+    private var cachedCitiesByKey: [String: CachedCity] {
+        Dictionary(
+            uniqueKeysWithValues: cityCache.cachedCities
+                .filter { !($0.isTemporary ?? false) }
+                .map { ($0.id, $0) }
+        )
+    }
+
     private func refreshCityLocalizations() async {
         var coordByKey: [String: CLLocationCoordinate2D] = [:]
         for journey in recentJourneys {
@@ -1749,14 +1782,34 @@ struct RecentJourneysView: View {
         for (key, coord) in coordByKey {
             if localizedCityNameByKey[key] != nil { continue }
 
-            if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key),
+            if let cachedCity = cachedCitiesByKey[key] {
+                let title = CityPlacemarkResolver.displayTitle(
+                    cityKey: cachedCity.id,
+                    iso2: cachedCity.countryISO2,
+                    fallbackTitle: cachedCity.name,
+                    availableLevelNamesRaw: cachedCity.reservedAvailableLevelNames,
+                    storedAvailableLevelNamesLocaleID: cachedCity.reservedAvailableLevelNamesLocaleID,
+                    parentRegionKey: cachedCity.reservedParentRegionKey,
+                    preferredLevel: cachedCity.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
+                    localizedDisplayNameByLocale: cachedCity.localizedDisplayNameByLocale,
+                    locale: .current
+                )
+                if !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    await MainActor.run { localizedCityNameByKey[key] = title }
+                    continue
+                }
+            }
+
+            let parentRegionKey = cachedCitiesByKey[key]?.reservedParentRegionKey
+
+            if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key, parentRegionKey: parentRegionKey),
                !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 await MainActor.run { localizedCityNameByKey[key] = cached }
                 continue
             }
 
             let loc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
-            if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key),
+            if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key, parentRegionKey: parentRegionKey),
                !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 await MainActor.run { localizedCityNameByKey[key] = title }
             }
@@ -1764,11 +1817,11 @@ struct RecentJourneysView: View {
     }
 
     private func resolvedDisplayCityName(for journey: JourneyRoute) -> String {
-        let key = (journey.startCityKey ?? journey.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
-        if let localized = localizedCityNameByKey[key], !localized.isEmpty {
-            return localized
-        }
-        return journey.displayCityName
+        JourneyCityNamePresentation.title(
+            for: journey,
+            localizedCityNameByKey: localizedCityNameByKey,
+            cachedCitiesByKey: cachedCitiesByKey
+        )
     }
 
     private var header: some View {
@@ -1825,6 +1878,7 @@ struct RecentJourneyCard: View {
     var journey: JourneyRoute
     var cityName: String
 
+    @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var sessionStore: UserSessionStore
     @State private var image: UIImage? = nil
@@ -1861,6 +1915,14 @@ struct RecentJourneyCard: View {
 
     private var detailButtonText: String {
         L10n.t("view_journey_memories")
+    }
+
+    private var cachedCitiesByKey: [String: CachedCity] {
+        Dictionary(
+            uniqueKeysWithValues: cityCache.cachedCities
+                .filter { !($0.isTemporary ?? false) }
+                .map { ($0.id, $0) }
+        )
     }
 
     var body: some View {
@@ -1982,7 +2044,11 @@ struct RecentJourneyCard: View {
         }
 
         isGenerating = true
-        ShareCardGenerator.generate(journey: journey, privacy: .exact) { img in
+        ShareCardGenerator.generate(
+            journey: journey,
+            cachedCitiesByKey: cachedCitiesByKey,
+            privacy: .exact
+        ) { img in
             self.image = img
             self.isGenerating = false
         }

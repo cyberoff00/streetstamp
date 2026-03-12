@@ -1,6 +1,63 @@
 import Foundation
 import CoreLocation
 
+enum CityLocalizationDebugTrace {
+    static func displayDecision(
+        cityKey: String,
+        locale: Locale,
+        source: String,
+        title: String,
+        fallbackTitle: String,
+        chosenLevel: CityPlacemarkResolver.CardLevel?,
+        parentRegionKey: String?,
+        availableLevelNames: [CityPlacemarkResolver.CardLevel: String]?
+    ) -> String {
+        let labels = (availableLevelNames ?? [:])
+            .sorted { $0.key.rawValue < $1.key.rawValue }
+            .map { "\($0.key.rawValue)=\($0.value)" }
+            .joined(separator: ",")
+        return "cityKey=\(cityKey) locale=\(locale.identifier) source=\(source) chosenLevel=\(chosenLevel?.rawValue ?? "nil") parentRegionKey=\(parentRegionKey ?? "nil") title=\(title) fallback=\(fallbackTitle) levels=[\(labels)]"
+    }
+
+    static func localizedHierarchy(
+        locale: Locale,
+        cellKey: String,
+        result: ReverseGeocodeService.CanonicalResult?
+    ) -> String {
+        let levels = (result?.availableLevels ?? [:])
+            .sorted { $0.key.rawValue < $1.key.rawValue }
+            .map { "\($0.key.rawValue)=\($0.value)" }
+            .joined(separator: ",")
+        return "locale=\(locale.identifier) cell=\(cellKey) cityKey=\(result?.cityKey ?? "nil") cityName=\(result?.cityName ?? "nil") parentRegionKey=\(result?.parentRegionKey ?? "nil") levels=[\(levels)]"
+    }
+
+    static func reserveProfileWrite(
+        cityKey: String,
+        locale: Locale,
+        level: CityPlacemarkResolver.CardLevel?,
+        parentRegionKey: String?,
+        availableLevels: [CityPlacemarkResolver.CardLevel: String]?
+    ) -> String {
+        let levels = (availableLevels ?? [:])
+            .sorted { $0.key.rawValue < $1.key.rawValue }
+            .map { "\($0.key.rawValue)=\($0.value)" }
+            .joined(separator: ",")
+        return "cityKey=\(cityKey) locale=\(locale.identifier) level=\(level?.rawValue ?? "nil") parentRegionKey=\(parentRegionKey ?? "nil") levels=[\(levels)]"
+    }
+}
+
+enum CityLocalizationDebugLogger {
+    static func log(_ domain: String, _ message: String) {
+#if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        let enabled = args.contains("-CityLocalizationDebug")
+            || UserDefaults.standard.bool(forKey: "city.localization.debug.enabled")
+        guard enabled else { return }
+        print("🌐 [CityLocale][\(domain)] \(message)")
+#endif
+    }
+}
+
 enum CityPlacemarkResolver {
 
     enum CardLevel: String, Codable, Sendable {
@@ -146,7 +203,7 @@ enum CityPlacemarkResolver {
         }
 
         return Display(
-            title: title,
+            title: normalizeUserFacingTitle(title, iso2: candidates.iso2, level: level, locale: .current),
             subtitle: subtitle,
             iso2: candidates.iso2,
             level: level,
@@ -156,7 +213,137 @@ enum CityPlacemarkResolver {
         )
     }
 
-    private static let strategyCountry: Set<String> = ["SG", "HK", "MO", "MC", "VA", "LI", "AD", "LU", "MT", "BH", "SC", "MV", "SM"]
+    static func displayTitle(
+        cityKey: String,
+        iso2: String?,
+        fallbackTitle: String,
+        availableLevelNames: [CardLevel: String]? = nil,
+        parentRegionKey: String? = nil,
+        preferredLevel: CardLevel? = nil,
+        localizedDisplayNameByLocale: [String: String]? = nil,
+        locale: Locale = .current
+    ) -> String {
+        let regionStyledKey = isRegionStyledDisplayKey(cityKey: cityKey, iso2: iso2)
+
+        // Fast path: use persisted localized name if available for this locale.
+        if let localized = localizedDisplayNameByLocale?[locale.identifier]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !localized.isEmpty,
+           (!regionStyledKey || matchesRegionAlias(localized, iso2: iso2 ?? "")),
+           shouldUseStoredDisplayTitle(localized, locale: locale) {
+            let resolved = normalizeUserFacingTitle(localized, iso2: iso2, level: nil, locale: locale)
+            CityLocalizationDebugLogger.log(
+                "displayTitle",
+                CityLocalizationDebugTrace.displayDecision(
+                    cityKey: cityKey,
+                    locale: locale,
+                    source: "localizedDisplayNameByLocale",
+                    title: resolved,
+                    fallbackTitle: fallbackTitle,
+                    chosenLevel: nil,
+                    parentRegionKey: parentRegionKey,
+                    availableLevelNames: availableLevelNames
+                )
+            )
+            return resolved
+        }
+
+        // Second chance: sync lookup from ReverseGeocodeService UserDefaults cache.
+        if let cached = syncCachedDisplayTitle(cityKey: cityKey, parentRegionKey: parentRegionKey, locale: locale),
+           (!regionStyledKey || matchesRegionAlias(cached, iso2: iso2 ?? "")),
+           shouldUseStoredDisplayTitle(cached, locale: locale) {
+            let resolved = normalizeUserFacingTitle(cached, iso2: iso2, level: nil, locale: locale)
+            CityLocalizationDebugLogger.log(
+                "displayTitle",
+                CityLocalizationDebugTrace.displayDecision(
+                    cityKey: cityKey,
+                    locale: locale,
+                    source: "displayCacheByLocaleKey.v2",
+                    title: resolved,
+                    fallbackTitle: fallbackTitle,
+                    chosenLevel: nil,
+                    parentRegionKey: parentRegionKey,
+                    availableLevelNames: availableLevelNames
+                )
+            )
+            return resolved
+        }
+
+        let chosenLevel = resolvedDisplayLevel(
+            cityKey: cityKey,
+            availableLevelNames: availableLevelNames,
+            parentRegionKey: parentRegionKey,
+            preferredLevel: preferredLevel
+        )
+
+        let decision: (source: String, rawTitle: String) = {
+            if let chosenLevel,
+               let levelTitle = availableLevelNames?[chosenLevel]?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !levelTitle.isEmpty,
+               shouldUseStoredLevelTitle(levelTitle, locale: locale) {
+                return ("availableLevelNames[\(chosenLevel.rawValue)]", levelTitle)
+            }
+
+            let trimmedFallback = fallbackTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedFallback.isEmpty {
+                return ("fallbackTitle", trimmedFallback)
+            }
+
+            let cityNameFromKey = cityKey.components(separatedBy: "|").first?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !cityNameFromKey.isEmpty {
+                return ("cityKey", cityNameFromKey)
+            }
+
+            return ("fallbackTitle.raw", fallbackTitle)
+        }()
+
+        let resolved = normalizeUserFacingTitle(decision.rawTitle, iso2: iso2, level: chosenLevel, locale: locale)
+        CityLocalizationDebugLogger.log(
+            "displayTitle",
+            CityLocalizationDebugTrace.displayDecision(
+                cityKey: cityKey,
+                locale: locale,
+                source: decision.source,
+                title: resolved,
+                fallbackTitle: fallbackTitle,
+                chosenLevel: chosenLevel,
+                parentRegionKey: parentRegionKey,
+                availableLevelNames: availableLevelNames
+            )
+        )
+        return resolved
+    }
+
+    static func displayTitle(
+        cityKey: String,
+        iso2: String?,
+        fallbackTitle: String,
+        availableLevelNamesRaw: [String: String]?,
+        storedAvailableLevelNamesLocaleID: String? = nil,
+        parentRegionKey: String? = nil,
+        preferredLevel: CardLevel? = nil,
+        localizedDisplayNameByLocale: [String: String]? = nil,
+        locale: Locale = .current
+    ) -> String {
+        let decoded = preferredAvailableLevelNamesForDisplay(
+            availableLevelNamesRaw,
+            storedLocaleIdentifier: storedAvailableLevelNamesLocaleID,
+            locale: locale
+        )
+        return displayTitle(
+            cityKey: cityKey,
+            iso2: iso2,
+            fallbackTitle: fallbackTitle,
+            availableLevelNames: decoded,
+            parentRegionKey: parentRegionKey,
+            preferredLevel: preferredLevel,
+            localizedDisplayNameByLocale: localizedDisplayNameByLocale,
+            locale: locale
+        )
+    }
+
+    private static let strategyCountry: Set<String> = ["SG", "HK", "MO", "TW", "MC", "VA", "LI", "AD", "LU", "MT", "BH", "SC", "MV", "SM"]
     private static let strategySubAdmin: Set<String> = ["CN", "GB", "AU", "NZ", "FR", "IT", "ES", "NL", "CH", "ID", "PH", "VN", "MY", "BE", "SE", "NO", "DK"]
 
     private static func decideLevel(candidates: LevelCandidates, preferred: CardLevel?) -> CardLevel {
@@ -295,6 +482,174 @@ enum CityPlacemarkResolver {
         return ["HK", "MO", "TW"].contains(iso2.uppercased())
     }
 
+    private static func decodedKeyedLevels(_ availableLevelNamesRaw: [String: String]?) -> [(CardLevel, String)] {
+        guard let availableLevelNamesRaw else { return [] }
+        return availableLevelNamesRaw.compactMap { key, value in
+            guard let level = CardLevel(rawValue: key) else { return nil }
+            return (level, value)
+        }
+    }
+
+    private static func decodeAvailableLevelNames(_ availableLevelNamesRaw: [String: String]?) -> [CardLevel: String] {
+        var decoded: [CardLevel: String] = [:]
+        for (level, value) in decodedKeyedLevels(availableLevelNamesRaw) {
+            decoded[level] = value
+        }
+        return decoded
+    }
+
+    static func preferredAvailableLevelNamesForDisplay(
+        _ availableLevelNamesRaw: [String: String]?,
+        storedLocaleIdentifier: String? = nil,
+        locale: Locale = .current
+    ) -> [CardLevel: String]? {
+        let decoded = decodeAvailableLevelNames(availableLevelNamesRaw)
+        guard !decoded.isEmpty else { return nil }
+
+        if let storedLocaleIdentifier,
+           localeDisplayLanguageIdentifier(storedLocaleIdentifier) == localeDisplayLanguageIdentifier(locale.identifier) {
+            return decoded
+        }
+        if storedLocaleIdentifier != nil {
+            return nil
+        }
+
+        let hasIncompatibleValue = decoded.values.contains { value in
+            !shouldUseStoredDisplayTitle(value, locale: locale)
+        }
+        return hasIncompatibleValue ? nil : decoded
+    }
+
+    private static func resolvedDisplayLevel(
+        cityKey: String,
+        availableLevelNames: [CardLevel: String]?,
+        parentRegionKey: String?,
+        preferredLevel: CardLevel?
+    ) -> CardLevel? {
+        let effectivePreferred = preferredLevel ?? CityLevelPreferenceStore.shared.preferredLevel(for: parentRegionKey)
+        if let effectivePreferred,
+           let title = availableLevelNames?[effectivePreferred]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !title.isEmpty {
+            return effectivePreferred
+        }
+
+        let cityNameFromKey = cityKey.components(separatedBy: "|").first?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let normalizedKeyName = normalizeForMatching(cityNameFromKey)
+        guard !normalizedKeyName.isEmpty else { return nil }
+
+        for level in [CardLevel.island, .locality, .subAdmin, .admin, .country] {
+            let title = availableLevelNames?[level]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !title.isEmpty, normalizeForMatching(title) == normalizedKeyName {
+                return level
+            }
+        }
+
+        if let availableLevelNames {
+            let inferredISO2 = cityKey.components(separatedBy: "|").dropFirst().first?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .uppercased()
+            if isRegionStyledDisplayKey(cityKey: cityKey, iso2: inferredISO2),
+               let countryTitle = availableLevelNames[.country]?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !countryTitle.isEmpty {
+                return .country
+            }
+
+            for level in [CardLevel.admin, .subAdmin, .locality, .country] {
+                let title = availableLevelNames[level]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if !title.isEmpty {
+                    return level
+                }
+            }
+        }
+
+        return nil
+    }
+
+    static func isRegionStyledDisplayKey(cityKey: String, iso2: String?) -> Bool {
+        guard let iso2, isRegionStyledISO(iso2) else { return false }
+        let cityNameFromKey = cityKey.components(separatedBy: "|").first?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return matchesRegionAlias(cityNameFromKey, iso2: iso2)
+    }
+
+    private static func normalizeUserFacingTitle(
+        _ rawTitle: String,
+        iso2: String?,
+        level: CardLevel?,
+        locale: Locale
+    ) -> String {
+        let trimmed = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return L10n.t("unknown", locale: locale) }
+
+        guard let iso2, isRegionStyledISO(iso2) else {
+            return trimmed
+        }
+
+        let shouldCanonicalizeRegion = level == .admin || level == .country || matchesRegionAlias(trimmed, iso2: iso2)
+        if shouldCanonicalizeRegion, let localized = localizedRegionName(iso2: iso2, locale: locale) {
+            return localized
+        }
+
+        return trimmed
+    }
+
+    private static func matchesRegionAlias(_ rawTitle: String, iso2: String) -> Bool {
+        let normalized = normalizeForMatching(rawTitle)
+        guard !normalized.isEmpty else { return false }
+
+        let aliases: [String]
+        switch iso2.uppercased() {
+        case "TW":
+            aliases = [
+                "taiwan", "taiwanprovince", "台湾", "台灣", "中国台湾",
+                "中國台灣", "台湾省", "台灣省"
+            ]
+        case "HK":
+            aliases = [
+                "hongkong", "hongkongsar", "chinahongkongsar",
+                "hongkongspecialadministrativeregion", "香港", "中国香港",
+                "中國香港", "香港特别行政区", "香港特別行政區",
+                "中国香港特别行政区", "中國香港特別行政區",
+                "中国香港特区", "中國香港特區"
+            ]
+        case "MO":
+            aliases = [
+                "macau", "macao", "macaosar", "chinamacaosar",
+                "macaospecialadministrativeregion", "澳门", "澳門",
+                "中国澳门", "中國澳門", "澳门特别行政区",
+                "澳門特別行政區", "中国澳门特别行政区", "中國澳門特別行政區"
+            ]
+        default:
+            aliases = []
+        }
+
+        return aliases.contains(normalized)
+    }
+
+    private static func localizedRegionName(iso2: String?, locale: Locale) -> String? {
+        guard let iso2 else { return nil }
+        let languageCode = locale.identifier.lowercased()
+        let isTraditionalChinese = languageCode.hasPrefix("zh-hant") || languageCode.hasPrefix("zh-hk") || languageCode.hasPrefix("zh-tw")
+        let isChinese = languageCode.hasPrefix("zh")
+
+        switch iso2.uppercased() {
+        case "TW":
+            if isTraditionalChinese { return "台灣" }
+            if isChinese { return "台湾" }
+            return "Taiwan"
+        case "HK":
+            if isChinese { return "香港" }
+            return "Hong Kong"
+        case "MO":
+            if isTraditionalChinese { return "澳門" }
+            if isChinese { return "澳门" }
+            return "Macau"
+        default:
+            return nil
+        }
+    }
+
     private static func regionFallbackName(from candidates: LevelCandidates) -> String? {
         candidates.admin ?? candidates.subAdmin ?? candidates.locality ?? candidates.country
     }
@@ -315,12 +670,80 @@ enum CityPlacemarkResolver {
     private static func normalizeForMatching(_ input: String) -> String {
         input.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: ",", with: "")
+            .replacingOccurrences(of: ".", with: "")
             .lowercased()
+    }
+
+    private static func shouldUseStoredLevelTitle(_ title: String, locale: Locale) -> Bool {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+
+        return shouldUseStoredDisplayTitle(trimmed, locale: locale)
+    }
+
+    private static func looksASCIIOnly(_ value: String) -> Bool {
+        value.unicodeScalars.allSatisfy { scalar in
+            scalar.isASCII && (scalar.properties.isAlphabetic || scalar.properties.isWhitespace || scalar.properties.generalCategory == .dashPunctuation)
+        }
+    }
+
+    private static func shouldUseStoredDisplayTitle(_ title: String, locale: Locale) -> Bool {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+
+        let languageCode = localeDisplayLanguageIdentifier(locale.identifier)
+        if ["zh", "ja", "ko"].contains(languageCode) {
+            return !looksASCIIOnly(trimmed)
+        }
+        if languageCode == "en" {
+            return !containsCJKCharacters(trimmed)
+        }
+        return true
+    }
+
+    private static func localeDisplayLanguageIdentifier(_ localeIdentifier: String) -> String {
+        let normalized = localeIdentifier.replacingOccurrences(of: "_", with: "-")
+        return normalized.split(separator: "-").first.map(String.init)?.lowercased() ?? normalized.lowercased()
+    }
+
+    private static func containsCJKCharacters(_ value: String) -> Bool {
+        value.unicodeScalars.contains { scalar in
+            switch scalar.value {
+            case 0x3400...0x4DBF, 0x4E00...0x9FFF, 0xF900...0xFAFF,
+                 0x3040...0x309F, 0x30A0...0x30FF, 0xAC00...0xD7AF:
+                return true
+            default:
+                return false
+            }
+        }
     }
 
     private static func clean(_ s: String?) -> String? {
         let t = (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         return t.isEmpty ? nil : t
+    }
+
+    // MARK: - Sync UserDefaults cache lookup
+
+    /// Lazy-loaded cache from ReverseGeocodeService's persisted UserDefaults.
+    /// Avoids repeated disk reads on every `displayTitle()` call.
+    private static let geocodeDefaultsCache: [String: String] = {
+        let defaults = UserDefaults(suiteName: "group.com.streetstamps.shared") ?? .standard
+        guard let data = defaults.data(forKey: "reverseGeocode.displayCacheByLocaleKey.v2"),
+              let dict = try? JSONDecoder().decode([String: String].self, from: data)
+        else { return [:] }
+        return dict
+    }()
+
+    /// Synchronous lookup of a display title from ReverseGeocodeService's persisted cache.
+    private static func syncCachedDisplayTitle(cityKey: String, parentRegionKey: String?, locale: Locale) -> String? {
+        let scope = CityLevelPreferenceStore.shared.displayCacheScope(for: parentRegionKey)
+        let cacheKey = "\(cityKey)|\(locale.identifier)|\(scope)"
+        guard let title = geocodeDefaultsCache[cacheKey]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !title.isEmpty
+        else { return nil }
+        return title
     }
 }
 
@@ -328,5 +751,88 @@ extension CityPlacemarkResolver.Canonical {
     var cityKey: String {
         let iso = (iso2 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         return "\(city)|\(iso)"
+    }
+}
+
+enum JourneyCityNamePresentation {
+    static func parentRegionKey(
+        for journey: JourneyRoute,
+        cachedCitiesByKey: [String: CachedCity]
+    ) -> String? {
+        let key = (journey.startCityKey ?? journey.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { return nil }
+        return cachedCitiesByKey[key]?.reservedParentRegionKey
+    }
+
+    static func title(for journey: JourneyRoute, localizedCityNameByKey: [String: String]) -> String {
+        title(
+            for: journey,
+            localizedCityNameByKey: localizedCityNameByKey,
+            cachedCitiesByKey: [:],
+            locale: .current
+        )
+    }
+
+    static func title(
+        for journey: JourneyRoute,
+        localizedCityNameByKey: [String: String],
+        cachedCitiesByKey: [String: CachedCity],
+        locale: Locale = .current
+    ) -> String {
+        let key = (journey.startCityKey ?? journey.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
+        if let localized = localizedCityNameByKey[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !localized.isEmpty {
+            return localized
+        }
+        if let cachedCity = cachedCitiesByKey[key] {
+            let title = CityPlacemarkResolver.displayTitle(
+                cityKey: cachedCity.id,
+                iso2: cachedCity.countryISO2,
+                fallbackTitle: cachedCity.name,
+                availableLevelNamesRaw: cachedCity.reservedAvailableLevelNames,
+                storedAvailableLevelNamesLocaleID: cachedCity.reservedAvailableLevelNamesLocaleID,
+                parentRegionKey: cachedCity.reservedParentRegionKey,
+                localizedDisplayNameByLocale: cachedCity.localizedDisplayNameByLocale,
+                locale: locale
+            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !title.isEmpty {
+                return title
+            }
+        }
+        return journey.displayCityName
+    }
+}
+
+enum CityDisplayTitlePresentation {
+    static func title(
+        cityKey: String?,
+        iso2: String?,
+        fallbackTitle: String?,
+        localizedCityNameByKey: [String: String] = [:],
+        availableLevelNamesRaw: [String: String]? = nil,
+        parentRegionKey: String? = nil,
+        localizedDisplayNameByLocale: [String: String]? = nil,
+        locale: Locale = .current
+    ) -> String {
+        let trimmedKey = (cityKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if let localized = localizedCityNameByKey[trimmedKey]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !localized.isEmpty {
+            return localized
+        }
+
+        let trimmedFallback = (fallbackTitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedKey.isEmpty else {
+            return trimmedFallback.isEmpty ? L10n.t("unknown") : trimmedFallback
+        }
+
+        return CityPlacemarkResolver.displayTitle(
+            cityKey: trimmedKey,
+            iso2: iso2,
+            fallbackTitle: trimmedFallback.isEmpty ? trimmedKey : trimmedFallback,
+            availableLevelNamesRaw: availableLevelNamesRaw,
+            parentRegionKey: parentRegionKey,
+            localizedDisplayNameByLocale: localizedDisplayNameByLocale,
+            locale: locale
+        )
     }
 }

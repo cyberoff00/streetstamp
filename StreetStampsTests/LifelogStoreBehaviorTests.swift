@@ -623,6 +623,154 @@ final class LifelogStoreBehaviorTests: XCTestCase {
     }
 
     @MainActor
+    func test_countryAttributionCoordinator_buildsCompressedRunsAfterResolution() async throws {
+        let userID = "lifelog-country-runs-smoke-\(UUID().uuidString)"
+        let paths = StoragePath(userID: userID)
+        try? FileManager.default.removeItem(at: paths.userRoot)
+        try paths.ensureBaseDirectoriesExist()
+
+        let coordinator = LifelogCountryAttributionCoordinator(
+            paths: paths,
+            resolveCanonical: { location in
+                if location.coordinate.longitude > 100 {
+                    return ReverseGeocodeService.CanonicalResult(
+                        cityName: "Beijing",
+                        iso2: "CN",
+                        cityKey: "Beijing|CN",
+                        level: .locality,
+                        parentRegionKey: "Beijing Municipality|CN",
+                        availableLevels: [.locality: "Beijing"]
+                    )
+                }
+                if location.coordinate.longitude < 0 {
+                    return ReverseGeocodeService.CanonicalResult(
+                        cityName: "San Francisco",
+                        iso2: "US",
+                        cityKey: "San Francisco|US",
+                        level: .locality,
+                        parentRegionKey: "California|US",
+                        availableLevels: [.locality: "San Francisco"]
+                    )
+                }
+                return nil
+            }
+        )
+
+        await coordinator.enqueue(points: [
+            LifelogCountryAttributionPointInput(
+                pointID: "point-1",
+                cellID: "cn-cell",
+                coordinate: CoordinateCodable(lat: 39.9042, lon: 116.4074)
+            ),
+            LifelogCountryAttributionPointInput(
+                pointID: "point-2",
+                cellID: "cn-cell",
+                coordinate: CoordinateCodable(lat: 39.90425, lon: 116.40745)
+            ),
+            LifelogCountryAttributionPointInput(
+                pointID: "point-3",
+                cellID: "unknown-cell",
+                coordinate: CoordinateCodable(lat: 0.0, lon: 0.0)
+            ),
+            LifelogCountryAttributionPointInput(
+                pointID: "point-4",
+                cellID: "us-cell",
+                coordinate: CoordinateCodable(lat: 37.7749, lon: -122.4194)
+            )
+        ])
+
+        let snapshot = try await waitForAttributionSnapshot(at: paths, timeout: 1.5) {
+            $0.runs.count == 3
+        }
+
+        XCTAssertEqual(
+            snapshot.runs,
+            [
+                LifelogCountryRunRecord(startPointID: "point-1", endPointID: "point-2", iso2: "CN"),
+                LifelogCountryRunRecord(startPointID: "point-3", endPointID: "point-3", iso2: nil),
+                LifelogCountryRunRecord(startPointID: "point-4", endPointID: "point-4", iso2: "US")
+            ]
+        )
+    }
+
+    @MainActor
+    func test_countryAttributionCoordinator_extendsTailRunsAcrossMultipleEnqueues() async throws {
+        let userID = "lifelog-country-runs-tail-smoke-\(UUID().uuidString)"
+        let paths = StoragePath(userID: userID)
+        try? FileManager.default.removeItem(at: paths.userRoot)
+        try paths.ensureBaseDirectoriesExist()
+
+        let coordinator = LifelogCountryAttributionCoordinator(
+            paths: paths,
+            resolveCanonical: { location in
+                if location.coordinate.longitude > 100 {
+                    return ReverseGeocodeService.CanonicalResult(
+                        cityName: "Beijing",
+                        iso2: "CN",
+                        cityKey: "Beijing|CN",
+                        level: .locality,
+                        parentRegionKey: "Beijing Municipality|CN",
+                        availableLevels: [.locality: "Beijing"]
+                    )
+                }
+                return ReverseGeocodeService.CanonicalResult(
+                    cityName: "San Francisco",
+                    iso2: "US",
+                    cityKey: "San Francisco|US",
+                    level: .locality,
+                    parentRegionKey: "California|US",
+                    availableLevels: [.locality: "San Francisco"]
+                )
+            }
+        )
+
+        await coordinator.enqueue(points: [
+            LifelogCountryAttributionPointInput(
+                pointID: "point-1",
+                cellID: "cn-cell",
+                coordinate: CoordinateCodable(lat: 39.9042, lon: 116.4074)
+            ),
+            LifelogCountryAttributionPointInput(
+                pointID: "point-2",
+                cellID: "cn-cell",
+                coordinate: CoordinateCodable(lat: 39.90425, lon: 116.40745)
+            )
+        ])
+
+        _ = try await waitForAttributionSnapshot(at: paths, timeout: 1.0) {
+            $0.runs == [LifelogCountryRunRecord(startPointID: "point-1", endPointID: "point-2", iso2: "CN")]
+        }
+
+        await coordinator.enqueue(points: [
+            LifelogCountryAttributionPointInput(
+                pointID: "point-3",
+                cellID: "cn-cell",
+                coordinate: CoordinateCodable(lat: 39.9043, lon: 116.4075)
+            ),
+            LifelogCountryAttributionPointInput(
+                pointID: "point-4",
+                cellID: "us-cell",
+                coordinate: CoordinateCodable(lat: 37.7749, lon: -122.4194)
+            )
+        ])
+
+        let snapshot = try await waitForAttributionSnapshot(at: paths, timeout: 1.5) {
+            $0.runs == [
+                LifelogCountryRunRecord(startPointID: "point-1", endPointID: "point-3", iso2: "CN"),
+                LifelogCountryRunRecord(startPointID: "point-4", endPointID: "point-4", iso2: "US")
+            ]
+        }
+
+        XCTAssertEqual(
+            snapshot.runs,
+            [
+                LifelogCountryRunRecord(startPointID: "point-1", endPointID: "point-3", iso2: "CN"),
+                LifelogCountryRunRecord(startPointID: "point-4", endPointID: "point-4", iso2: "US")
+            ]
+        )
+    }
+
+    @MainActor
     private func waitUntil(
         timeout: TimeInterval,
         check: @escaping @MainActor () -> Bool

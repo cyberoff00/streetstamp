@@ -24,7 +24,8 @@ struct ProfileSceneInteractionState: Equatable {
         mode: ProfileSceneMode,
         isViewingOwnFriendProfile: Bool,
         isVisitorSeated: Bool,
-        isInteractionInFlight: Bool
+        isInteractionInFlight: Bool,
+        localize: (String) -> String = { L10n.t($0) }
     ) -> ProfileSceneInteractionState {
         switch mode {
         case .myProfile:
@@ -48,15 +49,15 @@ struct ProfileSceneInteractionState: Equatable {
                 isCTAEnabled = false
                 postcardPromptText = nil
             } else if isInteractionInFlight {
-                ctaTitle = "坐下中..."
+                ctaTitle = localize("friend_profile_cta_loading")
                 isCTAEnabled = false
                 postcardPromptText = nil
             } else if isVisitorSeated {
-                ctaTitle = "已坐下"
+                ctaTitle = localize("friend_profile_cta_done")
                 isCTAEnabled = false
-                postcardPromptText = "send a postcard?"
+                postcardPromptText = localize("friends_postcard_prompt")
             } else {
-                ctaTitle = "坐一坐"
+                ctaTitle = localize("friend_profile_cta_idle")
                 isCTAEnabled = true
                 postcardPromptText = nil
             }

@@ -9,9 +9,19 @@ typealias MBMapView = MapboxMaps.MapView
 private final class GlobeMapViewHolder: ObservableObject {
     let mapView: MBMapView
     @Published var styleLoadRevision: Int = 0
+    var renderPayload = GlobeRenderPayload()
     init() {
         self.mapView = MBMapView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
     }
+
+    func syncRenderPayload(journeys: [JourneyRoute], cachedCities: [CachedCity]) {
+        renderPayload = GlobeRenderPayload(journeys: journeys, cachedCities: cachedCities)
+    }
+}
+
+struct GlobeRenderPayload {
+    var journeys: [JourneyRoute] = []
+    var cachedCities: [CachedCity] = []
 }
 
 // MARK: - MapboxGlobeView (FULL, no city boundary)
@@ -50,6 +60,7 @@ struct MapboxGlobeView: View {
     private let citiesGlowLayerId  = "ss-cities-glow"
     private let citiesLayerId      = "ss-cities-symbol"
     private let cityIconId         = "ss-city-pin"
+    private var renderInputSignature: String { "\(journeysRefreshToken)||\(cityRefreshToken)" }
 
     private var journeysRefreshToken: String {
         journeys.map {
@@ -82,21 +93,17 @@ struct MapboxGlobeView: View {
                     didSetup = true
                     setup()
                 }
-                .onChange(of: journeys.count) { newCount in
-                    print("📍 onChange: journeys.count changed to \(newCount)")
+                .task(id: renderInputSignature) {
+                    print("🔵 [Globe] task renderInputSignature: \(renderInputSignature.prefix(80))...")
+                    mapHolder.syncRenderPayload(
+                        journeys: journeys,
+                        cachedCities: cityCache.cachedCities
+                    )
                     refreshData()
                     updateCountryGlow()
                 }
-                .onChange(of: journeysRefreshToken) { _ in
-                    refreshData()
-                    updateCountryGlow()
-                }
-                .onChange(of: cityRefreshToken) { _ in
-                    print("📍 onChange: cachedCities token changed")
-                    refreshData()
-                    updateCountryGlow()
-                }
-                .onChange(of: mapHolder.styleLoadRevision) { _ in
+                .onChange(of: mapHolder.styleLoadRevision) { rev in
+                    print("🔵 [Globe] onChange styleLoadRevision: \(rev)")
                     refreshData()
                     updateCountryGlow()
                     flyToJourneysIfPossible()
@@ -663,22 +670,21 @@ struct MapboxGlobeView: View {
     private func refreshData() {
         guard mapHolder.styleLoadRevision > 0,
               mapView.mapboxMap.style.sourceExists(withId: footprintsSourceId),
-              mapView.mapboxMap.style.sourceExists(withId: citiesSourceId) else { return }
-        let startedAt = CFAbsoluteTimeGetCurrent()
+              mapView.mapboxMap.style.sourceExists(withId: citiesSourceId) else {
+            print("🔴 [Globe] refreshData SKIPPED: styleRev=\(mapHolder.styleLoadRevision) footprintsSrc=\(mapView.mapboxMap.style.sourceExists(withId: footprintsSourceId)) citiesSrc=\(mapView.mapboxMap.style.sourceExists(withId: citiesSourceId))")
+            return
+        }
 
-        let footprintsFC = makeFootprintsFC(journeys: journeys)
-        let routesFC = makeRoutesFC(journeys: journeys)
-        let citiesFC = makeCitiesFC(from: cityCache.cachedCities)
+        let payload = mapHolder.renderPayload
+        let footprintsFC = makeFootprintsFC(journeys: payload.journeys)
+        let routesFC = makeRoutesFC(journeys: payload.journeys)
+        let citiesFC = makeCitiesFC(from: payload.cachedCities)
 
-        print("✅ footprints:", footprintsFC.features.count,
-              "routes:", routesFC.features.count,
-              "cities:", citiesFC.features.count)
+        print("🟢 [Globe] refreshData: journeys=\(payload.journeys.count) footprints=\(footprintsFC.features.count) routes=\(routesFC.features.count) cities=\(citiesFC.features.count)")
 
         updateGeoJSONSource(id: footprintsSourceId, fc: footprintsFC)
         updateGeoJSONSource(id: routesSourceId, fc: routesFC)
         updateGeoJSONSource(id: citiesSourceId, fc: citiesFC)
-        let elapsedMs = Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1000)
-        print("⏱️ globe refreshData \(elapsedMs)ms")
     }
 
     private func updateGeoJSONSource(id: String, fc: Turf.FeatureCollection) {
@@ -910,7 +916,19 @@ private func makeRoutesFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
             var f = Turf.Feature(geometry: .point(p))
             f.properties = [
                 "cityId": .string(c.id),
-                "name": .string(c.name),
+                "name": .string(
+                    CityPlacemarkResolver.displayTitle(
+                        cityKey: c.id,
+                        iso2: c.countryISO2,
+                        fallbackTitle: c.name,
+                        availableLevelNamesRaw: c.reservedAvailableLevelNames,
+                        storedAvailableLevelNamesLocaleID: c.reservedAvailableLevelNamesLocaleID,
+                        parentRegionKey: c.reservedParentRegionKey,
+                        preferredLevel: c.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
+                        localizedDisplayNameByLocale: c.localizedDisplayNameByLocale,
+                        locale: .current
+                    )
+                ),
                 "iso2": .string(c.countryISO2 ?? "")
             ]
             feats.append(f)
@@ -933,7 +951,7 @@ private func makeRoutesFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
         }
 
         var all: [CLLocationCoordinate2D] = []
-        for j in journeys {
+        for j in mapHolder.renderPayload.journeys {
             let src = (!j.coordinates.isEmpty ? j.coordinates : j.thumbnailCoordinates)
             all.append(contentsOf: src.map { CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon) })
         }

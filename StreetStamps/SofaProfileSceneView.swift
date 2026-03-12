@@ -103,11 +103,11 @@ struct SofaProfileSceneView: View {
     private func postcardPrompt(text: String) -> some View {
         if let onPostcardPromptTap {
             Button(action: onPostcardPromptTap) {
-                promptBubble(text: text, bold: true, tailSide: .trailing)
+                promptBubble(text: text, bold: false, tailSide: .trailing)
             }
             .buttonStyle(.plain)
         } else {
-            promptBubble(text: text, bold: true, tailSide: .trailing)
+            promptBubble(text: text, bold: false, tailSide: .trailing)
         }
     }
 

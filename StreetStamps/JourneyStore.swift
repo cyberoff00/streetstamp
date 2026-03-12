@@ -347,6 +347,7 @@ final class JourneyStore: ObservableObject {
             journeys.insert(journey, at: 0)
         }
         bumpTrackTileRevision()
+        GlobeRefreshCoordinator.shared.requestRefresh(reason: .journeySaved)
         flushPersist(journey: journey, force: true)
     }
 

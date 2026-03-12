@@ -378,8 +378,15 @@ enum LifelogRenderSnapshotBuilder {
                 )
             }
 
+        let validCountryRuns = passiveCountryRuns.filter { $0.coordsWGS84.count >= 2 }
+        let tilePassiveSegments = segments.filter { $0.sourceType == .passive && $0.coordinates.count >= 2 }
+        let useCountryRuns = !validCountryRuns.isEmpty
+            && validCountryRuns.count >= tilePassiveSegments.count
+
         let passiveRuns: [LifelogAttributedCoordinateRun]
-        if passiveCountryRuns.isEmpty {
+        if useCountryRuns {
+            passiveRuns = validCountryRuns
+        } else {
             passiveRuns = segments
                 .filter { $0.sourceType == .passive }
                 .map { segment in
@@ -393,8 +400,6 @@ enum LifelogRenderSnapshotBuilder {
                         endTimestamp: segment.endTimestamp
                     )
                 }
-        } else {
-            passiveRuns = passiveCountryRuns
         }
 
         return (journeyRuns + passiveRuns).sorted {

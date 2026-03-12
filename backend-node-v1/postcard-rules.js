@@ -48,15 +48,20 @@ function canSendPostcard({ sentPostcards, toUserID, cityID, clientDraftID, allow
 
   const sentOnly = all.filter((item) => statusOf(item) === 'sent');
 
-  const hasSentToSameFriendSameCity = sentOnly.some((item) => {
+  const sameFriendSameCityCount = sentOnly.filter((item) => {
     return cityIDOf(item) === normalizedCityID && toUserIDOf(item) === normalizedToUserID;
-  });
-  if (hasSentToSameFriendSameCity) {
+  }).length;
+  if (sameFriendSameCityCount >= 2) {
     return { ok: false, reason: 'city_friend_quota_exceeded', idempotentHit: null };
   }
 
-  const citySentCount = sentOnly.filter((item) => cityIDOf(item) === normalizedCityID).length;
-  if (citySentCount >= 5) {
+  const uniqueFriendCountForCity = new Set(
+    sentOnly
+      .filter((item) => cityIDOf(item) === normalizedCityID)
+      .map((item) => toUserIDOf(item))
+      .filter(Boolean)
+  ).size;
+  if (uniqueFriendCountForCity >= 10 && sameFriendSameCityCount === 0) {
     return { ok: false, reason: 'city_total_quota_exceeded', idempotentHit: null };
   }
 

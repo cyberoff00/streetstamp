@@ -727,7 +727,9 @@ final class UserSessionStore: ObservableObject {
                     try activePaths.ensureBaseDirectoriesExist()
 
                     autoRecoverLegacySourcesIfNeededWorker(
-                        targetUserID: context.activeLocalProfileID
+                        targetUserID: context.activeLocalProfileID,
+                        guestID: context.guestID,
+                        sourceDevice: context.sourceDevice
                     )
 
                 } catch {
@@ -783,17 +785,19 @@ final class UserSessionStore: ObservableObject {
         saveGuestAccountBindingsWorker(existing)
     }
 
-    nonisolated private static func autoRecoverLegacySourcesIfNeededWorker(targetUserID: String) {
+    nonisolated private static func autoRecoverLegacySourcesIfNeededWorker(
+        targetUserID: String,
+        guestID: String,
+        sourceDevice: String
+    ) {
         var recoveredByTarget = loadAutoRecoveredGuestSourcesWorker()
         var recoveredSources = Set(recoveredByTarget[targetUserID] ?? [])
         var changed = false
 
-        let currentGuestID = loadOrCreateGuestIDWorker()
-        let currentDevice = currentDeviceIDWorker() ?? "unknown_device"
         for sourceUserID in legacyRecoverySourceUserIDsWorker(
             for: targetUserID,
-            guestID: currentGuestID,
-            sourceDevice: currentDevice
+            guestID: guestID,
+            sourceDevice: sourceDevice
         ) {
             if recoveredSources.contains(sourceUserID) { continue }
             do {

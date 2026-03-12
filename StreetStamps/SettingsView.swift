@@ -100,6 +100,140 @@ struct SettingsRowPresentation {
         iconColor: FigmaTheme.secondary,
         textStyle: .supporting
     )
+
+    static let liveActivity = SettingsRowPresentation(
+        title: L10n.t("settings_live_activity_title"),
+        subtitle: L10n.t("settings_live_activity_desc"),
+        icon: "rectangle.badge.person.crop",
+        iconColor: FigmaTheme.primary,
+        textStyle: .supporting
+    )
+}
+
+struct SettingsGeneralRowPresentation: Equatable {
+    let title: String
+    let icon: String
+    let iconColor: Color
+    let badgeText: String?
+    let rowHeight: CGFloat
+    let destination: Destination
+
+    enum Destination: Hashable {
+        case importGPX
+        case notifications
+        case debugTools
+    }
+}
+
+struct SettingsInformationRowPresentation: Equatable {
+    let title: String
+    let icon: String
+    let iconColor: Color
+    let badgeText: String?
+    let rowHeight: CGFloat
+    let destination: Destination
+
+    enum Destination: Hashable {
+        case checkUpdates
+        case aboutUs
+        case privacyPolicy
+    }
+}
+
+enum SettingsGeneralPresentation {
+    static func rows() -> [SettingsGeneralRowPresentation] {
+        var rows: [SettingsGeneralRowPresentation] = [
+            SettingsGeneralRowPresentation(
+                title: L10n.t("settings_import_gpx_row"),
+                icon: "map",
+                iconColor: FigmaTheme.primary,
+                badgeText: nil,
+                rowHeight: 64,
+                destination: .importGPX
+            ),
+            SettingsGeneralRowPresentation(
+                title: L10n.t("settings_notifications_title"),
+                icon: "bell",
+                iconColor: FigmaTheme.secondary,
+                badgeText: nil,
+                rowHeight: 64,
+                destination: .notifications
+            )
+        ]
+
+#if DEBUG
+        rows.append(
+            SettingsGeneralRowPresentation(
+                title: "DEBUG TOOLS",
+                icon: "wrench.and.screwdriver",
+                iconColor: .black.opacity(0.68),
+                badgeText: "DEV",
+                rowHeight: 74,
+                destination: .debugTools
+            )
+        )
+#endif
+
+        return rows
+    }
+}
+
+enum SettingsTrackingAssistPresentation {
+    static func toggleRows() -> [SettingsRowPresentation] {
+        []
+    }
+}
+
+enum SettingsNotificationsPresentation {
+    static func toggleRows(isLiveActivityAvailable: Bool) -> [SettingsRowPresentation] {
+        [
+            liveActivityRow(isLiveActivityAvailable: isLiveActivityAvailable),
+            .stationaryReminder
+        ]
+    }
+
+    static func liveActivityRow(isLiveActivityAvailable: Bool) -> SettingsRowPresentation {
+        SettingsRowPresentation(
+            title: L10n.t("settings_live_activity_title"),
+            subtitle: isLiveActivityAvailable
+                ? L10n.t("settings_live_activity_desc")
+                : L10n.t("settings_live_activity_system_disabled_desc"),
+            icon: "rectangle.badge.person.crop",
+            iconColor: FigmaTheme.primary,
+            textStyle: .supporting
+        )
+    }
+}
+
+enum SettingsInformationPresentation {
+    static func rows(appVersionText: String) -> [SettingsInformationRowPresentation] {
+        [
+            SettingsInformationRowPresentation(
+                title: L10n.t("settings_check_updates_title"),
+                icon: "sparkles",
+                iconColor: FigmaTheme.secondary,
+                badgeText: appVersionText,
+                rowHeight: 64,
+                destination: .checkUpdates
+            ),
+            SettingsInformationRowPresentation(
+                title: L10n.t("settings_about_us_title"),
+                icon: "info.circle",
+                iconColor: .black.opacity(0.75),
+                badgeText: nil,
+                rowHeight: 64,
+                destination: .aboutUs
+            ),
+            SettingsInformationRowPresentation(
+                title: L10n.t("settings_privacy_policy_title"),
+                icon: "shield",
+                iconColor: .black.opacity(0.75),
+                badgeText: nil,
+                rowHeight: 64,
+                destination: .privacyPolicy
+            )
+        ]
+    }
 }
 
 struct SettingsView: View {
@@ -115,6 +249,7 @@ struct SettingsView: View {
     @AppStorage(AppSettings.voiceBroadcastEnabledKey) private var voiceBroadcastEnabled = true
     @AppStorage(AppSettings.voiceBroadcastIntervalKMKey) private var voiceBroadcastIntervalKM = 1
     @AppStorage(AppSettings.longStationaryReminderEnabledKey) private var longStationaryReminderEnabled = true
+    @AppStorage(AppSettings.liveActivityEnabledKey) private var liveActivityEnabled = true
     @AppStorage(AppSettings.lifelogBackgroundModeKey) private var lifelogBackgroundModeRaw = LifelogBackgroundMode.defaultMode.rawValue
 
     @State private var showComingSoon = false
@@ -278,45 +413,46 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             sectionTitle(L10n.t("settings_section_tracking_assist"))
 
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .center, spacing: 10) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(L10n.t("settings_lifelog_bg_mode_title"))
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(FigmaTheme.text)
+            VStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .center, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(L10n.t("settings_lifelog_bg_mode_title"))
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(FigmaTheme.text)
+                        }
+
+                        Spacer(minLength: 8)
+
+                        Button {
+                            showBackgroundModeInfo = true
+                        } label: {
+                            Image(systemName: "questionmark.circle")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(FigmaTheme.subtext)
+                        }
+                        .buttonStyle(.plain)
                     }
 
-                    Spacer(minLength: 8)
-
-                    Button {
-                        showBackgroundModeInfo = true
-                    } label: {
-                        Image(systemName: "questionmark.circle")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(FigmaTheme.subtext)
+                    segmentedContainer {
+                        segmentButton(
+                            title: L10n.t(LifelogBackgroundMode.highPrecision.titleKey),
+                            isSelected: lifelogBackgroundMode == .highPrecision
+                        ) {
+                            lifelogBackgroundMode = .highPrecision
+                        }
+                        segmentButton(
+                            title: L10n.t(LifelogBackgroundMode.lowPrecision.titleKey),
+                            isSelected: lifelogBackgroundMode == .lowPrecision
+                        ) {
+                            lifelogBackgroundMode = .lowPrecision
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
-
-                segmentedContainer {
-                    segmentButton(
-                        title: L10n.t(LifelogBackgroundMode.highPrecision.titleKey),
-                        isSelected: lifelogBackgroundMode == .highPrecision
-                    ) {
-                        lifelogBackgroundMode = .highPrecision
-                    }
-                    segmentButton(
-                        title: L10n.t(LifelogBackgroundMode.lowPrecision.titleKey),
-                        isSelected: lifelogBackgroundMode == .lowPrecision
-                    ) {
-                        lifelogBackgroundMode = .lowPrecision
-                    }
-                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 18)
+                .figmaSurfaceCard(radius: 30)
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 18)
-            .figmaSurfaceCard(radius: 30)
-
         }
     }
 
@@ -325,51 +461,38 @@ struct SettingsView: View {
             sectionTitle(L10n.t("settings_section_general"))
 
             VStack(spacing: 10) {
-                NavigationLink {
-                    gpxImportEntryView
-                } label: {
-                    settingsRowLabel(title: L10n.t("settings_import_gpx_row"), icon: "map", iconColor: FigmaTheme.primary)
+                ForEach(SettingsGeneralPresentation.rows(), id: \.destination) { row in
+                    NavigationLink {
+                        settingsDestinationView(for: row.destination)
+                    } label: {
+                        settingsRowLabel(
+                            title: row.title,
+                            icon: row.icon,
+                            iconColor: row.iconColor,
+                            badgeText: row.badgeText,
+                            rowHeight: row.rowHeight
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
-
-                NavigationLink {
-                    notificationsView
-                } label: {
-                    settingsRowLabel(title: L10n.t("settings_notifications_title"), icon: "bell", iconColor: FigmaTheme.secondary)
-                }
-                .buttonStyle(.plain)
-
-                NavigationLink {
-                    SettingsDebugToolsEntryView()
-                } label: {
-                    settingsRowLabel(
-                        title: "DEBUG TOOLS",
-                        icon: "wrench.and.screwdriver",
-                        iconColor: .black.opacity(0.68),
-                        badgeText: "DEV",
-                        rowHeight: 74
-                    )
-                }
-                .buttonStyle(.plain)
-
-                NavigationLink {
-                    DebugFriendProfilePreviewView()
-                } label: {
-                    settingsRowLabel(
-                        title: "FRIEND UI PREVIEW",
-                        icon: "person.crop.square",
-                        iconColor: FigmaTheme.primary,
-                        badgeText: "LOCAL",
-                        rowHeight: 74
-                    )
-                }
-                .buttonStyle(.plain)
             }
         }
     }
 
+    @ViewBuilder
+    private func settingsDestinationView(for destination: SettingsGeneralRowPresentation.Destination) -> some View {
+        switch destination {
+        case .importGPX:
+            gpxImportEntryView
+        case .notifications:
+            notificationsView
+        case .debugTools:
+            SettingsDebugToolsEntryView()
+        }
+    }
+
     private var notificationsView: some View {
-        ScrollView(showsIndicators: false) {
+        SettingsDetailPage(title: L10n.t("settings_notifications_title")) {
             VStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 10) {
                     sectionTitle(L10n.t("settings_notifications_title"))
@@ -410,33 +533,37 @@ struct SettingsView: View {
                     .padding(.vertical, 18)
                     .figmaSurfaceCard(radius: 30)
 
-                    toggleRowCard(
-                        presentation: .stationaryReminder,
-                        isOn: $longStationaryReminderEnabled
-                    )
+                    ForEach(SettingsNotificationsPresentation.toggleRows(
+                        isLiveActivityAvailable: LiveActivityManager.shared.isLiveActivitySupported
+                    ), id: \.title) { row in
+                        switch row.title {
+                        case SettingsRowPresentation.liveActivity.title:
+                            toggleRowCard(
+                                presentation: row,
+                                isOn: Binding(
+                                    get: { liveActivityEnabled },
+                                    set: { newValue in
+                                        liveActivityEnabled = newValue
+                                        if !newValue {
+                                            LiveActivityManager.shared.endActivity()
+                                        }
+                                    }
+                                ),
+                                isEnabled: LiveActivityManager.shared.isLiveActivitySupported
+                            )
+                        default:
+                            toggleRowCard(
+                                presentation: row,
+                                isOn: $longStationaryReminderEnabled
+                            )
+                        }
+                    }
                 }
             }
             .padding(.horizontal, 18)
             .padding(.top, 16)
             .padding(.bottom, 28)
         }
-        .background(FigmaTheme.mutedBackground.ignoresSafeArea())
-        .safeAreaInset(edge: .top, spacing: 0) {
-            UnifiedNavigationHeader(
-                chrome: NavigationChrome(
-                    title: L10n.t("settings_notifications_title"),
-                    leadingAccessory: .back,
-                    titleLevel: .secondary
-                ),
-                horizontalPadding: 18,
-                topPadding: 8,
-                bottomPadding: 12,
-                onLeadingTap: { dismiss() }
-            ) {
-                Color.clear
-            }
-        }
-        .toolbar(.hidden, for: .navigationBar)
     }
 
     private var accountSection: some View {
@@ -657,29 +784,46 @@ struct SettingsView: View {
             sectionTitle(L10n.t("settings_section_information"))
 
             VStack(spacing: 10) {
-                settingsRow(
-                    title: L10n.t("settings_check_updates_title"),
-                    icon: "sparkles",
-                    iconColor: FigmaTheme.secondary,
-                    badgeText: appVersionText,
-                    rowHeight: 88
-                ) {
-                    showPlaceholder(L10n.t("settings_check_updates_placeholder"))
-                }
-
-                settingsRow(title: L10n.t("settings_about_us_title"), icon: "info.circle", iconColor: .black.opacity(0.75)) {
-                    showPlaceholder(L10n.t("settings_about_us_placeholder"))
-                }
-
-                settingsRow(title: L10n.t("settings_privacy_policy_title"), icon: "shield", iconColor: .black.opacity(0.75)) {
-                    showPlaceholder(L10n.t("settings_privacy_policy_placeholder"))
+                ForEach(SettingsInformationPresentation.rows(appVersionText: appVersionText), id: \.destination) { row in
+                    switch row.destination {
+                    case .aboutUs:
+                        NavigationLink {
+                            AboutUsView()
+                        } label: {
+                            settingsRowLabel(
+                                title: row.title,
+                                icon: row.icon,
+                                iconColor: row.iconColor,
+                                badgeText: row.badgeText,
+                                rowHeight: row.rowHeight
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    case .checkUpdates, .privacyPolicy:
+                        settingsRow(
+                            title: row.title,
+                            icon: row.icon,
+                            iconColor: row.iconColor,
+                            badgeText: row.badgeText,
+                            rowHeight: row.rowHeight
+                        ) {
+                            switch row.destination {
+                            case .checkUpdates:
+                                showPlaceholder(L10n.t("settings_check_updates_placeholder"))
+                            case .privacyPolicy:
+                                showPlaceholder(L10n.t("settings_privacy_policy_placeholder"))
+                            case .aboutUs:
+                                break
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 
     private var privateTransferView: some View {
-        ScrollView(showsIndicators: false) {
+        SettingsDetailPage(title: L10n.t("settings_device_transfer_title")) {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(L10n.t("settings_private_transfer_title"))
@@ -793,23 +937,6 @@ struct SettingsView: View {
             .padding(.top, 16)
             .padding(.bottom, 28)
         }
-        .background(FigmaTheme.mutedBackground.ignoresSafeArea())
-        .safeAreaInset(edge: .top, spacing: 0) {
-            UnifiedNavigationHeader(
-                chrome: NavigationChrome(
-                    title: L10n.t("settings_device_transfer_title"),
-                    leadingAccessory: .back,
-                    titleLevel: .secondary
-                ),
-                horizontalPadding: 18,
-                topPadding: 8,
-                bottomPadding: 12,
-                onLeadingTap: { dismiss() }
-            ) {
-                Color.clear
-            }
-        }
-        .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showTransferScanner) {
             QRCodeScannerSheet(
                 onFound: { payload in
@@ -843,7 +970,7 @@ struct SettingsView: View {
     }
 
     private var gpxImportEntryView: some View {
-        ScrollView(showsIndicators: false) {
+        SettingsDetailPage(title: L10n.t("import_gpx_title")) {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(L10n.t("gpx_import_entry_title"))
@@ -913,23 +1040,6 @@ struct SettingsView: View {
             .padding(.top, 16)
             .padding(.bottom, 28)
         }
-        .background(FigmaTheme.mutedBackground.ignoresSafeArea())
-        .safeAreaInset(edge: .top, spacing: 0) {
-            UnifiedNavigationHeader(
-                chrome: NavigationChrome(
-                    title: L10n.t("import_gpx_title"),
-                    leadingAccessory: .back,
-                    titleLevel: .secondary
-                ),
-                horizontalPadding: 18,
-                topPadding: 8,
-                bottomPadding: 12,
-                onLeadingTap: { dismiss() }
-            ) {
-                Color.clear
-            }
-        }
-        .toolbar(.hidden, for: .navigationBar)
         .alert(L10n.t("settings_import_failed_title"), isPresented: Binding(
             get: { gpxImportError != nil },
             set: { if !$0 { gpxImportError = nil } }
@@ -1013,6 +1123,7 @@ struct SettingsView: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 18)
+        .opacity(isEnabled ? 1 : 0.58)
         .figmaSurfaceCard(radius: 30)
     }
 
@@ -1355,11 +1466,53 @@ struct SettingsView: View {
     }
 }
 
-private struct SettingsDebugToolsEntryView: View {
+private struct SettingsDetailPage<Content: View>: View {
     @Environment(\.dismiss) private var dismiss
 
+    let title: String
+    @ViewBuilder let content: Content
+
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
     var body: some View {
-        DebugChinaTestModule()
+        ScrollView(showsIndicators: false) {
+            content
+        }
+        .background(FigmaTheme.mutedBackground.ignoresSafeArea())
+        .safeAreaInset(edge: .top, spacing: 0) {
+            UnifiedNavigationHeader(
+                chrome: NavigationChrome(
+                    title: title,
+                    leadingAccessory: .back,
+                    titleLevel: .secondary
+                ),
+                horizontalPadding: 18,
+                topPadding: 8,
+                bottomPadding: 12,
+                onLeadingTap: { dismiss() }
+            ) {
+                Color.clear
+            }
+        }
+        .toolbar(.hidden, for: .navigationBar)
+    }
+}
+
+private struct SettingsDebugToolsEntryView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var lifelogStore: LifelogStore
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Button("Diagnose Passive Gaps") {
+                lifelogStore.diagnosePassiveGaps()
+            }
+            .padding()
+            DebugChinaTestModule()
+        }
             .safeAreaInset(edge: .top, spacing: 0) {
                 UnifiedNavigationHeader(
                     chrome: NavigationChrome(
@@ -1503,7 +1656,13 @@ private enum GPXImportService {
                 out.append(
                     GPXImportCityCandidate(
                         cityKey: result.cityKey,
-                        name: result.cityName,
+                        name: CityPlacemarkResolver.displayTitle(
+                            cityKey: result.cityKey,
+                            iso2: result.iso2,
+                            fallbackTitle: result.cityName,
+                            parentRegionKey: result.parentRegionKey,
+                            locale: .current
+                        ),
                         iso2: result.iso2
                     )
                 )

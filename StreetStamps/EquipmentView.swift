@@ -196,7 +196,7 @@ struct EquipmentView: View {
 
     private var header: some View {
         ZStack {
-            Text(L10n.t("equipment_title"))
+            Text(L10n.upper("equipment_title"))
                 .navigationTitleStyle(level: .secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)

@@ -144,7 +144,7 @@ struct CityStampLibraryView: View {
             }
             Button(L10n.t("cancel"), role: .cancel) {}
         } message: { city in
-            Text(String(format: L10n.t("delete_city_alert_message"), locale: Locale.current, (city.displayName ?? city.name)))
+            Text(String(format: L10n.t("delete_city_alert_message"), locale: Locale.current, city.localizedName))
         }
         .alert(L10n.t("details_unavailable_title"), isPresented: $showPublicDetailUnavailableAlert) {
             Button(L10n.t("ok"), role: .cancel) {}
@@ -284,7 +284,7 @@ struct CityStampCard: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
-                    Text(city.displayName ?? city.name)
+                    Text(city.localizedName)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(UITheme.softBlack)
                         .lineLimit(1)
@@ -361,6 +361,159 @@ final class CityImageMemoryCache {
 }
 
 // =======================================================
+// MARK: - City thumbnail debug logging
+// =======================================================
+
+@MainActor
+final class CityThumbnailDebugLogger {
+    static let shared = CityThumbnailDebugLogger()
+
+    enum LogKind {
+        case keyFirstSeen
+        case keyChanged
+        case keySame
+        case memoryHit
+        case diskHit
+        case renderMiss
+        case renderComplete
+        case cancel
+
+        var logsByDefault: Bool {
+            switch self {
+            case .keyFirstSeen, .keyChanged, .diskHit, .renderMiss:
+                return true
+            case .keySame, .memoryHit, .renderComplete, .cancel:
+                return false
+            }
+        }
+    }
+
+    struct RenderKeyParts: Equatable {
+        let fullKey: String
+        let journeySignature: String
+        let boundarySignature: String
+        let anchorSignature: String
+    }
+
+    private var lastPartsByCityID: [String: RenderKeyParts] = [:]
+
+    private init() {}
+
+    var isEnabled: Bool {
+#if DEBUG
+        return launchArguments.contains("-CityThumbnailDebug")
+            || UserDefaults.standard.bool(forKey: "city.thumbnail.debug.enabled")
+#else
+        return false
+#endif
+    }
+
+    private var isVerboseEnabled: Bool {
+#if DEBUG
+        return launchArguments.contains("-CityThumbnailDebugVerbose")
+            || UserDefaults.standard.bool(forKey: "city.thumbnail.debug.verbose")
+#else
+        return false
+#endif
+    }
+
+    private var launchArguments: [String] {
+        ProcessInfo.processInfo.arguments
+    }
+
+    private var cityFilter: String? {
+        if let index = launchArguments.firstIndex(of: "-CityThumbnailDebugCity"),
+           launchArguments.indices.contains(index + 1) {
+            let value = launchArguments[index + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+            return value.isEmpty ? nil : value
+        }
+        return nil
+    }
+
+    func log(_ kind: LogKind, cityID: String? = nil, _ message: String) {
+        guard isEnabled else { return }
+        guard kind.logsByDefault || isVerboseEnabled else { return }
+        if let filter = cityFilter, let cityID, cityID != filter { return }
+        let line = "🧭 [CityThumb] \(message)"
+        print(line)
+        appendToFile(line)
+    }
+
+    private func appendToFile(_ line: String) {
+        guard let url = logFileURL() else { return }
+        let payload = "\(ISO8601DateFormatter().string(from: Date())) \(line)\n"
+        let data = Data(payload.utf8)
+
+        if FileManager.default.fileExists(atPath: url.path) == false {
+            try? data.write(to: url, options: .atomic)
+            return
+        }
+
+        guard let handle = try? FileHandle(forWritingTo: url) else { return }
+        defer { try? handle.close() }
+        do {
+            try handle.seekToEnd()
+            try handle.write(contentsOf: data)
+        } catch {
+            // Ignore debug logging failures.
+        }
+    }
+
+    private func logFileURL() -> URL? {
+        FileManager.default.temporaryDirectory.appendingPathComponent("city-thumbnail-debug.log", isDirectory: false)
+    }
+
+    func recordRenderKey(cityID: String, cityName: String, appearanceRaw: String, parts: RenderKeyParts) {
+        guard isEnabled else { return }
+        if let filter = cityFilter, cityID != filter { return }
+
+        if let previous = lastPartsByCityID[cityID] {
+            if previous == parts {
+                log(.keySame, cityID: cityID, "key_same city=\(cityID) name=\(cityName) appearance=\(appearanceRaw)")
+            } else {
+                let changedSections = [
+                    previous.journeySignature != parts.journeySignature ? "journey" : nil,
+                    previous.boundarySignature != parts.boundarySignature ? "boundary" : nil,
+                    previous.anchorSignature != parts.anchorSignature ? "anchor" : nil
+                ]
+                .compactMap { $0 }
+                .joined(separator: ",")
+
+                log(
+                    .keyChanged,
+                    cityID: cityID,
+                    """
+                    key_changed city=\(cityID) name=\(cityName) appearance=\(appearanceRaw) changed=\(changedSections)
+                       old.key=\(previous.fullKey)
+                       new.key=\(parts.fullKey)
+                       old.journey=\(previous.journeySignature)
+                       new.journey=\(parts.journeySignature)
+                       old.boundary=\(previous.boundarySignature)
+                       new.boundary=\(parts.boundarySignature)
+                       old.anchor=\(previous.anchorSignature)
+                       new.anchor=\(parts.anchorSignature)
+                    """
+                )
+            }
+        } else {
+            log(
+                .keyFirstSeen,
+                cityID: cityID,
+                """
+                key_first_seen city=\(cityID) name=\(cityName) appearance=\(appearanceRaw)
+                   key=\(parts.fullKey)
+                   journey=\(parts.journeySignature)
+                   boundary=\(parts.boundarySignature)
+                   anchor=\(parts.anchorSignature)
+                """
+            )
+        }
+
+        lastPartsByCityID[cityID] = parts
+    }
+}
+
+// =======================================================
 // MARK: - CityThumbnailView
 // =======================================================
 
@@ -380,9 +533,21 @@ struct CityThumbnailView: View {
     }
 
     var body: some View {
+        let syncCachedImage = CityThumbnailLoader.existingCachedImage(
+            city: city,
+            routePath: routePath,
+            basePath: basePath,
+            appearanceRaw: mapAppearanceRaw,
+            renderCacheStore: renderCacheStore
+        )
+
         Group {
             if let img = loader.image {
                 Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+            } else if let syncCachedImage {
+                Image(uiImage: syncCachedImage)
                     .resizable()
                     .scaledToFill()
             } else {
@@ -434,6 +599,10 @@ struct CityThumbnailView: View {
 final class CityThumbnailLoader: ObservableObject {
     @Published var image: UIImage?
     private var currentKey: String?
+    /// Tracks the render key that produced the current `image`.
+    /// Survives `cancel()` so we can skip redundant reloads.
+    private var renderedKey: String?
+    private var renderTask: Task<Void, Never>?
 
     private nonisolated static let cityFocusRadiusMeters: CLLocationDistance = 80_000
     private nonisolated static let cityFocusWindowMeters: CLLocationDistance = 40_000
@@ -445,21 +614,53 @@ final class CityThumbnailLoader: ObservableObject {
     func load(city: City?, routePath: String?, basePath: String?, appearanceRaw: String, renderCacheStore: CityRenderCacheStore) {
         // City cards use render-keyed persistent caching first, then render on miss.
         if let city {
-            let renderKey = Self.renderCacheKey(for: city, appearanceRaw: appearanceRaw)
+            let renderKeyParts = Self.renderKeyParts(for: city, appearanceRaw: appearanceRaw)
+            let renderKey = renderKeyParts.fullKey
+            CityThumbnailDebugLogger.shared.recordRenderKey(
+                cityID: city.id,
+                cityName: city.localizedName,
+                appearanceRaw: appearanceRaw,
+                parts: renderKeyParts
+            )
+            // Fast path: same key, image already showing — nothing to do.
             if currentKey == renderKey, image != nil { return }
+            // Also skip if we already rendered this exact key (survives cancel()).
+            if renderedKey == renderKey, image != nil {
+                currentKey = renderKey
+                return
+            }
             currentKey = renderKey
+            renderTask?.cancel()
+            renderTask = nil
             if let cached = CityImageMemoryCache.shared.image(forKey: renderKey) {
+                CityThumbnailDebugLogger.shared.log(
+                    .memoryHit,
+                    cityID: city.id,
+                    "load city=\(city.id) source=memory_hit key=\(renderKey)"
+                )
                 image = cached
+                renderedKey = renderKey
                 return
             }
 
             if let diskCached = renderCacheStore.image(forKey: renderKey) {
+                CityThumbnailDebugLogger.shared.log(
+                    .diskHit,
+                    cityID: city.id,
+                    "load city=\(city.id) source=disk_hit key=\(renderKey)"
+                )
                 CityImageMemoryCache.shared.set(diskCached, forKey: renderKey)
                 image = diskCached
+                renderedKey = renderKey
                 return
             }
 
-            image = nil
+            CityThumbnailDebugLogger.shared.log(
+                .renderMiss,
+                cityID: city.id,
+                "load city=\(city.id) source=render_miss key=\(renderKey)"
+            )
+            // Keep stale image visible while rendering the new one — avoids placeholder flash.
             renderOnDemand(city: city, appearanceRaw: appearanceRaw, key: renderKey, renderCacheStore: renderCacheStore)
             return
         }
@@ -516,21 +717,94 @@ final class CityThumbnailLoader: ObservableObject {
     }
 
     func cancel() {
-        currentKey = nil
+        CityThumbnailDebugLogger.shared.log(.cancel, "cancel key=\(currentKey ?? "nil")")
+        renderTask?.cancel()
+        renderTask = nil
+        // Intentionally keep currentKey and image so re-appear is instant.
     }
 
     nonisolated static func renderCacheKey(for city: City, appearanceRaw: String) -> String {
+        renderKeyParts(for: city, appearanceRaw: appearanceRaw).fullKey
+    }
+
+    nonisolated static func renderKeyParts(for city: City, appearanceRaw: String) -> CityThumbnailDebugLogger.RenderKeyParts {
         let journeySignature = city.journeys
             .sorted { $0.id < $1.id }
             .map(journeySignature)
             .joined(separator: "~")
-        let boundarySignature = polygonSignature(city.boundaryPolygon ?? [])
-        let anchorSignature = coordinateSignature(city.anchor.map { [$0] } ?? [])
-        return "render|\(city.id)|\(appearanceRaw)|\(journeySignature)|\(boundarySignature)|\(anchorSignature)"
+        let boundarySignature = "ignored-for-cache"
+        let anchorSignature = "ignored-for-cache"
+        let fullKey = "render|\(city.id)|\(appearanceRaw)|\(journeySignature)"
+        return CityThumbnailDebugLogger.RenderKeyParts(
+            fullKey: fullKey,
+            journeySignature: journeySignature,
+            boundarySignature: boundarySignature,
+            anchorSignature: anchorSignature
+        )
     }
 
     nonisolated static func renderCacheRelativePath(forKey key: String) -> String {
         "city_\(safeFilenameComponent(key)).jpg"
+    }
+
+    nonisolated static func existingPersistentCache(
+        for city: City,
+        appearanceRaw: String,
+        renderCacheStore: CityRenderCacheStore
+    ) -> UIImage? {
+        let key = renderCacheKey(for: city, appearanceRaw: appearanceRaw)
+        if let cached = CityImageMemoryCache.shared.image(forKey: key) {
+            return cached
+        }
+        if let diskCached = renderCacheStore.image(forKey: key) {
+            CityImageMemoryCache.shared.set(diskCached, forKey: key)
+            return diskCached
+        }
+        return nil
+    }
+
+    nonisolated static func existingCachedImage(
+        city: City?,
+        routePath: String?,
+        basePath: String?,
+        appearanceRaw: String,
+        renderCacheStore: CityRenderCacheStore
+    ) -> UIImage? {
+        if let city {
+            return existingPersistentCache(
+                for: city,
+                appearanceRaw: appearanceRaw,
+                renderCacheStore: renderCacheStore
+            )
+        }
+
+        let sources = [routePath, basePath].compactMap { $0 }
+        guard !sources.isEmpty else { return nil }
+
+        var orderedCandidates: [String] = []
+        var seen = Set<String>()
+        for source in sources {
+            for key in legacyCandidateKeys(from: source, appearanceRaw: appearanceRaw) {
+                if seen.insert(key).inserted { orderedCandidates.append(key) }
+            }
+        }
+
+        for chosen in orderedCandidates {
+            if let cached = CityImageMemoryCache.shared.image(forKey: chosen) {
+                return cached
+            }
+
+            guard let fullPath = CityThumbnailCache.resolveFullPath(chosen),
+                  FileManager.default.fileExists(atPath: fullPath),
+                  let diskCached = UIImage(contentsOfFile: fullPath) else {
+                continue
+            }
+
+            CityImageMemoryCache.shared.set(diskCached, forKey: chosen)
+            return diskCached
+        }
+
+        return nil
     }
 
     nonisolated static func ensurePersistentCache(for city: City, appearanceRaw: String, renderCacheStore: CityRenderCacheStore) async {
@@ -543,7 +817,7 @@ final class CityThumbnailLoader: ObservableObject {
 
         let fetchedBoundary = await CityBoundaryService.shared.boundaryPolygon(
             cityKey: city.id,
-            cityName: city.displayName ?? city.name,
+            cityName: city.localizedName,
             countryISO2: city.countryISO2,
             anchor: city.anchor ?? city.journeys.first?.allCLCoords.first
         )
@@ -554,12 +828,22 @@ final class CityThumbnailLoader: ObservableObject {
     }
 
     private func renderOnDemand(city: City, appearanceRaw: String, key: String, renderCacheStore: CityRenderCacheStore) {
-        Task(priority: .utility) { [city, appearanceRaw, key] in
+        renderTask?.cancel()
+        renderTask = Task(priority: .utility) { [city, appearanceRaw, key] in
             await Self.ensurePersistentCache(for: city, appearanceRaw: appearanceRaw, renderCacheStore: renderCacheStore)
+            guard !Task.isCancelled else { return }
             let img = CityImageMemoryCache.shared.image(forKey: key) ?? renderCacheStore.image(forKey: key)
             await MainActor.run {
                 guard self.currentKey == key else { return }
-                self.image = img
+                CityThumbnailDebugLogger.shared.log(
+                    .renderComplete,
+                    cityID: city.id,
+                    "render_complete city=\(city.id) image=\(img == nil ? "nil" : "ready") key=\(key)"
+                )
+                if let img {
+                    self.image = img
+                    self.renderedKey = key
+                }
             }
         }
     }
@@ -600,6 +884,10 @@ final class CityThumbnailLoader: ObservableObject {
     }
 
     private func candidateKeys(from preferred: String, appearanceRaw: String) -> [String] {
+        Self.legacyCandidateKeys(from: preferred, appearanceRaw: appearanceRaw)
+    }
+
+    nonisolated private static func legacyCandidateKeys(from preferred: String, appearanceRaw: String) -> [String] {
         let dotRange = preferred.range(of: ".", options: .backwards)
         let stem = dotRange.map { String(preferred[..<$0.lowerBound]) } ?? preferred
         let ext = dotRange.map { String(preferred[$0.lowerBound...]) } ?? ""

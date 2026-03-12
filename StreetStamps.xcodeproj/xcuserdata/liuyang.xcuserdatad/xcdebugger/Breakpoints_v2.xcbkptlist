@@ -18,6 +18,36 @@
             endingLineNumber = "17"
             landmarkName = "MemoryTypography"
             landmarkType = "13">
+            <Locations>
+               <Location
+                  uuid = "61036874-64D0-41C8-BBEC-561BD73C3F79 - 1ccab504c72e1674"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "one-time initialization function for textColorSwiftUI"
+                  moduleName = "StreetStamps.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/MemoryEditorKit.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "17"
+                  endingLineNumber = "17">
+               </Location>
+               <Location
+                  uuid = "61036874-64D0-41C8-BBEC-561BD73C3F79 - 8dd8a2afaad87f91"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "StreetStamps.MemoryTypography.textColorSwiftUI.unsafeMutableAddressor : SwiftUI.Color"
+                  moduleName = "StreetStamps.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/MemoryEditorKit.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "17"
+                  endingLineNumber = "17">
+               </Location>
+            </Locations>
          </BreakpointContent>
       </BreakpointProxy>
    </Breakpoints>

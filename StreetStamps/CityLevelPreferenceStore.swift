@@ -26,6 +26,10 @@ final class CityLevelPreferenceStore {
         defaults.set(dict, forKey: storageKey)
     }
 
+    func displayCacheScope(for parentRegionKey: String?) -> String {
+        preferredLevel(for: parentRegionKey)?.rawValue ?? "default"
+    }
+
     private func readAll() -> [String: String] {
         defaults.dictionary(forKey: storageKey) as? [String: String] ?? [:]
     }

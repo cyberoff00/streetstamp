@@ -1,9 +1,11 @@
 import SwiftUI
 import PhotosUI
+import CoreLocation
 
 struct PostcardComposerView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var cityCache: CityCache
+    @EnvironmentObject private var flow: AppFlowCoordinator
     @EnvironmentObject private var journeyStore: JourneyStore
 
     let friendID: String
@@ -18,6 +20,8 @@ struct PostcardComposerView: View {
     @State private var localImagePath: String = ""
     @State private var showPreview = false
     @State private var loadingPhoto = false
+    @State private var localizedCityNamesByID: [String: String] = [:]
+    @State private var sidebarHideToken = "\(PostcardSidebarVisibilityScope.composer.token)-\(UUID().uuidString)"
 
     private var cityOptions: [(id: String, name: String)] {
         var ordered: [(String, String)] = []
@@ -28,7 +32,7 @@ struct PostcardComposerView: View {
 
         for city in cityCache.cachedCities {
             let id = city.id.trimmingCharacters(in: .whitespacesAndNewlines)
-            let name = city.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let name = resolvedLocalizedCityName(for: city).trimmingCharacters(in: .whitespacesAndNewlines)
             guard !id.isEmpty, !name.isEmpty else { continue }
             if !ordered.contains(where: { $0.0 == id }) {
                 ordered.append((id, name))
@@ -41,19 +45,109 @@ struct PostcardComposerView: View {
     private var currentCityCandidate: (id: String, name: String)? {
         if let ongoing = journeyStore.latestOngoing {
             let id = ongoing.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
-            let name = ongoing.displayCityName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let name = resolvedLocalizedCityName(for: ongoing).trimmingCharacters(in: .whitespacesAndNewlines)
             if !id.isEmpty, !name.isEmpty {
                 return (id, name)
             }
         }
         if let first = journeyStore.journeys.first {
             let id = first.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
-            let name = first.displayCityName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let name = resolvedLocalizedCityName(for: first).trimmingCharacters(in: .whitespacesAndNewlines)
             if !id.isEmpty, !name.isEmpty {
                 return (id, name)
             }
         }
         return nil
+    }
+
+    private func localizedCityName(for city: CachedCity) -> String {
+        CityPlacemarkResolver.displayTitle(
+            cityKey: city.id,
+            iso2: city.countryISO2,
+            fallbackTitle: city.name,
+            availableLevelNamesRaw: city.reservedAvailableLevelNames,
+            storedAvailableLevelNamesLocaleID: city.reservedAvailableLevelNamesLocaleID,
+            parentRegionKey: city.reservedParentRegionKey,
+            preferredLevel: city.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
+            localizedDisplayNameByLocale: city.localizedDisplayNameByLocale,
+            locale: .current
+        )
+    }
+
+    private func normalizedPrefetchedCityName(for city: CachedCity, candidateTitle: String?) -> String {
+        let trimmedCandidate = candidateTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let localeID = Locale.current.identifier
+        var localizedMap = city.localizedDisplayNameByLocale ?? [:]
+        if let trimmedCandidate, !trimmedCandidate.isEmpty {
+            localizedMap[localeID] = trimmedCandidate
+        }
+
+        return CityPlacemarkResolver.displayTitle(
+            cityKey: city.id,
+            iso2: city.countryISO2,
+            fallbackTitle: city.name,
+            availableLevelNamesRaw: city.reservedAvailableLevelNames,
+            storedAvailableLevelNamesLocaleID: city.reservedAvailableLevelNamesLocaleID,
+            parentRegionKey: city.reservedParentRegionKey,
+            preferredLevel: city.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
+            localizedDisplayNameByLocale: localizedMap,
+            locale: .current
+        )
+    }
+
+    private func localizedCityName(for journey: JourneyRoute) -> String {
+        let key = journey.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let cachedCity = cityCache.cachedCities.first(where: { $0.id == key && !($0.isTemporary ?? false) }) {
+            return localizedCityName(for: cachedCity)
+        }
+
+        return CityPlacemarkResolver.displayTitle(
+            cityKey: key,
+            iso2: journey.countryISO2,
+            fallbackTitle: journey.displayCityName,
+            locale: .current
+        )
+    }
+
+    private func resolvedLocalizedCityName(for city: CachedCity) -> String {
+        localizedCityNamesByID[city.id] ?? localizedCityName(for: city)
+    }
+
+    private func resolvedLocalizedCityName(for journey: JourneyRoute) -> String {
+        let key = journey.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        return localizedCityNamesByID[key] ?? localizedCityName(for: journey)
+    }
+
+    private func refreshLocalizedCityNames() async {
+        for city in cityCache.cachedCities where !(city.isTemporary ?? false) {
+            let key = city.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty else { continue }
+            if localizedCityNamesByID[key] != nil { continue }
+
+            let fallback = localizedCityName(for: city).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !fallback.isEmpty {
+                await MainActor.run { localizedCityNamesByID[key] = fallback }
+            }
+
+            let anchor = city.anchor?.cl ?? city.journeyIds.compactMap { id in
+                journeyStore.journeys.first(where: { $0.id == id })?.startCoordinate
+            }.first
+            guard let anchor, anchor.isValid else { continue }
+
+            if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key, parentRegionKey: city.reservedParentRegionKey),
+               !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let resolved = normalizedPrefetchedCityName(for: city, candidateTitle: cached)
+                await MainActor.run { localizedCityNamesByID[key] = resolved }
+                continue
+            }
+
+            let loc = CLLocation(latitude: anchor.latitude, longitude: anchor.longitude)
+            if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key, parentRegionKey: city.reservedParentRegionKey),
+               !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let resolved = normalizedPrefetchedCityName(for: city, candidateTitle: title)
+                await MainActor.run { localizedCityNamesByID[key] = resolved }
+            }
+        }
     }
 
     private var canPreview: Bool {
@@ -187,6 +281,14 @@ struct PostcardComposerView: View {
             .padding(20)
         }
         .background(FigmaTheme.background.ignoresSafeArea())
+        .onAppear {
+            guard PostcardSidebarVisibilityScope.composer.hidesGlobalSidebarButton else { return }
+            flow.pushSidebarButtonHidden(token: sidebarHideToken)
+        }
+        .onDisappear {
+            guard PostcardSidebarVisibilityScope.composer.hidesGlobalSidebarButton else { return }
+            flow.popSidebarButtonHidden(token: sidebarHideToken)
+        }
         .safeAreaInset(edge: .top, spacing: 0) {
             UnifiedNavigationHeader(
                 chrome: NavigationChrome(
@@ -207,6 +309,12 @@ struct PostcardComposerView: View {
             if selectedCityID.isEmpty, let first = cityOptions.first {
                 selectedCityID = first.id
                 selectedCityName = first.name
+            }
+        }
+        .task(id: cityCache.cachedCities.map(\.id).joined(separator: ",")) {
+            await refreshLocalizedCityNames()
+            if let selected = cityOptions.first(where: { $0.id == selectedCityID }) {
+                selectedCityName = selected.name
             }
         }
         .onChange(of: pickedItem) { _, item in

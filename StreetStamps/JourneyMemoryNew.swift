@@ -19,6 +19,7 @@ import CoreLocation
 
 struct JourneyMemoryMainView: View {
     @EnvironmentObject private var store: JourneyStore
+    @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
     @Environment(\.dismiss) private var dismiss
@@ -127,6 +128,14 @@ struct JourneyMemoryMainView: View {
             .joined(separator: ",")
     }
 
+    private var cachedCitiesByKey: [String: CachedCity] {
+        Dictionary(
+            uniqueKeysWithValues: cityCache.cachedCities
+                .filter { !($0.isTemporary ?? false) }
+                .map { ($0.id, $0) }
+        )
+    }
+
     /// Fetch localized city titles for the current locale, keyed by the *start city*.
     private func refreshCityLocalizations() async {
         let journeys = allMemoryJourneys
@@ -145,15 +154,36 @@ struct JourneyMemoryMainView: View {
             // Skip if we already have a localized value for this key.
             if localizedCityNameByKey[key] != nil { continue }
 
+            // Check persisted localized name from CachedCity first (no async needed).
+            if let cachedCity = cachedCitiesByKey[key] {
+                let title = CityPlacemarkResolver.displayTitle(
+                    cityKey: cachedCity.id,
+                    iso2: cachedCity.countryISO2,
+                    fallbackTitle: cachedCity.name,
+                    availableLevelNamesRaw: cachedCity.reservedAvailableLevelNames,
+                    storedAvailableLevelNamesLocaleID: cachedCity.reservedAvailableLevelNamesLocaleID,
+                    parentRegionKey: cachedCity.reservedParentRegionKey,
+                    preferredLevel: cachedCity.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
+                    localizedDisplayNameByLocale: cachedCity.localizedDisplayNameByLocale,
+                    locale: .current
+                )
+                if !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    await MainActor.run { localizedCityNameByKey[key] = title }
+                    continue
+                }
+            }
+
             // Prefer service cache (now locale-aware) to avoid extra geocode calls.
-            if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key),
+            let parentRegionKey = cachedCitiesByKey[key]?.reservedParentRegionKey
+
+            if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key, parentRegionKey: parentRegionKey),
                !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 await MainActor.run { localizedCityNameByKey[key] = cached }
                 continue
             }
 
             let loc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
-            if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key),
+            if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key, parentRegionKey: parentRegionKey),
                !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 await MainActor.run { localizedCityNameByKey[key] = title }
             }
@@ -258,7 +288,13 @@ struct JourneyMemoryMainView: View {
                 if let localized = localizedCityNameByKey[key], !localized.isEmpty {
                     nameForKey[key] = cityOnly(localized)
                 } else {
-                    nameForKey[key] = cityOnly(j.displayCityName)
+                    nameForKey[key] = cityOnly(
+                        JourneyCityNamePresentation.title(
+                            for: j,
+                            localizedCityNameByKey: localizedCityNameByKey,
+                            cachedCitiesByKey: cachedCitiesByKey
+                        )
+                    )
                 }
             }
 

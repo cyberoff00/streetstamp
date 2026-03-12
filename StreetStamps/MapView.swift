@@ -341,17 +341,28 @@ struct JourneyRoute: Codable {
     var displayCityName: String {
         let unknownLocalized = L10n.t("unknown")
         let unknownEN = "Unknown"
+        let resolvedCityKey = (startCityKey ?? cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
         let label = (cityName ?? canonicalCity).trimmingCharacters(in: .whitespacesAndNewlines)
         if !label.isEmpty,
            label.caseInsensitiveCompare(unknownEN) != .orderedSame,
            label != unknownLocalized {
-            return label
+            return CityPlacemarkResolver.displayTitle(
+                cityKey: resolvedCityKey,
+                iso2: countryISO2,
+                fallbackTitle: label,
+                locale: .current
+            )
         }
         let old = currentCity.trimmingCharacters(in: .whitespacesAndNewlines)
         if old.isEmpty || old.caseInsensitiveCompare(unknownEN) == .orderedSame || old == unknownLocalized {
             return unknownLocalized
         }
-        return old
+        return CityPlacemarkResolver.displayTitle(
+            cityKey: resolvedCityKey,
+            iso2: countryISO2,
+            fallbackTitle: old,
+            locale: .current
+        )
     }
 
     enum CodingKeys: String, CodingKey {
@@ -659,6 +670,7 @@ struct PhotoLibraryPicker: UIViewControllerRepresentable {
 struct MapView: View {
     @ObservedObject private var tracking = TrackingService.shared
 
+    @EnvironmentObject private var flow: AppFlowCoordinator
     @EnvironmentObject private var journeyStore: JourneyStore
     @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var lifelogStore: LifelogStore
@@ -683,6 +695,14 @@ struct MapView: View {
 
     @Binding var showSharingCard: Bool
     @Binding var sharingJourney: JourneyRoute?
+
+    private var cachedCitiesByKey: [String: CachedCity] {
+        Dictionary(
+            uniqueKeysWithValues: cityCache.cachedCities
+                .filter { !($0.isTemporary ?? false) }
+                .map { ($0.id, $0) }
+        )
+    }
 
     init(
         cityName: String,
@@ -851,6 +871,9 @@ struct MapView: View {
             editingMemory = nil
             showMemoryEditor = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openCaptureFromWidget)) { _ in
+            openCaptureFromWidget()
+        }
         // ✅ 监听从锁屏 Widget 触发的"暂停/继续"操作
         .onReceive(NotificationCenter.default.publisher(for: .togglePauseFromWidget)) { _ in
             guard tracking.isTracking else { return }
@@ -859,6 +882,10 @@ struct MapView: View {
             } else {
                 tracking.pauseJourney()
             }
+        }
+        .onChange(of: flow.pendingWidgetCaptureSignal) { signal in
+            guard signal > 0 else { return }
+            openCaptureFromWidget()
         }
     }
 
@@ -1000,6 +1027,16 @@ struct MapView: View {
             movingDurationProvider: { date in currentMovingDuration(at: date) },
             durationFormatter: formatDuration
         )
+    }
+
+    private func openCaptureFromWidget() {
+        guard tracking.isTracking && !tracking.isPaused else {
+            flow.consumeWidgetCapture()
+            return
+        }
+        editingMemory = nil
+        showMemoryEditor = true
+        flow.consumeWidgetCapture()
     }
 
     private var gpsStatusChip: some View {
@@ -1174,8 +1211,12 @@ struct MapView: View {
         // the display title using the locale-aware cache/key without mutating the cityKey.
         let key = (journeyRoute.startCityKey ?? journeyRoute.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
         if !key.isEmpty && key != "Unknown|" {
+            let parentRegionKey = JourneyCityNamePresentation.parentRegionKey(
+                for: journeyRoute,
+                cachedCitiesByKey: cachedCitiesByKey
+            )
             Task {
-                if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key),
+                if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key, parentRegionKey: parentRegionKey),
                    !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     await MainActor.run {
                         journeyRoute.cityName = cached
@@ -1186,7 +1227,7 @@ struct MapView: View {
 
                 if let start = journeyRoute.startCoordinate, start.isValid {
                     let loc = CLLocation(latitude: start.latitude, longitude: start.longitude)
-                    if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key),
+                    if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key, parentRegionKey: parentRegionKey),
                        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         await MainActor.run {
                             journeyRoute.cityName = title

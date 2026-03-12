@@ -7,7 +7,7 @@
 "finished" = "完成";
 "continue_background" = "后台继续（低功耗）";
 "journey_paused" = "旅程已暂停";
-"go_to_library" = "去城市库";
+"go_to_library" = "去城市卡";
 "close" = "关闭";
 "share" = "分享";
 "save" = "保存";
@@ -21,7 +21,7 @@
 "tab_lifelog" = "足迹";
 "globe_view"="全球视图";
 "profile"="个人主页";
-"toast_city_added" = "已创建 %@ 城市卡并加入城市库";
+"toast_city_added" = "已创建 %@ 城市卡并加入城市卡";
 
 "start_upper" = "开始";
 "resume_upper" = "继续";
@@ -87,13 +87,19 @@
 
 "journey_memory" = "旅程记忆";
 "journey_memories" = "旅程记忆";
+"friend_city_cards_title" = "城市卡";
+"friend_profile_stat_trips" = "旅程";
+"friend_profile_stat_memories" = "记忆";
+"friend_profile_stat_cities" = "城市卡片";
+"friend_journey_detail_title" = "旅程";
+"friend_section_title_format" = "%1$@ · %2$@";
 "memories_for_city" = "%@ 的记忆：%d";
 "no_memories_yet" = "暂无记忆";
 "no_memories_desc" = "完成一次旅程后，记忆会保存在这里。";
 
 "unlock_city_title_cn" = "解锁新城市探索卡";
 "unlock_city_desc_1" = "你刚刚完成了在 %@ 的探索。";
-"unlock_city_desc_2" = "这张卡会出现在城市库里，随时回顾你的足迹。";
+"unlock_city_desc_2" = "这张卡会出现在城市卡里，随时回顾你的足迹。";
 "got_it" = "知道了";
 "go_see" = "去看看";
 
@@ -108,7 +114,7 @@
 /* Card stats */
 "city_stats_line" = "%d 次探索 · %d 条记忆";
 
-"library_city_title" = "你的城市邮票";
+"library_city_title" = "城市卡";
 "library_empty_title" = "还没有城市印章";
 "library_empty_subtitle" = "生成一张城市卡，或完成一次旅程来解锁你的第一座城市。";
 "city_card_stats" = "%d 次探索 · %d 条记忆";
@@ -150,7 +156,7 @@
 
 /* Added for full localization - 2026-01-31 */
 "delete_city_alert_title" = "删除这张城市卡片？";
-"delete_city_alert_message" = "“%@” 将从你的城市库中移除，无法撤销。";
+"delete_city_alert_message" = "“%@” 将从你的城市卡中移除，无法撤销。";
 "delete" = "删除";
 "cancel" = "取消";
 "profile_tagline_travel_enthusiastic" = "旅行爱好者";
@@ -387,8 +393,11 @@
 "settings_level_rules_3" = "每次升级所需旅程数逐级增加（Lv1→Lv2 需 2 次，Lv2→Lv3 需 3 次）。";
 "settings_level_rules_4" = "Profile、Lifelog、Globe 会显示实时等级与进度。";
 "settings_level_rules_intro" = "当前等级规则";
-"settings_check_updates_title" = "检查\n更新";
+"settings_check_updates_title" = "检查更新";
 "settings_check_updates_placeholder" = "检查更新";
+"settings_live_activity_title" = "实时活动";
+"settings_live_activity_desc" = "在锁屏和灵动岛显示当前追踪进度。";
+"settings_live_activity_system_disabled_desc" = "请前往 设置 -> Worldo -> 实时活动 开启。";
 "settings_about_us_title" = "关于我们";
 "settings_about_us_placeholder" = "关于我们";
 "settings_privacy_policy_title" = "隐私政策";
@@ -451,7 +460,7 @@
 "gpx_import_choose_detected_city" = "请选择一个识别出的城市：";
 "gpx_import_no_detected_city" = "未从该 GPX 轨迹识别到城市。";
 "app_name" = "Worldo";
-"splash_tagline" = "记录生活，地图珍藏回忆。";
+"splash_tagline" = "绘制你的世界记忆";
 "visibility_private" = "私密";
 "visibility_friends_only" = "好友可见";
 "visibility_public" = "公开";
@@ -486,12 +495,16 @@
 "postcard_to_prefix" = "寄给：";
 "postcard_sending" = "发送中...";
 "postcard_send" = "发送";
-"postcard_send_failed" = "发送失败";
+"postcard_send_failed" = "发送失败，请稍后重试。";
+"postcard_quota_friend_limit_reached" = "你已经给这位好友寄过 2 张来自这座城市的明信片了，换个城市再寄一张吧。";
+"postcard_quota_city_limit_reached" = "这座城市的明信片已经寄给 10 位好友了，换个城市再寄吧。";
 "postcard_sent_success_title" = "明信片已寄出";
 "postcard_go_to_sent_box" = "去发件箱看看";
 "postcard_notification_badge" = "收到明信片";
 "social_notice_like" = "收到点赞";
-"social_notice_stomp" = "主页被踩";
+"social_notice_friend_request" = "好友申请";
+"social_notice_friend_update" = "好友动态";
+"social_notice_stomp" = "有人到访";
 
 "tab_home" = "开始";
 "tab_friends" = "好友";
@@ -633,7 +646,8 @@
 "friends_delete_confirm_title" = "确认删除好友？";
 "friends_delete_confirm_message" = "删除后将从好友列表移除，对方需要重新发起申请。";
 "friends_delete_failed" = "删除失败";
-"friends_welcome" = "欢迎";
+"friends_welcome" = "欢迎！";
+"friends_postcard_prompt" = "送你一张明信片";
 "friends_joined_format" = "加入于 %@";
 "settings_section_map_appearance" = "地图外观";
 "settings_section_tracking_assist" = "追踪辅助";
@@ -655,6 +669,17 @@
 "settings_transfer_alert_title" = "迁移提示";
 "settings_import_failed_title" = "导入失败";
 "intro_skip" = "跳过";
+"intro_next" = "下一步";
+"intro_get_started" = "开始使用";
+"intro_slide_1_title" = "开启探索";
+"intro_slide_1_subtitle" = "点击开始，记录你的移动轨迹，图文记忆";
+"intro_slide_2_title" = "旅程存档";
+"intro_slide_2_subtitle" = "解锁新的城市卡片，每段旅程都会生成游记，归档照片、笔记和地图位置";
+"intro_slide_3_title" = "后台持续记录";
+"intro_slide_3_subtitle" = "即使关闭 App，Worldo 也会继续记录你的轨迹，逐渐构建属于你的终生探索地图";
+"intro_slide_4_title" = "好友探索";
+"intro_slide_4_subtitle" = "查看好友的旅程动态，通过彼此的探索发现更多世界";
+
 "gpx_import_not_enough_points" = "GPX 轨迹点不足（至少需要 2 个点）。";
 "unknown_parse_error" = "未知解析错误";
 "gpx_import_parse_failed_format" = "GPX 解析失败：%@";
@@ -686,6 +711,16 @@
 "postcard_received_title_format" = "%@ 给你寄来一张明信片";
 "postcard_received_title_fallback" = "你收到一张明信片";
 "postcard_received_body_format" = "来自 %@";
+"notification_journey_like_format" = "%@ 赞了你的旅程「%@」";
+"notification_profile_stomp_format" = "%@在你的沙发上坐了一坐";
+"notification_friend_request_format" = "%@ 向你发送了好友申请";
+"notification_friend_request_accepted_format" = "%@ 通过了你的好友申请";
+"notification_friend_request_fallback" = "你收到一条好友申请";
+"friend_profile_cta_idle" = "坐一坐";
+"friend_profile_cta_loading" = "坐下中...";
+"friend_profile_cta_done" = "已坐下";
+"friend_profile_stomp_success_format" = "你在 %@ 的沙发上坐了一坐";
+"friend_profile_stomp_failed_format" = "坐一坐失败：%@";
 "watch_status_permission_needed" = "请先允许定位权限";
 "watch_status_watch_permission_needed" = "请先允许手表定位权限";
 "watch_status_permission_unknown" = "定位权限状态未知";
@@ -731,3 +766,25 @@
 "无法访问摄像头。" = "无法访问摄像头。";
 "相机输入初始化失败。" = "相机输入初始化失败。";
 "扫码输出初始化失败。" = "扫码输出初始化失败。";
+"city_level_picker_title" = "选择城市层级";
+"city_level_picker_cancel" = "取消";
+"city_level_locality" = "城市";
+"city_level_sub_admin" = "地区";
+"city_level_admin" = "省 / 州";
+"city_level_island" = "整岛";
+"city_level_country" = "国家";
+"city_level_region" = "区域";
+"city_level_confirm_title" = "确认更换城市层级";
+"city_level_confirm_apply" = "确认更换";
+"city_level_confirm_upgrade_message" = "更换后，会将同一大层级下更小层级的卡片合并到新层级；未来在同一区域的旅程也会默认归到该层级。";
+"city_level_confirm_future_default_message" = "更换后，未来在同一区域的旅程会默认归到该层级，直到你再次修改。";
+"city_level_downgrade_blocked_title" = "暂不支持改为更小层级";
+"city_level_downgrade_blocked_message_format" = "当前仅支持从小层级改到大层级。\n你选择了从 %@ 改到 %@，此方向暂不支持。";
+"city_deep_memories_toggle_on" = "记忆 开";
+"city_deep_memories_toggle_off" = "记忆 关";
+"city_deep_memories_toggle_show_accessibility" = "显示地图上的记忆";
+"city_deep_memories_toggle_hide_accessibility" = "隐藏地图上的记忆";
+"lifelog_mood_option_sad" = "低落";
+"lifelog_mood_option_notbad" = "一般";
+"lifelog_mood_option_happy" = "开心";
+"profile_summary_stats_format" = "%d 城市  %d 记忆";

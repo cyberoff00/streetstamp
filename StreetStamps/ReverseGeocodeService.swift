@@ -26,6 +26,8 @@ actor ReverseGeocodeService {
 
     private var canonicalCacheByCell: [String: CanonicalResult] = [:]
     private var canonicalInFlight: [String: [CheckedContinuation<CanonicalResult?, Never>]] = [:]
+    private var localizedHierarchyCacheByLocaleCell: [String: CanonicalResult] = [:]
+    private var localizedHierarchyInFlightByLocaleCell: [String: [CheckedContinuation<CanonicalResult?, Never>]] = [:]
 
     /// Display localization cache is locale-dependent.
     ///
@@ -43,7 +45,7 @@ actor ReverseGeocodeService {
     // MARK: - Persistent cache (display titles)
     // Persist display localization cache across app launches to avoid re-geocoding every cold start.
     private let sharedDefaults = UserDefaults(suiteName: "group.com.streetstamps.shared") ?? .standard
-    private let persistKey = "reverseGeocode.displayCacheByLocaleKey.v1"
+    private let persistKey = "reverseGeocode.displayCacheByLocaleKey.v2"
     private var persistTask: Task<Void, Never>? = nil
 
     init() {
@@ -78,7 +80,6 @@ actor ReverseGeocodeService {
         let parentRegionKey: String?
         let availableLevels: [CityPlacemarkResolver.CardLevel: String]
     }
-
     // MARK: - Public API
 
     /// Canonical geocode (stable key). Uses fixedLocale.
@@ -143,12 +144,76 @@ actor ReverseGeocodeService {
         return result
     }
 
+    /// Localized hierarchy snapshot for UI labels. Uses `Locale.current`.
+    func localizedHierarchy(for location: CLLocation) async -> CanonicalResult? {
+        let localeCell = "\(cellKey(for: location))|\(Locale.current.identifier)"
+
+        if let cached = localizedHierarchyCacheByLocaleCell[localeCell] {
+            return cached
+        }
+
+        if localizedHierarchyInFlightByLocaleCell[localeCell] != nil {
+            return await withCheckedContinuation { cont in
+                localizedHierarchyInFlightByLocaleCell[localeCell]?.append(cont)
+            }
+        }
+
+        let now = Date()
+        if now < throttledUntil {
+            return nil
+        }
+        if now.timeIntervalSince(lastRequestAt) < minIntervalSeconds {
+            return nil
+        }
+        lastRequestAt = now
+
+        localizedHierarchyInFlightByLocaleCell[localeCell] = []
+
+        let result: CanonicalResult? = await withCheckedContinuation { cont in
+            canonicalGeocoder.reverseGeocodeLocation(location, preferredLocale: Locale.current) { placemarks, error in
+                if let nsErr = error as NSError? {
+                    Task { await self.handlePossibleThrottle(nsErr) }
+                }
+                guard let pm = placemarks?.first else {
+                    cont.resume(returning: nil)
+                    return
+                }
+                let canon = CityPlacemarkResolver.resolveCanonical(from: pm)
+                cont.resume(returning: CanonicalResult(
+                    cityName: canon.city,
+                    iso2: canon.iso2,
+                    cityKey: canon.cityKey,
+                    level: canon.level,
+                    parentRegionKey: canon.parentRegionKey,
+                    availableLevels: canon.availableLevelNames
+                ))
+            }
+        }
+
+        if let result {
+            localizedHierarchyCacheByLocaleCell[localeCell] = result
+            CityLocalizationDebugLogger.log(
+                "localizedHierarchy",
+                CityLocalizationDebugTrace.localizedHierarchy(
+                    locale: Locale.current,
+                    cellKey: localeCell,
+                    result: result
+                )
+            )
+        }
+
+        let waiters = localizedHierarchyInFlightByLocaleCell[localeCell] ?? []
+        localizedHierarchyInFlightByLocaleCell[localeCell] = nil
+        waiters.forEach { $0.resume(returning: result) }
+        return result
+    }
+
     /// Localized display title.
     /// - Only does reverse geocode once per cityKey.
     /// - Uses Locale.current.
     /// - Returns cached title immediately; otherwise nil if rate-limited/throttled.
-    func displayTitle(for location: CLLocation, cityKey: String) async -> String? {
-        let localeKey = displayCacheKey(cityKey: cityKey, locale: Locale.current)
+    func displayTitle(for location: CLLocation, cityKey: String, parentRegionKey: String? = nil) async -> String? {
+        let localeKey = displayCacheKey(cityKey: cityKey, locale: Locale.current, parentRegionKey: parentRegionKey)
         if let cached = displayCacheByLocaleKey[localeKey] {
             return cached
         }
@@ -181,12 +246,24 @@ actor ReverseGeocodeService {
                     return
                 }
                 let disp = CityPlacemarkResolver.resolveDisplay(from: pm)
-                cont.resume(returning: disp.title)
+                let title = CityPlacemarkResolver.displayTitle(
+                    cityKey: cityKey,
+                    iso2: disp.iso2,
+                    fallbackTitle: disp.title,
+                    parentRegionKey: parentRegionKey,
+                    preferredLevel: disp.level,
+                    locale: Locale.current
+                )
+                cont.resume(returning: title)
             }
         }
 
         if let title {
             displayCacheByLocaleKey[localeKey] = title
+            CityLocalizationDebugLogger.log(
+                "displayCacheWrite",
+                "locale=\(Locale.current.identifier) cacheKey=\(localeKey) title=\(title)"
+            )
             schedulePersist()
         }
 
@@ -197,8 +274,8 @@ actor ReverseGeocodeService {
     }
 
     /// Optional helper: get cached display title without making a request.
-    func cachedDisplayTitle(cityKey: String, locale: Locale = .current) -> String? {
-        displayCacheByLocaleKey[displayCacheKey(cityKey: cityKey, locale: locale)]
+    func cachedDisplayTitle(cityKey: String, parentRegionKey: String? = nil, locale: Locale = .current) -> String? {
+        displayCacheByLocaleKey[displayCacheKey(cityKey: cityKey, locale: locale, parentRegionKey: parentRegionKey)]
     }
 
     // MARK: - Internals
@@ -212,9 +289,10 @@ actor ReverseGeocodeService {
         return "\(lat),\(lon)"
     }
 
-    private func displayCacheKey(cityKey: String, locale: Locale) -> String {
+    private func displayCacheKey(cityKey: String, locale: Locale, parentRegionKey: String?) -> String {
         let id = locale.identifier
-        return "\(cityKey)|\(id)"
+        let scope = CityLevelPreferenceStore.shared.displayCacheScope(for: parentRegionKey)
+        return "\(cityKey)|\(id)|\(scope)"
     }
 
     private func roundPlaces(_ value: Double, places: Int) -> Double {

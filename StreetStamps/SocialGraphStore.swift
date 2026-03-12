@@ -1,6 +1,42 @@
 import Foundation
 import SwiftUI
 
+enum FriendIdentityPresentation {
+    static func displayName(
+        displayName: String?,
+        exclusiveID: String?,
+        userID: String,
+        localize: (String) -> String = L10n.t
+    ) -> String {
+        if let displayName = normalizedHumanReadableValue(displayName) {
+            return displayName
+        }
+        if let exclusiveID = normalizedHumanReadableValue(exclusiveID) {
+            return exclusiveID
+        }
+
+        let trimmedUserID = userID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedUserID.isEmpty, !looksLikeInternalIdentifier(trimmedUserID) else {
+            return localize("unknown")
+        }
+        return trimmedUserID
+    }
+
+    private static func normalizedHumanReadableValue(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty,
+              !looksLikeInternalIdentifier(trimmed) else {
+            return nil
+        }
+        return trimmed
+    }
+
+    private static func looksLikeInternalIdentifier(_ value: String) -> Bool {
+        let lowercased = value.lowercased()
+        return lowercased.hasPrefix("u_") || lowercased.hasPrefix("account_")
+    }
+}
+
 struct FriendCityCard: Identifiable, Codable, Hashable {
     var id: String
     var name: String
@@ -154,14 +190,19 @@ struct FriendProfileSnapshot: Identifiable, Codable, Hashable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
-        displayName = (try? c.decode(String.self, forKey: .displayName)) ?? "Explorer"
+        let rawDisplayName = try? c.decode(String.self, forKey: .displayName)
         bio = (try? c.decode(String.self, forKey: .bio)) ?? "Travel Enthusiastic"
         loadout = ((try? c.decode(RobotLoadout.self, forKey: .loadout)) ?? .defaultBoy).normalizedForCurrentAvatar()
         journeys = (try? c.decode([FriendSharedJourney].self, forKey: .journeys)) ?? []
         unlockedCityCards = (try? c.decode([FriendCityCard].self, forKey: .unlockedCityCards)) ?? []
         createdAt = (try? c.decode(Date.self, forKey: .createdAt)) ?? Date()
         inviteCode = (try? c.decode(String.self, forKey: .inviteCode)) ?? Self.fallbackInviteCode(source: id)
-        handle = (try? c.decode(String.self, forKey: .handle)) ?? Self.fallbackHandle(source: displayName)
+        handle = (try? c.decode(String.self, forKey: .handle)) ?? Self.fallbackHandle(source: rawDisplayName ?? id)
+        displayName = FriendIdentityPresentation.displayName(
+            displayName: rawDisplayName,
+            exclusiveID: handle,
+            userID: id
+        )
         profileVisibility = (try? c.decode(ProfileVisibility.self, forKey: .profileVisibility)) ?? .friendsOnly
         stats = (try? c.decode(ProfileStatsSnapshot.self, forKey: .stats)) ?? ProfileStatsSnapshot(
             totalJourneys: journeys.count,
@@ -342,12 +383,17 @@ final class SocialGraphStore: ObservableObject {
     }
 
     private static func friendSnapshot(from dto: BackendFriendDTO) -> FriendProfileSnapshot {
-        FriendProfileSnapshot(
+        let resolvedExclusiveID = dto.resolvedExclusiveID ?? FriendProfileSnapshot.fallbackHandle(source: dto.displayName)
+        return FriendProfileSnapshot(
             id: dto.id,
-            handle: dto.resolvedExclusiveID ?? FriendProfileSnapshot.fallbackHandle(source: dto.displayName),
+            handle: resolvedExclusiveID,
             inviteCode: dto.inviteCode ?? generateInviteCode(source: dto.id),
             profileVisibility: dto.profileVisibility ?? .friendsOnly,
-            displayName: dto.displayName,
+            displayName: FriendIdentityPresentation.displayName(
+                displayName: dto.displayName,
+                exclusiveID: resolvedExclusiveID,
+                userID: dto.id
+            ),
             bio: dto.bio,
             loadout: (dto.loadout ?? RobotLoadout.defaultBoy).normalizedForCurrentAvatar(),
             stats: dto.stats ?? ProfileStatsSnapshot(

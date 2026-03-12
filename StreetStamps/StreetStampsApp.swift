@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import UIKit
 #if canImport(FirebaseCore)
@@ -150,10 +151,17 @@ struct StreetStampsApp: App {
                     paths: StoragePath(userID: startupUserID)
                 )
                 journeyStore.load()
+                let journeysSnapshot = journeyStore.journeys
+                let cachedCitiesSnapshot = cityCache.cachedCities
+                let appearanceRaw = MapAppearanceSettings.current.rawValue
+                let renderCache = cityRenderCache
+                let cities = await Task.detached(priority: .userInitiated) {
+                    CityLibraryVM.buildCities(journeys: journeysSnapshot, cachedCities: cachedCitiesSnapshot)
+                }.value
                 StartupWarmupService.shared.start(
-                    cities: CityLibraryVM.buildCities(journeyStore: journeyStore, cityCache: cityCache),
-                    appearanceRaw: MapAppearanceSettings.current.rawValue,
-                    renderCacheStore: cityRenderCache,
+                    cities: cities,
+                    appearanceRaw: appearanceRaw,
+                    renderCacheStore: renderCache,
                     limit: 16
                 )
                 lifelogStore.load()
@@ -214,10 +222,17 @@ struct StreetStampsApp: App {
                     journeyStore.load()
                     cityCache.rebind(paths: paths)
                     cityRenderCache.rebind(rootDir: paths.thumbnailsDir)
+                    let journeysSnapshot = journeyStore.journeys
+                    let cachedCitiesSnapshot = cityCache.cachedCities
+                    let appearanceRaw = MapAppearanceSettings.current.rawValue
+                    let renderCache = cityRenderCache
+                    let cities = await Task.detached(priority: .userInitiated) {
+                        CityLibraryVM.buildCities(journeys: journeysSnapshot, cachedCities: cachedCitiesSnapshot)
+                    }.value
                     StartupWarmupService.shared.start(
-                        cities: CityLibraryVM.buildCities(journeyStore: journeyStore, cityCache: cityCache),
-                        appearanceRaw: MapAppearanceSettings.current.rawValue,
-                        renderCacheStore: cityRenderCache,
+                        cities: cities,
+                        appearanceRaw: appearanceRaw,
+                        renderCacheStore: renderCache,
                         limit: 16
                     )
                     lifelogStore.rebind(paths: paths)
@@ -337,11 +352,22 @@ struct StreetStampsApp: App {
     }
 
     private func awaitLifelogLoadThenRebuildTiles() async {
-        // Poll briefly until lifelogStore finishes its async load.
-        // Typically completes within a few hundred ms.
-        for _ in 0..<50 {
-            if lifelogStore.hasLoaded { break }
-            try? await Task.sleep(nanoseconds: 60_000_000) // 60ms
+        // Suspend cooperatively until lifelogStore finishes its async load,
+        // with a 3-second safety timeout.  Uses Combine's AsyncPublisher
+        // instead of polling so the main thread stays free for animations.
+        if !lifelogStore.hasLoaded {
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { @MainActor in
+                    for await loaded in self.lifelogStore.$hasLoaded.values {
+                        if loaded { return }
+                    }
+                }
+                group.addTask {
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                }
+                await group.next()
+                group.cancelAll()
+            }
         }
         await rebuildTrackTilesAsync()
     }

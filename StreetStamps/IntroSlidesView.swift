@@ -1,10 +1,12 @@
 import SwiftUI
+import UIKit
 
 private struct IntroSlide: Identifiable {
     let id = UUID()
-    let title: String
-    let subtitle: String
-    let symbol: String
+    let titleKey: String
+    let subtitleKey: String
+    let primaryImageName: String
+    let secondaryImageName: String
     let accent: Color
 }
 
@@ -15,35 +17,42 @@ struct IntroSlidesView: View {
 
     private let slides: [IntroSlide] = [
         .init(
-            title: "开始旅程",
-            subtitle: "点击 START 开始记录移动轨迹。",
-            symbol: "play.circle.fill",
-            accent: FigmaTheme.primary
+            titleKey: "intro_slide_1_title",
+            subtitleKey: "intro_slide_1_subtitle",
+            primaryImageName: "onboarding_intro_01",
+            secondaryImageName: "onboarding_intro_02",
+            accent: Color(red: 0.36, green: 0.78, blue: 0.61)
         ),
         .init(
-            title: "记录 Memory",
-            subtitle: "在地图页点 CAPTURE，随时拍照或写下当下。",
-            symbol: "camera.circle.fill",
-            accent: FigmaTheme.secondary
+            titleKey: "intro_slide_2_title",
+            subtitleKey: "intro_slide_2_subtitle",
+            primaryImageName: "onboarding_intro_03",
+            secondaryImageName: "onboarding_intro_04",
+            accent: Color(red: 0.53, green: 0.78, blue: 0.67)
         ),
         .init(
-            title: "保存旅程",
-            subtitle: "结束后可保存图片、填写名称和活动标签。",
-            symbol: "square.and.arrow.down.fill",
-            accent: .black
+            titleKey: "intro_slide_3_title",
+            subtitleKey: "intro_slide_3_subtitle",
+            primaryImageName: "onboarding_intro_05",
+            secondaryImageName: "onboarding_intro_06",
+            accent: Color(red: 0.67, green: 0.82, blue: 0.76)
         ),
         .init(
-            title: "回看与整理",
-            subtitle: "去 Collection 和 Memory 快速回看你的记录。",
-            symbol: "map.circle.fill",
-            accent: Color(red: 0.10, green: 0.45, blue: 0.98)
+            titleKey: "intro_slide_4_title",
+            subtitleKey: "intro_slide_4_subtitle",
+            primaryImageName: "onboarding_intro_07",
+            secondaryImageName: "onboarding_intro_08",
+            accent: Color(red: 0.80, green: 0.88, blue: 0.84)
         )
     ]
 
     var body: some View {
         ZStack {
             LinearGradient(
-                colors: [Color.white, FigmaTheme.mutedBackground],
+                colors: [
+                    Color(red: 0.98, green: 0.99, blue: 0.98),
+                    Color(red: 0.93, green: 0.97, blue: 0.95)
+                ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -62,15 +71,15 @@ struct IntroSlidesView: View {
 
                 bottomBar
             }
-            .padding(.bottom, 20)
+            .padding(.bottom, 16)
         }
     }
 
     private var topBar: some View {
         HStack {
-            Text("StreetStamps")
+            Text("Worldo")
                 .font(.system(size: 18, weight: .heavy))
-                .foregroundColor(.black.opacity(0.82))
+                .foregroundStyle(Color.black.opacity(0.82))
 
             Spacer()
 
@@ -78,50 +87,148 @@ struct IntroSlidesView: View {
                 Button(L10n.t("intro_skip")) {
                     onFinish()
                 }
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(.black.opacity(0.6))
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color.black.opacity(0.55))
                 .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 24)
-        .padding(.top, 18)
-        .padding(.bottom, 6)
+        .padding(.top, 20)
+        .padding(.bottom, 8)
     }
 
     private func slidePage(_ slide: IntroSlide) -> some View {
-        VStack(spacing: 28) {
-            Spacer(minLength: 8)
+        VStack(spacing: 22) {
+            Spacer(minLength: 10)
 
-            ZStack {
-                RoundedRectangle(cornerRadius: 40, style: .continuous)
-                    .fill(Color.white)
-                    .shadow(color: .black.opacity(0.08), radius: 24, x: 0, y: 10)
-                    .frame(width: 300, height: 300)
+            VStack(spacing: 14) {
+                Text(L10n.t(slide.titleKey))
+                    .font(.system(size: 28, weight: .black))
+                    .foregroundStyle(Color.black.opacity(0.88))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.78)
+                    .frame(maxWidth: 300)
+
+                Text(L10n.t(slide.subtitleKey))
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(Color.black.opacity(0.52))
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 310)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            ZStack(alignment: .center) {
+                RoundedRectangle(cornerRadius: 38, style: .continuous)
+                    .fill(.white.opacity(0.72))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 38, style: .continuous)
+                            .stroke(.white.opacity(0.65), lineWidth: 1)
+                    )
+                    .shadow(color: Color.black.opacity(0.06), radius: 26, x: 0, y: 14)
+
+                RoundedRectangle(cornerRadius: 38, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [slide.accent.opacity(0.18), .white.opacity(0.0)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
 
                 Circle()
-                    .fill(slide.accent.opacity(0.15))
-                    .frame(width: 172, height: 172)
+                    .fill(slide.accent.opacity(0.14))
+                    .frame(width: 220, height: 220)
+                    .offset(x: -84, y: -46)
 
-                Image(systemName: slide.symbol)
-                    .font(.system(size: 84, weight: .semibold))
-                    .foregroundColor(slide.accent)
+                Circle()
+                    .fill(slide.accent.opacity(0.12))
+                    .frame(width: 180, height: 180)
+                    .offset(x: 108, y: 74)
+
+                HStack(spacing: -34) {
+                    screenshotCard(
+                        name: slide.primaryImageName,
+                        width: 158,
+                        height: 322,
+                        tilt: -4,
+                        accent: slide.accent
+                    )
+                    .offset(y: 20)
+
+                    screenshotCard(
+                        name: slide.secondaryImageName,
+                        width: 170,
+                        height: 344,
+                        tilt: 5,
+                        accent: slide.accent
+                    )
+                    .zIndex(1)
+                }
             }
-
-            VStack(spacing: 10) {
-                Text(slide.title)
-                    .font(.system(size: 28, weight: .black))
-                    .foregroundColor(.black.opacity(0.9))
-
-                Text(slide.subtitle)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.black.opacity(0.6))
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 300)
-            }
+            .frame(width: 332, height: 454)
 
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 24)
+    }
+
+    private func screenshotCard(
+        name: String,
+        width: CGFloat,
+        height: CGFloat,
+        tilt: Double,
+        accent: Color
+    ) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .fill(.white)
+                .shadow(color: Color.black.opacity(0.16), radius: 16, x: 0, y: 10)
+
+            if let image = UIImage(named: name) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: width - 12, height: height - 12)
+                    .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+            } else {
+                placeholderCard(name: name, accent: accent)
+                    .frame(width: width - 12, height: height - 12)
+                    .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+            }
+        }
+        .frame(width: width, height: height)
+        .rotationEffect(.degrees(tilt))
+    }
+
+    private func placeholderCard(name: String, accent: Color) -> some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    accent.opacity(0.20),
+                    Color.white,
+                    accent.opacity(0.10)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            VStack(spacing: 14) {
+                Image(systemName: "iphone.gen3")
+                    .font(.system(size: 34, weight: .medium))
+                    .foregroundStyle(accent.opacity(0.95))
+
+                Text("待加入截图")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(Color.black.opacity(0.72))
+
+                Text(name)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.black.opacity(0.45))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 14)
+            }
+        }
     }
 
     private var bottomBar: some View {
@@ -129,7 +236,7 @@ struct IntroSlidesView: View {
             HStack(spacing: 8) {
                 ForEach(0..<slides.count, id: \.self) { idx in
                     Capsule(style: .continuous)
-                        .fill(idx == page ? Color.black : Color.black.opacity(0.18))
+                        .fill(idx == page ? slides[page].accent : Color.black.opacity(0.12))
                         .frame(width: idx == page ? 24 : 8, height: 8)
                 }
             }
@@ -138,17 +245,17 @@ struct IntroSlidesView: View {
                 if page >= slides.count - 1 {
                     onFinish()
                 } else {
-                    withAnimation(.easeInOut(duration: 0.2)) {
+                    withAnimation(.easeInOut(duration: 0.22)) {
                         page += 1
                     }
                 }
             } label: {
-                Text(page >= slides.count - 1 ? "开始使用" : "下一张")
+                Text(page >= slides.count - 1 ? L10n.t("intro_get_started") : L10n.t("intro_next"))
                     .font(.system(size: 17, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .frame(height: 56)
-                    .background(Color.black)
+                    .background(Color(red: 0.36, green: 0.78, blue: 0.61))
                     .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             }
             .buttonStyle(.plain)

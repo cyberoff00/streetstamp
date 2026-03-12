@@ -152,7 +152,7 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         stop()
 
         manager.allowsBackgroundLocationUpdates = true
-        manager.pausesLocationUpdatesAutomatically = true
+        manager.pausesLocationUpdatesAutomatically = false
         manager.showsBackgroundLocationIndicator = false
         manager.activityType = .fitness
 
@@ -175,7 +175,7 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         stop()
 
         manager.allowsBackgroundLocationUpdates = true
-        manager.pausesLocationUpdatesAutomatically = true
+        manager.pausesLocationUpdatesAutomatically = false
         manager.showsBackgroundLocationIndicator = false
         manager.activityType = .otherNavigation
 

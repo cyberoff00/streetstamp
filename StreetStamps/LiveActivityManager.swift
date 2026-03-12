@@ -216,6 +216,15 @@ final class LiveActivityManager: ObservableObject {
     
     @objc private func checkPendingWidgetActions() {
         guard let defaults = sharedDefaults else { return }
+
+        if defaults.bool(forKey: "pendingOpenCapture") {
+            defaults.set(false, forKey: "pendingOpenCapture")
+
+            NotificationCenter.default.post(
+                name: .openCaptureFromWidget,
+                object: nil
+            )
+        }
         
         // 检查是否有待处理的"添加记忆"操作
         if defaults.bool(forKey: "pendingAddMemory") {
@@ -243,6 +252,7 @@ final class LiveActivityManager: ObservableObject {
 // MARK: - Notification Names
 
 extension Notification.Name {
+    static let openCaptureFromWidget = Notification.Name("openCaptureFromWidget")
     static let openAddMemoryFromWidget = Notification.Name("openAddMemoryFromWidget")
     static let togglePauseFromWidget = Notification.Name("togglePauseFromWidget")
 }
@@ -254,6 +264,7 @@ extension TrackingService {
     /// 开始追踪时启动 Live Activity
     func startLiveActivity() {
         Task { @MainActor in
+            guard AppSettings.isLiveActivityEnabled else { return }
             LiveActivityManager.shared.startActivity(mode: trackingMode)
         }
     }
@@ -262,6 +273,10 @@ extension TrackingService {
     func updateLiveActivity(memoriesCount: Int = 0) {
         Task { @MainActor in
             refreshDurations()
+            guard AppSettings.isLiveActivityEnabled else {
+                LiveActivityManager.shared.endActivity()
+                return
+            }
             LiveActivityManager.shared.updateActivity(
                 distanceMeters: totalDistance,
                 elapsedSeconds: movingSeconds,

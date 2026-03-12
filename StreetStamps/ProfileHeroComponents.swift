@@ -43,11 +43,6 @@ struct ProfileHeroTopBackdrop<Content: View>: View {
                 .blur(radius: 36)
                 .offset(y: 28)
 
-            Circle()
-                .fill(Color.white.opacity(0.18))
-                .frame(width: 22, height: 22)
-                .offset(y: 108)
-
             content
         }
         .clipShape(

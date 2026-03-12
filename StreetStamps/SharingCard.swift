@@ -67,6 +67,14 @@ struct PopSharingCard: View {
     private let activityPresets: [String] = ["通勤", "跑步", "旅游", "散步", "骑行", "驾车", "地铁", "登山"]
     private let maxOverallMemoryPhotos = 3
 
+    private var cachedCitiesByKey: [String: CachedCity] {
+        Dictionary(
+            uniqueKeysWithValues: cityCache.cachedCities
+                .filter { !($0.isTemporary ?? false) }
+                .map { ($0.id, $0) }
+        )
+    }
+
     private var canAddOverallMemoryPhoto: Bool {
         overallMemoryImagePaths.count < maxOverallMemoryPhotos
     }
@@ -598,7 +606,11 @@ struct PopSharingCard: View {
         }()
 
         let title = (resolvedTitle?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
-            ?? journey.displayCityName
+            ?? JourneyCityNamePresentation.title(
+                for: journey,
+                localizedCityNameByKey: [:],
+                cachedCitiesByKey: cachedCitiesByKey
+            )
 
         let duration = durationText
         let distKm = max(0, journey.distance / 1000.0)
@@ -631,9 +643,17 @@ struct PopSharingCard: View {
         if let last = safe.last {
             let endLoc = CLLocation(latitude: last.latitude, longitude: last.longitude)
             let key = journey.cityKey
+            let parentRegionKey = JourneyCityNamePresentation.parentRegionKey(
+                for: journey,
+                cachedCitiesByKey: cachedCitiesByKey
+            )
 
             Task {
-                if let title = await ReverseGeocodeService.shared.displayTitle(for: endLoc, cityKey: key) {
+                if let title = await ReverseGeocodeService.shared.displayTitle(
+                    for: endLoc,
+                    cityKey: key,
+                    parentRegionKey: parentRegionKey
+                ) {
                     let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !t.isEmpty {
                         await MainActor.run { self.resolvedTitle = t }
@@ -990,6 +1010,20 @@ struct ShareCardGenerator {
         privacy: ShareMapPrivacyMode = .exact,
         completion: @escaping (UIImage) -> Void
     ) {
+        generate(
+            journey: journey,
+            cachedCitiesByKey: [:],
+            privacy: privacy,
+            completion: completion
+        )
+    }
+
+    static func generate(
+        journey: JourneyRoute,
+        cachedCitiesByKey: [String: CachedCity] = [:],
+        privacy: ShareMapPrivacyMode = .exact,
+        completion: @escaping (UIImage) -> Void
+    ) {
         let raw = journey.coordinates.clCoords
         let safeCoords = raw.filter { CLLocationCoordinate2DIsValid($0) && abs($0.latitude) <= 90 && abs($0.longitude) <= 180 }
 
@@ -1003,9 +1037,17 @@ struct ShareCardGenerator {
         let distKm = max(0, journey.distance / 1000.0)
         let memCount = journey.memories.count
 
-        resolveTitleIfNeeded(journey: journey, coords: safeCoords) { resolvedTitle in
+        resolveTitleIfNeeded(
+            journey: journey,
+            coords: safeCoords,
+            cachedCitiesByKey: cachedCitiesByKey
+        ) { resolvedTitle in
             let title = (resolvedTitle?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
-                ?? journey.displayCityName
+                ?? JourneyCityNamePresentation.title(
+                    for: journey,
+                    localizedCityNameByKey: [:],
+                    cachedCitiesByKey: cachedCitiesByKey
+                )
 
             makeShareCardImage(
                 coords: safeCoords,
@@ -1062,6 +1104,7 @@ struct ShareCardGenerator {
     private static func resolveTitleIfNeeded(
         journey: JourneyRoute,
         coords: [CLLocationCoordinate2D],
+        cachedCitiesByKey: [String: CachedCity],
         _ done: @escaping (String?) -> Void
     ) {
         guard !coords.isEmpty else { done(nil); return }
@@ -1069,9 +1112,17 @@ struct ShareCardGenerator {
         if let last = coords.last {
             let endLoc = CLLocation(latitude: last.latitude, longitude: last.longitude)
             let key = journey.cityKey
+            let parentRegionKey = JourneyCityNamePresentation.parentRegionKey(
+                for: journey,
+                cachedCitiesByKey: cachedCitiesByKey
+            )
 
             Task {
-                let title = await ReverseGeocodeService.shared.displayTitle(for: endLoc, cityKey: key)
+                let title = await ReverseGeocodeService.shared.displayTitle(
+                    for: endLoc,
+                    cityKey: key,
+                    parentRegionKey: parentRegionKey
+                )
                 let t = title?.trimmingCharacters(in: .whitespacesAndNewlines)
                 await MainActor.run { done((t?.isEmpty ?? true) ? nil : t) }
             }
@@ -1407,7 +1458,7 @@ struct UnlockModal: View {
                 .padding(.horizontal, 16)
 
             VStack(spacing: 6) {
-                Text(payload.id)
+                Text(payload.title)
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundColor(.black)
                     .lineLimit(2)

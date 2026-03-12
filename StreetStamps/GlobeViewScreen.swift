@@ -182,6 +182,7 @@ struct GlobeViewScreen: View {
     private func refreshGlobeData() {
         var gate = refreshGate
         guard gate.startOrQueue() else {
+            print("🟡 [GlobeScreen] refreshGlobeData GATED (already refreshing)")
             refreshGate = gate
             return
         }
@@ -195,12 +196,14 @@ struct GlobeViewScreen: View {
             for: nil,
             zoom: TrackRenderAdapter.unifiedRenderZoom
         )
+        print("🟡 [GlobeScreen] refreshGlobeData START: tileSegments=\(tileSegments.count) summary=\(summary.count) external=\(external?.count ?? -1) country=\(countryISO2 ?? "nil")")
         let cityISO2 = cityCache.cachedCities
             .filter { $0.isTemporary != true }
             .compactMap { $0.countryISO2?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
             .filter { $0.count == 2 }
         Task(priority: .userInitiated) {
             let passiveCountryRuns = await lifelogStore.passiveCountryRuns()
+            print("🟡 [GlobeScreen] passiveCountryRuns=\(passiveCountryRuns.count)")
             let previewRoutes = GlobeRouteResolver.resolve(
                 externalJourneys: external,
                 summaryJourneys: summary,
@@ -208,6 +211,7 @@ struct GlobeViewScreen: View {
                 passiveCountryRuns: passiveCountryRuns,
                 countryISO2: countryISO2
             )
+            print("🟡 [GlobeScreen] previewRoutes=\(previewRoutes.count)")
             let previewCountries = Self.resolveVisitedCountries(routes: previewRoutes, cityISO2: cityISO2)
 
             await MainActor.run {

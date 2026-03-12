@@ -159,6 +159,7 @@ struct MyJourneysView: View {
             if let likesJourney {
                 JourneyLikesSheet(
                     journey: likesJourney,
+                    displayCityName: resolvedDisplayCityName(for: likesJourney),
                     likers: journeyLikersByJourneyID[likesJourney.id] ?? [],
                     isLoading: likersLoadingJourneyID == likesJourney.id,
                     errorMessage: likersErrorByJourneyID[likesJourney.id],
@@ -265,6 +266,14 @@ struct MyJourneysView: View {
             .joined(separator: ",")
     }
 
+    private var cachedCitiesByKey: [String: CachedCity] {
+        Dictionary(
+            uniqueKeysWithValues: cityCache.cachedCities
+                .filter { !($0.isTemporary ?? false) }
+                .map { ($0.id, $0) }
+        )
+    }
+
     private func refreshCityLocalizations() async {
         var coordByKey: [String: CLLocationCoordinate2D] = [:]
         for journey in allJourneys {
@@ -278,14 +287,34 @@ struct MyJourneysView: View {
         for (key, coord) in coordByKey {
             if localizedCityNameByKey[key] != nil { continue }
 
-            if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key),
+            if let cachedCity = cachedCitiesByKey[key] {
+                let title = CityPlacemarkResolver.displayTitle(
+                    cityKey: cachedCity.id,
+                    iso2: cachedCity.countryISO2,
+                    fallbackTitle: cachedCity.name,
+                    availableLevelNamesRaw: cachedCity.reservedAvailableLevelNames,
+                    storedAvailableLevelNamesLocaleID: cachedCity.reservedAvailableLevelNamesLocaleID,
+                    parentRegionKey: cachedCity.reservedParentRegionKey,
+                    preferredLevel: cachedCity.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
+                    localizedDisplayNameByLocale: cachedCity.localizedDisplayNameByLocale,
+                    locale: .current
+                )
+                if !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    await MainActor.run { localizedCityNameByKey[key] = title }
+                    continue
+                }
+            }
+
+            let parentRegionKey = cachedCitiesByKey[key]?.reservedParentRegionKey
+
+            if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key, parentRegionKey: parentRegionKey),
                !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 await MainActor.run { localizedCityNameByKey[key] = cached }
                 continue
             }
 
             let loc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
-            if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key),
+            if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key, parentRegionKey: parentRegionKey),
                !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 await MainActor.run { localizedCityNameByKey[key] = title }
             }
@@ -293,11 +322,11 @@ struct MyJourneysView: View {
     }
 
     private func resolvedDisplayCityName(for journey: JourneyRoute) -> String {
-        let key = (journey.startCityKey ?? journey.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
-        if let localized = localizedCityNameByKey[key], !localized.isEmpty {
-            return localized
-        }
-        return journey.displayCityName
+        JourneyCityNamePresentation.title(
+            for: journey,
+            localizedCityNameByKey: localizedCityNameByKey,
+            cachedCitiesByKey: cachedCitiesByKey
+        )
     }
 
     private var listSection: some View {
@@ -683,6 +712,7 @@ private struct JourneySheetScaffold<Content: View>: View {
 
 private struct JourneyLikesSheet: View {
     let journey: JourneyRoute
+    let displayCityName: String
     let likers: [JourneyLiker]
     let isLoading: Bool
     let errorMessage: String?
@@ -692,7 +722,7 @@ private struct JourneyLikesSheet: View {
     private var title: String {
         journey.customTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             ? (journey.customTitle ?? "")
-            : journey.displayCityName
+            : displayCityName
     }
 
     var body: some View {
@@ -1517,6 +1547,7 @@ struct JourneyRouteDetailView: View {
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: JourneyStore
+    @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var flow: AppFlowCoordinator
 
@@ -1543,11 +1574,24 @@ struct JourneyRouteDetailView: View {
         store.journeys.first(where: { $0.id == journeyID })
     }
 
+    private var cachedCitiesByKey: [String: CachedCity] {
+        Dictionary(
+            uniqueKeysWithValues: cityCache.cachedCities
+                .filter { !($0.isTemporary ?? false) }
+                .map { ($0.id, $0) }
+        )
+    }
+
     private var cityTitle: String {
         if let localizedCityTitle, !localizedCityTitle.isEmpty {
             return localizedCityTitle
         }
-        return journey?.displayCityName ?? L10n.t("unknown")
+        guard let journey else { return L10n.t("unknown") }
+        return JourneyCityNamePresentation.title(
+            for: journey,
+            localizedCityNameByKey: [:],
+            cachedCitiesByKey: cachedCitiesByKey
+        )
     }
 
     private var countryTitle: String {
@@ -1799,7 +1843,27 @@ struct JourneyRouteDetailView: View {
         let key = (journey.startCityKey ?? journey.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty, key != "Unknown|" else { return }
 
-        if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key),
+        if let cachedCity = cachedCitiesByKey[key] {
+            let title = CityPlacemarkResolver.displayTitle(
+                cityKey: cachedCity.id,
+                iso2: cachedCity.countryISO2,
+                fallbackTitle: cachedCity.name,
+                availableLevelNamesRaw: cachedCity.reservedAvailableLevelNames,
+                storedAvailableLevelNamesLocaleID: cachedCity.reservedAvailableLevelNamesLocaleID,
+                parentRegionKey: cachedCity.reservedParentRegionKey,
+                preferredLevel: cachedCity.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
+                localizedDisplayNameByLocale: cachedCity.localizedDisplayNameByLocale,
+                locale: .current
+            )
+            if !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                await MainActor.run { localizedCityTitle = title }
+                return
+            }
+        }
+
+        let parentRegionKey = JourneyCityNamePresentation.parentRegionKey(for: journey, cachedCitiesByKey: cachedCitiesByKey)
+
+        if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key, parentRegionKey: parentRegionKey),
            !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             await MainActor.run { localizedCityTitle = cached }
             return
@@ -1807,7 +1871,7 @@ struct JourneyRouteDetailView: View {
 
         guard let start = journey.startCoordinate, start.isValid else { return }
         let loc = CLLocation(latitude: start.latitude, longitude: start.longitude)
-        if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key),
+        if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key, parentRegionKey: parentRegionKey),
            !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             await MainActor.run { localizedCityTitle = title }
         }
@@ -1815,7 +1879,11 @@ struct JourneyRouteDetailView: View {
 
     private func shareCurrent() {
         guard let j = journey else { return }
-        ShareCardGenerator.generate(journey: j, privacy: .exact) { img in
+        ShareCardGenerator.generate(
+            journey: j,
+            cachedCitiesByKey: cachedCitiesByKey,
+            privacy: .exact
+        ) { img in
             self.shareImage = img
             self.showShareSheet = true
         }

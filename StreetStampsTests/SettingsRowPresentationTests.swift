@@ -37,4 +37,13 @@ final class SettingsRowPresentationTests: XCTestCase {
         XCTAssertEqual(row.icon, "bell.badge")
         XCTAssertEqual(row.textStyle, .supporting)
     }
+
+    func test_liveActivity_keepsSupportingTextStyle() {
+        let row = SettingsRowPresentation.liveActivity
+
+        XCTAssertEqual(row.title, L10n.t("settings_live_activity_title"))
+        XCTAssertEqual(row.subtitle, L10n.t("settings_live_activity_desc"))
+        XCTAssertEqual(row.icon, "rectangle.badge.person.crop")
+        XCTAssertEqual(row.textStyle, .supporting)
+    }
 }

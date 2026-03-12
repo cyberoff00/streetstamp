@@ -482,7 +482,8 @@ struct AuthEntryView: View {
     }
 
     private func isEmailVerificationRequired(_ error: Error) -> Bool {
-        guard case let BackendAPIError.server(message) = error else { return false }
+        guard let backendError = error as? BackendAPIError,
+              let message = backendError.serverMessage else { return false }
         return message.localizedCaseInsensitiveContains("email not verified")
     }
 

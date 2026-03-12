@@ -212,7 +212,11 @@ enum JourneyCloudMigrationService {
         let routeCoords = journey.routeCoordinates
         let cityID = resolveCityID(for: journey, cards: cards)
         let cityCard = cards.first(where: { $0.id == cityID })
-        let cityName = cityCard?.name ?? journey.title
+        let cityName = CityDisplayTitlePresentation.title(
+            cityKey: cityCard?.id ?? cityID,
+            iso2: cityCard?.countryISO2,
+            fallbackTitle: cityCard?.name ?? journey.title
+        )
 
         let fallbackCoordinate = routeCoords.first ?? CoordinateCodable(lat: 0, lon: 0)
         let memories: [JourneyMemory] = journey.memories.enumerated().map { idx, memory in

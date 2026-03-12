@@ -143,6 +143,11 @@ struct CachedCity: Identifiable, Codable {
     var reservedLevelRaw: String? = nil
     var reservedParentRegionKey: String? = nil
     var reservedAvailableLevelNames: [String: String]? = nil
+    var reservedAvailableLevelNamesLocaleID: String? = nil
+
+    /// Persisted localized display names keyed by locale identifier (e.g. "zh-Hans": "上海").
+    /// Populated by CityLibraryVM after successful reverse-geocode localization.
+    var localizedDisplayNameByLocale: [String: String]? = nil
 
     var isTemporary: Bool? = false
 }
@@ -588,6 +593,7 @@ final class CityCache: ObservableObject {
         } catch {
             self.cachedCities = []
         }
+        backfillLocalizedNamesFromGeocodeDefaults()
     }
 
     private func loadMembershipIndexFromDisk() {
@@ -606,6 +612,39 @@ final class CityCache: ObservableObject {
         } catch {
             print("❌ city cache save failed:", error)
         }
+    }
+
+    /// Backfill `localizedDisplayNameByLocale` for historical cities from
+    /// ReverseGeocodeService's persisted UserDefaults cache. Runs synchronously
+    /// on cold start so all views see localized names immediately.
+    private func backfillLocalizedNamesFromGeocodeDefaults() {
+        let defaults = UserDefaults(suiteName: "group.com.streetstamps.shared") ?? .standard
+        guard let data = defaults.data(forKey: "reverseGeocode.displayCacheByLocaleKey.v2"),
+              let dict = try? JSONDecoder().decode([String: String].self, from: data),
+              !dict.isEmpty
+        else { return }
+
+        let localeID = Locale.current.identifier
+        var changed = false
+
+        for i in cachedCities.indices {
+            let city = cachedCities[i]
+            if let existing = city.localizedDisplayNameByLocale?[localeID],
+               !existing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                continue
+            }
+            let scope = CityLevelPreferenceStore.shared.displayCacheScope(for: city.reservedParentRegionKey)
+            let cacheKey = "\(city.id)|\(localeID)|\(scope)"
+            if let title = dict[cacheKey]?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !title.isEmpty {
+                var d = cachedCities[i].localizedDisplayNameByLocale ?? [:]
+                d[localeID] = title
+                cachedCities[i].localizedDisplayNameByLocale = d
+                changed = true
+            }
+        }
+
+        if changed { saveToDisk() }
     }
 
     private func saveMembershipIndexToDisk() {
@@ -696,6 +735,8 @@ final class CityCache: ObservableObject {
                 reservedLevelRaw: cachedCities[targetIdx].reservedLevelRaw,
                 reservedParentRegionKey: cachedCities[targetIdx].reservedParentRegionKey,
                 reservedAvailableLevelNames: cachedCities[targetIdx].reservedAvailableLevelNames,
+                reservedAvailableLevelNamesLocaleID: cachedCities[targetIdx].reservedAvailableLevelNamesLocaleID,
+                localizedDisplayNameByLocale: cachedCities[targetIdx].localizedDisplayNameByLocale,
                 isTemporary: cachedCities[targetIdx].isTemporary
             )
         } else {
@@ -713,6 +754,7 @@ final class CityCache: ObservableObject {
                 reservedLevelRaw: nil,
                 reservedParentRegionKey: nil,
                 reservedAvailableLevelNames: nil,
+                reservedAvailableLevelNamesLocaleID: nil,
                 isTemporary: false
             )
             cachedCities.append(created)
@@ -732,9 +774,19 @@ final class CityCache: ObservableObject {
         force: Bool
     ) {
         guard let idx = cachedCities.firstIndex(where: { $0.id == cityKey }) else { return }
-        if !force, cachedCities[idx].reservedLevelRaw != nil { return }
 
-        if let level, cachedCities[idx].reservedLevelRaw == nil {
+        CityLocalizationDebugLogger.log(
+            "reserveProfileWrite",
+            CityLocalizationDebugTrace.reserveProfileWrite(
+                cityKey: cityKey,
+                locale: .current,
+                level: level,
+                parentRegionKey: parentRegionKey,
+                availableLevels: availableLevels
+            )
+        )
+
+        if let level, (force || cachedCities[idx].reservedLevelRaw == nil) {
             cachedCities[idx].reservedLevelRaw = level.rawValue
         }
         if let parentRegionKey, !parentRegionKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -743,6 +795,7 @@ final class CityCache: ObservableObject {
         if let availableLevels {
             let mapped = Dictionary(uniqueKeysWithValues: availableLevels.map { ($0.key.rawValue, $0.value) })
             cachedCities[idx].reservedAvailableLevelNames = mapped
+            cachedCities[idx].reservedAvailableLevelNamesLocaleID = Locale.current.identifier
         }
         if let anchor, anchor.isValid, cachedCities[idx].anchor == nil {
             cachedCities[idx].anchor = LatLon(anchor)
@@ -750,6 +803,35 @@ final class CityCache: ObservableObject {
 
         saveToDisk()
         notifyCitiesChanged()
+    }
+
+    /// Persist a localized display name for the given city + locale.
+    /// Called by CityLibraryVM after a successful reverse-geocode localization.
+    @MainActor
+    func updateLocalizedDisplayName(cityKey: String, locale: Locale, displayName: String) {
+        guard let idx = cachedCities.firstIndex(where: { $0.id == cityKey }) else { return }
+        let localeID = locale.identifier
+        var dict = cachedCities[idx].localizedDisplayNameByLocale ?? [:]
+        guard dict[localeID] != displayName else { return }
+        dict[localeID] = displayName
+        cachedCities[idx].localizedDisplayNameByLocale = dict
+        saveToDisk()
+    }
+
+    /// Batch-persist localized display names (avoids repeated disk writes).
+    @MainActor
+    func updateLocalizedDisplayNames(_ updates: [(cityKey: String, displayName: String)], locale: Locale) {
+        let localeID = locale.identifier
+        var changed = false
+        for update in updates {
+            guard let idx = cachedCities.firstIndex(where: { $0.id == update.cityKey }) else { continue }
+            var dict = cachedCities[idx].localizedDisplayNameByLocale ?? [:]
+            guard dict[localeID] != update.displayName else { continue }
+            dict[localeID] = update.displayName
+            cachedCities[idx].localizedDisplayNameByLocale = dict
+            changed = true
+        }
+        if changed { saveToDisk() }
     }
 
     func refreshThumbnailsForCurrentMapAppearance() {
@@ -859,6 +941,8 @@ final class CityCache: ObservableObject {
             reservedLevelRaw: previous?.reservedLevelRaw,
             reservedParentRegionKey: previous?.reservedParentRegionKey,
             reservedAvailableLevelNames: previous?.reservedAvailableLevelNames,
+            reservedAvailableLevelNamesLocaleID: previous?.reservedAvailableLevelNamesLocaleID,
+            localizedDisplayNameByLocale: previous?.localizedDisplayNameByLocale,
             isTemporary: false
         )
     }
@@ -993,7 +1077,17 @@ final class CityCache: ObservableObject {
         return UnlockedPayload(
             id: c.id,
             kind: .city,
-            title: c.name,
+            title: CityPlacemarkResolver.displayTitle(
+                cityKey: c.id,
+                iso2: c.countryISO2,
+                fallbackTitle: c.name,
+                availableLevelNamesRaw: c.reservedAvailableLevelNames,
+                storedAvailableLevelNamesLocaleID: c.reservedAvailableLevelNamesLocaleID,
+                parentRegionKey: c.reservedParentRegionKey,
+                preferredLevel: c.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
+                localizedDisplayNameByLocale: c.localizedDisplayNameByLocale,
+                locale: .current
+            ),
             subtitle: c.countryISO2,
             baseThumbPath: nil,
             routeThumbPath: nil
@@ -1131,6 +1225,7 @@ final class CityCache: ObservableObject {
             anchor: tmp.anchor,
             thumbnailBasePath: tmp.thumbnailBasePath,
             thumbnailRoutePath: tmp.thumbnailRoutePath,
+            localizedDisplayNameByLocale: tmp.localizedDisplayNameByLocale,
             isTemporary: false
         )
 
@@ -1380,7 +1475,17 @@ final class CityCache: ObservableObject {
         pendingUnlock = UnlockedPayload(
             id: c.id,
             kind: .city,
-            title: c.name,
+            title: CityPlacemarkResolver.displayTitle(
+                cityKey: c.id,
+                iso2: c.countryISO2,
+                fallbackTitle: c.name,
+                availableLevelNamesRaw: c.reservedAvailableLevelNames,
+                storedAvailableLevelNamesLocaleID: c.reservedAvailableLevelNamesLocaleID,
+                parentRegionKey: c.reservedParentRegionKey,
+                preferredLevel: c.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
+                localizedDisplayNameByLocale: c.localizedDisplayNameByLocale,
+                locale: .current
+            ),
             subtitle: c.countryISO2,
             baseThumbPath: nil,
             routeThumbPath: nil

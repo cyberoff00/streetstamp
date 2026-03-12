@@ -1623,6 +1623,7 @@ function normalizePostcardMessage(raw) {
     fromUserID,
     fromDisplayName: raw.fromDisplayName == null ? null : String(raw.fromDisplayName),
     toUserID,
+    toDisplayName: raw.toDisplayName == null ? null : String(raw.toDisplayName),
     cityID: String(raw.cityID || "").trim(),
     cityName: String(raw.cityName || raw.cityID || "").trim(),
     photoURL: raw.photoURL == null ? null : String(raw.photoURL),
@@ -1701,7 +1702,7 @@ function pushProfileStompNotification(owner, fromUser) {
     fromDisplayName: fromUser.displayName,
     journeyID: null,
     journeyTitle: null,
-    message: `${fromUser.displayName} 踩了踩你的主页`,
+    message: `${fromUser.displayName}在你的沙发上坐了一坐`,
     createdAt: new Date().toISOString(),
     read: false
   });
@@ -2994,6 +2995,18 @@ async function main() {
         if (rule.reason === "city_not_allowed") {
           return res.status(400).json({ code: rule.reason, message: "city not allowed" });
         }
+        if (rule.reason === "city_friend_quota_exceeded") {
+          return res.status(409).json({
+            code: rule.reason,
+            message: "friend city postcard limit reached"
+          });
+        }
+        if (rule.reason === "city_total_quota_exceeded") {
+          return res.status(409).json({
+            code: rule.reason,
+            message: "city postcard limit reached"
+          });
+        }
         return res.status(409).json({ code: rule.reason, message: "postcard quota exceeded" });
       }
 
@@ -3004,6 +3017,7 @@ async function main() {
         fromUserID: me.id,
         fromDisplayName: me.displayName,
         toUserID: target.id,
+        toDisplayName: target.displayName,
         cityID,
         cityName,
         photoURL,

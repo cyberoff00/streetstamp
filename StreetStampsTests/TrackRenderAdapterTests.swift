@@ -3,7 +3,7 @@ import XCTest
 @testable import StreetStamps
 
 final class TrackRenderAdapterTests: XCTestCase {
-    func test_lifelogFootprintSampler_placesFootstepsByDistanceNotPointCount() {
+    func test_lifelogFootprintSampler_keepsModerateStraightRouteSparse() {
         let route: [CLLocationCoordinate2D] = [
             .init(latitude: 0.0, longitude: 0.0),
             .init(latitude: 0.0, longitude: 0.0027) // ~300m
@@ -11,8 +11,97 @@ final class TrackRenderAdapterTests: XCTestCase {
 
         let sampled = LifelogFootprintSampler.sample(route: route, stepMeters: 50, gapBreakMeters: 8_000)
 
-        XCTAssertGreaterThanOrEqual(sampled.count, 6)
-        XCTAssertLessThanOrEqual(sampled.count, 8)
+        XCTAssertGreaterThanOrEqual(sampled.count, 3)
+        XCTAssertLessThanOrEqual(sampled.count, 4)
+    }
+
+    func test_lifelogFootprintSampler_preservesMeaningfulTurnVertex() {
+        let route: [CLLocationCoordinate2D] = [
+            .init(latitude: 37.7749, longitude: -122.4194),
+            .init(latitude: 37.7749, longitude: -122.41815), // ~110m east
+            .init(latitude: 37.77589, longitude: -122.41815) // ~110m north
+        ]
+
+        let sampled = LifelogFootprintSampler.sample(route: route, stepMeters: 50, gapBreakMeters: 8_000)
+
+        XCTAssertTrue(
+            sampled.contains { coord in
+                abs(coord.latitude - route[1].latitude) < 0.000_001 &&
+                abs(coord.longitude - route[1].longitude) < 0.000_001
+            },
+            "Shape-aware sampling should keep the turn vertex even when it does not land on a uniform distance bucket."
+        )
+    }
+
+    func test_lifelogFootprintSampler_keepsLongStraightRouteSparse() {
+        let route: [CLLocationCoordinate2D] = [
+            .init(latitude: 37.7749, longitude: -122.4194),
+            .init(latitude: 37.7749, longitude: -122.41255) // ~600m east
+        ]
+
+        let sampled = LifelogFootprintSampler.sample(route: route, stepMeters: 50, gapBreakMeters: 8_000)
+
+        XCTAssertLessThanOrEqual(
+            sampled.count,
+            6,
+            "Shape-aware sampling should not fill a long straight segment with near-uniform footsteps."
+        )
+    }
+
+    func test_lifelogFootprintSampler_preservesSimpleLoopSilhouetteWithoutReplayingEveryPoint() {
+        let route: [CLLocationCoordinate2D] = [
+            .init(latitude: 37.7749, longitude: -122.4194),
+            .init(latitude: 37.7749, longitude: -122.4183),
+            .init(latitude: 37.7758, longitude: -122.4183),
+            .init(latitude: 37.7758, longitude: -122.4194),
+            .init(latitude: 37.7749, longitude: -122.4194)
+        ]
+
+        let sampled = LifelogFootprintSampler.sample(route: route, stepMeters: 50, gapBreakMeters: 8_000)
+
+        XCTAssertGreaterThanOrEqual(sampled.count, 5)
+        XCTAssertLessThanOrEqual(sampled.count, 10)
+        XCTAssertTrue(
+            sampled.contains { coord in
+                abs(coord.latitude - route[1].latitude) < 0.000_001 &&
+                abs(coord.longitude - route[1].longitude) < 0.000_001
+            }
+        )
+        XCTAssertTrue(
+            sampled.contains { coord in
+                abs(coord.latitude - route[2].latitude) < 0.000_001 &&
+                abs(coord.longitude - route[2].longitude) < 0.000_001
+            }
+        )
+        XCTAssertTrue(
+            sampled.contains { coord in
+                abs(coord.latitude - route[3].latitude) < 0.000_001 &&
+                abs(coord.longitude - route[3].longitude) < 0.000_001
+            }
+        )
+    }
+
+    func test_lifelogFootprintSampler_fillPointsFollowOriginalCurvedRun() {
+        let route: [CLLocationCoordinate2D] = [
+            .init(latitude: 37.7749, longitude: -122.4194),
+            .init(latitude: 37.7755, longitude: -122.4188),
+            .init(latitude: 37.7762, longitude: -122.4186),
+            .init(latitude: 37.7771, longitude: -122.41855),
+            .init(latitude: 37.7782, longitude: -122.4185)
+        ]
+
+        let sampled = LifelogFootprintSampler.sample(route: route, stepMeters: 50, gapBreakMeters: 8_000)
+
+        XCTAssertGreaterThan(sampled.count, 2)
+        XCTAssertTrue(
+            sampled.contains { coord in
+                route.contains { routeCoord in
+                    abs(coord.latitude - routeCoord.latitude) < 0.000_001 &&
+                    abs(coord.longitude - routeCoord.longitude) < 0.000_001
+                }
+            },
+            "Sampled footprints should stay on the original polyline instead of using a chord between sparse anchors."
+        )
     }
 
     func test_lifelogFootprintSampler_breaksAtLargeGap_withoutInterpolatingAcrossJump() {

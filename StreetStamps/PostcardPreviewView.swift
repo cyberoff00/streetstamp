@@ -4,6 +4,7 @@ import ImageIO
 
 struct PostcardPreviewView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var flow: AppFlowCoordinator
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var postcardCenter: PostcardCenter
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
@@ -24,6 +25,7 @@ struct PostcardPreviewView: View {
     @State private var saveToastText: String?
     @State private var downsampledImage: UIImage?
     @State private var sentSuccessfully = false
+    @State private var sidebarHideToken = "\(PostcardSidebarVisibilityScope.preview.token)-\(UUID().uuidString)"
 
     var body: some View {
         VStack(spacing: 20) {
@@ -103,6 +105,14 @@ struct PostcardPreviewView: View {
         }
         .padding(20)
         .background(FigmaTheme.background.ignoresSafeArea())
+        .onAppear {
+            guard PostcardSidebarVisibilityScope.preview.hidesGlobalSidebarButton else { return }
+            flow.pushSidebarButtonHidden(token: sidebarHideToken)
+        }
+        .onDisappear {
+            guard PostcardSidebarVisibilityScope.preview.hidesGlobalSidebarButton else { return }
+            flow.popSidebarButtonHidden(token: sidebarHideToken)
+        }
         .safeAreaInset(edge: .top, spacing: 0) {
             UnifiedNavigationHeader(
                 chrome: NavigationChrome(

@@ -13,6 +13,30 @@ final class LocalizationCoverageTests: XCTestCase {
         XCTAssertEqual(simplifiedChinese["lifelog_title"], "足迹")
     }
 
+    func test_friendSofaSceneCopyUsesUpdatedEnglishAndSimplifiedChineseStrings() throws {
+        let appRoot = projectRoot().appendingPathComponent("StreetStamps", isDirectory: true)
+        let english = try loadStringsFile(at: appRoot.appendingPathComponent("en.lproj/Localizable.strings"))
+        let simplifiedChinese = try loadStringsFile(at: appRoot.appendingPathComponent("zh-Hans.lproj/Localizable.strings"))
+
+        XCTAssertEqual(english["friends_welcome"], "Welcome!")
+        XCTAssertEqual(english["friends_postcard_prompt"], "bring you a postcard")
+        XCTAssertEqual(simplifiedChinese["friends_welcome"], "欢迎！")
+        XCTAssertEqual(simplifiedChinese["friends_postcard_prompt"], "送你一张明信片")
+    }
+
+    func test_profileVisitCopyUsesUpdatedEnglishAndSimplifiedChineseStrings() throws {
+        let appRoot = projectRoot().appendingPathComponent("StreetStamps", isDirectory: true)
+        let english = try loadStringsFile(at: appRoot.appendingPathComponent("en.lproj/Localizable.strings"))
+        let simplifiedChinese = try loadStringsFile(at: appRoot.appendingPathComponent("zh-Hans.lproj/Localizable.strings"))
+
+        XCTAssertEqual(english["social_notice_stomp"], "Visitor")
+        XCTAssertEqual(english["notification_profile_stomp_format"], "%@ sat on your sofa")
+        XCTAssertEqual(english["friend_profile_stomp_success_format"], "You sat on %@'s sofa")
+        XCTAssertEqual(simplifiedChinese["social_notice_stomp"], "有人到访")
+        XCTAssertEqual(simplifiedChinese["notification_profile_stomp_format"], "%@在你的沙发上坐了一坐")
+        XCTAssertEqual(simplifiedChinese["friend_profile_stomp_success_format"], "你在 %@ 的沙发上坐了一坐")
+    }
+
     func test_requiredFormalUserFacingKeysExistInEnglishAndSimplifiedChinese() throws {
         let appRoot = projectRoot().appendingPathComponent("StreetStamps", isDirectory: true)
         let english = try loadStringsFile(at: appRoot.appendingPathComponent("en.lproj/Localizable.strings"))
@@ -48,6 +72,8 @@ final class LocalizationCoverageTests: XCTestCase {
             "friends_mark_all_read",
             "friends_delete_friend",
             "friends_delete_failed",
+            "friends_welcome",
+            "friends_postcard_prompt",
             "friends_joined_format",
             "settings_coming_soon_title",
             "settings_notifications_title",
@@ -61,6 +87,8 @@ final class LocalizationCoverageTests: XCTestCase {
             "settings_transfer_scan_hint",
             "settings_transfer_same_wifi_hint",
             "settings_import_failed_title",
+            "settings_live_activity_title",
+            "settings_live_activity_desc",
             "settings_check_updates_title",
             "settings_check_updates_placeholder",
             "settings_about_us_title",
@@ -92,6 +120,8 @@ final class LocalizationCoverageTests: XCTestCase {
             "equipment_buy_all_and_apply",
             "equipment_hat",
             "equipment_glass",
+            "postcard_quota_friend_limit_reached",
+            "postcard_quota_city_limit_reached",
             "postcard_sync_error_format",
             "details_unavailable_title",
             "details_unavailable_message",
@@ -113,6 +143,40 @@ final class LocalizationCoverageTests: XCTestCase {
             "postcard_received_title_format",
             "postcard_received_title_fallback",
             "postcard_received_body_format",
+            "notification_journey_like_format",
+            "notification_profile_stomp_format",
+            "notification_friend_request_format",
+            "notification_friend_request_accepted_format",
+            "notification_friend_request_fallback",
+            "social_notice_friend_request",
+            "social_notice_friend_update",
+            "friend_profile_cta_idle",
+            "friend_profile_cta_loading",
+            "friend_profile_cta_done",
+            "friend_profile_stomp_success_format",
+            "friend_profile_stomp_failed_format",
+            "city_level_picker_title",
+            "city_level_picker_cancel",
+            "city_level_locality",
+            "city_level_sub_admin",
+            "city_level_admin",
+            "city_level_island",
+            "city_level_country",
+            "city_level_region",
+            "city_level_confirm_title",
+            "city_level_confirm_apply",
+            "city_level_confirm_upgrade_message",
+            "city_level_confirm_future_default_message",
+            "city_level_downgrade_blocked_title",
+            "city_level_downgrade_blocked_message_format",
+            "city_deep_memories_toggle_on",
+            "city_deep_memories_toggle_off",
+            "city_deep_memories_toggle_show_accessibility",
+            "city_deep_memories_toggle_hide_accessibility",
+            "lifelog_mood_option_sad",
+            "lifelog_mood_option_notbad",
+            "lifelog_mood_option_happy",
+            "profile_summary_stats_format",
             "lockscreen_mode_sport_short",
             "lockscreen_mode_daily_short",
             "lockscreen_distance_unit_km_short",
@@ -177,6 +241,59 @@ final class LocalizationCoverageTests: XCTestCase {
 
         XCTAssertEqual(card.title, L10n.t("settings_sign_in_title"))
         XCTAssertEqual(card.subtitle, L10n.t("settings_sign_in_subtitle"))
+    }
+
+    func test_checkUpdatesTitleDoesNotForceLineBreakInChineseLocalizations() throws {
+        let appRoot = projectRoot().appendingPathComponent("StreetStamps", isDirectory: true)
+        let simplifiedChinese = try loadStringsFile(at: appRoot.appendingPathComponent("zh-Hans.lproj/Localizable.strings"))
+        let traditionalChinese = try loadStringsFile(at: appRoot.appendingPathComponent("zh-Hant.lproj/Localizable.strings"))
+
+        XCTAssertEqual(simplifiedChinese["settings_check_updates_title"], "检查更新")
+        XCTAssertEqual(traditionalChinese["settings_check_updates_title"], "檢查更新")
+        XCTAssertFalse(simplifiedChinese["settings_check_updates_title"]?.contains("\n") ?? true)
+        XCTAssertFalse(traditionalChinese["settings_check_updates_title"]?.contains("\n") ?? true)
+    }
+
+    func test_appNameUsesWorldoAcrossEnglishAndSimplifiedChinese() throws {
+        let appRoot = projectRoot().appendingPathComponent("StreetStamps", isDirectory: true)
+        let english = try loadStringsFile(at: appRoot.appendingPathComponent("en.lproj/Localizable.strings"))
+        let simplifiedChinese = try loadStringsFile(at: appRoot.appendingPathComponent("zh-Hans.lproj/Localizable.strings"))
+
+        XCTAssertEqual(english["app_name"], "Worldo")
+        XCTAssertEqual(simplifiedChinese["app_name"], "Worldo")
+    }
+
+    func test_introSlidesExposeLocalizedScreenshotOnboardingCopy() throws {
+        let appRoot = projectRoot().appendingPathComponent("StreetStamps", isDirectory: true)
+        let english = try loadStringsFile(at: appRoot.appendingPathComponent("en.lproj/Localizable.strings"))
+        let simplifiedChinese = try loadStringsFile(at: appRoot.appendingPathComponent("zh-Hans.lproj/Localizable.strings"))
+
+        let requiredKeys = [
+            "intro_next",
+            "intro_get_started",
+            "intro_slide_1_title",
+            "intro_slide_1_subtitle",
+            "intro_slide_2_title",
+            "intro_slide_2_subtitle",
+            "intro_slide_3_title",
+            "intro_slide_3_subtitle",
+            "intro_slide_4_title",
+            "intro_slide_4_subtitle"
+        ]
+
+        for key in requiredKeys {
+            XCTAssertNotNil(english[key], "Missing English localization for key \(key)")
+            XCTAssertNotNil(simplifiedChinese[key], "Missing Simplified Chinese localization for key \(key)")
+        }
+
+        XCTAssertEqual(simplifiedChinese["intro_slide_1_title"], "开启探索")
+        XCTAssertEqual(simplifiedChinese["intro_slide_4_title"], "好友与更多探索")
+    }
+
+    func test_upperReturnsUppercasedLocalizedValue() {
+        let english = Locale(identifier: "en")
+
+        XCTAssertEqual(L10n.upper("profile_invite_friends", locale: english), "INVITE FRIENDS")
     }
 
     private func projectRoot() -> URL {

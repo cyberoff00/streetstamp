@@ -128,6 +128,7 @@ async function run() {
     assert.equal(sent.data.items.length, 1);
     assert.equal(sent.data.items[0].messageID, send.data.messageID);
     assert.equal(sent.data.items[0].photoURL, `http://127.0.0.1:${port}/media/fake.jpg`);
+    assert.equal(sent.data.items[0].toDisplayName, 'Explorer');
 
     const received = await requestJSON(port, 'GET', '/v1/postcards?box=received', u2.accessToken);
     assert.equal(received.status, 200);
@@ -135,6 +136,7 @@ async function run() {
     assert.equal(received.data.items.length, 1);
     assert.equal(received.data.items[0].messageID, send.data.messageID);
     assert.equal(received.data.items[0].photoURL, `http://127.0.0.1:${port}/media/fake.jpg`);
+    assert.equal(received.data.items[0].toDisplayName, 'Explorer');
 
     const notifications = await requestJSON(port, 'GET', '/v1/notifications?unreadOnly=0', u2.accessToken);
     assert.equal(notifications.status, 200);
@@ -145,18 +147,32 @@ async function run() {
     assert.equal(postcardNotice.messageText, 'hello postcard');
     assert.equal(postcardNotice.photoURL, `http://127.0.0.1:${port}/media/fake.jpg`);
 
-    const duplicate = await requestJSON(port, 'POST', '/v1/postcards/send', u1.accessToken, {
+    const secondSend = await requestJSON(port, 'POST', '/v1/postcards/send', u1.accessToken, {
       clientDraftID: 'd2',
       toUserID: u2.userId,
       cityID: 'paris',
       cityName: 'Paris',
-      messageText: 'duplicate',
+      messageText: 'second postcard',
+      photoURL: '/media/fake.jpg',
+      allowedCityIDs: ['paris']
+    });
+
+    assert.equal(secondSend.status, 200);
+    assert.ok(secondSend.data.messageID);
+
+    const duplicate = await requestJSON(port, 'POST', '/v1/postcards/send', u1.accessToken, {
+      clientDraftID: 'd3',
+      toUserID: u2.userId,
+      cityID: 'paris',
+      cityName: 'Paris',
+      messageText: 'third postcard',
       photoURL: '/media/fake.jpg',
       allowedCityIDs: ['paris']
     });
 
     assert.equal(duplicate.status, 409);
     assert.equal(duplicate.data.code, 'city_friend_quota_exceeded');
+    assert.equal(duplicate.data.message, 'friend city postcard limit reached');
 
     console.log('postcard API contract: PASS');
   } finally {

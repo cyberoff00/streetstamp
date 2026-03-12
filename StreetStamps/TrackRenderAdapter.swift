@@ -141,7 +141,16 @@ enum TrackRenderAdapter {
     ) -> [JourneyRoute] {
         let lifelogName = L10n.t("tab_lifelog")
 
-        if passiveCountryRuns.isEmpty {
+        let validCountryRuns = passiveCountryRuns.filter { $0.coordsWGS84.count >= 2 }
+        let tilePassiveSegments = segments.filter { $0.sourceType == .passive && $0.coordinates.count >= 2 }
+
+        // Use country-attributed runs only when they carry at least as many
+        // renderable entries as the tile-based passive segments. Otherwise the
+        // attribution data is still incomplete and we'd lose visible tracks.
+        let useCountryRuns = !validCountryRuns.isEmpty
+            && validCountryRuns.count >= tilePassiveSegments.count
+
+        if !useCountryRuns {
             let filtered = segments.filter { $0.coordinates.count >= 2 }
             guard !filtered.isEmpty else { return [] }
             return filtered.enumerated().map { index, segment in
@@ -166,8 +175,7 @@ enum TrackRenderAdapter {
                 )
             }
 
-        let passiveRoutes = passiveCountryRuns
-            .filter { $0.coordsWGS84.count >= 2 }
+        let passiveRoutes = validCountryRuns
             .enumerated()
             .map { index, run in
                 makeGlobeJourney(
