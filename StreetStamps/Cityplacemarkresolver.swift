@@ -520,6 +520,26 @@ enum CityPlacemarkResolver {
         return hasIncompatibleValue ? nil : decoded
     }
 
+    /// Resolve stable per-level labels for the current locale.
+    /// Priority:
+    /// 1) Stored labels if they match current locale language.
+    /// 2) Freshly resolved labels (first-time initialization or language switch).
+    static func resolvedStableLevelNamesForDisplay(
+        storedAvailableLevelNamesRaw: [String: String]?,
+        storedLocaleIdentifier: String?,
+        freshlyResolvedLevelNames: [CardLevel: String],
+        locale: Locale = .current
+    ) -> [CardLevel: String] {
+        if let stored = preferredAvailableLevelNamesForDisplay(
+            storedAvailableLevelNamesRaw,
+            storedLocaleIdentifier: storedLocaleIdentifier,
+            locale: locale
+        ), !stored.isEmpty {
+            return stored
+        }
+        return freshlyResolvedLevelNames
+    }
+
     private static func resolvedDisplayLevel(
         cityKey: String,
         availableLevelNames: [CardLevel: String]?,

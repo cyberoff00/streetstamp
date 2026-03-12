@@ -175,6 +175,36 @@ private actor BackendTokenRefreshGate {
     }
 }
 
+private actor BackendRefreshBackoffGate {
+    private var blockedAccessToken: String?
+    private var blockedUntil: Date = .distantPast
+
+    func shouldAttemptRefresh(failedAccessToken: String) -> Bool {
+        guard let blockedAccessToken else { return true }
+        guard blockedAccessToken == failedAccessToken else { return true }
+        return Date() >= blockedUntil
+    }
+
+    func markFailure(failedAccessToken: String, statusCode: Int?, retryAfterSeconds: Int?) {
+        let now = Date()
+        let delaySeconds: TimeInterval
+        if let retryAfterSeconds, retryAfterSeconds > 0 {
+            delaySeconds = TimeInterval(retryAfterSeconds)
+        } else if statusCode == 401 {
+            delaySeconds = 30 * 60
+        } else {
+            delaySeconds = 60
+        }
+        blockedAccessToken = failedAccessToken
+        blockedUntil = now.addingTimeInterval(delaySeconds)
+    }
+
+    func clear() {
+        blockedAccessToken = nil
+        blockedUntil = .distantPast
+    }
+}
+
 struct BackendProfileDTO: Codable {
     var id: String
     var handle: String?
@@ -249,6 +279,7 @@ enum BackendAPIError: LocalizedError {
 final class BackendAPIClient {
     static let shared = BackendAPIClient()
     private let tokenRefreshGate = BackendTokenRefreshGate()
+    private let refreshBackoffGate = BackendRefreshBackoffGate()
     private var transport: @Sendable (URLRequest) async throws -> (Data, URLResponse)
 
     @MainActor
@@ -514,6 +545,9 @@ final class BackendAPIClient {
     }
 
     fileprivate func performTokenRefresh(failedAccessToken: String) async -> String? {
+        guard await refreshBackoffGate.shouldAttemptRefresh(failedAccessToken: failedAccessToken) else {
+            return nil
+        }
         guard let snapshot = await currentSessionSnapshot() else { return nil }
 
         if snapshot.accessToken != failedAccessToken {
@@ -523,19 +557,36 @@ final class BackendAPIClient {
         if let refreshToken = await MainActor.run(resultType: String?.self, body: { sessionStore?.currentRefreshToken }),
            !refreshToken.isEmpty {
             do {
-                let body = try encoder.encode(["refreshToken": refreshToken])
-                let (data, _) = try await request(path: "/v1/auth/refresh", method: "POST", jsonBody: body)
-                let refreshed = try decoder.decode(BackendRefreshResponse.self, from: data)
+                let result = try await requestAccessTokenRefresh(refreshToken: refreshToken)
+                guard let refreshedAccessToken = result.accessToken else {
+                    if result.statusCode == 401 {
+                        await MainActor.run {
+                            sessionStore?.logoutToGuest(requireReauthenticationPrompt: true)
+                        }
+                    }
+                    await refreshBackoffGate.markFailure(
+                        failedAccessToken: failedAccessToken,
+                        statusCode: result.statusCode,
+                        retryAfterSeconds: result.retryAfterSeconds
+                    )
+                    return nil
+                }
                 let currentUserID = await MainActor.run { sessionStore?.accountUserID }
                 guard currentUserID == snapshot.userID else { return nil }
                 await MainActor.run {
-                    sessionStore?.updateAccessToken(refreshed.accessToken)
+                    sessionStore?.updateAccessToken(refreshedAccessToken)
                 }
+                await refreshBackoffGate.clear()
                 return await MainActor.run {
-                    guard sessionStore?.currentAccessToken == refreshed.accessToken else { return nil }
-                    return refreshed.accessToken
+                    guard sessionStore?.currentAccessToken == refreshedAccessToken else { return nil }
+                    return refreshedAccessToken
                 }
             } catch {
+                await refreshBackoffGate.markFailure(
+                    failedAccessToken: failedAccessToken,
+                    statusCode: nil,
+                    retryAfterSeconds: nil
+                )
                 return nil
             }
         }
@@ -546,6 +597,7 @@ final class BackendAPIClient {
             let currentUserID = await MainActor.run { sessionStore?.accountUserID }
             guard currentUserID == snapshot.userID else { return nil }
             await synchronizeFirebaseSession(idToken: refreshed)
+            await refreshBackoffGate.clear()
             return await MainActor.run {
                 guard sessionStore?.currentAccessToken == refreshed else { return nil }
                 return refreshed
@@ -553,6 +605,36 @@ final class BackendAPIClient {
         } catch {
             return nil
         }
+    }
+
+    private func requestAccessTokenRefresh(refreshToken: String) async throws -> (accessToken: String?, statusCode: Int?, retryAfterSeconds: Int?) {
+        let body = try encoder.encode(["refreshToken": refreshToken])
+        let url = try makeURL(path: "/v1/auth/refresh")
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 45
+        req.httpBody = body
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let (data, resp) = try await transport(req)
+        guard let http = resp as? HTTPURLResponse else {
+            return (nil, nil, nil)
+        }
+        let retryAfter = parseRetryAfterSeconds(http.value(forHTTPHeaderField: "Retry-After"))
+        guard http.statusCode == 200 else {
+            return (nil, http.statusCode, retryAfter)
+        }
+        let refreshed = try decoder.decode(BackendRefreshResponse.self, from: data)
+        return (refreshed.accessToken, 200, retryAfter)
+    }
+
+    private func parseRetryAfterSeconds(_ rawValue: String?) -> Int? {
+        guard let rawValue else { return nil }
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let seconds = Int(trimmed), seconds > 0 {
+            return seconds
+        }
+        return nil
     }
 
     func register(email: String, password: String, displayName: String) async throws -> BackendRegisterResponse {

@@ -1731,11 +1731,29 @@ struct MemoryDetailPage: View {
     let memory: JourneyMemory
     @Binding var isPresented: Bool
     let allowsEditing: Bool
+    let maxCardWidth: CGFloat
+    let maxCardHeight: CGFloat
     let onUpdated: (JourneyMemory?) -> Void
 
     @State private var showViewer: Bool = false
     @State private var viewerIndex: Int = 0
     @State private var showEditor: Bool = false
+
+    init(
+        memory: JourneyMemory,
+        isPresented: Binding<Bool>,
+        allowsEditing: Bool,
+        maxCardWidth: CGFloat = 340,
+        maxCardHeight: CGFloat = 520,
+        onUpdated: @escaping (JourneyMemory?) -> Void
+    ) {
+        self.memory = memory
+        self._isPresented = isPresented
+        self.allowsEditing = allowsEditing
+        self.maxCardWidth = maxCardWidth
+        self.maxCardHeight = maxCardHeight
+        self.onUpdated = onUpdated
+    }
 
     var body: some View {
         ZStack {
@@ -1852,7 +1870,7 @@ struct MemoryDetailPage: View {
                     }
                     .padding(16)
                 }
-                .frame(maxWidth: 340, maxHeight: 520)
+                .frame(maxWidth: maxCardWidth, maxHeight: maxCardHeight)
             }
             .background(Color.white)
             .cornerRadius(12)

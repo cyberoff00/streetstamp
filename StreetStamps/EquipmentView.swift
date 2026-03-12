@@ -30,6 +30,8 @@ enum EquipmentCategoryIconAssetResolver {
             return "equipment_icon_glass"
         case "accessory":
             return "equipment_icon_accessory 1"
+        case "pat":
+            return "equipment_icon_pat"
         default:
             return nil
         }
@@ -339,7 +341,7 @@ struct EquipmentView: View {
 
     private var orderedCategories: [GearCategory] {
         let map = Dictionary(uniqueKeysWithValues: store.catalog.categories.map { ($0.id, $0) })
-        let preferred = ["expression", "hair", "suit", "upper", "under", "hat", "glass", "accessory"]
+        let preferred = ["expression", "hair", "suit", "upper", "under", "hat", "glass", "accessory", "pat"]
         let preferredItems = preferred.compactMap { map[$0] }
         let rest = store.catalog.categories.filter { !preferred.contains($0.id) }
         return preferredItems + rest
@@ -444,6 +446,8 @@ struct EquipmentView: View {
             return "eyeglasses"
         case "accessory":
             return "fanblades.fill"
+        case "pat":
+            return "sparkles.rectangle.stack"
         default:
             return "circle.grid.2x2"
         }
@@ -822,12 +826,33 @@ struct EquipmentView: View {
                 target.glassId = (item.id == "none") ? nil : item.id
             case "accessoryId":
                 if item.id == "none" {
-                    target.accessoryIds = []
-                } else {
-                    if let idx = target.accessoryIds.firstIndex(of: item.id) {
-                        target.accessoryIds.remove(at: idx)
+                    if category.id == "pat" {
+                        let patIDs = Set(
+                            store.catalog.categories
+                                .first(where: { $0.id == "pat" })?
+                                .items
+                                .map(\.id) ?? []
+                        )
+                        target.accessoryIds.removeAll { patIDs.contains($0) }
                     } else {
+                        target.accessoryIds = []
+                    }
+                } else {
+                    if category.id == "pat" {
+                        let patIDs = Set(
+                            store.catalog.categories
+                                .first(where: { $0.id == "pat" })?
+                                .items
+                                .map(\.id) ?? []
+                        )
+                        target.accessoryIds.removeAll { patIDs.contains($0) }
                         target.accessoryIds.append(item.id)
+                    } else {
+                        if let idx = target.accessoryIds.firstIndex(of: item.id) {
+                            target.accessoryIds.remove(at: idx)
+                        } else {
+                            target.accessoryIds.append(item.id)
+                        }
                     }
                 }
             case "expressionId":
@@ -860,7 +885,11 @@ struct EquipmentView: View {
         appendIfMissing(categoryId: "hat", itemId: loadout.hatId)
         appendIfMissing(categoryId: "glass", itemId: loadout.glassId)
         for accessoryId in loadout.accessoryIds {
-            appendIfMissing(categoryId: "accessory", itemId: accessoryId)
+            if store.item(categoryId: "pat", itemId: accessoryId) != nil {
+                appendIfMissing(categoryId: "pat", itemId: accessoryId)
+            } else {
+                appendIfMissing(categoryId: "accessory", itemId: accessoryId)
+            }
         }
         return result
     }
@@ -903,16 +932,25 @@ enum EquipmentGridDisplay {
 }
 
 struct EquipmentPreviewLayout {
+    private static func logicalCanvasSize(for imageSize: CGSize) -> CGSize {
+        // Keep preview sizing consistent with avatar layering for newly added 140x160 assets.
+        if Int(imageSize.width.rounded()) == 140 && Int(imageSize.height.rounded()) == 160 {
+            return CGSize(width: 128, height: 128)
+        }
+        return imageSize
+    }
+
     static func imageRect(imageSize: CGSize, in containerSize: CGSize) -> CGRect {
         guard imageSize.width > 0, imageSize.height > 0, containerSize.width > 0, containerSize.height > 0 else {
             return CGRect(origin: .zero, size: containerSize)
         }
 
-        let scale = max(containerSize.width / imageSize.width, containerSize.height / imageSize.height)
+        let logicalSize = logicalCanvasSize(for: imageSize)
+        let scale = min(containerSize.width / logicalSize.width, containerSize.height / logicalSize.height)
         let scaledSize = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
         let origin = CGPoint(
             x: (containerSize.width - scaledSize.width) / 2,
-            y: (containerSize.height - scaledSize.height) / 2
+            y: containerSize.height - scaledSize.height
         )
         return CGRect(origin: origin, size: scaledSize)
     }

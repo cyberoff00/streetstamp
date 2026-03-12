@@ -1623,15 +1623,15 @@ struct LifelogView: View {
             Color.black.opacity(0.36)
                 .ignoresSafeArea()
 
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
+            VStack(alignment: .center, spacing: 14) {
+                ZStack(alignment: .trailing) {
                     Image(systemName: "shoeprints.fill")
                         .font(.system(size: 16, weight: .bold))
                         .foregroundColor(FigmaTheme.primary)
                         .padding(8)
                         .background(FigmaTheme.primary.opacity(0.12))
                         .clipShape(Circle())
-                    Spacer()
+
                     Button {
                         dismissStepModal()
                     } label: {
@@ -1644,19 +1644,20 @@ struct LifelogView: View {
                     }
                     .buttonStyle(.plain)
                 }
+                .frame(maxWidth: .infinity)
 
                 Text(L10n.t("lifelog_steps_modal_title"))
                     .font(.system(size: 22, weight: .black, design: .rounded))
                     .foregroundColor(FigmaTheme.text)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .multilineTextAlignment(.center)
 
                 Text(formattedStepCount(stepModalStepCount))
                     .font(.system(size: 40, weight: .black, design: .rounded))
                     .foregroundColor(FigmaTheme.text)
                     .contentTransition(.numericText())
-
-                Text(L10n.t("lifelog_steps_modal_subtitle"))
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(FigmaTheme.subtext)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .multilineTextAlignment(.center)
 
                 Button(L10n.t("lifelog_steps_modal_close")) {
                     dismissStepModal()

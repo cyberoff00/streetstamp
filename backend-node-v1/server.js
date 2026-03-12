@@ -36,6 +36,10 @@ const MEDIA_UPLOAD_MAX_BYTES = Number(process.env.MEDIA_UPLOAD_MAX_BYTES || 10 *
 const CORS_ALLOWED_ORIGINS = String(process.env.CORS_ALLOWED_ORIGINS || "").trim();
 const AUTH_RATE_LIMIT_WINDOW_MS = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000);
 const AUTH_RATE_LIMIT_MAX = Number(process.env.AUTH_RATE_LIMIT_MAX || 20);
+const AUTH_LOGIN_RATE_LIMIT_WINDOW_MS = Number(process.env.AUTH_LOGIN_RATE_LIMIT_WINDOW_MS || AUTH_RATE_LIMIT_WINDOW_MS);
+const AUTH_LOGIN_RATE_LIMIT_MAX = Number(process.env.AUTH_LOGIN_RATE_LIMIT_MAX || AUTH_RATE_LIMIT_MAX);
+const AUTH_REFRESH_RATE_LIMIT_WINDOW_MS = Number(process.env.AUTH_REFRESH_RATE_LIMIT_WINDOW_MS || 5 * 60 * 1000);
+const AUTH_REFRESH_RATE_LIMIT_MAX = Number(process.env.AUTH_REFRESH_RATE_LIMIT_MAX || 80);
 const WRITE_RATE_LIMIT_WINDOW_MS = Number(process.env.WRITE_RATE_LIMIT_WINDOW_MS || 60 * 1000);
 const WRITE_RATE_LIMIT_MAX = Number(process.env.WRITE_RATE_LIMIT_MAX || 40);
 const UPLOAD_RATE_LIMIT_WINDOW_MS = Number(process.env.UPLOAD_RATE_LIMIT_WINDOW_MS || 60 * 1000);
@@ -178,12 +182,23 @@ function applyHTMLSecurityHeaders(res) {
   res.setHeader("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https:;");
 }
 
-function makeRateLimiter({ keyPrefix, windowMs, maxHits }) {
+function makeRateLimiter({ keyPrefix, windowMs, maxHits, keyResolver }) {
   return function rateLimiter(req, res, next) {
     const now = Date.now();
     const safeWindow = Number.isFinite(windowMs) && windowMs > 0 ? windowMs : 60 * 1000;
     const safeMax = Number.isFinite(maxHits) && maxHits > 0 ? maxHits : 20;
-    const clientKey = `${keyPrefix}:${req.ip || req.socket?.remoteAddress || "unknown"}`;
+    let resolvedKey = "";
+    if (typeof keyResolver === "function") {
+      try {
+        resolvedKey = String(keyResolver(req) || "").trim();
+      } catch {
+        resolvedKey = "";
+      }
+    }
+    if (!resolvedKey) {
+      resolvedKey = req.ip || req.socket?.remoteAddress || "unknown";
+    }
+    const clientKey = `${keyPrefix}:${resolvedKey}`;
     const existing = rateLimitState.get(clientKey);
     if (!existing || existing.resetAt <= now) {
       rateLimitState.set(clientKey, { hits: 1, resetAt: now + safeWindow });
@@ -197,6 +212,14 @@ function makeRateLimiter({ keyPrefix, windowMs, maxHits }) {
     }
     return next();
   };
+}
+
+function refreshRateLimitKey(req) {
+  const ip = req.ip || req.socket?.remoteAddress || "unknown";
+  const refreshToken = String(req.body?.refreshToken || "").trim();
+  if (!refreshToken) return `${ip}:no-token`;
+  const fingerprint = crypto.createHash("sha256").update(refreshToken).digest("hex").slice(0, 16);
+  return `${ip}:${fingerprint}`;
 }
 
 function firebaseAuthConfigError() {
@@ -1995,9 +2018,20 @@ async function main() {
     return next();
   });
   const authRateLimiter = makeRateLimiter({
-    keyPrefix: "auth",
+    keyPrefix: "auth-general",
     windowMs: AUTH_RATE_LIMIT_WINDOW_MS,
     maxHits: AUTH_RATE_LIMIT_MAX
+  });
+  const authLoginRateLimiter = makeRateLimiter({
+    keyPrefix: "auth-login",
+    windowMs: AUTH_LOGIN_RATE_LIMIT_WINDOW_MS,
+    maxHits: AUTH_LOGIN_RATE_LIMIT_MAX
+  });
+  const authRefreshRateLimiter = makeRateLimiter({
+    keyPrefix: "auth-refresh",
+    windowMs: AUTH_REFRESH_RATE_LIMIT_WINDOW_MS,
+    maxHits: AUTH_REFRESH_RATE_LIMIT_MAX,
+    keyResolver: refreshRateLimitKey
   });
   const writeRateLimiter = makeRateLimiter({
     keyPrefix: "write",
@@ -2257,7 +2291,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/auth/login", authRateLimiter, async (req, res) => {
+  app.post("/v1/auth/login", authLoginRateLimiter, async (req, res) => {
     try {
       const email = String(req.body?.email || "").trim().toLowerCase();
       const password = String(req.body?.password || "");
@@ -2286,7 +2320,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/auth/refresh", authRateLimiter, async (req, res) => {
+  app.post("/v1/auth/refresh", authRefreshRateLimiter, async (req, res) => {
     try {
       const rawToken = String(req.body?.refreshToken || "").trim();
       const payload = parseRefreshToken(rawToken);
@@ -2378,7 +2412,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/auth/apple", authRateLimiter, async (req, res) => {
+  app.post("/v1/auth/apple", authLoginRateLimiter, async (req, res) => {
     try {
       const idToken = String(req.body?.idToken || "").trim();
       if (!idToken) return res.status(400).json({ message: "idToken required" });
@@ -2480,14 +2514,14 @@ async function main() {
     });
   });
 
-  app.post("/v1/auth/email/login", authRateLimiter, (req, res) => {
+  app.post("/v1/auth/email/login", authLoginRateLimiter, (req, res) => {
     return res.status(410).json({
       code: "legacy_auth_endpoint_disabled",
       message: "legacy endpoint disabled; use /v1/auth/login"
     });
   });
 
-  app.post("/v1/auth/oauth", authRateLimiter, async (req, res) => {
+  app.post("/v1/auth/oauth", authLoginRateLimiter, async (req, res) => {
     try {
       const provider = String(req.body?.provider || "").trim().toLowerCase();
       const idToken = String(req.body?.idToken || "").trim();

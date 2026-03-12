@@ -118,6 +118,29 @@ final class GuestDataRecoveryServiceTests: XCTestCase {
 
         XCTAssertEqual(store.activeLocalProfileID, initialLocalProfileID)
         XCTAssertNil(store.accountUserID)
+        XCTAssertEqual(store.reauthenticationPromptVersion, 0)
+    }
+
+    @MainActor
+    func test_forcedLogout_requestsReauthenticationPrompt() {
+        let store = UserSessionStore()
+
+        store.applyAuth(
+            BackendAuthResponse(
+                userId: "forced-logout-\(UUID().uuidString)",
+                provider: "email",
+                email: "forced@example.com",
+                accessToken: "token",
+                refreshToken: "refresh"
+            )
+        )
+        XCTAssertTrue(store.isLoggedIn)
+        XCTAssertEqual(store.reauthenticationPromptVersion, 0)
+
+        store.logoutToGuest(requireReauthenticationPrompt: true)
+
+        XCTAssertFalse(store.isLoggedIn)
+        XCTAssertEqual(store.reauthenticationPromptVersion, 1)
     }
 
     @MainActor

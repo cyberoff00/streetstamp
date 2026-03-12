@@ -210,12 +210,22 @@ struct RobotLoadout: Codable, Equatable, Hashable {
 // MARK: - Renderer
 
 struct AvatarAssetLayout {
+    private static func logicalCanvasSize(for imageSize: CGSize) -> CGSize {
+        // New add-on assets were exported as 140x160 from an original 128x128 working canvas.
+        // Keep their visual layering scale consistent with legacy parts.
+        if Int(imageSize.width.rounded()) == 140 && Int(imageSize.height.rounded()) == 160 {
+            return CGSize(width: 128, height: 128)
+        }
+        return imageSize
+    }
+
     static func imageRect(imageSize: CGSize, in containerSize: CGSize) -> CGRect {
         guard imageSize.width > 0, imageSize.height > 0, containerSize.width > 0, containerSize.height > 0 else {
             return CGRect(origin: .zero, size: containerSize)
         }
 
-        let scale = max(containerSize.width / imageSize.width, containerSize.height / imageSize.height)
+        let logicalSize = logicalCanvasSize(for: imageSize)
+        let scale = max(containerSize.width / logicalSize.width, containerSize.height / logicalSize.height)
         let scaledSize = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
         let origin = CGPoint(
             x: (containerSize.width - scaledSize.width) / 2,
@@ -301,8 +311,13 @@ struct RobotRendererView: View {
 
 
     private func accessoryAsset(itemId: String, face: RobotFace) -> String? {
-        guard let item = catalogStore.item(categoryId: "accessory", itemId: itemId) else { return nil }
-        return catalogStore.imageName(item.images, face: face)
+        if let accessory = catalogStore.item(categoryId: "accessory", itemId: itemId) {
+            return catalogStore.imageName(accessory.images, face: face)
+        }
+        if let pat = catalogStore.item(categoryId: "pat", itemId: itemId) {
+            return catalogStore.imageName(pat.images, face: face)
+        }
+        return nil
     }
 
     private func hatAsset(face: RobotFace) -> String? {

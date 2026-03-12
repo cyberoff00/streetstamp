@@ -257,6 +257,57 @@ final class CityDisplayNameResolverTests: XCTestCase {
         XCTAssertEqual(labels?[.admin], "上海")
     }
 
+    func test_resolvedStableLevelNamesPrefersStoredLabelsWhenLocaleMatches() {
+        let labels = CityPlacemarkResolver.resolvedStableLevelNamesForDisplay(
+            storedAvailableLevelNamesRaw: [
+                CityPlacemarkResolver.CardLevel.locality.rawValue: "济州市",
+                CityPlacemarkResolver.CardLevel.admin.rawValue: "济州特别自治道"
+            ],
+            storedLocaleIdentifier: "zh-Hans",
+            freshlyResolvedLevelNames: [
+                .locality: "济州市",
+                .admin: "济州道"
+            ],
+            locale: Locale(identifier: "zh-Hans")
+        )
+
+        XCTAssertEqual(labels[.locality], "济州市")
+        XCTAssertEqual(labels[.admin], "济州特别自治道")
+    }
+
+    func test_resolvedStableLevelNamesUsesFreshLabelsWhenLocaleChanged() {
+        let labels = CityPlacemarkResolver.resolvedStableLevelNamesForDisplay(
+            storedAvailableLevelNamesRaw: [
+                CityPlacemarkResolver.CardLevel.locality.rawValue: "Jeju-si",
+                CityPlacemarkResolver.CardLevel.admin.rawValue: "Jeju Special Self-Governing Province"
+            ],
+            storedLocaleIdentifier: "en_US",
+            freshlyResolvedLevelNames: [
+                .locality: "济州市",
+                .admin: "济州特别自治道"
+            ],
+            locale: Locale(identifier: "zh-Hans")
+        )
+
+        XCTAssertEqual(labels[.locality], "济州市")
+        XCTAssertEqual(labels[.admin], "济州特别自治道")
+    }
+
+    func test_resolvedStableLevelNamesUsesFreshLabelsWhenStoredMissing() {
+        let labels = CityPlacemarkResolver.resolvedStableLevelNamesForDisplay(
+            storedAvailableLevelNamesRaw: nil,
+            storedLocaleIdentifier: nil,
+            freshlyResolvedLevelNames: [
+                .locality: "济州市",
+                .admin: "济州特别自治道"
+            ],
+            locale: Locale(identifier: "zh-Hans")
+        )
+
+        XCTAssertEqual(labels[.locality], "济州市")
+        XCTAssertEqual(labels[.admin], "济州特别自治道")
+    }
+
     func test_displayCacheScopeChangesWhenPreferredLevelChanges() {
         let parentRegionKey = "resolver-test-scope-\(UUID().uuidString)"
 

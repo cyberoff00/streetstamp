@@ -554,17 +554,35 @@ struct CityDeepView: View {
                 return
             }
 
-            let displayLevels = localized?.availableLevels ?? canonical.availableLevels
-            let selectedNameRaw = displayLevels[level] ?? localized?.cityName ?? canonical.availableLevels[level] ?? canonical.cityName
+            let liveLevels = localized?.availableLevels ?? canonical.availableLevels
+            let iso = (canonical.iso2 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            let sourceKey = await MainActor.run { activeCityKey }
+            let sourceCities = await MainActor.run {
+                cache.cachedCities.filter { !($0.isTemporary ?? false) }
+            }
+            let sourceCitiesByKey = Dictionary(uniqueKeysWithValues: sourceCities.map { ($0.id, $0) })
+            let sourceCached = sourceCitiesByKey[sourceKey]
+            let sourceDisplayLevels = CityPlacemarkResolver.resolvedStableLevelNamesForDisplay(
+                storedAvailableLevelNamesRaw: sourceCached?.reservedAvailableLevelNames,
+                storedLocaleIdentifier: sourceCached?.reservedAvailableLevelNamesLocaleID,
+                freshlyResolvedLevelNames: liveLevels,
+                locale: .current
+            )
+            let selectedNameRaw = sourceDisplayLevels[level] ?? localized?.cityName ?? canonical.availableLevels[level] ?? canonical.cityName
             let selectedName = selectedNameRaw.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !selectedName.isEmpty else {
                 await MainActor.run { cityLevelLoading = false }
                 return
             }
 
-            let iso = (canonical.iso2 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
             let targetKey = "\(selectedName)|\(iso)"
-            let sourceKey = await MainActor.run { activeCityKey }
+            let targetCached = sourceCitiesByKey[targetKey]
+            let displayLevels = CityPlacemarkResolver.resolvedStableLevelNamesForDisplay(
+                storedAvailableLevelNamesRaw: targetCached?.reservedAvailableLevelNames,
+                storedLocaleIdentifier: targetCached?.reservedAvailableLevelNamesLocaleID,
+                freshlyResolvedLevelNames: liveLevels,
+                locale: .current
+            )
             let targetNameNorm = selectedName.normalizedCityNameForMatching()
             let baseLevelForDisplay: CityPlacemarkResolver.CardLevel? = await MainActor.run {
                 if let raw = activeCachedCity?.reservedLevelRaw,
@@ -581,11 +599,6 @@ struct CityDeepView: View {
                 }
                 return
             }
-
-            let sourceCities = await MainActor.run {
-                cache.cachedCities.filter { !($0.isTemporary ?? false) }
-            }
-            let sourceCitiesByKey = Dictionary(uniqueKeysWithValues: sourceCities.map { ($0.id, $0) })
 
             let candidateSourceKeys: Set<String> = {
                 guard let parentKey = canonical.parentRegionKey, !targetNameNorm.isEmpty else {
@@ -750,7 +763,13 @@ struct CityDeepView: View {
             await MainActor.run {
                 cityLevelLoading = false
                 guard let canonical else { return }
-                let labels = normalizedCityLevelLabels(localized?.availableLevels ?? canonical.availableLevels)
+                let liveLabels = localized?.availableLevels ?? canonical.availableLevels
+                let labels = CityPlacemarkResolver.resolvedStableLevelNamesForDisplay(
+                    storedAvailableLevelNamesRaw: activeCachedCity?.reservedAvailableLevelNames,
+                    storedLocaleIdentifier: activeCachedCity?.reservedAvailableLevelNamesLocaleID,
+                    freshlyResolvedLevelNames: liveLabels,
+                    locale: .current
+                )
 
                 let ordered: [CityPlacemarkResolver.CardLevel] = [.island, .locality, .subAdmin, .admin, .country]
                 let resolvedCurrent = resolveCurrentLevel(labels: labels, parentRegionKey: canonical.parentRegionKey, options: ordered)
@@ -791,32 +810,7 @@ struct CityDeepView: View {
     ) -> [CityPlacemarkResolver.CardLevel: String] {
         guard !labels.isEmpty else { return labels }
 
-        let fallbackTitle = activeCachedCity?.name ?? city.name
-        let preferredLevel = activeCachedCity?.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) }
-        let resolvedTitle = CityPlacemarkResolver.displayTitle(
-            cityKey: activeCityKey,
-            iso2: effectiveCountryISO2,
-            fallbackTitle: fallbackTitle,
-            availableLevelNames: labels,
-            parentRegionKey: cityLevelParentRegionKey ?? activeCachedCity?.reservedParentRegionKey,
-            preferredLevel: preferredLevel,
-            localizedDisplayNameByLocale: activeCachedCity?.localizedDisplayNameByLocale,
-            locale: .current
-        ).trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !resolvedTitle.isEmpty else { return labels }
-
-        let keyBase = activeCityKey.components(separatedBy: "|").first?.normalizedCityNameForMatching() ?? ""
-        guard !keyBase.isEmpty else { return labels }
-
-        var updated = labels
-        for level in [CityPlacemarkResolver.CardLevel.locality, .subAdmin, .admin] {
-            let existing = labels[level]?.normalizedCityNameForMatching() ?? ""
-            if !existing.isEmpty && existing == keyBase {
-                updated[level] = resolvedTitle
-            }
-        }
-        return updated
+        return labels
     }
 
     private func resolveCurrentLevel(

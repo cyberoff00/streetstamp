@@ -1703,6 +1703,8 @@ struct JourneyRouteDetailView: View {
                         set: { if !$0 { viewingMemory = nil } }
                     ),
                     allowsEditing: false,
+                    maxCardWidth: 300,
+                    maxCardHeight: 440,
                     onUpdated: { _ in }
                 )
                 .environmentObject(sessionStore)

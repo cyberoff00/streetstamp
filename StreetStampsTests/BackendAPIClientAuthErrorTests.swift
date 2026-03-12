@@ -95,4 +95,67 @@ final class BackendAPIClientAuthErrorTests: XCTestCase {
             XCTAssertEqual(message, "postcard quota exceeded")
         }
     }
+
+    @MainActor
+    func test_refreshFailureEntersBackoffAndAvoidsImmediateRepeatRefresh() async throws {
+        let session = UserSessionStore()
+        BackendAPIClient.shared.bindSessionStore(session)
+        session.applyAuth(
+            BackendAuthResponse(
+                userId: "user-1",
+                provider: "email",
+                email: "user-1@example.com",
+                accessToken: "expired-access-token",
+                refreshToken: "refresh-token-1"
+            )
+        )
+
+        var refreshAttempts = 0
+        BackendAPIClient.shared.installTestingTransport { request in
+            let path = request.url?.path ?? ""
+            let responseURL = try XCTUnwrap(request.url)
+            if path == "/v1/auth/refresh" {
+                refreshAttempts += 1
+                let response = HTTPURLResponse(
+                    url: responseURL,
+                    statusCode: 401,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!
+                let body = #"{"message":"refresh token invalid"}"#.data(using: .utf8)!
+                return (body, response)
+            }
+
+            let response = HTTPURLResponse(
+                url: responseURL,
+                statusCode: 401,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            let body = #"{"message":"unauthorized"}"#.data(using: .utf8)!
+            return (body, response)
+        }
+
+        do {
+            _ = try await BackendAPIClient.shared.fetchFriends(token: "expired-access-token")
+            XCTFail("Expected first protected call to throw")
+        } catch {
+            // expected
+        }
+
+        do {
+            _ = try await BackendAPIClient.shared.fetchFriends(token: "expired-access-token")
+            XCTFail("Expected second protected call to throw")
+        } catch {
+            // expected
+        }
+
+        XCTAssertFalse(session.isLoggedIn)
+        XCTAssertEqual(session.reauthenticationPromptVersion, 1)
+        XCTAssertEqual(
+            refreshAttempts,
+            1,
+            "refresh should be backoff-protected after invalid refresh token"
+        )
+    }
 }

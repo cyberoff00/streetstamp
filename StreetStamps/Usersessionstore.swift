@@ -43,6 +43,7 @@ final class UserSessionStore: ObservableObject {
     @Published private(set) var firebaseAccountState: FirebaseAccountState?
     @Published private(set) var pendingMigrationFromGuestUserID: String?
     @Published private(set) var activeLocalProfileID: String
+    @Published private(set) var reauthenticationPromptVersion: Int = 0
 
     private static let guestIDKey = "streetstamps.guest_id.v1"
     private static let activeLocalProfileIDKey = "streetstamps.active_local_profile_id.v1"
@@ -362,11 +363,14 @@ final class UserSessionStore: ObservableObject {
         persistSession()
     }
 
-    func logoutToGuest() {
+    func logoutToGuest(requireReauthenticationPrompt: Bool = false) {
         session = .guest(guestID: guestID)
         firebaseAccountState = nil
         persistSession()
         persistFirebaseAccountState()
+        if requireReauthenticationPrompt {
+            reauthenticationPromptVersion &+= 1
+        }
     }
 
     func clearPendingGuestMigrationMarker() {

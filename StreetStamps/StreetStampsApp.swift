@@ -289,6 +289,10 @@ struct StreetStampsApp: App {
                     }
                 }
             }
+            .onChange(of: sessionStore.reauthenticationPromptVersion) { _, version in
+                guard version > 0 else { return }
+                showAuthEntry = true
+            }
             .onChange(of: scenePhase) { phase in
                 // Best-effort: reduce data loss when the app is backgrounded or suspended.
                 if phase == .background || phase == .inactive {
