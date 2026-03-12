@@ -6,3 +6,5 @@
 "NSLocationWhenInUseUsageDescription" = "我们需要使用你的位置信息来记录旅程。";
 "NSLocationAlwaysAndWhenInUseUsageDescription" = "我们需要在后台持续使用你的位置信息来记录旅程。";
 "NSHealthShareUsageDescription" = "用于读取你当天的步数并在 Lifelog 中展示。";
+
+"NSHealthUpdateUsageDescription" = "用于写入健康数据以维持运动会话，保障后台轨迹记录稳定。";

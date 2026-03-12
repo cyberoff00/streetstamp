@@ -405,6 +405,8 @@ struct LifelogView: View {
     @State private var isMoodPopupVisible = false
     @State private var isStepPopupVisible = false
     @State private var isRefreshingSteps = false
+    @State private var isStepModalVisible = false
+    @State private var stepModalStepCount = 0
     @State private var hasHealthStepPermission = false
     @State private var calendarDisplayMode: CalendarDisplayMode = .day
     @State private var visibleMonthAnchor: Date = Calendar.current.startOfDay(for: Date())
@@ -421,6 +423,8 @@ struct LifelogView: View {
     @AppStorage("streetstamps.lifelog.health.steps.snapshot.day") private var legacyStepSnapshotDay = ""
     @AppStorage("streetstamps.lifelog.health.steps.snapshot.value") private var legacyStepSnapshotValue = 0
     @AppStorage("streetstamps.lifelog.steps.popup.prompted.day") private var stepPopupPromptedDay = ""
+    @AppStorage("streetstamps.lifelog.steps.popup.prompted.value") private var stepPopupPromptedValue = 0
+    @AppStorage("streetstamps.lifelog.steps.badge.prompted.day") private var stepBadgePromptedDay = ""
     @AppStorage("streetstamps.lifelog.mood.prompted.day") private var moodPromptedDay = ""
     @State private var footprintViewportCache = LifelogFootprintViewportCache()
 
@@ -551,6 +555,9 @@ struct LifelogView: View {
                 if isMoodPopupVisible {
                     moodPickerPopup
                 }
+                if isStepModalVisible {
+                    stepMilestoneModal
+                }
             }
         }
         .fullScreenCover(isPresented: $showGlobe) {
@@ -592,12 +599,15 @@ struct LifelogView: View {
             Task {
                 await refreshHealthPermissionState()
                 await requestHealthPermissionIfNeeded()
-                await captureStepSnapshotIfNeeded(for: Calendar.current.startOfDay(for: selectedDay ?? Date()))
-                if stepPopupPromptedDay != todayKey() {
-                    stepPopupPromptedDay = todayKey()
+                await captureStepSnapshotIfNeeded(for: Calendar.current.startOfDay(for: Date()), force: true)
+                if stepBadgePromptedDay != todayKey() {
+                    stepBadgePromptedDay = todayKey()
                     isStepPopupVisible = true
                 }
-                presentMoodPopupIfNeeded()
+                await presentStepModalIfNeeded()
+                if !isStepModalVisible {
+                    presentMoodPopupIfNeeded()
+                }
             }
         }
         .onDisappear {
@@ -637,13 +647,12 @@ struct LifelogView: View {
         .onChange(of: renderViewportRefreshKey) { _ in
             scheduleRenderSnapshotRefresh(debounceNanoseconds: 120_000_000)
         }
-        .onChange(of: selectedDay) { day in
+        .onChange(of: selectedDay) { _ in
             scheduleRenderSnapshotRefresh()
             guard isStepPopupVisible else { return }
-            guard let day else { return }
             Task {
                 isRefreshingSteps = true
-                await captureStepSnapshotIfNeeded(for: Calendar.current.startOfDay(for: day), force: true)
+                await captureStepSnapshotIfNeeded(for: Calendar.current.startOfDay(for: selectedDay ?? Date()), force: true)
                 isRefreshingSteps = false
             }
         }
@@ -795,10 +804,6 @@ struct LifelogView: View {
     private var shouldShowMoodQuestionMark: Bool {
         let today = Calendar.current.startOfDay(for: Date())
         return lifelogStore.mood(for: today) == nil
-    }
-
-    private var canShowStepSnapshot: Bool {
-        hasHealthStepPermission && stepSnapshotValueForSelectedDay > 0
     }
 
     private var recenterButton: some View {
@@ -1613,6 +1618,74 @@ struct LifelogView: View {
         }
     }
 
+    private var stepMilestoneModal: some View {
+        ZStack {
+            Color.black.opacity(0.36)
+                .ignoresSafeArea()
+
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Image(systemName: "shoeprints.fill")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(FigmaTheme.primary)
+                        .padding(8)
+                        .background(FigmaTheme.primary.opacity(0.12))
+                        .clipShape(Circle())
+                    Spacer()
+                    Button {
+                        dismissStepModal()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(FigmaTheme.subtext)
+                            .frame(width: 30, height: 30)
+                            .background(FigmaTheme.background)
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Text(L10n.t("lifelog_steps_modal_title"))
+                    .font(.system(size: 22, weight: .black, design: .rounded))
+                    .foregroundColor(FigmaTheme.text)
+
+                Text(formattedStepCount(stepModalStepCount))
+                    .font(.system(size: 40, weight: .black, design: .rounded))
+                    .foregroundColor(FigmaTheme.text)
+                    .contentTransition(.numericText())
+
+                Text(L10n.t("lifelog_steps_modal_subtitle"))
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(FigmaTheme.subtext)
+
+                Button(L10n.t("lifelog_steps_modal_close")) {
+                    dismissStepModal()
+                }
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(FigmaTheme.primary)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .buttonStyle(.plain)
+            }
+            .padding(20)
+            .background(FigmaTheme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(FigmaTheme.border, lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.16), radius: 20, x: 0, y: 8)
+            .padding(.horizontal, 20)
+        }
+        .transition(.opacity)
+    }
+
+    private var canShowStepSnapshot: Bool {
+        hasHealthStepPermission && stepSnapshotValue(for: selectedDay ?? Date()) > 0
+    }
+
     private var stepCompactBadge: some View {
         HStack(spacing: 5) {
             Image(systemName: "shoeprints.fill")
@@ -1637,11 +1710,12 @@ struct LifelogView: View {
 
     private var stepCompactText: String {
         if isRefreshingSteps { return "..." }
-        if canShowStepSnapshot { return "\(stepSnapshotValueForSelectedDay)" }
+        if canShowStepSnapshot { return "\(stepSnapshotValue(for: selectedDay ?? Date()))" }
         return "--"
     }
 
     private func presentMoodPopupIfNeeded() {
+        guard !isStepModalVisible else { return }
         let today = Calendar.current.startOfDay(for: Date())
         guard lifelogStore.mood(for: today) == nil else { return }
         guard moodPromptedDay != todayKey() else { return }
@@ -1664,8 +1738,7 @@ struct LifelogView: View {
         await refreshHealthPermissionState()
         await requestHealthPermissionIfNeeded()
         await refreshHealthPermissionState()
-        let targetDay = Calendar.current.startOfDay(for: selectedDay ?? Date())
-        await captureStepSnapshotIfNeeded(for: targetDay)
+        await captureStepSnapshotIfNeeded(for: Calendar.current.startOfDay(for: selectedDay ?? Date()), force: true)
         isRefreshingSteps = false
     }
 
@@ -1684,13 +1757,38 @@ struct LifelogView: View {
         }
     }
 
-    private var selectedStepDayKey: String {
-        dayKey(for: Calendar.current.startOfDay(for: selectedDay ?? Date()))
+    private func stepSnapshotValue(for day: Date) -> Int {
+        let cache = LifelogStepSnapshotCache(rawValue: stepSnapshotByDayRaw)
+        let key = dayKey(for: Calendar.current.startOfDay(for: day))
+        return max(0, cache.value(forDayKey: key) ?? 0)
     }
 
-    private var stepSnapshotValueForSelectedDay: Int {
-        let cache = LifelogStepSnapshotCache(rawValue: stepSnapshotByDayRaw)
-        return max(0, cache.value(forDayKey: selectedStepDayKey) ?? 0)
+    private func presentStepModalIfNeeded() async {
+        let today = Calendar.current.startOfDay(for: Date())
+        let todayKey = dayKey(for: today)
+        let todaySteps = stepSnapshotValue(for: today)
+        let decision = LifelogStepPopupTriggerPolicy.decide(
+            todayKey: todayKey,
+            todaySteps: todaySteps,
+            lastPromptedDay: stepPopupPromptedDay,
+            lastPromptedSteps: stepPopupPromptedValue
+        )
+        guard decision.shouldPresent else { return }
+        stepPopupPromptedDay = decision.nextPromptedDay
+        stepPopupPromptedValue = decision.nextPromptedSteps
+        stepModalStepCount = todaySteps
+        isStepModalVisible = true
+    }
+
+    private func dismissStepModal() {
+        isStepModalVisible = false
+        presentMoodPopupIfNeeded()
+    }
+
+    private func formattedStepCount(_ value: Int) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        return formatter.string(from: NSNumber(value: max(0, value))) ?? "\(max(0, value))"
     }
 
     private func migrateLegacyStepSnapshotIfNeeded() {
@@ -1805,6 +1903,56 @@ struct LifelogStepSnapshotCache {
 
     mutating func setValue(_ value: Int, forDayKey key: String) {
         byDay[key] = max(0, value)
+    }
+}
+
+struct LifelogStepPopupTriggerPolicy {
+    static let deltaThreshold = 1_000
+
+    struct Decision {
+        let shouldPresent: Bool
+        let nextPromptedDay: String
+        let nextPromptedSteps: Int
+    }
+
+    static func decide(
+        todayKey: String,
+        todaySteps: Int,
+        lastPromptedDay: String,
+        lastPromptedSteps: Int
+    ) -> Decision {
+        let normalizedSteps = max(0, todaySteps)
+        let normalizedPrompted = max(0, lastPromptedSteps)
+
+        guard normalizedSteps > 0 else {
+            return Decision(
+                shouldPresent: false,
+                nextPromptedDay: lastPromptedDay,
+                nextPromptedSteps: normalizedPrompted
+            )
+        }
+
+        if lastPromptedDay != todayKey {
+            return Decision(
+                shouldPresent: true,
+                nextPromptedDay: todayKey,
+                nextPromptedSteps: normalizedSteps
+            )
+        }
+
+        if normalizedSteps - normalizedPrompted >= deltaThreshold {
+            return Decision(
+                shouldPresent: true,
+                nextPromptedDay: todayKey,
+                nextPromptedSteps: normalizedSteps
+            )
+        }
+
+        return Decision(
+            shouldPresent: false,
+            nextPromptedDay: todayKey,
+            nextPromptedSteps: normalizedPrompted
+        )
     }
 }
 

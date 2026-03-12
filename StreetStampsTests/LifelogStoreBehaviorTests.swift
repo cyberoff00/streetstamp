@@ -438,7 +438,7 @@ final class LifelogStoreBehaviorTests: XCTestCase {
                 verticalAccuracy: 0,
                 course: 0,
                 speed: 0.1,
-                timestamp: base.addingTimeInterval(190)
+                timestamp: base.addingTimeInterval(250)
             )
         )
         LocationHub.shared.locationStream.send(
@@ -449,7 +449,7 @@ final class LifelogStoreBehaviorTests: XCTestCase {
                 verticalAccuracy: 0,
                 course: 0,
                 speed: 0.1,
-                timestamp: base.addingTimeInterval(240)
+                timestamp: base.addingTimeInterval(300)
             )
         )
 
@@ -472,6 +472,92 @@ final class LifelogStoreBehaviorTests: XCTestCase {
         XCTAssertTrue(resumed)
     }
 
+    @MainActor
+    func test_bind_acceptsMovingModerateAccuracyPassiveLocation() async throws {
+        let userID = "lifelog-moving-moderate-accuracy-\(UUID().uuidString)"
+        let paths = StoragePath(userID: userID)
+        try? FileManager.default.removeItem(at: paths.userRoot)
+        try paths.ensureBaseDirectoriesExist()
+
+        let base = Date(timeIntervalSince1970: 1_700_010_000)
+        let store = LifelogStore(paths: paths, trackTileRevisionDebounce: 0)
+        store.load()
+        let loaded = await waitUntil(timeout: 1.0) { store.hasLoaded }
+        XCTAssertTrue(loaded)
+
+        store.bind(to: LocationHub.shared)
+
+        LocationHub.shared.locationStream.send(
+            CLLocation(
+                coordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
+                altitude: 0,
+                horizontalAccuracy: 12,
+                verticalAccuracy: 0,
+                course: 0,
+                speed: 0.5,
+                timestamp: base
+            )
+        )
+
+        LocationHub.shared.locationStream.send(
+            CLLocation(
+                coordinate: CLLocationCoordinate2D(latitude: 37.7755, longitude: -122.4194),
+                altitude: 0,
+                horizontalAccuracy: 90,
+                verticalAccuracy: 0,
+                course: 0,
+                speed: 1.6,
+                timestamp: base.addingTimeInterval(30)
+            )
+        )
+
+        let accepted = await waitUntil(timeout: 1.0) { store.coordinates.count == 2 }
+        XCTAssertTrue(accepted, "Expected moving moderate-accuracy passive point to be accepted.")
+    }
+
+    @MainActor
+    func test_bind_acceptsLongGapFallbackWhenAccuracyIsWeak() async throws {
+        let userID = "lifelog-long-gap-fallback-\(UUID().uuidString)"
+        let paths = StoragePath(userID: userID)
+        try? FileManager.default.removeItem(at: paths.userRoot)
+        try paths.ensureBaseDirectoriesExist()
+
+        let base = Date(timeIntervalSince1970: 1_700_020_000)
+        let store = LifelogStore(paths: paths, trackTileRevisionDebounce: 0)
+        store.load()
+        let loaded = await waitUntil(timeout: 1.0) { store.hasLoaded }
+        XCTAssertTrue(loaded)
+
+        store.bind(to: LocationHub.shared)
+
+        LocationHub.shared.locationStream.send(
+            CLLocation(
+                coordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
+                altitude: 0,
+                horizontalAccuracy: 10,
+                verticalAccuracy: 0,
+                course: 0,
+                speed: 0.4,
+                timestamp: base
+            )
+        )
+
+        LocationHub.shared.locationStream.send(
+            CLLocation(
+                coordinate: CLLocationCoordinate2D(latitude: 37.7762, longitude: -122.4194),
+                altitude: 0,
+                horizontalAccuracy: 110,
+                verticalAccuracy: 0,
+                course: 0,
+                speed: 0.7,
+                timestamp: base.addingTimeInterval(100)
+            )
+        )
+
+        let accepted = await waitUntil(timeout: 1.0) { store.coordinates.count == 2 }
+        XCTAssertTrue(accepted, "Expected long-gap fallback to accept weak-accuracy moving point.")
+    }
+
     func test_stepSnapshotCache_readsAndWritesPerDayValues() {
         var cache = LifelogStepSnapshotCache(rawValue: "")
         XCTAssertNil(cache.value(forDayKey: "2026-03-03"))
@@ -485,6 +571,46 @@ final class LifelogStoreBehaviorTests: XCTestCase {
         let roundTrip = LifelogStepSnapshotCache(rawValue: cache.rawValue)
         XCTAssertEqual(roundTrip.value(forDayKey: "2026-03-03"), 1234)
         XCTAssertEqual(roundTrip.value(forDayKey: "2026-03-04"), 2222)
+    }
+
+    func test_stepPopupPolicy_firstPromptOfDayRequiresPositiveSteps() {
+        let zeroSteps = LifelogStepPopupTriggerPolicy.decide(
+            todayKey: "2026-03-12",
+            todaySteps: 0,
+            lastPromptedDay: "2026-03-11",
+            lastPromptedSteps: 1800
+        )
+        XCTAssertFalse(zeroSteps.shouldPresent)
+
+        let positiveSteps = LifelogStepPopupTriggerPolicy.decide(
+            todayKey: "2026-03-12",
+            todaySteps: 1,
+            lastPromptedDay: "2026-03-11",
+            lastPromptedSteps: 1800
+        )
+        XCTAssertTrue(positiveSteps.shouldPresent)
+        XCTAssertEqual(positiveSteps.nextPromptedDay, "2026-03-12")
+        XCTAssertEqual(positiveSteps.nextPromptedSteps, 1)
+    }
+
+    func test_stepPopupPolicy_sameDayPromptRequiresAtLeast1000NewSteps() {
+        let noPrompt = LifelogStepPopupTriggerPolicy.decide(
+            todayKey: "2026-03-12",
+            todaySteps: 2499,
+            lastPromptedDay: "2026-03-12",
+            lastPromptedSteps: 1500
+        )
+        XCTAssertFalse(noPrompt.shouldPresent)
+        XCTAssertEqual(noPrompt.nextPromptedSteps, 1500)
+
+        let shouldPrompt = LifelogStepPopupTriggerPolicy.decide(
+            todayKey: "2026-03-12",
+            todaySteps: 2500,
+            lastPromptedDay: "2026-03-12",
+            lastPromptedSteps: 1500
+        )
+        XCTAssertTrue(shouldPrompt.shouldPresent)
+        XCTAssertEqual(shouldPrompt.nextPromptedSteps, 2500)
     }
 
     func test_countryAttributionStore_roundTripsCellPointAndRunSnapshots() throws {

@@ -54,7 +54,7 @@ struct TrackingLiveActivity: Widget {
                                 Text(formatDistance(context.state.distanceMeters))
                                     .font(.system(size: 18, weight: .black, design: .rounded))
                                     .foregroundColor(.white)
-                                Text("mi")
+                                Text(distanceUnitLabel())
                                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                                     .foregroundColor(WidgetTheme.islandMuted)
                             }
@@ -99,7 +99,7 @@ private struct UnifiedLockScreenView: View {
                         .font(.system(size: 30, weight: .black, design: .rounded))
                         .foregroundColor(WidgetTheme.ink)
 
-                    Text("mi")
+                    Text(distanceUnitLabel())
                         .font(.system(size: 16, weight: .bold, design: .rounded))
                         .foregroundColor(WidgetTheme.unitText)
                 }
@@ -172,8 +172,8 @@ enum WidgetTheme {
 }
 
 private func formatDistance(_ meters: Double) -> String {
-    let miles = meters / 1609.344
-    return String(format: "%.2f", miles)
+    let kilometers = meters / 1000
+    return String(format: "%.2f", kilometers)
 }
 
 private func formatDuration(_ seconds: Int) -> String {
@@ -186,4 +186,8 @@ private func formatDuration(_ seconds: Int) -> String {
     } else {
         return String(format: "%d:%02d", minutes, secs)
     }
+}
+
+private func distanceUnitLabel() -> String {
+    NSLocalizedString("lockscreen_distance_unit_km_short", comment: "")
 }

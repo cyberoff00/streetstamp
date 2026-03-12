@@ -251,6 +251,7 @@ struct SettingsView: View {
     @AppStorage(AppSettings.longStationaryReminderEnabledKey) private var longStationaryReminderEnabled = true
     @AppStorage(AppSettings.liveActivityEnabledKey) private var liveActivityEnabled = true
     @AppStorage(AppSettings.lifelogBackgroundModeKey) private var lifelogBackgroundModeRaw = LifelogBackgroundMode.defaultMode.rawValue
+    @AppStorage(AppSettings.iCloudSyncEnabledKey) private var iCloudSyncEnabled = true
 
     @State private var showComingSoon = false
     @State private var comingSoonTitle = ""
@@ -276,6 +277,8 @@ struct SettingsView: View {
     @State private var showAuthSheet = false
     @State private var authSheetMode: AuthEntryMode = .signIn
     @State private var showBackgroundModeInfo = false
+    @State private var iCloudAvailable = false
+    @State private var isRestoringFromICloud = false
 
     private var appearance: MapAppearanceStyle {
         get { MapAppearanceStyle(rawValue: mapAppearanceRaw) ?? .dark }
@@ -292,6 +295,17 @@ struct SettingsView: View {
     private var appVersionText: String {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
         return "V\(version)"
+    }
+
+    private var iCloudSyncSubtitle: String {
+        guard iCloudAvailable else { return L10n.t("settings_icloud_sync_unavailable_desc") }
+        let userID = sessionStore.activeLocalProfileID
+        let statusKey = ICloudSyncService.statusKey(for: userID)
+        let statusAtKey = ICloudSyncService.statusAtKey(for: userID)
+        let status = UserDefaults.standard.string(forKey: statusKey)
+        let statusAt = UserDefaults.standard.object(forKey: statusAtKey) as? Date
+        let statusLine = iCloudStatusLine(status: status, at: statusAt)
+        return "\(L10n.t("settings_icloud_sync_desc"))\n\(statusLine)"
     }
 
     private var lifelogBackgroundMode: LifelogBackgroundMode {
@@ -348,6 +362,10 @@ struct SettingsView: View {
         }
         .task {
             await refreshAccountIfPossible()
+            await refreshICloudAvailability()
+        }
+        .onChange(of: iCloudSyncEnabled) { _, enabled in
+            Task { await handleICloudSyncToggleChanged(enabled: enabled) }
         }
         .sheet(isPresented: $showDisplayNameEditor) {
             displayNameEditorSheet
@@ -487,7 +505,11 @@ struct SettingsView: View {
         case .notifications:
             notificationsView
         case .debugTools:
+            #if DEBUG
             SettingsDebugToolsEntryView()
+            #else
+            EmptyView()
+            #endif
         }
     }
 
@@ -626,6 +648,25 @@ struct SettingsView: View {
                     settingsRowLabel(title: L10n.t("settings_private_transfer_row"), icon: "qrcode.viewfinder", iconColor: FigmaTheme.primary)
                 }
                 .buttonStyle(.plain)
+
+                toggleRowCard(
+                    presentation: SettingsRowPresentation(
+                        title: L10n.t("settings_icloud_sync_title"),
+                        subtitle: iCloudSyncSubtitle,
+                        icon: "icloud",
+                        iconColor: FigmaTheme.primary,
+                        textStyle: .supporting
+                    ),
+                    isOn: $iCloudSyncEnabled
+                )
+
+                settingsRow(
+                    title: L10n.t("settings_restore_from_icloud"),
+                    icon: "icloud.and.arrow.down",
+                    iconColor: FigmaTheme.secondary
+                ) {
+                    Task { await restoreFromICloudManually() }
+                }
 
                 settingsRow(title: L10n.t("settings_subscription_row"), icon: "creditcard", iconColor: FigmaTheme.primary) {
                     showPlaceholder("Subscription")
@@ -1224,6 +1265,78 @@ struct SettingsView: View {
         showComingSoon = true
     }
 
+    private func refreshICloudAvailability() async {
+        iCloudAvailable = await ICloudSyncService.shared.isAccountAvailable()
+    }
+
+    private func handleICloudSyncToggleChanged(enabled: Bool) async {
+        if enabled {
+            journeyStore.flushPersist()
+            lifelogStore.flushPersistNow()
+            let paths = StoragePath(userID: sessionStore.activeLocalProfileID)
+            await ICloudSyncService.shared.uploadSnapshotIfEnabled(
+                userID: sessionStore.activeLocalProfileID,
+                paths: paths,
+                reason: "settings_toggle_on"
+            )
+            accountMessage = L10n.t("settings_icloud_sync_enabled_hint")
+            showAccountMessage = true
+        } else {
+            accountMessage = L10n.t("settings_icloud_sync_disabled_hint")
+            showAccountMessage = true
+        }
+    }
+
+    private func restoreFromICloudManually() async {
+        guard !isRestoringFromICloud else { return }
+        isRestoringFromICloud = true
+        defer { isRestoringFromICloud = false }
+
+        let userID = sessionStore.activeLocalProfileID
+        let paths = StoragePath(userID: userID)
+        let restored = await ICloudSyncService.shared.restoreLatestIfNeeded(
+            userID: userID,
+            paths: paths,
+            force: true
+        )
+
+        if restored {
+            journeyStore.load()
+            cityCache.rebuildFromJourneyStore()
+            lifelogStore.load()
+            accountMessage = L10n.t("settings_restore_from_icloud_success")
+        } else {
+            accountMessage = L10n.t("settings_restore_from_icloud_no_backup")
+        }
+        showAccountMessage = true
+    }
+
+    private func iCloudStatusLine(status: String?, at date: Date?) -> String {
+        let atText: String
+        if let date {
+            atText = RelativeDateTimeFormatter().localizedString(for: date, relativeTo: Date())
+        } else {
+            atText = L10n.t("settings_icloud_status_unknown_time")
+        }
+
+        switch status {
+        case "upload_success":
+            return String(format: L10n.t("settings_icloud_status_upload_success_format"), atText)
+        case "upload_failed":
+            return String(format: L10n.t("settings_icloud_status_upload_failed_format"), atText)
+        case "restore_success":
+            return String(format: L10n.t("settings_icloud_status_restore_success_format"), atText)
+        case "restore_failed":
+            return String(format: L10n.t("settings_icloud_status_restore_failed_format"), atText)
+        case "no_backup":
+            return L10n.t("settings_icloud_status_no_backup")
+        case "already_latest":
+            return L10n.t("settings_icloud_status_already_latest")
+        default:
+            return L10n.t("settings_icloud_status_idle")
+        }
+    }
+
     private func refreshAccountIfPossible() async {
         guard let token = sessionStore.currentAccessToken, !token.isEmpty else {
             displayNameDraft = UserDefaults.standard.string(forKey: "streetstamps.profile.displayName") ?? "Explorer"
@@ -1501,6 +1614,7 @@ private struct SettingsDetailPage<Content: View>: View {
     }
 }
 
+#if DEBUG
 private struct SettingsDebugToolsEntryView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var lifelogStore: LifelogStore
@@ -1531,6 +1645,7 @@ private struct SettingsDebugToolsEntryView: View {
             .toolbar(.hidden, for: .navigationBar)
     }
 }
+#endif
 
 private struct GPXImportPoint: Identifiable {
     let id = UUID()

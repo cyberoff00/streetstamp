@@ -39,6 +39,26 @@ struct StreetStampsApp: App {
         }
     }
 
+    private func restoreFromICloudIfNeeded(userID: String) async {
+        let paths = StoragePath(userID: userID)
+        let restored = await ICloudSyncService.shared.restoreLatestIfNeeded(
+            userID: userID,
+            paths: paths
+        )
+        if restored {
+            print("☁️ Restored cloud snapshot for user:", userID)
+        }
+    }
+
+    private func uploadSnapshotToICloud(userID: String, reason: String) async {
+        let paths = StoragePath(userID: userID)
+        await ICloudSyncService.shared.uploadSnapshotIfEnabled(
+            userID: userID,
+            paths: paths,
+            reason: reason
+        )
+    }
+
     @MainActor
     private func maybeShowFirstAuthPromptIfNeeded() {
         let firstPromptKey = "streetstamps.auth_entry_shown.v1"
@@ -150,6 +170,7 @@ struct StreetStampsApp: App {
                 await LifelogMigrationService.migrateLegacyLifelogIfNeededAsync(
                     paths: StoragePath(userID: startupUserID)
                 )
+                await restoreFromICloudIfNeeded(userID: startupUserID)
                 journeyStore.load()
                 let journeysSnapshot = journeyStore.journeys
                 let cachedCitiesSnapshot = cityCache.cachedCities
@@ -217,6 +238,7 @@ struct StreetStampsApp: App {
                     await sessionStore.bootstrapFileSystemAsync()
                     await LifelogMigrationService.migrateLegacyLifelogIfNeededAsync(paths: paths)
                     guard sessionStore.activeLocalProfileID == uid else { return }
+                    await restoreFromICloudIfNeeded(userID: uid)
 
                     journeyStore.rebind(paths: paths)
                     journeyStore.load()
@@ -272,6 +294,12 @@ struct StreetStampsApp: App {
                 if phase == .background || phase == .inactive {
                     journeyStore.flushPersist()
                     lifelogStore.flushPersistNow()
+                    Task {
+                        await uploadSnapshotToICloud(
+                            userID: sessionStore.activeLocalProfileID,
+                            reason: "scene_\(phase == .background ? "background" : "inactive")"
+                        )
+                    }
                 }
                 if phase == .active {
                     ensurePassiveLocationTrackingIfNeeded()

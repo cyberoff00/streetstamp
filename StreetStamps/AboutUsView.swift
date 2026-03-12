@@ -113,15 +113,16 @@ struct AboutUsView: View {
                     bodyParagraphGroup(section.paragraphs)
                 } else if section.title == "话外" {
                     asideSection
+                        .padding(.top, 48)
                 }
             }
         }
     }
 
     private var asideSection: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 16) {
             Text("话外")
-                .font(.system(size: 22, weight: .semibold))
+                .font(.system(size: 16, weight: .medium))
                 .foregroundColor(UITheme.softBlack)
 
             ForEach(Array(AboutUsContent.sections.dropFirst(2).enumerated()), id: \.offset) { _, section in
@@ -130,7 +131,7 @@ struct AboutUsView: View {
                         Text(section.title)
                             .font(.system(size: 16, weight: .regular))
                             .foregroundColor(Color(red: 0.26, green: 0.30, blue: 0.35))
-                            .padding(.top, section.title == "旅行者的需求" ? 10 : 0)
+                            .padding(.top, section.title == "旅行者的需求" ? 6 : 0)
                     }
 
                     bodyParagraphGroup(section.paragraphs)

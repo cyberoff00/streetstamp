@@ -24,40 +24,24 @@ struct PostcardComposerView: View {
     @State private var sidebarHideToken = "\(PostcardSidebarVisibilityScope.composer.token)-\(UUID().uuidString)"
 
     private var cityOptions: [(id: String, name: String)] {
-        var ordered: [(String, String)] = []
-
-        if let current = currentCityCandidate, !current.id.isEmpty {
-            ordered.append(current)
-        }
-
-        for city in cityCache.cachedCities {
-            let id = city.id.trimmingCharacters(in: .whitespacesAndNewlines)
-            let name = resolvedLocalizedCityName(for: city).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !id.isEmpty, !name.isEmpty else { continue }
-            if !ordered.contains(where: { $0.0 == id }) {
-                ordered.append((id, name))
-            }
-        }
-
-        return ordered
+        PostcardCityOptionsPresentation.buildOptions(
+            cachedCities: cityCache.cachedCities,
+            journeyCandidates: currentCityCandidates,
+            localizedCityNamesByID: localizedCityNamesByID
+        )
     }
 
-    private var currentCityCandidate: (id: String, name: String)? {
+    private var currentCityCandidates: [JourneyRoute] {
+        var candidates: [JourneyRoute] = []
         if let ongoing = journeyStore.latestOngoing {
-            let id = ongoing.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
-            let name = resolvedLocalizedCityName(for: ongoing).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !id.isEmpty, !name.isEmpty {
-                return (id, name)
-            }
+            candidates.append(ongoing)
         }
         if let first = journeyStore.journeys.first {
-            let id = first.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
-            let name = resolvedLocalizedCityName(for: first).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !id.isEmpty, !name.isEmpty {
-                return (id, name)
+            if !candidates.contains(where: { $0.id == first.id }) {
+                candidates.append(first)
             }
         }
-        return nil
+        return candidates
     }
 
     private func localizedCityName(for city: CachedCity) -> String {
@@ -122,7 +106,6 @@ struct PostcardComposerView: View {
         for city in cityCache.cachedCities where !(city.isTemporary ?? false) {
             let key = city.id.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !key.isEmpty else { continue }
-            if localizedCityNamesByID[key] != nil { continue }
 
             let fallback = localizedCityName(for: city).trimmingCharacters(in: .whitespacesAndNewlines)
             if !fallback.isEmpty {
@@ -311,8 +294,22 @@ struct PostcardComposerView: View {
                 selectedCityName = first.name
             }
         }
-        .task(id: cityCache.cachedCities.map(\.id).joined(separator: ",")) {
+        .task(id: cityCache.cachedCities.map { city in
+            let localizedCount = city.localizedDisplayNameByLocale?.count ?? 0
+            let levelCount = city.reservedAvailableLevelNames?.count ?? 0
+            return "\(city.id)|\(city.name)|\(city.reservedLevelRaw ?? "")|\(city.reservedParentRegionKey ?? "")|\(city.reservedAvailableLevelNamesLocaleID ?? "")|\(localizedCount)|\(levelCount)"
+        }.joined(separator: ";")) {
             await refreshLocalizedCityNames()
+            guard let first = cityOptions.first else {
+                selectedCityID = ""
+                selectedCityName = ""
+                return
+            }
+            if selectedCityID.isEmpty || !cityOptions.contains(where: { $0.id == selectedCityID }) {
+                selectedCityID = first.id
+                selectedCityName = first.name
+                return
+            }
             if let selected = cityOptions.first(where: { $0.id == selectedCityID }) {
                 selectedCityName = selected.name
             }

@@ -47,6 +47,8 @@
 	<string>我们需要您的位置来持续追踪您的旅程</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>用于读取你当日步数并在 Lifelog 中展示每日记录。</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>用于写入健康数据以维持运动会话，保障后台轨迹记录稳定。</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

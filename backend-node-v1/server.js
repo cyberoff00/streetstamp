@@ -71,6 +71,7 @@ const allowedOrigins = CORS_ALLOWED_ORIGINS
   .split(",")
   .map((value) => value.trim())
   .filter(Boolean);
+const NODE_ENV = String(process.env.NODE_ENV || "").trim().toLowerCase();
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -211,6 +212,27 @@ function firebaseAuthConfigError() {
   }
   if (!FIREBASE_LEGACY_APP_USER_ID) {
     return "firebase auth enabled but FIREBASE_LEGACY_APP_USER_ID is missing";
+  }
+  return "";
+}
+
+function weakJWTSecretConfigured() {
+  if (!JWT_SECRET) return true;
+  const normalized = JWT_SECRET.trim().toLowerCase();
+  if (normalized === "change-me-in-production") return true;
+  if (normalized === "change-me") return true;
+  if (normalized === "replace-with-a-long-random-secret") return true;
+  if (JWT_SECRET.length < 32) return true;
+  return false;
+}
+
+function productionConfigError() {
+  if (NODE_ENV !== "production") return "";
+  if (weakJWTSecretConfigured()) {
+    return "weak JWT_SECRET for production; set a high-entropy secret (>=32 chars)";
+  }
+  if (!corsConfigured()) {
+    return "CORS_ALLOWED_ORIGINS must be configured in production";
   }
   return "";
 }
@@ -1889,6 +1911,10 @@ function r2PublicURL(objectKey) {
 }
 
 async function main() {
+  const prodConfigError = productionConfigError();
+  if (prodConfigError) {
+    throw new Error(prodConfigError);
+  }
   const firebaseConfigError = firebaseAuthConfigError();
   if (firebaseConfigError) {
     throw new Error(firebaseConfigError);
@@ -2448,70 +2474,17 @@ async function main() {
   });
 
   app.post("/v1/auth/email/register", authRateLimiter, async (req, res) => {
-    try {
-      const email = String(req.body?.email || "").trim().toLowerCase();
-      const password = String(req.body?.password || "");
-      if (!email.includes("@") || password.length < 8) return res.status(400).json({ message: "invalid email or password" });
-      if (db.emailIndex[email]) return res.status(409).json({ message: "email already exists" });
-
-      const uid = `u_${randHex(12)}`;
-      const invite = genInviteCode();
-      const user = {
-        id: uid,
-        provider: "email",
-        email,
-        passwordHash: hashPassword(password),
-        inviteCode: invite,
-        handle: null,
-        handleChangeUsed: false,
-        profileVisibility: visibilityFriendsOnly,
-        displayName: "Explorer",
-        bio: "Travel Enthusiastic",
-        loadout: defaultLoadout(),
-        journeys: [],
-        cityCards: [],
-        friendIDs: [],
-        notifications: [],
-        sentPostcards: [],
-        receivedPostcards: [],
-        createdAt: nowUnix()
-      };
-      db.users[uid] = user;
-      setUserHandle(uid, null, { strict: false });
-      db.emailIndex[email] = uid;
-      db.inviteIndex[invite] = uid;
-      const identityID = `aid_${randHex(12)}`;
-      db.authIdentities[identityID] = {
-        id: identityID,
-        userID: uid,
-        provider: "email_password",
-        providerSubject: email,
-        email,
-        emailVerified: false,
-        passwordHash: user.passwordHash,
-        createdAt: nowUnix(),
-        updatedAt: nowUnix()
-      };
-      await saveDB();
-
-      return res.status(200).json({ userId: uid, provider: "email", email, accessToken: makeAccessToken(uid, "email"), refreshToken: makeRefreshToken(uid, "email") });
-    } catch (e) {
-      return res.status(500).json({ message: "internal error" });
-    }
+    return res.status(410).json({
+      code: "legacy_auth_endpoint_disabled",
+      message: "legacy endpoint disabled; use /v1/auth/register"
+    });
   });
 
   app.post("/v1/auth/email/login", authRateLimiter, (req, res) => {
-    try {
-      const email = String(req.body?.email || "").trim().toLowerCase();
-      const password = String(req.body?.password || "");
-      const uid = db.emailIndex[email];
-      if (!uid) return res.status(404).json({ message: "account not found" });
-      const u = db.users[uid];
-      if (!u || u.passwordHash !== hashPassword(password)) return res.status(401).json({ message: "wrong email or password" });
-      return res.status(200).json({ userId: uid, provider: u.provider, email: u.email || null, accessToken: makeAccessToken(uid, u.provider), refreshToken: makeRefreshToken(uid, u.provider) });
-    } catch {
-      return res.status(500).json({ message: "internal error" });
-    }
+    return res.status(410).json({
+      code: "legacy_auth_endpoint_disabled",
+      message: "legacy endpoint disabled; use /v1/auth/login"
+    });
   });
 
   app.post("/v1/auth/oauth", authRateLimiter, async (req, res) => {
@@ -2601,27 +2574,6 @@ async function main() {
         return res.status(401).json({ message: "invalid oauth token" });
       }
       return res.status(500).json({ message: "internal error" });
-    }
-  });
-
-  app.post("/v1/auth/refresh", (req, res) => {
-    try {
-      const payload = parseRefreshToken(req.body?.refreshToken);
-      const uid = String(payload?.uid || "").trim();
-      if (!uid) return res.status(401).json({ message: "unauthorized" });
-
-      const u = db.users[uid];
-      if (!u) return res.status(401).json({ message: "unauthorized" });
-
-      return res.status(200).json({
-        userId: uid,
-        provider: u.provider,
-        email: u.email || null,
-        accessToken: makeAccessToken(uid, u.provider),
-        refreshToken: makeRefreshToken(uid, u.provider)
-      });
-    } catch {
-      return res.status(401).json({ message: "unauthorized" });
     }
   });
 

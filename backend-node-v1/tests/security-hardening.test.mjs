@@ -164,3 +164,63 @@ test("oversized json bodies return 413", async (t) => {
   assert.equal(resp.status, 413);
   assert.equal(data.message, "payload too large");
 });
+
+test("legacy email auth endpoints are disabled", async (t) => {
+  const { port } = await startServer(t, {});
+
+  const registerResp = await fetch(`http://127.0.0.1:${port}/v1/auth/email/register`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "legacy@example.com", password: "Password1!" })
+  });
+  assert.equal(registerResp.status, 410);
+  const registerData = await registerResp.json();
+  assert.equal(registerData.code, "legacy_auth_endpoint_disabled");
+
+  const loginResp = await fetch(`http://127.0.0.1:${port}/v1/auth/email/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "legacy@example.com", password: "Password1!" })
+  });
+  assert.equal(loginResp.status, 410);
+  const loginData = await loginResp.json();
+  assert.equal(loginData.code, "legacy_auth_endpoint_disabled");
+});
+
+test("production rejects weak jwt secret defaults at startup", async () => {
+  const port = nextPort;
+  nextPort += 1;
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "security-hardening-jwt-"));
+  const dataFile = path.join(tmp, "data.json");
+  const mediaDir = path.join(tmp, "media");
+  await fs.writeFile(dataFile, JSON.stringify(emptyState(), null, 2), "utf8");
+  await fs.mkdir(mediaDir, { recursive: true });
+
+  const child = spawn("node", ["server.js"], {
+    cwd: SERVER_DIR,
+    env: {
+      ...process.env,
+      NODE_ENV: "production",
+      PORT: String(port),
+      JWT_SECRET: "change-me-in-production",
+      DATA_FILE: dataFile,
+      MEDIA_DIR: mediaDir,
+      DATABASE_URL: ""
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+
+  let logs = "";
+  child.stdout?.on("data", (chunk) => {
+    logs += String(chunk);
+  });
+  child.stderr?.on("data", (chunk) => {
+    logs += String(chunk);
+  });
+
+  const exitCode = await new Promise((resolve) => child.once("close", resolve));
+  await fs.rm(tmp, { recursive: true, force: true });
+
+  assert.notEqual(exitCode, 0);
+  assert.match(logs, /weak jwt_secret/i);
+});

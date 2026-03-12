@@ -7,6 +7,7 @@ enum AppSettings {
     static let avatarHeadlightEnabledKey = "streetstamps.avatar.headlight.enabled"
     static let liveActivityEnabledKey = "streetstamps.live_activity.enabled"
     static let lifelogBackgroundModeKey = "streetstamps.lifelog.background.mode"
+    static let iCloudSyncEnabledKey = "streetstamps.icloud.sync.enabled"
 
     static var isVoiceBroadcastEnabled: Bool {
         let defaults = UserDefaults.standard
@@ -52,5 +53,13 @@ enum AppSettings {
             return .highPrecision
         }
         return mode
+    }
+
+    static var isICloudSyncEnabled: Bool {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: iCloudSyncEnabledKey) == nil {
+            return true
+        }
+        return defaults.bool(forKey: iCloudSyncEnabledKey)
     }
 }

@@ -102,9 +102,13 @@ final class LifelogStore: ObservableObject {
 
     // Keep passive lifelog dense enough for continuous fog-of-world coverage.
     private let minDistanceMeters: CLLocationDistance = 10
-    private let maxAcceptedHorizontalAccuracy: CLLocationAccuracy = 65
-    private let stationaryEnterWindow: TimeInterval = 180
-    private let stationaryClusterRadiusMeters: CLLocationDistance = 18
+    private let maxAcceptedHorizontalAccuracyStationary: CLLocationAccuracy = 65
+    private let maxAcceptedHorizontalAccuracyMoving: CLLocationAccuracy = 95
+    private let longGapFallbackInterval: TimeInterval = 90
+    private let longGapFallbackDistanceMeters: CLLocationDistance = 120
+    private let longGapFallbackMaxAccuracy: CLLocationAccuracy = 120
+    private let stationaryEnterWindow: TimeInterval = 240
+    private let stationaryClusterRadiusMeters: CLLocationDistance = 15
     private let stationaryExitDistanceMeters: CLLocationDistance = 30
     private let stationaryExitSpeedMetersPerSecond: CLLocationSpeed = 1.2
 
@@ -552,8 +556,8 @@ final class LifelogStore: ObservableObject {
         // Journey in-progress owns point storage; Lifelog only stores passive points.
         if TrackingService.shared.isTracking { return }
         guard loc.horizontalAccuracy >= 0 else { return }
-        guard loc.horizontalAccuracy <= maxAcceptedHorizontalAccuracy else { return }
         guard shouldAcceptPassiveLocation(loc) else { return }
+        guard passesPassiveAccuracyGate(loc) || shouldAcceptLongGapFallback(loc) else { return }
 
         if let last = lastAccepted {
             let moved = loc.distance(from: last)
@@ -646,6 +650,25 @@ final class LifelogStore: ObservableObject {
             }
             return false
         }
+    }
+
+    private func passesPassiveAccuracyGate(_ loc: CLLocation) -> Bool {
+        let limit: CLLocationAccuracy = (passiveMotionState == .moving)
+            ? maxAcceptedHorizontalAccuracyMoving
+            : maxAcceptedHorizontalAccuracyStationary
+        return loc.horizontalAccuracy <= limit
+    }
+
+    private func shouldAcceptLongGapFallback(_ loc: CLLocation) -> Bool {
+        guard passiveMotionState == .moving else { return false }
+        guard loc.horizontalAccuracy <= longGapFallbackMaxAccuracy else { return false }
+        guard let lastAccepted else { return false }
+
+        let dt = loc.timestamp.timeIntervalSince(lastAccepted.timestamp)
+        guard dt >= longGapFallbackInterval else { return false }
+
+        let moved = loc.distance(from: lastAccepted)
+        return moved >= longGapFallbackDistanceMeters
     }
 
     private func resetPassiveMotionState() {
