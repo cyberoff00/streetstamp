@@ -36,19 +36,25 @@ struct JourneyMemoryMainView: View {
     private let hideLeadingControl: Bool
     private let readOnly: Bool
     private let headerTitle: String?
+    private let emptyTitleKey: String
+    private let emptySubtitleKey: String
     
     init(
         showSidebar: Binding<Bool>,
         usesSidebarHeader: Bool = true,
         hideLeadingControl: Bool = false,
         readOnly: Bool = false,
-        headerTitle: String? = nil
+        headerTitle: String? = nil,
+        emptyTitleKey: String = "no_memories_yet",
+        emptySubtitleKey: String = "memory_empty_desc"
     ) {
         self._showSidebar = showSidebar
         self.usesSidebarHeader = usesSidebarHeader
         self.hideLeadingControl = hideLeadingControl
         self.readOnly = readOnly
         self.headerTitle = headerTitle
+        self.emptyTitleKey = emptyTitleKey
+        self.emptySubtitleKey = emptySubtitleKey
     }
 
     private var allMemoryJourneys: [JourneyRoute] {
@@ -253,11 +259,11 @@ struct JourneyMemoryMainView: View {
                 .font(.system(size: 48))
                 .foregroundColor(.gray.opacity(0.4))
             
-            Text(L10n.key("no_memories_yet"))
+            Text(L10n.key(emptyTitleKey))
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundColor(.black)
             
-            Text(L10n.key("memory_empty_desc"))
+            Text(L10n.key(emptySubtitleKey))
                 .font(.system(size: 14))
                 .foregroundColor(.gray)
                 .multilineTextAlignment(.center)

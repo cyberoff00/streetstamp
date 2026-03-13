@@ -8,7 +8,7 @@ final class PostcardSendErrorPresentationTests: XCTestCase {
         let english = PostcardSendErrorPresentation.message(for: error) { key in
             switch key {
             case "postcard_quota_friend_limit_reached":
-                return "You've already sent this friend 2 postcards from this city. Try sending one from another city."
+                return "You've reached this friend's postcard limit for the city. Start more journeys here to unlock more postcard quota."
             case "postcard_send_failed":
                 return "Send failed. Please try again."
             default:
@@ -18,7 +18,7 @@ final class PostcardSendErrorPresentationTests: XCTestCase {
         let chinese = PostcardSendErrorPresentation.message(for: error) { key in
             switch key {
             case "postcard_quota_friend_limit_reached":
-                return "你已经给这位好友寄过 2 张来自这座城市的明信片了，换个城市再寄一张吧。"
+                return "这位好友在这座城市的明信片额度已经满了，开启更多旅程即可解锁更多明信片额度。"
             case "postcard_send_failed":
                 return "发送失败，请稍后重试。"
             default:
@@ -26,8 +26,8 @@ final class PostcardSendErrorPresentationTests: XCTestCase {
             }
         }
 
-        XCTAssertEqual(english, "You've already sent this friend 2 postcards from this city. Try sending one from another city.")
-        XCTAssertEqual(chinese, "你已经给这位好友寄过 2 张来自这座城市的明信片了，换个城市再寄一张吧。")
+        XCTAssertEqual(english, "You've reached this friend's postcard limit for the city. Start more journeys here to unlock more postcard quota.")
+        XCTAssertEqual(chinese, "这位好友在这座城市的明信片额度已经满了，开启更多旅程即可解锁更多明信片额度。")
     }
 
     func test_cityQuotaExceeded_usesLocalizedProductCopy() {
@@ -36,7 +36,7 @@ final class PostcardSendErrorPresentationTests: XCTestCase {
         let english = PostcardSendErrorPresentation.message(for: error) { key in
             switch key {
             case "postcard_quota_city_limit_reached":
-                return "Postcards from this city have already been sent to 10 friends. Try another city."
+                return "This city's postcard quota is full. Start more journeys here to unlock more postcard quota."
             case "postcard_send_failed":
                 return "Send failed. Please try again."
             default:
@@ -44,7 +44,7 @@ final class PostcardSendErrorPresentationTests: XCTestCase {
             }
         }
 
-        XCTAssertEqual(english, "Postcards from this city have already been sent to 10 friends. Try another city.")
+        XCTAssertEqual(english, "This city's postcard quota is full. Start more journeys here to unlock more postcard quota.")
     }
 
     func test_unknownError_fallsBackToGenericSendFailure() {

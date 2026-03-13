@@ -95,6 +95,8 @@
 "memories_for_city" = "%@ の記憶：%d";
 "no_memories_yet" = "まだ記憶がありません";
 "no_memories_desc" = "旅を完了すると、記憶がここに保存されます。";
+"friend_memories_empty_title" = "まだ公開された旅の記憶がありません";
+"friend_memories_empty_subtitle" = "この友だちはまだ旅の記憶を公開していません。";
 
 "unlock_city_title_cn" = "新しい都市探索カードを解放";
 "unlock_city_desc_1" = "%@ の探索を終えました。";
@@ -115,6 +117,8 @@
 "library_city_title" = "あなたの都市スタンプ";
 "library_empty_title" = "まだ都市スタンプがありません";
 "library_empty_subtitle" = "都市カードを生成するか、旅を完了して最初の都市を解放しましょう。";
+"friend_city_cards_empty_title" = "まだ都市カードがありません";
+"friend_city_cards_empty_subtitle" = "この友だちはまだ都市カードを解放していません。";
 "city_card_stats" = "探索 %d回 · 記憶 %d件";
 
 "location_failed_title" = "位置情報の取得に失敗";

@@ -760,6 +760,7 @@ final class CityCache: ObservableObject {
             cachedCities.append(created)
         }
 
+        generateRouteThumbnail(cityKey: targetCityKey)
         saveToDisk()
         notifyCitiesChanged()
     }

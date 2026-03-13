@@ -34,6 +34,28 @@ enum PostcardInboxPresentation {
         return "\(initialBox.rawValue)|\(focus)"
     }
 
+    static func avatarLoadout(
+        for message: BackendPostcardMessageDTO,
+        box: PostcardInboxView.Box,
+        myUserID: String,
+        myLoadout: RobotLoadout,
+        friendLoadoutsByUserID: [String: RobotLoadout]
+    ) -> RobotLoadout {
+        if box == .sent {
+            return myLoadout.normalizedForCurrentAvatar()
+        }
+
+        let trimmedMyUserID = myUserID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let senderUserID = message.fromUserID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedMyUserID.isEmpty && senderUserID == trimmedMyUserID {
+            return myLoadout.normalizedForCurrentAvatar()
+        }
+        if let senderLoadout = friendLoadoutsByUserID[senderUserID] {
+            return senderLoadout.normalizedForCurrentAvatar()
+        }
+        return RobotLoadout.defaultBoy.normalizedForCurrentAvatar()
+    }
+
     private static func resolvedLabel(
         primaryDisplayName: String?,
         fallbackDisplayName: String?,

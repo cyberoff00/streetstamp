@@ -13,6 +13,7 @@ struct PostcardPreviewView: View {
     let friendName: String
     let selectedCityID: String
     let selectedCityName: String
+    let selectedCityJourneyCount: Int
     let messageText: String
     let localImagePath: String
     let selectedImage: UIImage?
@@ -182,7 +183,8 @@ struct PostcardPreviewView: View {
         await postcardCenter.enqueueSend(
             draftID: draft.draftID,
             token: sessionStore.currentAccessToken,
-            allowedCityIDs: allowedCityIDs
+            allowedCityIDs: allowedCityIDs,
+            cityJourneyCount: selectedCityJourneyCount
         )
 
         if let latest = postcardCenter.drafts.first(where: { $0.draftID == draft.draftID }), latest.status == .sent {

@@ -390,6 +390,7 @@ struct LifelogView: View {
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var lifelogRenderCache: LifelogRenderCacheCoordinator
+    @EnvironmentObject private var flow: AppFlowCoordinator
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
     @AppStorage(AppSettings.avatarHeadlightEnabledKey) private var avatarHeadlightEnabled = true
 
@@ -743,6 +744,10 @@ struct LifelogView: View {
                         }
                         .frame(width: AvatarMapMarkerStyle.annotationSize, height: AvatarMapMarkerStyle.annotationSize)
                         .shadow(color: .black.opacity(0.24), radius: 8, y: 2)
+                        .contentShape(Rectangle())
+                        .onTapGesture(count: 2) {
+                            flow.requestOpenSidebarDestination(.equipment)
+                        }
                     }
                     .animation(.spring(response: 0.28, dampingFraction: 0.82), value: shouldShowMoodQuestionMark)
                 }
@@ -857,13 +862,18 @@ struct LifelogView: View {
         )
 
         return HStack(spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color(red: 200.0 / 255.0, green: 232.0 / 255.0, blue: 221.0 / 255.0))
-                    .frame(width: 68, height: 68)
+            Button {
+                flow.requestOpenSidebarDestination(.equipment)
+            } label: {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color(red: 200.0 / 255.0, green: 232.0 / 255.0, blue: 221.0 / 255.0))
+                        .frame(width: 68, height: 68)
 
-                RobotRendererView(size: 56, face: .front, loadout: AvatarLoadoutStore.load())
+                    RobotRendererView(size: 56, face: .front, loadout: AvatarLoadoutStore.load())
+                }
             }
+            .buttonStyle(.plain)
             .overlay(alignment: .topTrailing) {
                 LevelBadgeView(level: levelProgress.level)
                     .offset(x: 10, y: -10)

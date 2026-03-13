@@ -7,6 +7,13 @@ private enum CityDeepPalette {
     static let headerBg = Color(red: 251.0 / 255.0, green: 251.0 / 255.0, blue: 249.0 / 255.0)
 }
 
+enum CityLevelReconcilePolicy {
+    static func shouldFetchFreshProfile(isLoading: Bool, hasExistingOptions: Bool) -> Bool {
+        guard !isLoading else { return false }
+        return true
+    }
+}
+
 struct CityDeepView: View {
     @AppStorage(MapAppearanceSettings.storageKey) private var mapAppearanceRaw = MapAppearanceStyle.dark.rawValue
     private let cityFocusRadiusMeters: CLLocationDistance = 80_000
@@ -49,6 +56,14 @@ struct CityDeepView: View {
     @State private var showCityLevelDowngradeBlocked = false
     @State private var sidebarHideToken = UUID().uuidString
 
+    private var cityLevelLabelsSignature: String {
+        cityLevelOptionLabels
+            .map { ($0.key.rawValue, $0.value) }
+            .sorted { $0.0 < $1.0 }
+            .map { "\($0.0)=\($0.1)" }
+            .joined(separator: "|")
+    }
+
     private var activeCachedCity: CachedCity? {
         cache.cachedCities.first(where: { $0.id == activeCityKey && !($0.isTemporary ?? false) })
     }
@@ -67,17 +82,7 @@ struct CityDeepView: View {
 
     private var effectiveCityName: String {
         if let cached = activeCachedCity {
-            return CityPlacemarkResolver.displayTitle(
-                cityKey: cached.id,
-                iso2: cached.countryISO2,
-                fallbackTitle: cached.name,
-                availableLevelNamesRaw: cached.reservedAvailableLevelNames,
-                storedAvailableLevelNamesLocaleID: cached.reservedAvailableLevelNamesLocaleID,
-                parentRegionKey: cached.reservedParentRegionKey,
-                preferredLevel: cached.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
-                localizedDisplayNameByLocale: cached.localizedDisplayNameByLocale,
-                locale: .current
-            )
+            return CityPlacemarkResolver.displayTitle(for: cached, locale: .current)
         }
         return city.localizedName
     }
@@ -419,6 +424,12 @@ struct CityDeepView: View {
         .onChange(of: mapAppearanceRaw) { _ in
             refreshRegionAndBoundary()
         }
+        .onChange(of: cityLevelCurrentSelection) { _, _ in
+            Task { await ensureActiveCityKeyMatchesCurrentSelection() }
+        }
+        .onChange(of: cityLevelLabelsSignature) { _, _ in
+            Task { await ensureActiveCityKeyMatchesCurrentSelection() }
+        }
         .navigationBarBackButtonHidden(true)
         .confirmationDialog(
             levelDialogTitle(),
@@ -584,13 +595,6 @@ struct CityDeepView: View {
                 locale: .current
             )
             let targetNameNorm = selectedName.normalizedCityNameForMatching()
-            let baseLevelForDisplay: CityPlacemarkResolver.CardLevel? = await MainActor.run {
-                if let raw = activeCachedCity?.reservedLevelRaw,
-                   let level = CityPlacemarkResolver.CardLevel(rawValue: raw) {
-                    return level
-                }
-                return cityLevelCurrentSelection
-            }
 
             if targetKey == sourceKey {
                 await MainActor.run {
@@ -677,7 +681,7 @@ struct CityDeepView: View {
                 }
                 cache.updateCityLevelReserveProfile(
                     cityKey: targetKey,
-                    level: baseLevelForDisplay,
+                    level: level,
                     parentRegionKey: canonical.parentRegionKey,
                     availableLevels: displayLevels,
                     anchor: anchor,
@@ -746,13 +750,17 @@ struct CityDeepView: View {
     }
 
     private func initializeReservedLevelProfileIfNeeded(showPickerWhenReady: Bool) {
-        guard !cityLevelLoading else { return }
-        if !cityLevelOptions.isEmpty {
-            if showPickerWhenReady {
-                showCityLevelPicker = true
-            }
-            return
+        let hasExistingOptions = !cityLevelOptions.isEmpty
+        guard CityLevelReconcilePolicy.shouldFetchFreshProfile(
+            isLoading: cityLevelLoading,
+            hasExistingOptions: hasExistingOptions
+        ) else { return }
+
+        if showPickerWhenReady && hasExistingOptions {
+            showCityLevelPicker = true
         }
+
+        let shouldShowPickerAfterRefresh = showPickerWhenReady && !hasExistingOptions
         guard let reserveAnchor = reserveJourneyStart, CLLocationCoordinate2DIsValid(reserveAnchor) else { return }
 
         cityLevelLoading = true
@@ -789,20 +797,121 @@ struct CityDeepView: View {
                 cityLevelOptionLabels = labels
                 cityLevelOptions = options
                 cityLevelCurrentSelection = resolveCurrentLevel(labels: labels, parentRegionKey: canonical.parentRegionKey, options: options)
+                reconcileActiveCityKeyWithSelectionIfNeeded(
+                    canonical: canonical,
+                    labels: labels,
+                    selectedLevel: cityLevelCurrentSelection,
+                    anchor: reserveAnchor
+                )
                 refreshDisplayTitleFromCardKey()
                 cache.updateCityLevelReserveProfile(
                     cityKey: activeCityKey,
-                    level: baseLevel,
+                    level: cityLevelCurrentSelection ?? baseLevel,
                     parentRegionKey: canonical.parentRegionKey,
                     availableLevels: labels,
                     anchor: reserveAnchor,
                     force: false
                 )
-                if showPickerWhenReady {
+                if shouldShowPickerAfterRefresh {
                     showCityLevelPicker = true
                 }
             }
         }
+    }
+
+    @MainActor
+    private func reconcileActiveCityKeyWithSelectionIfNeeded(
+        canonical: ReverseGeocodeService.CanonicalResult,
+        labels: [CityPlacemarkResolver.CardLevel: String],
+        selectedLevel: CityPlacemarkResolver.CardLevel?,
+        anchor: CLLocationCoordinate2D
+    ) {
+        guard let selectedLevel else { return }
+        let selectedName = (labels[selectedLevel] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !selectedName.isEmpty else { return }
+
+        let iso = (canonical.iso2 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let targetKey = "\(selectedName)|\(iso)"
+        let sourceKey = activeCityKey
+        guard targetKey != sourceKey else { return }
+
+        let candidateJourneyIDs = cityJourneyIDs
+        let updatedJourneys: [JourneyRoute] = store.journeys.compactMap { journey in
+            guard candidateJourneyIDs.contains(journey.id), journey.isCompleted else { return nil }
+            var next = journey
+            next.startCityKey = targetKey
+            next.cityKey = targetKey
+            next.canonicalCity = selectedName
+            if !iso.isEmpty {
+                next.countryISO2 = iso
+            }
+            return next
+        }
+
+        if !updatedJourneys.isEmpty {
+            store.applyBulkCompletedUpdates(updatedJourneys)
+            cache.applyCityLevelReassignment(
+                from: sourceKey,
+                to: targetKey,
+                targetCityName: selectedName,
+                targetISO2: iso,
+                movedJourneys: updatedJourneys,
+                anchor: anchor
+            )
+        }
+
+        cache.updateCityLevelReserveProfile(
+            cityKey: targetKey,
+            level: selectedLevel,
+            parentRegionKey: canonical.parentRegionKey,
+            availableLevels: labels,
+            anchor: anchor,
+            force: true
+        )
+        activeCityKey = targetKey
+    }
+
+    @MainActor
+    private func ensureActiveCityKeyMatchesCurrentSelection() async {
+        guard !cityLevelLoading else { return }
+        let inferredSelection = resolveCurrentLevel(
+            labels: cityLevelOptionLabels,
+            parentRegionKey: cityLevelParentRegionKey,
+            options: cityLevelOptions
+        )
+        let selectedLevel = cityLevelCurrentSelection ?? inferredSelection
+        guard let selectedLevel else { return }
+        if cityLevelCurrentSelection == nil {
+            cityLevelCurrentSelection = selectedLevel
+        }
+        guard !cityLevelOptionLabels.isEmpty else { return }
+        guard let anchor = reserveJourneyStart, CLLocationCoordinate2DIsValid(anchor) else { return }
+
+        let canonical: ReverseGeocodeService.CanonicalResult? = {
+            if let cached = cityLevelCanonicalSnapshot { return cached }
+            return nil
+        }()
+
+        let resolvedCanonical: ReverseGeocodeService.CanonicalResult?
+        if let canonical {
+            resolvedCanonical = canonical
+        } else {
+            let location = CLLocation(latitude: anchor.latitude, longitude: anchor.longitude)
+            resolvedCanonical = await canonicalWithRetry(for: location)
+            if let resolvedCanonical {
+                cityLevelCanonicalSnapshot = resolvedCanonical
+                cityLevelParentRegionKey = resolvedCanonical.parentRegionKey
+            }
+        }
+
+        guard let resolvedCanonical else { return }
+        reconcileActiveCityKeyWithSelectionIfNeeded(
+            canonical: resolvedCanonical,
+            labels: cityLevelOptionLabels,
+            selectedLevel: selectedLevel,
+            anchor: anchor
+        )
+        refreshDisplayTitleFromCardKey()
     }
 
     private func normalizedCityLevelLabels(
@@ -935,17 +1044,7 @@ struct CityDeepView: View {
 
     private func cityName(from cityKey: String) -> String {
         if let cached = cache.cachedCities.first(where: { $0.id == cityKey && !($0.isTemporary ?? false) }) {
-            return CityPlacemarkResolver.displayTitle(
-                cityKey: cached.id,
-                iso2: cached.countryISO2,
-                fallbackTitle: cached.name,
-                availableLevelNamesRaw: cached.reservedAvailableLevelNames,
-                storedAvailableLevelNamesLocaleID: cached.reservedAvailableLevelNamesLocaleID,
-                parentRegionKey: cached.reservedParentRegionKey,
-                preferredLevel: cached.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
-                localizedDisplayNameByLocale: cached.localizedDisplayNameByLocale,
-                locale: .current
-            )
+            return CityPlacemarkResolver.displayTitle(for: cached, locale: .current)
         }
 
         let fallbackTitle = cityKey.components(separatedBy: "|").first ?? cityKey

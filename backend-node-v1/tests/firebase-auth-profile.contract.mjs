@@ -182,6 +182,7 @@ async function testFirebaseBearerCanLoadProfileAndUsePostcardRoutes() {
     const me = await requestJSON(server.port, "GET", "/v1/profile/me", senderToken);
     assert.equal(me.status, 200);
     assert.equal(me.data.id, senderID);
+    assert.equal(me.data.profileSetupCompleted, true);
 
     const send = await requestJSON(server.port, "POST", "/v1/postcards/send", senderToken, {
       clientDraftID: "firebase-draft-1",
@@ -264,6 +265,8 @@ async function testPreservedLegacyEmailReusesHistoricalAccountAcrossRepeatedSign
     assert.equal(second.data.id, legacyAppUserId);
     assert.equal(first.data.handle, "legacy_business_owner");
     assert.equal(second.data.handle, "legacy_business_owner");
+    assert.equal(first.data.profileSetupCompleted, true);
+    assert.equal(second.data.profileSetupCompleted, true);
 
     const saved = await server.readDB();
     assert.equal(saved.firebaseIdentityIndex["firebase-legacy-uid-1"].appUserId, legacyAppUserId);
@@ -274,9 +277,131 @@ async function testPreservedLegacyEmailReusesHistoricalAccountAcrossRepeatedSign
   }
 }
 
+async function testHistoricalDuplicateDisplayNamesAreRenumberedAndSetupEndpointEnforcesUniqueness() {
+  const firstID = "u_dup_first";
+  const secondID = "u_dup_second";
+  const thirdID = "u_dup_third";
+  const setupToken = "firebase-setup-token";
+  const setupUID = "firebase-setup-uid";
+
+  const db = makeDB({
+    users: {
+      [firstID]: makeUser(firstID, {
+        email: "first@example.com",
+        displayName: "Traveler",
+        createdAt: 1771000000
+      }),
+      [secondID]: makeUser(secondID, {
+        email: "second@example.com",
+        displayName: "Traveler",
+        createdAt: 1771000001
+      }),
+      [thirdID]: makeUser(thirdID, {
+        provider: "apple",
+        email: "third@example.com",
+        displayName: "Traveler",
+        profileSetupCompleted: false,
+        createdAt: 1771000002
+      })
+    },
+    emailIndex: {
+      "first@example.com": firstID,
+      "second@example.com": secondID,
+      "third@example.com": thirdID
+    },
+    firebaseIdentityIndex: {
+      [setupUID]: {
+        firebaseUid: setupUID,
+        appUserId: thirdID,
+        email: "third@example.com",
+        emailVerified: true,
+        providers: ["apple.com"],
+        createdAt: "2026-03-13T00:00:00.000Z",
+        lastLoginAt: "2026-03-13T00:00:00.000Z"
+      }
+    }
+  });
+
+  const fixtures = {
+    [setupToken]: {
+      uid: setupUID,
+      email: "third@example.com",
+      email_verified: true,
+      firebase: { sign_in_provider: "apple.com" }
+    }
+  };
+
+  const server = await startServer(db, fixtures);
+  try {
+    const migrated = await server.readDB();
+    assert.equal(migrated.users[firstID].displayName, "Traveler");
+    assert.equal(migrated.users[secondID].displayName, "Traveler2");
+    assert.equal(migrated.users[thirdID].displayName, "Traveler3");
+
+    const meBefore = await requestJSON(server.port, "GET", "/v1/profile/me", setupToken);
+    assert.equal(meBefore.status, 200);
+    assert.equal(meBefore.data.profileSetupCompleted, false);
+    assert.equal(meBefore.data.displayName, "Traveler3");
+
+    const duplicateUpdate = await requestJSON(
+      server.port,
+      "PATCH",
+      "/v1/profile/display-name",
+      setupToken,
+      { displayName: "Traveler2" }
+    );
+    assert.equal(duplicateUpdate.status, 409);
+
+    const duplicateSetup = await requestJSON(
+      server.port,
+      "POST",
+      "/v1/profile/setup",
+      setupToken,
+      {
+        displayName: "Traveler2",
+        loadout: {
+          species: "boy",
+          color: "yellow",
+          accessory: null,
+          headgear: null,
+          handheld: null
+        }
+      }
+    );
+    assert.equal(duplicateSetup.status, 409);
+
+    const completeSetup = await requestJSON(
+      server.port,
+      "POST",
+      "/v1/profile/setup",
+      setupToken,
+      {
+        displayName: "SkyWalker",
+        loadout: {
+          species: "boy",
+          color: "yellow",
+          accessory: null,
+          headgear: null,
+          handheld: null
+        }
+      }
+    );
+    assert.equal(completeSetup.status, 200);
+    assert.equal(completeSetup.data.displayName, "SkyWalker");
+    assert.equal(completeSetup.data.profileSetupCompleted, true);
+
+    const saved = await server.readDB();
+    assert.equal(saved.users[thirdID].displayName, "SkyWalker");
+    assert.equal(saved.users[thirdID].profileSetupCompleted, true);
+  } finally {
+    await server.cleanup();
+  }
+}
+
 async function run() {
   await testFirebaseBearerCanLoadProfileAndUsePostcardRoutes();
   await testPreservedLegacyEmailReusesHistoricalAccountAcrossRepeatedSignIns();
+  await testHistoricalDuplicateDisplayNamesAreRenumberedAndSetupEndpointEnforcesUniqueness();
   console.log("firebase auth profile contract: PASS");
 }
 

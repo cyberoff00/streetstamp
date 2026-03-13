@@ -2,6 +2,24 @@ import XCTest
 @testable import StreetStamps
 
 final class CityDisplayNameResolverTests: XCTestCase {
+    func test_cityLevelReconcilePolicy_fetchesFreshProfileWhenCachedOptionsExist() {
+        XCTAssertTrue(
+            CityLevelReconcilePolicy.shouldFetchFreshProfile(
+                isLoading: false,
+                hasExistingOptions: true
+            )
+        )
+    }
+
+    func test_cityLevelReconcilePolicy_skipsWhileLoading() {
+        XCTAssertFalse(
+            CityLevelReconcilePolicy.shouldFetchFreshProfile(
+                isLoading: true,
+                hasExistingOptions: true
+            )
+        )
+    }
+
     func test_cityLocalizationDebugTraceIncludesSourceAndLocale() {
         let message = CityLocalizationDebugTrace.displayDecision(
             cityKey: "Taipei|TW",
@@ -123,6 +141,27 @@ final class CityDisplayNameResolverTests: XCTestCase {
             preferredLevel: .admin,
             localizedDisplayNameByLocale: ["zh_CN": "Jeju Province"],
             locale: Locale(identifier: "zh_CN")
+        )
+
+        XCTAssertEqual(title, "济州特别自治道")
+    }
+
+    func test_displayTitleSelectedLevelOverridesLocalizedCacheTitle() {
+        let parentRegionKey = "resolver-test-level-override-\(UUID().uuidString)"
+        CityLevelPreferenceStore.shared.setPreferredLevel(.admin, for: parentRegionKey)
+
+        let title = CityPlacemarkResolver.displayTitle(
+            cityKey: "Jeju Province|KR",
+            iso2: "KR",
+            fallbackTitle: "济州市",
+            availableLevelNames: [
+                .admin: "济州特别自治道",
+                .locality: "济州市"
+            ],
+            parentRegionKey: parentRegionKey,
+            preferredLevel: .admin,
+            localizedDisplayNameByLocale: ["zh-Hans": "济州市"],
+            locale: Locale(identifier: "zh-Hans")
         )
 
         XCTAssertEqual(title, "济州特别自治道")
@@ -297,6 +336,24 @@ final class CityDisplayNameResolverTests: XCTestCase {
         let labels = CityPlacemarkResolver.resolvedStableLevelNamesForDisplay(
             storedAvailableLevelNamesRaw: nil,
             storedLocaleIdentifier: nil,
+            freshlyResolvedLevelNames: [
+                .locality: "济州市",
+                .admin: "济州特别自治道"
+            ],
+            locale: Locale(identifier: "zh-Hans")
+        )
+
+        XCTAssertEqual(labels[.locality], "济州市")
+        XCTAssertEqual(labels[.admin], "济州特别自治道")
+    }
+
+    func test_resolvedStableLevelNamesRefreshesFlattenedStoredLabels() {
+        let labels = CityPlacemarkResolver.resolvedStableLevelNamesForDisplay(
+            storedAvailableLevelNamesRaw: [
+                CityPlacemarkResolver.CardLevel.locality.rawValue: "济州市",
+                CityPlacemarkResolver.CardLevel.admin.rawValue: "济州市"
+            ],
+            storedLocaleIdentifier: "zh-Hans",
             freshlyResolvedLevelNames: [
                 .locality: "济州市",
                 .admin: "济州特别自治道"

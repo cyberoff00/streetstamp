@@ -22,6 +22,7 @@ struct MainTabLayout {
 
 enum MainSidebarDestination: String, Identifiable, CaseIterable {
     case profile
+    case accountCenter
     case settings
     case equipment
     case postcards
@@ -44,6 +45,8 @@ enum MainSidebarDestination: String, Identifiable, CaseIterable {
         switch self {
         case .profile:
             return NavigationChrome(title: L10n.t("profile_title"), leadingAccessory: .none, titleLevel: .secondary)
+        case .accountCenter:
+            return NavigationChrome(title: L10n.t("account_center_title"), leadingAccessory: .none, titleLevel: .secondary)
         case .settings:
             return NavigationChrome(title: L10n.t("settings_title"), leadingAccessory: .none, titleLevel: .secondary)
         case .equipment:
@@ -62,6 +65,7 @@ struct MainTabView: View {
     @State private var loadedTabs: Set<NavigationTab> = [.start]
     @State private var showSidebar = false
     @State private var sidebarDestination: MainSidebarDestination? = nil
+    @State private var sidebarPostcardIntent = PostcardInboxIntent(box: "received", messageID: nil)
 
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var flow: AppFlowCoordinator
@@ -142,12 +146,24 @@ struct MainTabView: View {
                 switch destination {
                 case .profile:
                     ProfileView()
+                case .accountCenter:
+                    AccountCenterView()
                 case .settings:
                     SettingsView()
                 case .equipment:
                     SidebarEquipmentEntryView()
                 case .postcards:
-                    SidebarPostcardsEntryView()
+                    let initialBox: PostcardInboxView.Box = sidebarPostcardIntent.box == "sent" ? .sent : .received
+                    SidebarPostcardsEntryView(
+                        initialBox: initialBox,
+                        focusMessageID: sidebarPostcardIntent.messageID
+                    )
+                    .id(
+                        PostcardInboxView.viewIdentity(
+                            initialBox: initialBox,
+                            focusMessageID: sidebarPostcardIntent.messageID
+                        )
+                    )
                 case .inviteFriend:
                     SidebarInviteFriendEntryView()
                 }
@@ -174,6 +190,19 @@ struct MainTabView: View {
             guard let tab else { return }
             selectedTab = tab
             flow.clearRequestedTab()
+        }
+        .onReceive(flow.$openPostcardSidebarSignal) { signal in
+            guard signal > 0,
+                  let intent = flow.pendingPostcardSidebarIntent else { return }
+            sidebarPostcardIntent = intent
+            sidebarDestination = .postcards
+            flow.consumePendingPostcardSidebarIntent()
+        }
+        .onReceive(flow.$openSidebarDestinationSignal) { signal in
+            guard signal > 0,
+                  let destination = flow.pendingSidebarDestination else { return }
+            sidebarDestination = destination
+            flow.consumePendingSidebarDestination()
         }
         .onReceive(NotificationCenter.default.publisher(for: .openCaptureFromWidget)) { _ in
             selectedTab = .start
@@ -478,7 +507,7 @@ private struct MainSidebarMenuView: View {
             }
 
             Button {
-                onSelectDestination(.profile)
+                onSelectDestination(.accountCenter)
                 withAnimation(.easeOut(duration: 0.25)) {
                     isPresented = false
                 }
@@ -554,8 +583,11 @@ private struct MainSidebarMenuView: View {
 }
 
 private struct SidebarPostcardsEntryView: View {
+    let initialBox: PostcardInboxView.Box
+    let focusMessageID: String?
+
     var body: some View {
-        PostcardInboxView()
+        PostcardInboxView(initialBox: initialBox, focusMessageID: focusMessageID)
     }
 }
 
@@ -563,6 +595,8 @@ private struct SidebarInviteFriendEntryView: View {
     @EnvironmentObject private var socialStore: SocialGraphStore
     @EnvironmentObject private var sessionStore: UserSessionStore
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
+    @State private var exclusiveID = ""
+    @State private var inviteCode = ""
 
     private var resolvedDisplayName: String {
         let trimmed = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -570,12 +604,16 @@ private struct SidebarInviteFriendEntryView: View {
     }
 
     private var resolvedExclusiveID: String {
+        let remote = exclusiveID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !remote.isEmpty { return remote }
         let source = sessionStore.accountUserID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return source.isEmpty ? "explorer" : source
     }
 
     private var resolvedInviteCode: String {
-        SocialGraphStore.generateInviteCode(source: sessionStore.accountUserID ?? resolvedExclusiveID)
+        let remote = inviteCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if !remote.isEmpty { return remote }
+        return SocialGraphStore.generateInviteCode(source: sessionStore.accountUserID ?? resolvedExclusiveID)
     }
 
     var body: some View {
@@ -587,6 +625,32 @@ private struct SidebarInviteFriendEntryView: View {
         )
         .environmentObject(socialStore)
         .environmentObject(sessionStore)
+        .task(id: sessionStore.currentAccessToken) {
+            await refreshInviteIdentity()
+        }
+    }
+
+    @MainActor
+    private func refreshInviteIdentity() async {
+        guard BackendConfig.isEnabled,
+              let token = sessionStore.currentAccessToken,
+              !token.isEmpty else {
+            return
+        }
+
+        do {
+            let me = try await BackendAPIClient.shared.fetchMyProfile(token: token)
+            if let id = me.resolvedExclusiveID?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty {
+                exclusiveID = id
+            }
+            if let code = me.inviteCode?.trimmingCharacters(in: .whitespacesAndNewlines), !code.isEmpty {
+                inviteCode = code.uppercased()
+            } else {
+                inviteCode = SocialGraphStore.generateInviteCode(source: me.id)
+            }
+        } catch {
+            // Keep local fallback values when backend data cannot be fetched.
+        }
     }
 }
 

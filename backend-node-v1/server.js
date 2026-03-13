@@ -782,6 +782,7 @@ function createDefaultUser(provider, email = "") {
     handleChangeUsed: false,
     profileVisibility: visibilityFriendsOnly,
     displayName: "Explorer",
+    profileSetupCompleted: false,
     bio: "Travel Enthusiastic",
     loadout: defaultLoadout(),
     journeys: [],
@@ -939,6 +940,86 @@ function normalizeDisplayName(raw) {
   return trimmed;
 }
 
+function baseDisplayName(raw) {
+  const trimmed = String(raw || "").trim();
+  return trimmed || "Explorer";
+}
+
+function canUseDisplayName(displayName, excludedUserID = "") {
+  const next = baseDisplayName(displayName);
+  const excluded = String(excludedUserID || "").trim();
+  for (const [uid, user] of Object.entries(db.users || {})) {
+    if (uid === excluded) continue;
+    if (baseDisplayName(user?.displayName) === next) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function allocateUniqueDisplayName(displayName, excludedUserID = "") {
+  const base = baseDisplayName(displayName);
+  if (canUseDisplayName(base, excludedUserID)) return base;
+  let suffix = 2;
+  while (suffix < 1000000) {
+    const candidate = `${base}${suffix}`;
+    if (canUseDisplayName(candidate, excludedUserID)) return candidate;
+    suffix += 1;
+  }
+  return `${base}${nowUnix()}`;
+}
+
+function normalizeHistoricalDisplayNames() {
+  const users = Object.values(db.users || {})
+    .filter(Boolean)
+    .sort((left, right) => {
+      const leftCreatedAt = Number(left?.createdAt || 0);
+      const rightCreatedAt = Number(right?.createdAt || 0);
+      if (leftCreatedAt !== rightCreatedAt) return leftCreatedAt - rightCreatedAt;
+      return String(left?.id || "").localeCompare(String(right?.id || ""));
+    });
+
+  const used = new Set();
+  let changed = false;
+
+  for (const user of users) {
+    const original = baseDisplayName(user.displayName);
+    let next = original;
+    if (used.has(next)) {
+      let suffix = 2;
+      while (used.has(`${original}${suffix}`)) {
+        suffix += 1;
+      }
+      next = `${original}${suffix}`;
+    }
+    used.add(next);
+    if (user.displayName !== next) {
+      user.displayName = next;
+      changed = true;
+    }
+  }
+
+  return changed;
+}
+
+function ensureProfileSetupCompleted(user, defaultValue) {
+  if (!user || typeof user !== "object") return false;
+  if (typeof user.profileSetupCompleted === "boolean") return false;
+  user.profileSetupCompleted = Boolean(defaultValue);
+  return true;
+}
+
+function authSuccessPayload(user, provider, email, accessToken, refreshToken) {
+  return {
+    userId: user.id,
+    provider,
+    email: email || null,
+    accessToken,
+    refreshToken,
+    needsProfileSetup: !Boolean(user.profileSetupCompleted)
+  };
+}
+
 function normalizeISOTime(raw) {
   const t = Date.parse(String(raw || ""));
   if (!Number.isFinite(t)) return null;
@@ -1066,6 +1147,7 @@ function createFirebaseBackedUser(identity) {
     handleChangeUsed: false,
     profileVisibility: visibilityFriendsOnly,
     displayName: "Explorer",
+    profileSetupCompleted: false,
     bio: "Travel Enthusiastic",
     loadout: defaultLoadout(),
     journeys: [],
@@ -1900,6 +1982,7 @@ function profileDTOForViewer(target, isSelf, isFriend) {
     inviteCode: target.inviteCode,
     profileVisibility: visibility,
     displayName: target.displayName,
+    profileSetupCompleted: Boolean(target.profileSetupCompleted),
     email: isSelf ? (target.email || null) : null,
     bio: target.bio,
     loadout: normalizeLoadout(target.loadout),
@@ -1946,6 +2029,7 @@ async function main() {
   console.log(`[streetstamps-node-v1] storage=${pgPool ? "postgresql" : "file"}`);
   db.handleIndex = {};
   db.inviteIndex = {};
+  let shouldPersistMigration = false;
   if (!db.likesIndex || typeof db.likesIndex !== "object") {
     db.likesIndex = {};
   }
@@ -1960,6 +2044,7 @@ async function main() {
     if (typeof user.handleChangeUsed !== "boolean") {
       user.handleChangeUsed = false;
     }
+    shouldPersistMigration = ensureProfileSetupCompleted(user, true) || shouldPersistMigration;
     user.loadout = normalizeLoadout(user.loadout);
     ensureUserNotifications(user);
     ensurePostcardCollections(user);
@@ -1969,12 +2054,16 @@ async function main() {
   for (const [uid, user] of Object.entries(db.users || {})) {
     reconcilePostcardsForUser(user, uid);
   }
+  shouldPersistMigration = normalizeHistoricalDisplayNames() || shouldPersistMigration;
   for (const req of allFriendRequests()) {
     const from = db.users[req.fromUserID];
     const to = db.users[req.toUserID];
     if (!from || !to || from.id === to.id || isFriendOf(from, to.id)) {
       delete db.friendRequestsIndex[req.id];
     }
+  }
+  if (shouldPersistMigration) {
+    await saveDB();
   }
   await fsp.mkdir(MEDIA_DIR, { recursive: true });
 
@@ -2152,6 +2241,7 @@ async function main() {
         handleChangeUsed: false,
         profileVisibility: visibilityFriendsOnly,
         displayName: displayName || "Explorer",
+        profileSetupCompleted: false,
         bio: "Travel Enthusiastic",
         loadout: defaultLoadout(),
         journeys: [],
@@ -2185,7 +2275,8 @@ async function main() {
       return res.status(200).json({
         userId: uid,
         email,
-        emailVerificationRequired: true
+        emailVerificationRequired: true,
+        needsProfileSetup: true
       });
     } catch {
       return res.status(500).json({ message: "internal error" });
@@ -2308,13 +2399,13 @@ async function main() {
       const accessToken = makeAccessToken(user.id, user.provider || "email");
       const refreshToken = issueStoredRefreshToken(user.id, user.provider || "email");
       await saveDB();
-      return res.status(200).json({
-        userId: user.id,
-        provider: user.provider || "email",
-        email: user.email || identity.email || null,
+      return res.status(200).json(authSuccessPayload(
+        user,
+        user.provider || "email",
+        user.email || identity.email || null,
         accessToken,
         refreshToken
-      });
+      ));
     } catch {
       return res.status(500).json({ message: "internal error" });
     }
@@ -2491,13 +2582,13 @@ async function main() {
       const refreshToken = issueStoredRefreshToken(uid, "apple");
       await saveDB();
 
-      return res.status(200).json({
-        userId: uid,
-        provider: "apple",
-        email: user.email || appleIdentity.email || null,
+      return res.status(200).json(authSuccessPayload(
+        user,
+        "apple",
+        user.email || appleIdentity.email || null,
         accessToken,
         refreshToken
-      });
+      ));
     } catch (e) {
       const message = String(e?.message || "").toLowerCase();
       if (message.includes("token") || message.includes("jwt") || message.includes("audience") || message.includes("issuer")) {
@@ -2601,7 +2692,13 @@ async function main() {
       if (changed) {
         await saveDB();
       }
-      return res.status(200).json({ userId: uid, provider: u.provider, email: u.email || null, accessToken: makeAccessToken(uid, u.provider), refreshToken: makeRefreshToken(uid, u.provider) });
+      return res.status(200).json(authSuccessPayload(
+        u,
+        u.provider,
+        u.email || null,
+        makeAccessToken(uid, u.provider),
+        makeRefreshToken(uid, u.provider)
+      ));
     } catch (e) {
       const message = String(e?.message || "").toLowerCase();
       if (message.includes("token") || message.includes("jwt") || message.includes("audience") || message.includes("issuer")) {
@@ -2933,6 +3030,7 @@ async function main() {
 
       const toUserID = String(req.body?.toUserID || "").trim();
       const cityID = String(req.body?.cityID || "").trim();
+      const cityJourneyCount = Math.max(1, Number.parseInt(String(req.body?.cityJourneyCount ?? ""), 10) || 1);
       const cityNameRaw = String(req.body?.cityName || "").trim();
       const cityName = cityNameRaw || cityID;
       const messageText = String(req.body?.messageText || "").trim();
@@ -2964,6 +3062,7 @@ async function main() {
         sentPostcards: me.sentPostcards,
         toUserID,
         cityID,
+        cityJourneyCount,
         clientDraftID,
         allowedCityIDs
       });
@@ -3189,6 +3288,9 @@ async function main() {
 
       const nextName = normalizeDisplayName(req.body?.displayName);
       if (!nextName) return res.status(400).json({ message: "invalid display name" });
+      if (!canUseDisplayName(nextName, uid)) {
+        return res.status(409).json({ message: "display name already taken" });
+      }
 
       me.displayName = nextName;
       await saveDB();
@@ -3240,6 +3342,33 @@ async function main() {
       }
 
       me.loadout = normalizeLoadout(incoming, me.loadout);
+      await saveDB();
+      return res.status(200).json(profileDTOForViewer(me, true, true));
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.post("/v1/profile/setup", async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = db.users[uid];
+      if (!me) return res.status(404).json({ message: "user not found" });
+
+      const nextName = normalizeDisplayName(req.body?.displayName);
+      if (!nextName) return res.status(400).json({ message: "invalid display name" });
+      if (!canUseDisplayName(nextName, uid)) {
+        return res.status(409).json({ message: "display name already taken" });
+      }
+
+      const incoming = req.body?.loadout;
+      if (!incoming || typeof incoming !== "object" || Array.isArray(incoming)) {
+        return res.status(400).json({ message: "invalid loadout" });
+      }
+
+      me.displayName = nextName;
+      me.loadout = normalizeLoadout(incoming, me.loadout);
+      me.profileSetupCompleted = true;
       await saveDB();
       return res.status(200).json(profileDTOForViewer(me, true, true));
     } catch {

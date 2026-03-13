@@ -4,6 +4,7 @@ struct SendPostcardRequest: Codable {
     var clientDraftID: String
     var toUserID: String
     var cityID: String
+    var cityJourneyCount: Int
     var cityName: String
     var messageText: String
     var photoURL: String
@@ -13,6 +14,7 @@ struct SendPostcardRequest: Codable {
         case clientDraftID
         case toUserID
         case cityID
+        case cityJourneyCount
         case cityName
         case messageText
         case photoURL

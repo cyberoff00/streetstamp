@@ -44,6 +44,7 @@ final class UserSessionStore: ObservableObject {
     @Published private(set) var pendingMigrationFromGuestUserID: String?
     @Published private(set) var activeLocalProfileID: String
     @Published private(set) var reauthenticationPromptVersion: Int = 0
+    @Published private(set) var requiresProfileSetup: Bool
 
     private static let guestIDKey = "streetstamps.guest_id.v1"
     private static let activeLocalProfileIDKey = "streetstamps.active_local_profile_id.v1"
@@ -60,6 +61,7 @@ final class UserSessionStore: ObservableObject {
         let savedPending = UserDefaults.standard.string(forKey: Self.pendingGuestMigrationKey)
         self.pendingMigrationFromGuestUserID = savedPending
         self.firebaseAccountState = Self.loadFirebaseAccountState()
+        self.requiresProfileSetup = false
 
         if let data = UserDefaults.standard.data(forKey: Self.sessionDataKey),
            let restored = try? JSONDecoder().decode(Session.self, from: data) {
@@ -75,6 +77,7 @@ final class UserSessionStore: ObservableObject {
                     refreshToken: refreshToken,
                     guestID: guestID
                 )
+                self.requiresProfileSetup = UserScopedProfileStateStore.isProfileSetupPending(for: userID)
             }
             return
         }
@@ -248,6 +251,12 @@ final class UserSessionStore: ObservableObject {
             guestID: guestID
         )
         firebaseAccountState = nil
+        if auth.needsProfileSetup {
+            UserScopedProfileStateStore.markProfileSetupPending(for: auth.userId)
+        } else {
+            UserScopedProfileStateStore.clearProfileSetupPending(for: auth.userId)
+        }
+        requiresProfileSetup = auth.needsProfileSetup
         bindGuestToAccount(guestID: guestID, accountUserID: auth.userId)
         persistSession()
         persistFirebaseAccountState()
@@ -282,6 +291,7 @@ final class UserSessionStore: ObservableObject {
         bindGuestToAccount(guestID: guestID, accountUserID: appUserID)
         persistSession()
         persistFirebaseAccountState()
+        requiresProfileSetup = UserScopedProfileStateStore.isProfileSetupPending(for: appUserID)
         if !preserveGuestBoundary {
             clearPendingGuestMigrationMarker()
         }
@@ -344,6 +354,12 @@ final class UserSessionStore: ObservableObject {
             refreshToken: auth.refreshToken,
             guestID: guestID
         )
+        if auth.needsProfileSetup {
+            UserScopedProfileStateStore.markProfileSetupPending(for: expectedUserID)
+        } else {
+            UserScopedProfileStateStore.clearProfileSetupPending(for: expectedUserID)
+        }
+        requiresProfileSetup = auth.needsProfileSetup
         persistSession()
         return true
     }
@@ -366,6 +382,7 @@ final class UserSessionStore: ObservableObject {
     func logoutToGuest(requireReauthenticationPrompt: Bool = false) {
         session = .guest(guestID: guestID)
         firebaseAccountState = nil
+        requiresProfileSetup = false
         persistSession()
         persistFirebaseAccountState()
         if requireReauthenticationPrompt {
@@ -376,6 +393,12 @@ final class UserSessionStore: ObservableObject {
     func clearPendingGuestMigrationMarker() {
         pendingMigrationFromGuestUserID = nil
         UserDefaults.standard.removeObject(forKey: Self.pendingGuestMigrationKey)
+    }
+
+    func markProfileSetupCompleted() {
+        guard let accountUserID, !accountUserID.isEmpty else { return }
+        UserScopedProfileStateStore.clearProfileSetupPending(for: accountUserID)
+        requiresProfileSetup = false
     }
 
     func diagnosticLegacyUserIDs() -> [String] {

@@ -167,6 +167,7 @@ async function run() {
     assert.equal(firstLogin.status, 200);
     assert.equal(firstLogin.data.provider, "apple");
     assert.equal(firstLogin.data.email, "apple-fresh@example.com");
+    assert.equal(firstLogin.data.needsProfileSetup, true);
     const firstUserID = firstLogin.data.userId;
     assert.ok(firstUserID);
 
@@ -175,18 +176,21 @@ async function run() {
     });
     assert.equal(repeatedLogin.status, 200);
     assert.equal(repeatedLogin.data.userId, firstUserID);
+    assert.equal(repeatedLogin.data.needsProfileSetup, true);
 
     const mergedLogin = await requestJSON(PORT, "POST", "/v1/auth/apple", {
       idToken: "apple-merge-token"
     });
     assert.equal(mergedLogin.status, 200);
     assert.equal(mergedLogin.data.userId, "u_existing_email");
+    assert.equal(mergedLogin.data.needsProfileSetup, false);
 
     const hiddenLogin = await requestJSON(PORT, "POST", "/v1/auth/apple", {
       idToken: "apple-hidden-token"
     });
     assert.equal(hiddenLogin.status, 200);
     assert.notEqual(hiddenLogin.data.userId, "u_existing_email");
+    assert.equal(hiddenLogin.data.needsProfileSetup, true);
 
     const saved = JSON.parse(await fs.readFile(dataFile, "utf8"));
     const createdAppleIdentity = Object.values(saved.authIdentities).find((item) => (
@@ -208,6 +212,8 @@ async function run() {
     assert.notEqual(hiddenAppleIdentity.userID, "u_existing_email");
 
     assert.equal(saved.users.u_existing_email.journeys.length, 1);
+    assert.equal(saved.users[firstUserID].profileSetupCompleted, false);
+    assert.equal(saved.users.u_existing_email.profileSetupCompleted, true);
 
     console.log("auth apple contract: PASS");
   } finally {

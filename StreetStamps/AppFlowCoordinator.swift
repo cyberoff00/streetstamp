@@ -26,9 +26,15 @@ enum PostcardSidebarVisibilityScope {
 /// - An incrementing Int is a simple, reliable "edge trigger".
 @MainActor
 final class AppFlowCoordinator: ObservableObject {
+    static let shared = AppFlowCoordinator()
+
     @Published private(set) var resumeOngoingSignal: Int = 0
     @Published private(set) var endOngoingSignal: Int = 0
     @Published private(set) var pendingWidgetCaptureSignal: Int = 0
+    @Published private(set) var openPostcardSidebarSignal: Int = 0
+    @Published private(set) var openSidebarDestinationSignal: Int = 0
+    @Published private(set) var pendingPostcardSidebarIntent: PostcardInboxIntent?
+    @Published private(set) var pendingSidebarDestination: MainSidebarDestination?
     @Published private(set) var sidebarHiddenTokens: Set<String> = []
     @Published private(set) var requestedTab: NavigationTab?
     @Published private(set) var currentTab: NavigationTab = .start
@@ -47,6 +53,24 @@ final class AppFlowCoordinator: ObservableObject {
 
     func consumeWidgetCapture() {
         pendingWidgetCaptureSignal = 0
+    }
+
+    func requestOpenPostcardSidebar(_ intent: PostcardInboxIntent) {
+        pendingPostcardSidebarIntent = intent
+        openPostcardSidebarSignal += 1
+    }
+
+    func requestOpenSidebarDestination(_ destination: MainSidebarDestination) {
+        pendingSidebarDestination = destination
+        openSidebarDestinationSignal += 1
+    }
+
+    func consumePendingPostcardSidebarIntent() {
+        pendingPostcardSidebarIntent = nil
+    }
+
+    func consumePendingSidebarDestination() {
+        pendingSidebarDestination = nil
     }
 
     func requestSelectTab(_ tab: NavigationTab) {
@@ -197,7 +221,7 @@ final class AppDeepLinkStore: ObservableObject {
         return value
     }
 
-    private static func parsePostcardInbox(from url: URL) -> PostcardInboxIntent? {
+    static func parsePostcardInbox(from url: URL) -> PostcardInboxIntent? {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: true) else { return nil }
         let scheme = (components.scheme ?? "").lowercased()
         guard scheme == "streetstamps" || scheme == "https" || scheme == "http" else { return nil }

@@ -22,7 +22,15 @@ function statusOf(item) {
   return normalizeKey(item?.status || 'sent');
 }
 
-function canSendPostcard({ sentPostcards, toUserID, cityID, clientDraftID, allowedCityIDs }) {
+function normalizedJourneyCount(value) {
+  const numeric = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(numeric)) {
+    return 1;
+  }
+  return Math.max(1, numeric);
+}
+
+function canSendPostcard({ sentPostcards, toUserID, cityID, cityJourneyCount, clientDraftID, allowedCityIDs }) {
   const all = Array.isArray(sentPostcards) ? sentPostcards : [];
   const normalizedDraftID = normalizeText(clientDraftID);
 
@@ -47,11 +55,14 @@ function canSendPostcard({ sentPostcards, toUserID, cityID, clientDraftID, allow
   }
 
   const sentOnly = all.filter((item) => statusOf(item) === 'sent');
+  const additionalJourneyCount = Math.max(0, normalizedJourneyCount(cityJourneyCount) - 1);
+  const perFriendQuota = 2 + additionalJourneyCount;
+  const cityUniqueFriendQuota = 10 + (additionalJourneyCount * 10);
 
   const sameFriendSameCityCount = sentOnly.filter((item) => {
     return cityIDOf(item) === normalizedCityID && toUserIDOf(item) === normalizedToUserID;
   }).length;
-  if (sameFriendSameCityCount >= 2) {
+  if (sameFriendSameCityCount >= perFriendQuota) {
     return { ok: false, reason: 'city_friend_quota_exceeded', idempotentHit: null };
   }
 
@@ -61,7 +72,7 @@ function canSendPostcard({ sentPostcards, toUserID, cityID, clientDraftID, allow
       .map((item) => toUserIDOf(item))
       .filter(Boolean)
   ).size;
-  if (uniqueFriendCountForCity >= 10 && sameFriendSameCityCount === 0) {
+  if (uniqueFriendCountForCity >= cityUniqueFriendQuota && sameFriendSameCityCount === 0) {
     return { ok: false, reason: 'city_total_quota_exceeded', idempotentHit: null };
   }
 

@@ -38,17 +38,7 @@ enum PostcardCityOptionsPresentation {
             guard !id.isEmpty else { continue }
 
             // Keep postcard city labels aligned with city-card naming rules.
-            let resolved = CityPlacemarkResolver.displayTitle(
-                cityKey: city.id,
-                iso2: city.countryISO2,
-                fallbackTitle: city.name,
-                availableLevelNamesRaw: city.reservedAvailableLevelNames,
-                storedAvailableLevelNamesLocaleID: city.reservedAvailableLevelNamesLocaleID,
-                parentRegionKey: city.reservedParentRegionKey,
-                preferredLevel: city.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
-                localizedDisplayNameByLocale: city.localizedDisplayNameByLocale,
-                locale: locale
-            )
+            let resolved = CityPlacemarkResolver.displayTitle(for: city, locale: locale)
             if !resolved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 appendOption(id: id, name: resolved)
                 continue
@@ -65,4 +55,3 @@ enum PostcardCityOptionsPresentation {
         return ordered
     }
 }
-

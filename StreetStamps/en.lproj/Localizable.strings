@@ -96,6 +96,8 @@
 "memories_for_city" = "Memories in %@: %d";
 "no_memories_yet" = "No memories yet";
 "no_memories_desc" = "After you finish a journey, your memories will be saved here.";
+"friend_memories_empty_title" = "No journey memories yet";
+"friend_memories_empty_subtitle" = "This friend has not published any journey memories yet.";
 
 "unlock_city_title_cn" = "New City Card Unlocked";
 "unlock_city_desc_1" = "You just finished exploring %@.";
@@ -116,6 +118,8 @@
 "library_city_title" = "City Cards";
 "library_empty_title" = "No city stamps yet";
 "library_empty_subtitle" = "Generate a city card, or finish a journey to unlock your first city.";
+"friend_city_cards_empty_title" = "No city cards yet";
+"friend_city_cards_empty_subtitle" = "This friend has not unlocked any city cards yet.";
 "city_card_stats" = "%d explorations · %d memories";
 
 "location_failed_title" = "Location Failed";
@@ -498,8 +502,8 @@
 "postcard_sending" = "Sending...";
 "postcard_send" = "Send";
 "postcard_send_failed" = "Send failed. Please try again.";
-"postcard_quota_friend_limit_reached" = "You've already sent this friend 2 postcards from this city. Try sending one from another city.";
-"postcard_quota_city_limit_reached" = "Postcards from this city have already been sent to 10 friends. Try another city.";
+"postcard_quota_friend_limit_reached" = "You've reached this friend's postcard limit for the city. Start more journeys here to unlock more postcard quota.";
+"postcard_quota_city_limit_reached" = "This city's postcard quota is full. Start more journeys here to unlock more postcard quota.";
 "postcard_sent_success_title" = "Postcard sent!";
 "postcard_go_to_sent_box" = "View in Sent Box";
 "postcard_notification_badge" = "Postcard";
@@ -588,6 +592,16 @@
 "switched_to_guest_mode" = "Switched back to guest mode";
 "profile_name_empty" = "Display name cannot be empty";
 "profile_name_updated" = "Display name updated";
+"profile_setup_title" = "SET UP YOUR TRAVELER";
+"profile_setup_subtitle" = "Pick your look and claim a nickname before you enter StreetStamps.";
+"profile_setup_avatar_hint" = "Your first look can be changed again later.";
+"profile_setup_edit_look" = "EDIT MY LOOK";
+"profile_setup_nickname_label" = "NICKNAME";
+"profile_setup_nickname_placeholder" = "SKYWALKER";
+"profile_setup_nickname_hint" = "Nicknames are unique now, so pick one that feels like you.";
+"profile_setup_ready_title" = "One last step";
+"profile_setup_ready_body" = "We'll save this nickname and outfit to your account so your friends see the same traveler everywhere.";
+"profile_setup_confirm" = "ENTER STREETSTAMPS";
 "account_exclusive_id_empty" = "Exclusive ID cannot be empty";
 "account_exclusive_id_rules" = "Exclusive ID only supports letters, numbers, and underscores";
 "account_exclusive_id_updated" = "Exclusive ID updated";
@@ -615,11 +629,11 @@
 "profile_invite_code_copied" = "Invite code copied";
 "profile_share_card" = "Share Card";
 "profile_send_friend_request" = "Send Friend Request";
-"profile_friend_request_input" = "Enter invite code / exclusive ID / invite link";
+"profile_friend_request_input" = "Enter invite code / @exclusive ID / invite link";
 "profile_sending" = "Sending...";
 "profile_send_friend_request_button" = "Send Friend Request";
 "profile_scan_qr_code" = "Scan QR Code";
-"profile_friend_request_input_required" = "Enter an invite code, exclusive ID, or invite link first.";
+"profile_friend_request_input_required" = "Enter an invite code, @exclusive ID, or invite link first.";
 "profile_friend_request_sent" = "Friend request sent.";
 "profile_open_app_to_scan" = "Open Worldo -> Friends -> Scan QR Code";
 "profile_place_qr_in_frame" = "Place the friend's invite QR code inside the frame";

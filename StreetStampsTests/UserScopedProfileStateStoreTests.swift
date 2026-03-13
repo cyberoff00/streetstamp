@@ -133,6 +133,45 @@ final class UserScopedProfileStateStoreTests: XCTestCase {
         )
     }
 
+    func test_profileSetupPendingMarkerPersistsPerUser() throws {
+        let defaults = try makeDefaults()
+        let firstUserID = "account_123"
+        let secondUserID = "account_456"
+
+        UserScopedProfileStateStore.markProfileSetupPending(for: firstUserID, defaults: defaults)
+
+        XCTAssertTrue(UserScopedProfileStateStore.isProfileSetupPending(for: firstUserID, defaults: defaults))
+        XCTAssertFalse(UserScopedProfileStateStore.isProfileSetupPending(for: secondUserID, defaults: defaults))
+
+        UserScopedProfileStateStore.clearProfileSetupPending(for: firstUserID, defaults: defaults)
+
+        XCTAssertFalse(UserScopedProfileStateStore.isProfileSetupPending(for: firstUserID, defaults: defaults))
+    }
+
+    @MainActor
+    func test_applyAuthTracksPendingProfileSetupInSessionStore() {
+        let store = UserSessionStore()
+
+        store.applyAuth(
+            BackendAuthResponse(
+                userId: "account_profile_setup",
+                provider: "email",
+                email: "setup@example.com",
+                accessToken: "access-setup",
+                refreshToken: "refresh-setup",
+                needsProfileSetup: true
+            )
+        )
+
+        XCTAssertTrue(store.requiresProfileSetup)
+        XCTAssertTrue(UserScopedProfileStateStore.isProfileSetupPending(for: "account_profile_setup"))
+
+        store.markProfileSetupCompleted()
+
+        XCTAssertFalse(store.requiresProfileSetup)
+        XCTAssertFalse(UserScopedProfileStateStore.isProfileSetupPending(for: "account_profile_setup"))
+    }
+
     func test_decodeLoadoutMigratesRemovedHair009ToHair0007() throws {
         let legacyLoadout = RobotLoadout(
             hairId: "hair_009",

@@ -13,12 +13,42 @@ struct BackendAuthResponse: Codable {
     let email: String?
     let accessToken: String
     let refreshToken: String
+    let needsProfileSetup: Bool
+
+    init(
+        userId: String,
+        provider: String,
+        email: String?,
+        accessToken: String,
+        refreshToken: String,
+        needsProfileSetup: Bool = false
+    ) {
+        self.userId = userId
+        self.provider = provider
+        self.email = email
+        self.accessToken = accessToken
+        self.refreshToken = refreshToken
+        self.needsProfileSetup = needsProfileSetup
+    }
 }
 
 struct BackendRegisterResponse: Codable {
     let userId: String
     let email: String
     let emailVerificationRequired: Bool
+    let needsProfileSetup: Bool
+
+    init(
+        userId: String,
+        email: String,
+        emailVerificationRequired: Bool,
+        needsProfileSetup: Bool = false
+    ) {
+        self.userId = userId
+        self.email = email
+        self.emailVerificationRequired = emailVerificationRequired
+        self.needsProfileSetup = needsProfileSetup
+    }
 }
 
 struct BackendRefreshResponse: Codable {
@@ -158,6 +188,11 @@ private struct BackendNotificationReadRequest: Codable {
     var all: Bool
 }
 
+private struct BackendProfileSetupRequest: Codable {
+    var displayName: String
+    var loadout: RobotLoadout
+}
+
 private actor BackendTokenRefreshGate {
     private var inFlight: Task<String?, Never>?
 
@@ -212,6 +247,7 @@ struct BackendProfileDTO: Codable {
     var inviteCode: String?
     var profileVisibility: ProfileVisibility?
     var displayName: String
+    var profileSetupCompleted: Bool?
     var email: String?
     var bio: String
     var loadout: RobotLoadout?
@@ -233,6 +269,40 @@ struct BackendProfileDTO: Codable {
             return canUpdateHandleOneTime
         }
         return !(handleChangeUsed ?? false)
+    }
+
+    init(
+        id: String,
+        handle: String? = nil,
+        exclusiveID: String? = nil,
+        inviteCode: String? = nil,
+        profileVisibility: ProfileVisibility? = nil,
+        displayName: String,
+        email: String? = nil,
+        bio: String,
+        loadout: RobotLoadout? = nil,
+        handleChangeUsed: Bool? = nil,
+        canUpdateHandleOneTime: Bool? = nil,
+        stats: ProfileStatsSnapshot? = nil,
+        journeys: [FriendSharedJourney],
+        unlockedCityCards: [FriendCityCard],
+        profileSetupCompleted: Bool? = nil
+    ) {
+        self.id = id
+        self.handle = handle
+        self.exclusiveID = exclusiveID
+        self.inviteCode = inviteCode
+        self.profileVisibility = profileVisibility
+        self.displayName = displayName
+        self.profileSetupCompleted = profileSetupCompleted
+        self.email = email
+        self.bio = bio
+        self.loadout = loadout
+        self.handleChangeUsed = handleChangeUsed
+        self.canUpdateHandleOneTime = canUpdateHandleOneTime
+        self.stats = stats
+        self.journeys = journeys
+        self.unlockedCityCards = unlockedCityCards
     }
 }
 
@@ -786,6 +856,17 @@ final class BackendAPIClient {
     func updateLoadout(token: String, loadout: RobotLoadout) async throws -> BackendProfileDTO {
         let body = try encoder.encode(["loadout": loadout])
         let (data, _) = try await request(path: "/v1/profile/loadout", method: "PATCH", token: token, jsonBody: body)
+        return try decoder.decode(BackendProfileDTO.self, from: data)
+    }
+
+    func completeProfileSetup(token: String, displayName: String, loadout: RobotLoadout) async throws -> BackendProfileDTO {
+        let body = try encoder.encode(
+            BackendProfileSetupRequest(
+                displayName: displayName,
+                loadout: loadout.normalizedForCurrentAvatar()
+            )
+        )
+        let (data, _) = try await request(path: "/v1/profile/setup", method: "POST", token: token, jsonBody: body)
         return try decoder.decode(BackendProfileDTO.self, from: data)
     }
 

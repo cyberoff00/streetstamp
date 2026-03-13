@@ -119,7 +119,11 @@ final class AppNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNoti
             return
         }
         await MainActor.run {
-            UIApplication.shared.open(url)
+            if let intent = AppDeepLinkStore.parsePostcardInbox(from: url) {
+                AppFlowCoordinator.shared.requestOpenPostcardSidebar(intent)
+            } else {
+                UIApplication.shared.open(url)
+            }
         }
     }
 }

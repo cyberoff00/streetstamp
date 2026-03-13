@@ -80,6 +80,7 @@ final class BackendAPIClientAuthErrorTests: XCTestCase {
                     clientDraftID: "draft-1",
                     toUserID: "friend-1",
                     cityID: "paris",
+                    cityJourneyCount: 1,
                     cityName: "Paris",
                     messageText: "hello",
                     photoURL: "https://example.com/p.jpg",
@@ -96,6 +97,27 @@ final class BackendAPIClientAuthErrorTests: XCTestCase {
         }
     }
 
+    func test_loginSuccessDecodesNeedsProfileSetupFlag() async throws {
+        BackendAPIClient.shared.installTestingTransport { request in
+            XCTAssertEqual(request.url?.path, "/v1/auth/login")
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            let body = #"{"userId":"user-1","provider":"email","email":"user-1@example.com","accessToken":"access-1","refreshToken":"refresh-1","needsProfileSetup":true}"#
+                .data(using: .utf8)!
+            return (body, response)
+        }
+
+        let auth = try await BackendAPIClient.shared.login(email: "user-1@example.com", password: "Password1!")
+
+        XCTAssertEqual(auth.userId, "user-1")
+        XCTAssertEqual(auth.email, "user-1@example.com")
+        XCTAssertTrue(auth.needsProfileSetup)
+    }
+
     @MainActor
     func test_refreshFailureEntersBackoffAndAvoidsImmediateRepeatRefresh() async throws {
         let session = UserSessionStore()
@@ -106,7 +128,8 @@ final class BackendAPIClientAuthErrorTests: XCTestCase {
                 provider: "email",
                 email: "user-1@example.com",
                 accessToken: "expired-access-token",
-                refreshToken: "refresh-token-1"
+                refreshToken: "refresh-token-1",
+                needsProfileSetup: false
             )
         )
 

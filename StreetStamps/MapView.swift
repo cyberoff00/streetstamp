@@ -14,6 +14,16 @@ import PhotosUI
 
 // MARK: - Models
 
+enum WidgetCaptureLaunchPolicy {
+    static func shouldOpenEditorOnMapAppear(
+        pendingWidgetCaptureSignal: Int,
+        isTracking: Bool,
+        isPaused: Bool
+    ) -> Bool {
+        pendingWidgetCaptureSignal > 0 && isTracking && !isPaused
+    }
+}
+
 struct CoordinateCodable: Codable, Hashable, Sendable {
     var lat: Double
     var lon: Double
@@ -848,6 +858,17 @@ struct MapView: View {
         .onAppear {
             onAppearSetup()
             groupedMemoriesCache = computeGroupedMemories()
+            if flow.pendingWidgetCaptureSignal > 0 {
+                if WidgetCaptureLaunchPolicy.shouldOpenEditorOnMapAppear(
+                    pendingWidgetCaptureSignal: flow.pendingWidgetCaptureSignal,
+                    isTracking: tracking.isTracking,
+                    isPaused: tracking.isPaused
+                ) {
+                    openCaptureFromWidget()
+                } else {
+                    flow.consumeWidgetCapture()
+                }
+            }
         }
         .onChange(of: journeyRoute.memories) { _ in
             groupedMemoriesCache = computeGroupedMemories()
@@ -2982,6 +3003,7 @@ private struct RobotMapMarkerView: View {
     let face: RobotFace
     let headingDegrees: Double
     let showsHeadlight: Bool
+    let onOpenEquipment: () -> Void
 
     var body: some View {
         ZStack {
@@ -2991,6 +3013,10 @@ private struct RobotMapMarkerView: View {
             RobotRendererView(size: AvatarMapMarkerStyle.visualSize, face: face, loadout: AvatarLoadoutStore.load())
         }
         .frame(width: AvatarMapMarkerStyle.annotationSize, height: AvatarMapMarkerStyle.annotationSize)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            onOpenEquipment()
+        }
     }
 }
 
@@ -3185,7 +3211,10 @@ private struct JourneyMKMapView: UIViewRepresentable {
                 rootView: RobotMapMarkerView(
                     face: fixedFace,
                     headingDegrees: displayHeading,
-                    showsHeadlight: parent.headlightEnabled
+                    showsHeadlight: parent.headlightEnabled,
+                    onOpenEquipment: {
+                        AppFlowCoordinator.shared.requestOpenSidebarDestination(.equipment)
+                    }
                 )
             )
             hosting.view.backgroundColor = .clear

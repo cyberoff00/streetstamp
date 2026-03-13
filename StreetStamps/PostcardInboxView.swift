@@ -42,6 +42,18 @@ struct PostcardInboxView: View {
         return normalized.isEmpty ? "EXPLORER" : normalized
     }
 
+    private var myLoadout: RobotLoadout {
+        AvatarLoadoutStore.load().normalizedForCurrentAvatar()
+    }
+
+    private var friendLoadoutsByUserID: [String: RobotLoadout] {
+        Dictionary(
+            uniqueKeysWithValues: socialStore.friends.map { friend in
+                (friend.id, friend.loadout.normalizedForCurrentAvatar())
+            }
+        )
+    }
+
     var body: some View {
         VStack(spacing: 12) {
             Picker("Postcards", selection: $selectedBox) {
@@ -130,6 +142,13 @@ struct PostcardInboxView: View {
                     nickname: myDisplayName.uppercased(),
                     messageText: item.messageText,
                     photoSource: photoSource(for: item),
+                    avatarLoadout: PostcardInboxPresentation.avatarLoadout(
+                        for: item,
+                        box: .sent,
+                        myUserID: sessionStore.currentUserID,
+                        myLoadout: myLoadout,
+                        friendLoadoutsByUserID: friendLoadoutsByUserID
+                    ),
                     sentDate: item.sentAt,
                     metaLabel: "\(L10n.t("postcard_to_prefix"))\(recipientLabel)"
                 )
@@ -146,6 +165,7 @@ struct PostcardInboxView: View {
                     nickname: myDisplayName.uppercased(),
                     messageText: draft.message,
                     photoSource: draftPhotoSource(draft),
+                    avatarLoadout: myLoadout,
                     sentDate: draft.sentAt ?? draft.updatedAt,
                     metaLabel: "\(L10n.t("postcard_to_prefix"))\(recipientLabel)",
                     statusBadge: draft.status == .sending ? L10n.t("postcard_sending") : nil
@@ -172,6 +192,13 @@ struct PostcardInboxView: View {
                     nickname: senderLabel.uppercased(),
                     messageText: item.messageText,
                     photoSource: photoSource(for: item),
+                    avatarLoadout: PostcardInboxPresentation.avatarLoadout(
+                        for: item,
+                        box: .received,
+                        myUserID: sessionStore.currentUserID,
+                        myLoadout: myLoadout,
+                        friendLoadoutsByUserID: friendLoadoutsByUserID
+                    ),
                     sentDate: item.sentAt,
                     metaLabel: "\(L10n.t("postcard_from_prefix"))\(senderLabel)"
                 )
@@ -293,6 +320,7 @@ private struct PostcardCardRow: View {
     let nickname: String
     let messageText: String
     let photoSource: PostcardPhotoSource
+    let avatarLoadout: RobotLoadout
     let sentDate: Date
     let metaLabel: String
     var statusBadge: String? = nil
@@ -307,7 +335,7 @@ private struct PostcardCardRow: View {
                 nickname: nickname,
                 messageText: messageText,
                 photoSource: photoSource,
-                avatarLoadout: AvatarLoadoutStore.load(),
+                avatarLoadout: avatarLoadout,
                 isFront: $isFront,
                 sentDate: sentDate,
                 onLongPress: { saveCurrentFaceToPhotos() }
@@ -361,7 +389,7 @@ private struct PostcardCardRow: View {
                     cityName: cityName,
                     nickname: nickname,
                     photoSource: photoSource,
-                    avatarLoadout: AvatarLoadoutStore.load(),
+                    avatarLoadout: avatarLoadout,
                     cornerRadius: 22
                 )
             )
@@ -371,7 +399,7 @@ private struct PostcardCardRow: View {
                     cityName: cityName,
                     nickname: nickname,
                     messageText: messageText,
-                    avatarLoadout: AvatarLoadoutStore.load(),
+                    avatarLoadout: avatarLoadout,
                     sentDate: sentDate,
                     cornerRadius: 22
                 )

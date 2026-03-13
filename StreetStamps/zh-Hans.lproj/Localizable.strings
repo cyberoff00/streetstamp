@@ -96,6 +96,8 @@
 "memories_for_city" = "%@ 的记忆：%d";
 "no_memories_yet" = "暂无记忆";
 "no_memories_desc" = "完成一次旅程后，记忆会保存在这里。";
+"friend_memories_empty_title" = "TA 暂无旅程记忆";
+"friend_memories_empty_subtitle" = "TA 还没有公开旅程记忆。";
 
 "unlock_city_title_cn" = "解锁新城市探索卡";
 "unlock_city_desc_1" = "你刚刚完成了在 %@ 的探索。";
@@ -117,6 +119,8 @@
 "library_city_title" = "城市卡";
 "library_empty_title" = "还没有城市印章";
 "library_empty_subtitle" = "生成一张城市卡，或完成一次旅程来解锁你的第一座城市。";
+"friend_city_cards_empty_title" = "TA 暂无城市卡";
+"friend_city_cards_empty_subtitle" = "TA 还没有解锁城市卡。";
 "city_card_stats" = "%d 次探索 · %d 条记忆";
 
 "location_failed_title" = "定位失败";
@@ -500,8 +504,8 @@
 "postcard_sending" = "发送中...";
 "postcard_send" = "发送";
 "postcard_send_failed" = "发送失败，请稍后重试。";
-"postcard_quota_friend_limit_reached" = "你已经给这位好友寄过 2 张来自这座城市的明信片了，换个城市再寄一张吧。";
-"postcard_quota_city_limit_reached" = "这座城市的明信片已经寄给 10 位好友了，换个城市再寄吧。";
+"postcard_quota_friend_limit_reached" = "这位好友在这座城市的明信片额度已经满了，开启更多旅程即可解锁更多明信片额度。";
+"postcard_quota_city_limit_reached" = "这座城市的明信片额度已经满了，开启更多旅程即可解锁更多明信片额度。";
 "postcard_sent_success_title" = "明信片已寄出";
 "postcard_go_to_sent_box" = "去发件箱看看";
 "postcard_notification_badge" = "收到明信片";
@@ -590,6 +594,16 @@
 "switched_to_guest_mode" = "已切回游客模式";
 "profile_name_empty" = "昵称不能为空";
 "profile_name_updated" = "昵称已更新";
+"profile_setup_title" = "先设置你的旅行形象";
+"profile_setup_subtitle" = "先换好造型，再取一个昵称，然后进入 StreetStamps。";
+"profile_setup_avatar_hint" = "这个初始造型之后也可以再改。";
+"profile_setup_edit_look" = "去换装";
+"profile_setup_nickname_label" = "昵称";
+"profile_setup_nickname_placeholder" = "SKYWALKER";
+"profile_setup_nickname_hint" = "昵称现在不能和别人重复，选一个最像你的吧。";
+"profile_setup_ready_title" = "差最后一步";
+"profile_setup_ready_body" = "保存后，你的昵称和穿搭会同步到账号里，好友看到的就是这一版。";
+"profile_setup_confirm" = "进入 STREETSTAMPS";
 "account_exclusive_id_empty" = "专属ID不能为空";
 "account_exclusive_id_rules" = "专属ID仅支持字母、数字、下划线";
 "account_exclusive_id_updated" = "专属ID已更新";
@@ -617,11 +631,11 @@
 "profile_invite_code_copied" = "邀请码已复制";
 "profile_share_card" = "分享卡片";
 "profile_send_friend_request" = "传送好友请求";
-"profile_friend_request_input" = "输入好友邀请码 / 专属ID / 邀请链接";
+"profile_friend_request_input" = "输入好友邀请码 / @专属ID / 邀请链接";
 "profile_sending" = "发送中...";
 "profile_send_friend_request_button" = "发送好友申请";
 "profile_scan_qr_code" = "扫描二维码";
-"profile_friend_request_input_required" = "请先输入邀请码、专属ID或邀请链接。";
+"profile_friend_request_input_required" = "请先输入邀请码、@专属ID或邀请链接。";
 "profile_friend_request_sent" = "好友申请已发送。";
 "profile_open_app_to_scan" = "打开 Worldo -> 好友 -> 扫描二维码";
 "profile_place_qr_in_frame" = "将好友邀请码二维码放入框内";

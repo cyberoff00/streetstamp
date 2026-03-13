@@ -54,6 +54,8 @@ struct CityStampLibraryView: View {
     private let showHeader: Bool
     private let allowCityDetailNavigation: Bool
     private let headerTitle: String?
+    private let emptyTitleKey: String
+    private let emptySubtitleKey: String
 
     init(
         showSidebar: Binding<Bool>,
@@ -61,7 +63,9 @@ struct CityStampLibraryView: View {
         usesSidebarHeader: Bool = true,
         showHeader: Bool = true,
         allowCityDetailNavigation: Bool = true,
-        headerTitle: String? = nil
+        headerTitle: String? = nil,
+        emptyTitleKey: String = "library_empty_title",
+        emptySubtitleKey: String = "library_empty_subtitle"
     ) {
         self._showSidebar = showSidebar
         self.autoRebuildFromJourneyStore = autoRebuildFromJourneyStore
@@ -69,6 +73,8 @@ struct CityStampLibraryView: View {
         self.showHeader = showHeader
         self.allowCityDetailNavigation = allowCityDetailNavigation
         self.headerTitle = headerTitle
+        self.emptyTitleKey = emptyTitleKey
+        self.emptySubtitleKey = emptySubtitleKey
     }
 
     var body: some View {
@@ -237,8 +243,8 @@ struct CityStampLibraryView: View {
 
             if vm.cities.isEmpty {
                 emptyState(
-                    title: L10n.key("library_empty_title"),
-                    subtitle: L10n.key("library_empty_subtitle")
+                    title: L10n.key(emptyTitleKey),
+                    subtitle: L10n.key(emptySubtitleKey)
                 )
                 .padding(.top, 28)
                 .padding(.bottom, 60)

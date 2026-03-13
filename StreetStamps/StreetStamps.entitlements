@@ -20,7 +20,7 @@
 	<true/>
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.claire.streetstampschatgpt</string>
+		<string>group.com.streetstamps.shared</string>
 	</array>
 </dict>
 </plist>

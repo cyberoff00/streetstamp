@@ -21,4 +21,13 @@ final class AppDeepLinkStoreTests: XCTestCase {
         XCTAssertFalse(handled)
         XCTAssertNil(store.pendingPasswordResetToken)
     }
+
+    func testParsePostcardInboxURLReturnsReceivedIntentWithMessageID() {
+        let intent = AppDeepLinkStore.parsePostcardInbox(
+            from: URL(string: "streetstamps://postcards?box=received&messageID=pm_123")!
+        )
+
+        XCTAssertEqual(intent?.box, "received")
+        XCTAssertEqual(intent?.messageID, "pm_123")
+    }
 }

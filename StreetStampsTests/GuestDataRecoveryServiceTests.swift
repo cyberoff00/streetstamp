@@ -87,7 +87,8 @@ final class GuestDataRecoveryServiceTests: XCTestCase {
                 provider: "email",
                 email: "task5@example.com",
                 accessToken: "token",
-                refreshToken: "refresh"
+                refreshToken: "refresh",
+                needsProfileSetup: false
             )
         )
 
@@ -109,7 +110,8 @@ final class GuestDataRecoveryServiceTests: XCTestCase {
                 provider: "email",
                 email: "local@example.com",
                 accessToken: "token",
-                refreshToken: "refresh"
+                refreshToken: "refresh",
+                needsProfileSetup: false
             )
         )
         XCTAssertEqual(store.activeLocalProfileID, initialLocalProfileID)
@@ -131,7 +133,8 @@ final class GuestDataRecoveryServiceTests: XCTestCase {
                 provider: "email",
                 email: "forced@example.com",
                 accessToken: "token",
-                refreshToken: "refresh"
+                refreshToken: "refresh",
+                needsProfileSetup: false
             )
         )
         XCTAssertTrue(store.isLoggedIn)
@@ -181,7 +184,8 @@ final class GuestDataRecoveryServiceTests: XCTestCase {
                 provider: "email",
                 email: "bound@example.com",
                 accessToken: "token",
-                refreshToken: "refresh"
+                refreshToken: "refresh",
+                needsProfileSetup: false
             )
         )
         store.logoutToGuest()

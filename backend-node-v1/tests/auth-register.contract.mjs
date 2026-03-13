@@ -102,6 +102,7 @@ async function run() {
     assert.equal(good.status, 200);
     assert.equal(good.data.emailVerificationRequired, true);
     assert.equal(typeof good.data.userId, "string");
+    assert.equal(good.data.needsProfileSetup, true);
 
     const duplicate = await requestJSON(PORT, "POST", "/v1/auth/register", {
       email: "valid@example.com",
@@ -114,6 +115,10 @@ async function run() {
     assert.ok(identity, "expected email_password identity to be persisted");
     assert.equal(identity.provider, "email_password");
     assert.equal(identity.emailVerified, false);
+
+    const createdUser = state.users[good.data.userId];
+    assert.ok(createdUser, "expected registered user to be persisted");
+    assert.equal(createdUser.profileSetupCompleted, false);
 
     console.log("auth register contract: PASS");
   } finally {

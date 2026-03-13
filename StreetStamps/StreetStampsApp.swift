@@ -20,7 +20,7 @@ struct StreetStampsApp: App {
     @StateObject private var lifelogRenderCache: LifelogRenderCacheCoordinator
     @StateObject private var socialStore: SocialGraphStore
     @StateObject private var postcardCenter: PostcardCenter
-    @StateObject private var flow = AppFlowCoordinator()
+    @StateObject private var flow = AppFlowCoordinator.shared
     @StateObject private var deepLinkStore = AppDeepLinkStore()
     @StateObject private var onboardingGuide = OnboardingGuideStore()
     @State private var showAuthEntry = false
@@ -40,6 +40,7 @@ struct StreetStampsApp: App {
     }
 
     private func restoreFromICloudIfNeeded(userID: String) async {
+        guard AppSettings.isAutomaticICloudRestoreEnabled else { return }
         let paths = StoragePath(userID: userID)
         let restored = await ICloudSyncService.shared.restoreLatestIfNeeded(
             userID: userID,
@@ -151,6 +152,15 @@ struct StreetStampsApp: App {
                 .environmentObject(cityCache)
                 .environmentObject(socialStore)
                 .environmentObject(postcardCenter)
+            }
+            .fullScreenCover(
+                isPresented: Binding(
+                    get: { sessionStore.requiresProfileSetup },
+                    set: { _ in }
+                )
+            ) {
+                FirstProfileSetupView()
+                    .environmentObject(sessionStore)
             }
     }
 
@@ -355,22 +365,27 @@ struct StreetStampsApp: App {
     private var appContent: some View {
         appContentWithLifecycleHandlers
             .onOpenURL { url in
-                guard deepLinkStore.handleIncomingURL(url) else { return }
-                if deepLinkStore.pendingPasswordResetToken != nil {
-                    showAuthEntry = true
-                } else {
-                    flow.requestSelectTab(.friends)
-                }
+                handleIncomingAppURL(url)
             }
             .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
                 guard let url = activity.webpageURL else { return }
-                guard deepLinkStore.handleIncomingURL(url) else { return }
-                if deepLinkStore.pendingPasswordResetToken != nil {
-                    showAuthEntry = true
-                } else {
-                    flow.requestSelectTab(.friends)
-                }
+                handleIncomingAppURL(url)
             }
+            .preferredColorScheme(.light)
+    }
+
+    private func handleIncomingAppURL(_ url: URL) {
+        if let postcardIntent = AppDeepLinkStore.parsePostcardInbox(from: url) {
+            flow.requestOpenPostcardSidebar(postcardIntent)
+            return
+        }
+
+        guard deepLinkStore.handleIncomingURL(url) else { return }
+        if deepLinkStore.pendingPasswordResetToken != nil {
+            showAuthEntry = true
+        } else {
+            flow.requestSelectTab(.friends)
+        }
     }
 
     private func scheduleTrackTileRebuild(delay: TimeInterval = 0.25, force: Bool = true) {

@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import MapKit
 import AVFoundation
+import PhotosUI
 
 private enum FriendsTopTab: String, CaseIterable, Identifiable {
     case activity
@@ -529,10 +530,15 @@ struct FriendsHubView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 4) {
+                    let handleText: String = {
+                        let raw = profile.handle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        if raw.isEmpty { return L10n.t("unknown_id") }
+                        return "@\(raw)"
+                    }()
                     Text(profile.displayName)
                         .font(.system(size: 15, weight: .bold))
                         .foregroundColor(FigmaTheme.text)
-                    Text(String(format: L10n.t("friends_exclusive_id_format"), profile.handle ?? L10n.t("unknown_id")))
+                    Text(String(format: L10n.t("friends_exclusive_id_format"), handleText))
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(FigmaTheme.subtext)
                     Text(shortAgoText(from: request.createdAt))
@@ -1458,7 +1464,7 @@ private struct AddFriendSheet: View {
     private var inputPlaceholder: String {
         switch method {
         case .inviteCode: return "输入邀请码（A1B2C3D4）"
-        case .exclusiveID: return "输入好友专属ID（支持带或不带 @）"
+        case .exclusiveID: return "输入好友专属ID（示例：@alice）"
         case .qrToken: return "粘贴二维码 token 或链接"
         }
     }
@@ -2026,6 +2032,9 @@ private struct FriendInviteScannerSheet: View {
     @Environment(\.dismiss) private var dismiss
     let onScanned: (String) -> Void
 
+    @State private var pickedPhotoItem: PhotosPickerItem?
+    @State private var isImportingFromAlbum = false
+    @State private var didResolveCode = false
     @State private var scannerError: String?
 
     var body: some View {
@@ -2033,21 +2042,36 @@ private struct FriendInviteScannerSheet: View {
             ZStack(alignment: .bottom) {
                 FriendInviteScannerRepresentable(
                     onDetected: { code in
-                        dismiss()
-                        onScanned(code)
+                        completeScan(with: code)
                     },
-                    onFailure: { scannerError = $0 }
+                    onFailure: { message in
+                        guard !didResolveCode else { return }
+                        scannerError = message
+                    }
                 )
                 .ignoresSafeArea()
 
-                Text(L10n.t("profile_place_qr_in_frame"))
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color.black.opacity(0.55))
-                    .clipShape(Capsule())
-                    .padding(.bottom, 24)
+                VStack(spacing: 10) {
+                    Text(L10n.t("profile_place_qr_in_frame"))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.black.opacity(0.55))
+                        .clipShape(Capsule())
+
+                    PhotosPicker(selection: $pickedPhotoItem, matching: .images, photoLibrary: .shared()) {
+                        Label(isImportingFromAlbum ? "识别中..." : "从相册导入", systemImage: "photo.on.rectangle")
+                            .font(.system(size: 13, weight: .semibold))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 9)
+                            .background(Color.white.opacity(0.9))
+                            .foregroundColor(.black)
+                            .clipShape(Capsule())
+                    }
+                    .disabled(isImportingFromAlbum || didResolveCode)
+                }
+                .padding(.bottom, 24)
             }
             .safeAreaInset(edge: .top, spacing: 0) {
                 UnifiedNavigationHeader(
@@ -2073,7 +2097,42 @@ private struct FriendInviteScannerSheet: View {
             } message: {
                 Text(scannerError ?? "")
             }
+            .onChange(of: pickedPhotoItem) { _, item in
+                guard let item else { return }
+                Task { await importQRCodeFromPhoto(item) }
+            }
         }
+    }
+
+    @MainActor
+    private func importQRCodeFromPhoto(_ item: PhotosPickerItem) async {
+        guard !didResolveCode else { return }
+        isImportingFromAlbum = true
+        defer {
+            isImportingFromAlbum = false
+            pickedPhotoItem = nil
+        }
+
+        guard let data = try? await item.loadTransferable(type: Data.self),
+              let image = UIImage(data: data) else {
+            scannerError = "无法读取这张图片，请换一张再试。"
+            return
+        }
+
+        guard let code = QRCodeImageDecoder.decode(image: image) else {
+            scannerError = "未在该图片中识别到二维码。"
+            return
+        }
+
+        completeScan(with: code)
+    }
+
+    @MainActor
+    private func completeScan(with code: String) {
+        guard !didResolveCode else { return }
+        didResolveCode = true
+        dismiss()
+        onScanned(code)
     }
 }
 
@@ -2479,7 +2538,9 @@ private struct FriendCitiesScreen: View {
                     autoRebuildFromJourneyStore: false,
                     usesSidebarHeader: false,
                     allowCityDetailNavigation: false,
-                    headerTitle: FriendSectionTitleFormatter.sectionTitle(for: .cityCards, friendName: friend.displayName, locale: locale)
+                    headerTitle: FriendSectionTitleFormatter.sectionTitle(for: .cityCards, friendName: friend.displayName, locale: locale),
+                    emptyTitleKey: "friend_city_cards_empty_title",
+                    emptySubtitleKey: "friend_city_cards_empty_subtitle"
                 )
                     .environmentObject(mirror.journeyStore)
                     .environmentObject(mirror.cityCache)
@@ -2623,7 +2684,9 @@ private struct FriendPublicMemoriesScreen: View {
                     showSidebar: .constant(false),
                     usesSidebarHeader: false,
                     readOnly: true,
-                    headerTitle: FriendSectionTitleFormatter.sectionTitle(for: .journeyMemories, friendName: friend.displayName, locale: locale)
+                    headerTitle: FriendSectionTitleFormatter.sectionTitle(for: .journeyMemories, friendName: friend.displayName, locale: locale),
+                    emptyTitleKey: "friend_memories_empty_title",
+                    emptySubtitleKey: "friend_memories_empty_subtitle"
                 )
                     .environmentObject(mirror.journeyStore)
                     .environmentObject(sessionStore)

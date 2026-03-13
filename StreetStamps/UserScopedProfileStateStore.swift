@@ -16,6 +16,10 @@ enum UserScopedProfileStateStore {
         "avatar.loadout.v2.pending.user.\(userID)"
     }
 
+    static func pendingProfileSetupKey(for userID: String) -> String {
+        "streetstamps.profile.setup.pending.user.\(userID)"
+    }
+
     static func initializeCurrentUser(_ userID: String, defaults: UserDefaults = .standard) {
         guard !userID.isEmpty else { return }
 
@@ -56,6 +60,21 @@ enum UserScopedProfileStateStore {
     static func clearPendingLoadout(for userID: String, defaults: UserDefaults = .standard) {
         guard !userID.isEmpty else { return }
         defaults.removeObject(forKey: pendingAvatarLoadoutKey(for: userID))
+    }
+
+    static func markProfileSetupPending(for userID: String, defaults: UserDefaults = .standard) {
+        guard !userID.isEmpty else { return }
+        defaults.set(true, forKey: pendingProfileSetupKey(for: userID))
+    }
+
+    static func isProfileSetupPending(for userID: String, defaults: UserDefaults = .standard) -> Bool {
+        guard !userID.isEmpty else { return false }
+        return defaults.bool(forKey: pendingProfileSetupKey(for: userID))
+    }
+
+    static func clearProfileSetupPending(for userID: String, defaults: UserDefaults = .standard) {
+        guard !userID.isEmpty else { return }
+        defaults.removeObject(forKey: pendingProfileSetupKey(for: userID))
     }
 
     private static func captureCurrentGlobalStateIfPresent(for userID: String, defaults: UserDefaults) {

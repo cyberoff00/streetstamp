@@ -97,19 +97,32 @@ final class PostcardCenter: ObservableObject {
         persist()
     }
 
-    func retry(draftID: String, token: String?, allowedCityIDs: [String]) async {
-        await enqueueSend(draftID: draftID, token: token, allowedCityIDs: allowedCityIDs, increaseRetry: true)
+    func retry(draftID: String, token: String?, allowedCityIDs: [String], cityJourneyCount: Int) async {
+        await enqueueSend(
+            draftID: draftID,
+            token: token,
+            allowedCityIDs: allowedCityIDs,
+            cityJourneyCount: cityJourneyCount,
+            increaseRetry: true
+        )
     }
 
-    func enqueueSend(draftID: String, token: String?, allowedCityIDs: [String]) async {
-        await enqueueSend(draftID: draftID, token: token, allowedCityIDs: allowedCityIDs, increaseRetry: false)
+    func enqueueSend(draftID: String, token: String?, allowedCityIDs: [String], cityJourneyCount: Int) async {
+        await enqueueSend(
+            draftID: draftID,
+            token: token,
+            allowedCityIDs: allowedCityIDs,
+            cityJourneyCount: cityJourneyCount,
+            increaseRetry: false
+        )
     }
 
     func refreshFromBackend(token: String?) async {
         guard let token, !token.isEmpty else { return }
         do {
-            let sent = try await BackendAPIClient.shared.fetchPostcards(token: token, box: "sent")
-            let received = try await BackendAPIClient.shared.fetchPostcards(token: token, box: "received")
+            async let sentTask = BackendAPIClient.shared.fetchPostcards(token: token, box: "sent")
+            async let receivedTask = BackendAPIClient.shared.fetchPostcards(token: token, box: "received")
+            let (sent, received) = try await (sentTask, receivedTask)
             sentItems = sent.items.sorted(by: { $0.sentAt > $1.sentAt })
             receivedItems = received.items.sorted(by: { $0.sentAt > $1.sentAt })
             lastSyncError = nil
@@ -123,7 +136,13 @@ final class PostcardCenter: ObservableObject {
         }
     }
 
-    private func enqueueSend(draftID: String, token: String?, allowedCityIDs: [String], increaseRetry: Bool) async {
+    private func enqueueSend(
+        draftID: String,
+        token: String?,
+        allowedCityIDs: [String],
+        cityJourneyCount: Int,
+        increaseRetry: Bool
+    ) async {
         guard let idx = drafts.firstIndex(where: { $0.draftID == draftID }) else { return }
         guard let token, !token.isEmpty else {
             var draft = drafts[idx]
@@ -153,6 +172,7 @@ final class PostcardCenter: ObservableObject {
                 clientDraftID: draft.clientDraftID,
                 toUserID: draft.toUserID,
                 cityID: draft.cityID,
+                cityJourneyCount: max(1, cityJourneyCount),
                 cityName: draft.cityName,
                 messageText: String(draft.message.prefix(80)),
                 photoURL: remotePhotoURL,
@@ -170,7 +190,10 @@ final class PostcardCenter: ObservableObject {
             current.updatedAt = Date()
             drafts[currentIndex] = current
             persist()
-            await refreshFromBackend(token: token)
+            // Keep "send" completion snappy; refresh inbox in background.
+            Task { [weak self] in
+                await self?.refreshFromBackend(token: token)
+            }
         } catch {
             guard let currentIndex = drafts.firstIndex(where: { $0.draftID == draftID }) else { return }
             var current = drafts[currentIndex]

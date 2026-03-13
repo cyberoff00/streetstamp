@@ -32,4 +32,20 @@ final class FriendLocalizationCopyTests: XCTestCase {
 
         XCTAssertEqual(traditionalChinese["friend_city_cards_title"], "城市卡")
     }
+
+    func test_friendEmptyStateCopyUsesFriendSpecificText() throws {
+        let appRoot = projectRoot().appendingPathComponent("StreetStamps", isDirectory: true)
+        let english = try loadStringsFile(at: appRoot.appendingPathComponent("en.lproj/Localizable.strings"))
+        let simplifiedChinese = try loadStringsFile(at: appRoot.appendingPathComponent("zh-Hans.lproj/Localizable.strings"))
+
+        XCTAssertEqual(english["friend_city_cards_empty_title"], "No city cards yet")
+        XCTAssertEqual(english["friend_city_cards_empty_subtitle"], "This friend has not unlocked any city cards yet.")
+        XCTAssertEqual(english["friend_memories_empty_title"], "No journey memories yet")
+        XCTAssertEqual(english["friend_memories_empty_subtitle"], "This friend has not published any journey memories yet.")
+
+        XCTAssertEqual(simplifiedChinese["friend_city_cards_empty_title"], "TA 暂无城市卡")
+        XCTAssertEqual(simplifiedChinese["friend_city_cards_empty_subtitle"], "TA 还没有解锁城市卡。")
+        XCTAssertEqual(simplifiedChinese["friend_memories_empty_title"], "TA 暂无旅程记忆")
+        XCTAssertEqual(simplifiedChinese["friend_memories_empty_subtitle"], "TA 还没有公开旅程记忆。")
+    }
 }

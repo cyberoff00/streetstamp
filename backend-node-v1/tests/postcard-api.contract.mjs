@@ -113,6 +113,7 @@ async function run() {
       clientDraftID: 'd1',
       toUserID: u2.userId,
       cityID: 'paris',
+      cityJourneyCount: 2,
       cityName: 'Paris',
       messageText: 'hello postcard',
       photoURL: '/media/fake.jpg',
@@ -151,6 +152,7 @@ async function run() {
       clientDraftID: 'd2',
       toUserID: u2.userId,
       cityID: 'paris',
+      cityJourneyCount: 2,
       cityName: 'Paris',
       messageText: 'second postcard',
       photoURL: '/media/fake.jpg',
@@ -160,19 +162,19 @@ async function run() {
     assert.equal(secondSend.status, 200);
     assert.ok(secondSend.data.messageID);
 
-    const duplicate = await requestJSON(port, 'POST', '/v1/postcards/send', u1.accessToken, {
+    const thirdSend = await requestJSON(port, 'POST', '/v1/postcards/send', u1.accessToken, {
       clientDraftID: 'd3',
       toUserID: u2.userId,
       cityID: 'paris',
+      cityJourneyCount: 2,
       cityName: 'Paris',
       messageText: 'third postcard',
       photoURL: '/media/fake.jpg',
       allowedCityIDs: ['paris']
     });
 
-    assert.equal(duplicate.status, 409);
-    assert.equal(duplicate.data.code, 'city_friend_quota_exceeded');
-    assert.equal(duplicate.data.message, 'friend city postcard limit reached');
+    assert.equal(thirdSend.status, 200);
+    assert.ok(thirdSend.data.messageID);
 
     console.log('postcard API contract: PASS');
   } finally {

@@ -224,6 +224,34 @@ enum CityPlacemarkResolver {
         locale: Locale = .current
     ) -> String {
         let regionStyledKey = isRegionStyledDisplayKey(cityKey: cityKey, iso2: iso2)
+        let chosenLevel = resolvedDisplayLevel(
+            cityKey: cityKey,
+            availableLevelNames: availableLevelNames,
+            parentRegionKey: parentRegionKey,
+            preferredLevel: preferredLevel
+        )
+
+        // Selected level must win over generic localized/cache titles.
+        if let chosenLevel,
+           let levelTitle = availableLevelNames?[chosenLevel]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !levelTitle.isEmpty,
+           shouldUseStoredLevelTitle(levelTitle, locale: locale) {
+            let resolved = normalizeUserFacingTitle(levelTitle, iso2: iso2, level: chosenLevel, locale: locale)
+            CityLocalizationDebugLogger.log(
+                "displayTitle",
+                CityLocalizationDebugTrace.displayDecision(
+                    cityKey: cityKey,
+                    locale: locale,
+                    source: "availableLevelNames[\(chosenLevel.rawValue)]",
+                    title: resolved,
+                    fallbackTitle: fallbackTitle,
+                    chosenLevel: chosenLevel,
+                    parentRegionKey: parentRegionKey,
+                    availableLevelNames: availableLevelNames
+                )
+            )
+            return resolved
+        }
 
         // Fast path: use persisted localized name if available for this locale.
         if let localized = localizedDisplayNameByLocale?[locale.identifier]?
@@ -269,21 +297,7 @@ enum CityPlacemarkResolver {
             return resolved
         }
 
-        let chosenLevel = resolvedDisplayLevel(
-            cityKey: cityKey,
-            availableLevelNames: availableLevelNames,
-            parentRegionKey: parentRegionKey,
-            preferredLevel: preferredLevel
-        )
-
         let decision: (source: String, rawTitle: String) = {
-            if let chosenLevel,
-               let levelTitle = availableLevelNames?[chosenLevel]?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !levelTitle.isEmpty,
-               shouldUseStoredLevelTitle(levelTitle, locale: locale) {
-                return ("availableLevelNames[\(chosenLevel.rawValue)]", levelTitle)
-            }
-
             let trimmedFallback = fallbackTitle.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmedFallback.isEmpty {
                 return ("fallbackTitle", trimmedFallback)
@@ -339,6 +353,34 @@ enum CityPlacemarkResolver {
             parentRegionKey: parentRegionKey,
             preferredLevel: preferredLevel,
             localizedDisplayNameByLocale: localizedDisplayNameByLocale,
+            locale: locale
+        )
+    }
+
+    static func displayTitle(
+        for cachedCity: CachedCity,
+        locale: Locale = .current,
+        preferredLevelOverride: CardLevel? = nil,
+        localizedCandidate: String? = nil
+    ) -> String {
+        let localeID = locale.identifier
+        var localizedMap = cachedCity.localizedDisplayNameByLocale ?? [:]
+        if let localizedCandidate {
+            let trimmed = localizedCandidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                localizedMap[localeID] = trimmed
+            }
+        }
+
+        return displayTitle(
+            cityKey: cachedCity.id,
+            iso2: cachedCity.countryISO2,
+            fallbackTitle: cachedCity.name,
+            availableLevelNamesRaw: cachedCity.reservedAvailableLevelNames,
+            storedAvailableLevelNamesLocaleID: cachedCity.reservedAvailableLevelNamesLocaleID,
+            parentRegionKey: cachedCity.reservedParentRegionKey,
+            preferredLevel: preferredLevelOverride ?? cachedCity.reservedLevelRaw.flatMap { CardLevel(rawValue: $0) },
+            localizedDisplayNameByLocale: localizedMap,
             locale: locale
         )
     }
@@ -523,7 +565,8 @@ enum CityPlacemarkResolver {
     /// Resolve stable per-level labels for the current locale.
     /// Priority:
     /// 1) Stored labels if they match current locale language.
-    /// 2) Freshly resolved labels (first-time initialization or language switch).
+    /// 2) Freshly resolved labels when stored labels look flattened/inconsistent.
+    /// 3) Freshly resolved labels (first-time initialization or language switch).
     static func resolvedStableLevelNamesForDisplay(
         storedAvailableLevelNamesRaw: [String: String]?,
         storedLocaleIdentifier: String?,
@@ -534,10 +577,31 @@ enum CityPlacemarkResolver {
             storedAvailableLevelNamesRaw,
             storedLocaleIdentifier: storedLocaleIdentifier,
             locale: locale
-        ), !stored.isEmpty {
+        ), !stored.isEmpty,
+           !looksFlattenedComparedToFresh(stored: stored, fresh: freshlyResolvedLevelNames) {
             return stored
         }
         return freshlyResolvedLevelNames
+    }
+
+    private static func looksFlattenedComparedToFresh(
+        stored: [CardLevel: String],
+        fresh: [CardLevel: String]
+    ) -> Bool {
+        let levels: [CardLevel] = [.locality, .subAdmin, .admin]
+
+        func uniqueCount(_ labels: [CardLevel: String]) -> Int {
+            let values = levels.compactMap { level -> String? in
+                let trimmed = (labels[level] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return nil }
+                return normalizeForMatching(trimmed)
+            }
+            return Set(values).count
+        }
+
+        let storedUnique = uniqueCount(stored)
+        let freshUnique = uniqueCount(fresh)
+        return storedUnique <= 1 && freshUnique > 1
     }
 
     private static func resolvedDisplayLevel(

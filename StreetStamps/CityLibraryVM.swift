@@ -118,17 +118,7 @@ final class CityLibraryVM: ObservableObject {
     private func makeCity(from cached: CachedCity, journeysById: [String: JourneyRoute]) -> City {
         let js = cached.journeyIds.compactMap { journeysById[$0] }.filter { $0.isCompleted }
         return City(
-            displayName: CityPlacemarkResolver.displayTitle(
-                cityKey: cached.id,
-                iso2: cached.countryISO2,
-                fallbackTitle: cached.name,
-                availableLevelNamesRaw: cached.reservedAvailableLevelNames,
-                storedAvailableLevelNamesLocaleID: cached.reservedAvailableLevelNamesLocaleID,
-                parentRegionKey: cached.reservedParentRegionKey,
-                preferredLevel: cached.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
-                localizedDisplayNameByLocale: cached.localizedDisplayNameByLocale,
-                locale: .current
-            ),
+            displayName: CityPlacemarkResolver.displayTitle(for: cached, locale: .current),
             id: cached.id,
             name: cached.name,
             countryISO2: cached.countryISO2,
@@ -172,17 +162,7 @@ final class CityLibraryVM: ObservableObject {
         for c in cached {
             out.append(
                 City(
-                    displayName: CityPlacemarkResolver.displayTitle(
-                        cityKey: c.id,
-                        iso2: c.countryISO2,
-                        fallbackTitle: c.name,
-                        availableLevelNamesRaw: c.reservedAvailableLevelNames,
-                        storedAvailableLevelNamesLocaleID: c.reservedAvailableLevelNamesLocaleID,
-                        parentRegionKey: c.reservedParentRegionKey,
-                        preferredLevel: c.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
-                        localizedDisplayNameByLocale: c.localizedDisplayNameByLocale,
-                        locale: .current
-                    ),
+                    displayName: CityPlacemarkResolver.displayTitle(for: c, locale: .current),
                     id: c.id,
                     name: c.name,
                     countryISO2: c.countryISO2,

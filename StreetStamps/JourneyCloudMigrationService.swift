@@ -9,6 +9,13 @@ struct JourneyMigrationReport {
 }
 
 enum JourneyCloudMigrationService {
+    static func shouldMergeDownloadedProfile(expectedAccountUserID: String?, remoteProfileID: String) -> Bool {
+        let expected = expectedAccountUserID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let remote = remoteProfileID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !expected.isEmpty, !remote.isEmpty else { return false }
+        return expected == remote
+    }
+
     static func migrateAll(
         sessionStore: UserSessionStore,
         journeyStore: JourneyStore,
@@ -190,6 +197,13 @@ enum JourneyCloudMigrationService {
         }
 
         let profile = try await BackendAPIClient.shared.fetchMyProfile(token: token)
+        guard shouldMergeDownloadedProfile(
+            expectedAccountUserID: sessionStore.accountUserID,
+            remoteProfileID: profile.id
+        ) else {
+            print("🚫 Refused cloud merge due to account mismatch. expected=\(sessionStore.accountUserID ?? "nil") remote=\(profile.id)")
+            return 0
+        }
 
         let localIDs = Set(journeyStore.journeys.map(\.id))
         let cloudOnly = profile.journeys.filter { !localIDs.contains($0.id) }

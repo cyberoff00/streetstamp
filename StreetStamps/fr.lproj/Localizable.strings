@@ -94,6 +94,8 @@
 "memories_for_city" = "Souvenirs à %@ : %d";
 "no_memories_yet" = "Aucun souvenir pour le moment";
 "no_memories_desc" = "Après avoir terminé un parcours, vos souvenirs seront enregistrés ici.";
+"friend_memories_empty_title" = "Aucun souvenir de parcours pour le moment";
+"friend_memories_empty_subtitle" = "Cet ami n'a pas encore publié de souvenirs de parcours.";
 
 "unlock_city_title_cn" = "Nouvelle carte de ville déverrouillée";
 "unlock_city_desc_1" = "Vous venez de terminer l'exploration de %@.";
@@ -114,6 +116,8 @@
 "library_city_title" = "Vos tampons de ville";
 "library_empty_title" = "Aucun tampon de ville";
 "library_empty_subtitle" = "Générez une carte de ville, ou terminez un parcours pour déverrouiller votre première ville.";
+"friend_city_cards_empty_title" = "Aucune carte de ville pour le moment";
+"friend_city_cards_empty_subtitle" = "Cet ami n'a pas encore débloqué de cartes de ville.";
 "city_card_stats" = "%d explorations · %d souvenirs";
 
 "location_failed_title" = "Échec de la localisation";

@@ -94,6 +94,8 @@
 "memories_for_city" = "Recuerdos en %@: %d";
 "no_memories_yet" = "Aún no hay recuerdos";
 "no_memories_desc" = "Cuando termines un viaje, tus recuerdos se guardarán aquí.";
+"friend_memories_empty_title" = "Aún no hay recuerdos de viaje";
+"friend_memories_empty_subtitle" = "Este amigo aún no ha publicado recuerdos de viaje.";
 
 "unlock_city_title_cn" = "Nueva tarjeta de ciudad desbloqueada";
 "unlock_city_desc_1" = "Acabas de terminar de explorar %@.";
@@ -114,6 +116,8 @@
 "library_city_title" = "Tus sellos de ciudad";
 "library_empty_title" = "Aún no tienes sellos de ciudad";
 "library_empty_subtitle" = "Genera una tarjeta de ciudad o termina un viaje para desbloquear tu primera ciudad.";
+"friend_city_cards_empty_title" = "Aún no hay tarjetas de ciudad";
+"friend_city_cards_empty_subtitle" = "Este amigo aún no ha desbloqueado tarjetas de ciudad.";
 "city_card_stats" = "%d exploraciones · %d recuerdos";
 
 "location_failed_title" = "Error de ubicación";

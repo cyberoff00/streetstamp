@@ -31,6 +31,15 @@ struct PostcardComposerView: View {
         )
     }
 
+    private var selectedCityJourneyCount: Int {
+        guard let city = cityCache.cachedCities.first(where: {
+            $0.id == selectedCityID && !($0.isTemporary ?? false)
+        }) else {
+            return 1
+        }
+        return max(1, city.journeyIds.count)
+    }
+
     private var currentCityCandidates: [JourneyRoute] {
         var candidates: [JourneyRoute] = []
         if let ongoing = journeyStore.latestOngoing {
@@ -45,37 +54,14 @@ struct PostcardComposerView: View {
     }
 
     private func localizedCityName(for city: CachedCity) -> String {
-        CityPlacemarkResolver.displayTitle(
-            cityKey: city.id,
-            iso2: city.countryISO2,
-            fallbackTitle: city.name,
-            availableLevelNamesRaw: city.reservedAvailableLevelNames,
-            storedAvailableLevelNamesLocaleID: city.reservedAvailableLevelNamesLocaleID,
-            parentRegionKey: city.reservedParentRegionKey,
-            preferredLevel: city.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
-            localizedDisplayNameByLocale: city.localizedDisplayNameByLocale,
-            locale: .current
-        )
+        CityPlacemarkResolver.displayTitle(for: city, locale: .current)
     }
 
     private func normalizedPrefetchedCityName(for city: CachedCity, candidateTitle: String?) -> String {
-        let trimmedCandidate = candidateTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let localeID = Locale.current.identifier
-        var localizedMap = city.localizedDisplayNameByLocale ?? [:]
-        if let trimmedCandidate, !trimmedCandidate.isEmpty {
-            localizedMap[localeID] = trimmedCandidate
-        }
-
-        return CityPlacemarkResolver.displayTitle(
-            cityKey: city.id,
-            iso2: city.countryISO2,
-            fallbackTitle: city.name,
-            availableLevelNamesRaw: city.reservedAvailableLevelNames,
-            storedAvailableLevelNamesLocaleID: city.reservedAvailableLevelNamesLocaleID,
-            parentRegionKey: city.reservedParentRegionKey,
-            preferredLevel: city.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
-            localizedDisplayNameByLocale: localizedMap,
-            locale: .current
+        CityPlacemarkResolver.displayTitle(
+            for: city,
+            locale: .current,
+            localizedCandidate: candidateTitle
         )
     }
 
@@ -234,6 +220,7 @@ struct PostcardComposerView: View {
                         friendName: friendName,
                         selectedCityID: selectedCityID,
                         selectedCityName: selectedCityName,
+                        selectedCityJourneyCount: selectedCityJourneyCount,
                         messageText: messageText,
                         localImagePath: localImagePath,
                         selectedImage: selectedImage,

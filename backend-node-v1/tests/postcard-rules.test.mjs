@@ -22,6 +22,25 @@ test('allows up to two postcards to the same friend from the same city and rejec
   assert.equal(result.reason, 'city_friend_quota_exceeded');
 });
 
+test('an additional journey increases the same-city per-friend quota by one', () => {
+  const sent = [
+    { toUserID: 'u2', cityID: 'paris', status: 'sent', clientDraftID: 'd1' },
+    { toUserID: 'u2', cityID: 'paris', status: 'sent', clientDraftID: 'd2' }
+  ];
+
+  const result = canSendPostcard({
+    sentPostcards: sent,
+    toUserID: 'u2',
+    cityID: 'paris',
+    cityJourneyCount: 2,
+    clientDraftID: 'd3',
+    allowedCityIDs: ['paris']
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.reason, null);
+});
+
 test('rejects city total above 10', () => {
   const sent = Array.from({ length: 10 }, (_, index) => index + 1).map((n) => ({
     toUserID: `u${n}`,
@@ -40,6 +59,27 @@ test('rejects city total above 10', () => {
 
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'city_total_quota_exceeded');
+});
+
+test('an additional journey increases the same-city unique friend quota by ten', () => {
+  const sent = Array.from({ length: 10 }, (_, index) => index + 1).map((n) => ({
+    toUserID: `u${n}`,
+    cityID: 'paris',
+    status: 'sent',
+    clientDraftID: `d${n}`
+  }));
+
+  const result = canSendPostcard({
+    sentPostcards: sent,
+    toUserID: 'u11',
+    cityID: 'paris',
+    cityJourneyCount: 2,
+    clientDraftID: 'd11',
+    allowedCityIDs: ['paris']
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.reason, null);
 });
 
 test('second postcard to an existing friend does not consume a new city friend slot', () => {

@@ -94,6 +94,8 @@
 "memories_for_city" = "%@의 기억: %d";
 "no_memories_yet" = "아직 기억이 없습니다";
 "no_memories_desc" = "여정을 완료하면 기억이 여기에 저장됩니다.";
+"friend_memories_empty_title" = "아직 공개된 여정 기억이 없습니다";
+"friend_memories_empty_subtitle" = "이 친구는 아직 여정 기억을 공개하지 않았습니다.";
 
 "unlock_city_title_cn" = "새 도시 탐험 카드 해금";
 "unlock_city_desc_1" = "%@에서의 탐험을 막 마쳤습니다.";
@@ -114,6 +116,8 @@
 "library_city_title" = "내 도시 스탬프";
 "library_empty_title" = "아직 도시 스탬프가 없습니다";
 "library_empty_subtitle" = "도시 카드를 생성하거나 여정을 완료하여 첫 도시를 해금하세요.";
+"friend_city_cards_empty_title" = "아직 도시 카드가 없습니다";
+"friend_city_cards_empty_subtitle" = "이 친구는 아직 도시 카드를 해금하지 않았습니다.";
 "city_card_stats" = "%d회 탐험 · %d개 기억";
 
 "location_failed_title" = "위치 확인 실패";
