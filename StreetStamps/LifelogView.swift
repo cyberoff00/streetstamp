@@ -802,7 +802,7 @@ struct LifelogView: View {
                 .buttonStyle(.plain)
             }
 
-            Text(L10n.t("lifelog_title"))
+            Text("Worldo")
                 .navigationTitleStyle(level: .primary)
         }
         .padding(.horizontal, 18)

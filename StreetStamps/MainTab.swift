@@ -2,21 +2,37 @@ import SwiftUI
 import Combine
 
 struct MainTabLayout {
+    enum Icon: Equatable {
+        case asset(String)
+        case system(String)
+    }
+
     struct Item: Equatable {
         let tab: NavigationTab
-        let iconAssetName: String
+        let icon: Icon
     }
 
     static let bottomTabs: [Item] = [
-        Item(tab: .start, iconAssetName: "tab_start_icon"),
-        Item(tab: .memory, iconAssetName: "tab_memory_icon"),
-        Item(tab: .cities, iconAssetName: "tab_cities_icon"),
-        Item(tab: .lifelog, iconAssetName: "tab_lifelog_icon"),
-        Item(tab: .friends, iconAssetName: "tab_friends_icon")
+        Item(tab: .start, icon: .asset("tab_start_icon")),
+        Item(tab: .cities, icon: .asset("tab_memory_icon")),
+        Item(tab: .lifelog, icon: .asset("tab_cities_icon")),
+        Item(tab: .friends, icon: .asset("tab_friends_icon")),
+        Item(tab: .profile, icon: .system("person"))
     ]
 
-    static func iconAssetName(for tab: NavigationTab) -> String {
-        bottomTabs.first(where: { $0.tab == tab })?.iconAssetName ?? tab.icon
+    static func icon(for tab: NavigationTab) -> Icon {
+        bottomTabs.first(where: { $0.tab == tab })?.icon ?? .system(tab.icon)
+    }
+
+    @ViewBuilder
+    static func image(for tab: NavigationTab) -> some View {
+        switch icon(for: tab) {
+        case .asset(let name):
+            Image(name)
+                .renderingMode(.template)
+        case .system(let name):
+            Image(systemName: name)
+        }
     }
 }
 
@@ -60,53 +76,16 @@ enum MainSidebarDestination: String, Identifiable, CaseIterable {
 struct MainTabView: View {
     @State private var selectedTab: NavigationTab = .start
     @State private var loadedTabs: Set<NavigationTab> = [.start]
-    @State private var showSidebar = false
-    @State private var sidebarDestination: MainSidebarDestination? = nil
-    @State private var sidebarPostcardIntent = PostcardInboxIntent(box: "received", messageID: nil)
 
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var flow: AppFlowCoordinator
     @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
-    @EnvironmentObject private var socialStore: SocialGraphStore
-    @EnvironmentObject private var sessionStore: UserSessionStore
 
     @State private var pendingResumeJourney: JourneyRoute? = nil
     @State private var didPromptResumeThisLaunch: Bool = false
 
     var body: some View {
-        ZStack(alignment: .leading) {
-            tabContent
-                .contentShape(Rectangle())
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 12, coordinateSpace: .global)
-                        .onEnded { v in
-                            guard canSwipeSidebar else { return }
-                            guard !showSidebar else { return }
-                            if v.startLocation.x < 24, v.translation.width > 60 {
-                                withAnimation(.easeOut(duration: 0.25)) {
-                                    showSidebar = true
-                                }
-                            }
-                        }
-                )
-
-            if showSidebar {
-                MainSidebarMenuView(
-                    isPresented: $showSidebar,
-                    onSelectDestination: { destination in
-                        sidebarDestination = destination
-                    }
-                )
-                .zIndex(100)
-            }
-        }
-        .overlay(alignment: .topLeading) {
-            if flow.shouldShowSidebarButton && !showSidebar {
-                sidebarLauncherButton
-                    .padding(.leading, 20)
-                    .padding(.top, 14)
-            }
-        }
+        tabContent
         .overlay(alignment: .top) {
             if onboardingGuide.canResume {
                 HStack {
@@ -138,32 +117,6 @@ struct MainTabView: View {
                 .padding(.bottom, 90)
             }
         }
-        .sheet(item: $sidebarDestination) { destination in
-            NavigationStack {
-                switch destination {
-                case .profile:
-                    ProfileView()
-                case .settings:
-                    SettingsView()
-                case .equipment:
-                    SidebarEquipmentEntryView()
-                case .postcards:
-                    let initialBox: PostcardInboxView.Box = sidebarPostcardIntent.box == "sent" ? .sent : .received
-                    SidebarPostcardsEntryView(
-                        initialBox: initialBox,
-                        focusMessageID: sidebarPostcardIntent.messageID
-                    )
-                    .id(
-                        PostcardInboxView.viewIdentity(
-                            initialBox: initialBox,
-                            focusMessageID: sidebarPostcardIntent.messageID
-                        )
-                    )
-                case .inviteFriend:
-                    SidebarInviteFriendEntryView()
-                }
-            }
-        }
         .onReceive(store.$hasLoaded) { loaded in
             guard loaded else { return }
             maybePromptResumeIfNeeded()
@@ -173,8 +126,6 @@ struct MainTabView: View {
             flow.updateCurrentTab(tab)
             if tab == .cities {
                 onboardingGuide.advance(.openCityCards)
-            }
-            if tab == .memory {
                 onboardingGuide.advance(.openMemory)
             }
         }
@@ -183,21 +134,8 @@ struct MainTabView: View {
         }
         .onReceive(flow.$requestedTab) { tab in
             guard let tab else { return }
-            selectedTab = tab
+            selectedTab = MainTabLayout.bottomTabs.contains(where: { $0.tab == tab }) ? tab : .start
             flow.clearRequestedTab()
-        }
-        .onReceive(flow.$openPostcardSidebarSignal) { signal in
-            guard signal > 0,
-                  let intent = flow.pendingPostcardSidebarIntent else { return }
-            sidebarPostcardIntent = intent
-            sidebarDestination = .postcards
-            flow.consumePendingPostcardSidebarIntent()
-        }
-        .onReceive(flow.$openSidebarDestinationSignal) { signal in
-            guard signal > 0,
-                  let destination = flow.pendingSidebarDestination else { return }
-            sidebarDestination = destination
-            flow.consumePendingSidebarDestination()
         }
         .onReceive(NotificationCenter.default.publisher(for: .openCaptureFromWidget)) { _ in
             selectedTab = .start
@@ -232,27 +170,8 @@ struct MainTabView: View {
             ))
             .tag(NavigationTab.start)
             .tabItem {
-                Image(MainTabLayout.iconAssetName(for: .start))
-                    .renderingMode(.template)
+                MainTabLayout.image(for: .start)
                 Text(L10n.t("tab_home"))
-            }
-
-            NavigationStack {
-                if shouldRenderTab(.memory) {
-                    JourneyMemoryMainView(
-                        showSidebar: .constant(false),
-                        usesSidebarHeader: false,
-                        hideLeadingControl: true
-                    )
-                } else {
-                    Color.clear
-                }
-            }
-            .tag(NavigationTab.memory)
-            .tabItem {
-                Image(MainTabLayout.iconAssetName(for: .memory))
-                    .renderingMode(.template)
-                Text(L10n.t("tab_memory"))
             }
 
             NavigationStack {
@@ -264,9 +183,8 @@ struct MainTabView: View {
             }
             .tag(NavigationTab.cities)
             .tabItem {
-                Image(MainTabLayout.iconAssetName(for: .cities))
-                    .renderingMode(.template)
-                Text(L10n.t("tab_collection"))
+                MainTabLayout.image(for: .cities)
+                Text("记忆")
             }
 
             Group {
@@ -278,9 +196,8 @@ struct MainTabView: View {
             }
                 .tag(NavigationTab.lifelog)
                 .tabItem {
-                    Image(MainTabLayout.iconAssetName(for: .lifelog))
-                        .renderingMode(.template)
-                    Text(L10n.t("tab_lifelog"))
+                    MainTabLayout.image(for: .lifelog)
+                    Text("Worldo")
                 }
 
             NavigationStack {
@@ -292,9 +209,21 @@ struct MainTabView: View {
             }
             .tag(NavigationTab.friends)
             .tabItem {
-                Image(MainTabLayout.iconAssetName(for: .friends))
-                    .renderingMode(.template)
+                MainTabLayout.image(for: .friends)
                 Text(L10n.t("tab_friends"))
+            }
+
+            NavigationStack {
+                if shouldRenderTab(.profile) {
+                    ProfileView()
+                } else {
+                    Color.clear
+                }
+            }
+            .tag(NavigationTab.profile)
+            .tabItem {
+                MainTabLayout.image(for: .profile)
+                Text(L10n.t("profile_title"))
             }
         }
         .tint(FigmaTheme.primary)
@@ -303,7 +232,6 @@ struct MainTabView: View {
         .toolbarBackground(.visible, for: .tabBar)
     }
 
-    private var canSwipeSidebar: Bool { true }
     private func shouldRenderTab(_ tab: NavigationTab) -> Bool {
         TabRenderPolicy.shouldRender(
             tab: tab,
@@ -318,7 +246,7 @@ struct MainTabView: View {
         case .openCityCards:
             return selectedTab == .cities ? nil : .openCityCards
         case .openMemory:
-            return selectedTab == .memory ? nil : .openMemory
+            return selectedTab == .cities ? nil : .openMemory
         default:
             return nil
         }
@@ -330,22 +258,11 @@ struct MainTabView: View {
             selectedTab = .cities
             onboardingGuide.advance(.openCityCards)
         case .openMemory:
-            selectedTab = .memory
+            selectedTab = .cities
             onboardingGuide.advance(.openMemory)
         default:
             break
         }
-    }
-
-    private var sidebarLauncherButton: some View {
-        SidebarHamburgerButton(
-            showSidebar: $showSidebar,
-            size: 42,
-            iconSize: 20,
-            iconWeight: .semibold,
-            foreground: .black
-        )
-        .accessibilityLabel(L10n.t("open_sidebar"))
     }
 
     /// Prompt user once per launch if there is an unfinished journey on disk.
