@@ -2297,7 +2297,21 @@ private final class FriendMirrorContext: ObservableObject {
     static func signature(for snapshot: FriendProfileSnapshot) -> String {
         let journeys = snapshot.journeys
             .map {
-                "\($0.id)|\($0.title)|\($0.distance)|\($0.routeCoordinates.count)|\($0.memories.count)|\($0.endTime?.timeIntervalSince1970 ?? 0)"
+                let memorySignature = $0.memories
+                    .map {
+                        [
+                            $0.id,
+                            $0.title,
+                            $0.notes,
+                            String($0.timestamp.timeIntervalSince1970),
+                            $0.imageURLs.joined(separator: ","),
+                            $0.latitude.map(String.init) ?? "",
+                            $0.longitude.map(String.init) ?? "",
+                            $0.locationStatus ?? ""
+                        ].joined(separator: "|")
+                    }
+                    .joined(separator: ";")
+                return "\($0.id)|\($0.title)|\($0.distance)|\($0.routeCoordinates.count)|\($0.memories.count)|\($0.endTime?.timeIntervalSince1970 ?? 0)|\(memorySignature)"
             }
             .joined(separator: ";")
         let cards = snapshot.unlockedCityCards
@@ -2401,7 +2415,18 @@ private final class FriendMirrorContext: ObservableObject {
 
         let fallbackCoordinate: CoordinateCodable = routeCoords.first ?? CoordinateCodable(lat: 0, lon: 0)
         let memories: [JourneyMemory] = friendJourney.memories.enumerated().map { idx, memory in
-            let coord = routeCoords.isEmpty ? fallbackCoordinate : routeCoords[min(idx, routeCoords.count - 1)]
+            let explicitCoordinate: CoordinateCodable? = {
+                guard let latitude = memory.latitude, let longitude = memory.longitude else { return nil }
+                return CoordinateCodable(lat: latitude, lon: longitude)
+            }()
+            let coord = explicitCoordinate ?? (routeCoords.isEmpty ? fallbackCoordinate : routeCoords[min(idx, routeCoords.count - 1)])
+            let status = JourneyMemoryLocationStatus(rawValue: memory.locationStatus ?? "")
+                ?? (explicitCoordinate == nil ? .resolved : .fallback)
+            let source: JourneyMemoryLocationSource = {
+                if status == .pending { return .pending }
+                if explicitCoordinate != nil && status == .fallback { return .trackNearestByTime }
+                return .legacyCoordinate
+            }()
             return JourneyMemory(
                 id: memory.id,
                 timestamp: memory.timestamp,
@@ -2413,7 +2438,9 @@ private final class FriendMirrorContext: ObservableObject {
                 cityKey: cityID,
                 cityName: cityName,
                 coordinate: (coord.lat, coord.lon),
-                type: .memory
+                type: .memory,
+                locationStatus: status,
+                locationSource: source
             )
         }
 

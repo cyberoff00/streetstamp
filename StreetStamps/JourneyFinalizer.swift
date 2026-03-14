@@ -28,11 +28,20 @@ enum JourneyFinalizer {
         cityCache: CityCache,
         lifelogStore: LifelogStore,
         source: JourneyFinalizeSource,
+        recordedLocations: [CLLocation] = [],
+        lastKnownLocation: CLLocation? = nil,
         completion: @escaping (JourneyRoute) -> Void
     ) {
         _ = source
 
         var r = route
+        r.memories = r.memories.map {
+            JourneyMemoryLocationResolver.finalize(
+                memory: $0,
+                lastKnownLocation: lastKnownLocation,
+                recordedLocations: recordedLocations
+            )
+        }
         r.correctedCoordinates = JourneyPostCorrection.correctedCoordinates(for: r)
         if !r.correctedCoordinates.isEmpty {
             r.preferredRouteSource = .corrected

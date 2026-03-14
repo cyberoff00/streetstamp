@@ -49,17 +49,32 @@ struct FriendSharedMemory: Identifiable, Codable, Hashable {
     var notes: String
     var timestamp: Date
     var imageURLs: [String]
+    var latitude: Double?
+    var longitude: Double?
+    var locationStatus: String?
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, notes, timestamp, imageURLs
+        case id, title, notes, timestamp, imageURLs, latitude, longitude, locationStatus
     }
 
-    init(id: String, title: String, notes: String, timestamp: Date, imageURLs: [String]) {
+    init(
+        id: String,
+        title: String,
+        notes: String,
+        timestamp: Date,
+        imageURLs: [String],
+        latitude: Double? = nil,
+        longitude: Double? = nil,
+        locationStatus: String? = nil
+    ) {
         self.id = id
         self.title = title
         self.notes = notes
         self.timestamp = timestamp
         self.imageURLs = imageURLs
+        self.latitude = latitude
+        self.longitude = longitude
+        self.locationStatus = locationStatus
     }
 
     init(from decoder: Decoder) throws {
@@ -69,6 +84,9 @@ struct FriendSharedMemory: Identifiable, Codable, Hashable {
         notes = (try? c.decode(String.self, forKey: .notes)) ?? ""
         timestamp = (try? c.decode(Date.self, forKey: .timestamp)) ?? Date()
         imageURLs = (try? c.decode([String].self, forKey: .imageURLs)) ?? []
+        latitude = try c.decodeIfPresent(Double.self, forKey: .latitude)
+        longitude = try c.decodeIfPresent(Double.self, forKey: .longitude)
+        locationStatus = try c.decodeIfPresent(String.self, forKey: .locationStatus)
     }
 }
 
@@ -252,7 +270,10 @@ extension FriendSharedJourney {
                     title: $0.title,
                     notes: $0.notes,
                     timestamp: $0.timestamp,
-                    imageURLs: $0.remoteImageURLs
+                    imageURLs: $0.remoteImageURLs,
+                    latitude: $0.locationStatus == .pending ? nil : $0.coordinate.0,
+                    longitude: $0.locationStatus == .pending ? nil : $0.coordinate.1,
+                    locationStatus: $0.locationStatus.rawValue
                 )
             }
         )

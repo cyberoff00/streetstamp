@@ -1631,7 +1631,7 @@ struct JourneyRouteDetailView: View {
 
     private var memoryGroups: [JourneyDetailMap.MemoryGroup] {
         guard let j = journey else { return [] }
-        return j.memories.map { memory in
+        return j.memories.filter { $0.locationStatus != .pending }.map { memory in
             let mapped = JourneyMemoryMapCoordinateResolver.mapCoordinate(
                 for: memory,
                 fallbackCountryISO2: j.countryISO2,

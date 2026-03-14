@@ -204,7 +204,10 @@ enum JourneyCloudMigrationService {
                         title: memory.title,
                         notes: memory.notes,
                         timestamp: memory.timestamp,
-                        imageURLs: uploadedURLs
+                        imageURLs: uploadedURLs,
+                        latitude: memory.locationStatus == .pending ? nil : memory.coordinate.0,
+                        longitude: memory.locationStatus == .pending ? nil : memory.coordinate.1,
+                        locationStatus: memory.locationStatus.rawValue
                     )
                 )
                 memoriesCount += 1
@@ -314,7 +317,18 @@ enum JourneyCloudMigrationService {
 
         let fallbackCoordinate = routeCoords.first ?? CoordinateCodable(lat: 0, lon: 0)
         let memories: [JourneyMemory] = journey.memories.enumerated().map { idx, memory in
-            let coord = routeCoords.isEmpty ? fallbackCoordinate : routeCoords[min(idx, routeCoords.count - 1)]
+            let explicitCoordinate: CoordinateCodable? = {
+                guard let latitude = memory.latitude, let longitude = memory.longitude else { return nil }
+                return CoordinateCodable(lat: latitude, lon: longitude)
+            }()
+            let coord = explicitCoordinate ?? (routeCoords.isEmpty ? fallbackCoordinate : routeCoords[min(idx, routeCoords.count - 1)])
+            let status = JourneyMemoryLocationStatus(rawValue: memory.locationStatus ?? "")
+                ?? (explicitCoordinate == nil ? .resolved : .fallback)
+            let source: JourneyMemoryLocationSource = {
+                if status == .pending { return .pending }
+                if explicitCoordinate != nil && status == .fallback { return .trackNearestByTime }
+                return .legacyCoordinate
+            }()
             return JourneyMemory(
                 id: memory.id,
                 timestamp: memory.timestamp,
@@ -326,7 +340,9 @@ enum JourneyCloudMigrationService {
                 cityKey: cityID,
                 cityName: cityName,
                 coordinate: (coord.lat, coord.lon),
-                type: .memory
+                type: .memory,
+                locationStatus: status,
+                locationSource: source
             )
         }
 

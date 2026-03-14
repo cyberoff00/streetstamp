@@ -383,7 +383,9 @@ struct MainView: View {
                     journeyStore: store,
                     cityCache: cityCache,
                     lifelogStore: lifelogStore,
-                    source: .resumeDeclined
+                    source: .resumeDeclined,
+                    recordedLocations: tracking.recordedLocationsForMemories,
+                    lastKnownLocation: tracking.latestReliableLocationForMemories
                 ) { updated in
                     ongoingJourney = updated
                     sharingJourney = updated

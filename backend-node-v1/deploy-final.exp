@@ -1,0 +1,29 @@
+#!/usr/bin/expect -f
+set timeout 120
+set password "Ylinteresting22@"
+set server "101.132.159.73"
+
+spawn ssh root@$server
+expect "password:" { send "$password\r" }
+
+expect "#"
+send "cd /opt/streetstamps/backend-node-v1\r"
+expect "#"
+send "mv -f server.js.new server.js\r"
+expect "#"
+send "mv -f package.json.new package.json\r"
+expect "#"
+send "mv -f package-lock.json.new package-lock.json\r"
+expect "#"
+send "docker restart streetstamps-node-v1\r"
+expect "#"
+send "sleep 8\r"
+expect "#"
+send "docker logs streetstamps-node-v1 --tail 30\r"
+expect "#"
+send "echo '=== Health Check ==='\r"
+expect "#"
+send "curl -s http://localhost:18080/v1/health | python3 -m json.tool\r"
+expect "#"
+send "exit\r"
+expect eof

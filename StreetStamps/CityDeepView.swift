@@ -190,7 +190,9 @@ struct CityDeepView: View {
     }
 
     private var groupedMemories: [MemoryGroup] {
-        let all = currentJourneys.flatMap { $0.memories }
+        let all = currentJourneys
+            .flatMap { $0.memories }
+            .filter { $0.locationStatus != .pending }
         guard !all.isEmpty else { return [] }
 
         return all

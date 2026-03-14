@@ -61,6 +61,9 @@ struct BackendMemoryUploadDTO: Codable {
     var notes: String
     var timestamp: Date
     var imageURLs: [String]
+    var latitude: Double?
+    var longitude: Double?
+    var locationStatus: String?
 }
 
 struct BackendJourneyUploadDTO: Codable {

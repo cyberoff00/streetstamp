@@ -41,6 +41,20 @@ enum JourneyMemoryType: String, Codable {
     case memory
 }
 
+enum JourneyMemoryLocationStatus: String, Codable {
+    case resolved
+    case fallback
+    case pending
+}
+
+enum JourneyMemoryLocationSource: String, Codable {
+    case liveGPS
+    case trackNearestByTime
+    case lastKnownLocation
+    case pending
+    case legacyCoordinate
+}
+
 enum ExploreMode: String, Codable {
     case city
 
@@ -66,9 +80,11 @@ struct JourneyMemory: Identifiable, Codable, Equatable {
     var cityName: String? = nil
     var coordinate: (Double, Double)
     var type: JourneyMemoryType
+    var locationStatus: JourneyMemoryLocationStatus = .resolved
+    var locationSource: JourneyMemoryLocationSource = .legacyCoordinate
 
     enum CodingKeys: String, CodingKey {
-        case id, timestamp, title, notes, imageData, imagePaths, remoteImageURLs, cityKey, cityName, coordinateLat, coordinateLon, type
+        case id, timestamp, title, notes, imageData, imagePaths, remoteImageURLs, cityKey, cityName, coordinateLat, coordinateLon, type, locationStatus, locationSource
     }
 
     init(
@@ -82,7 +98,9 @@ struct JourneyMemory: Identifiable, Codable, Equatable {
         cityKey: String? = nil,
         cityName: String? = nil,
         coordinate: (Double, Double),
-        type: JourneyMemoryType
+        type: JourneyMemoryType,
+        locationStatus: JourneyMemoryLocationStatus = .resolved,
+        locationSource: JourneyMemoryLocationSource = .legacyCoordinate
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -95,6 +113,8 @@ struct JourneyMemory: Identifiable, Codable, Equatable {
         self.cityName = cityName
         self.coordinate = coordinate
         self.type = type
+        self.locationStatus = locationStatus
+        self.locationSource = locationSource
     }
 
     init(from decoder: Decoder) throws {
@@ -112,6 +132,8 @@ struct JourneyMemory: Identifiable, Codable, Equatable {
         let lon = try c.decode(Double.self, forKey: .coordinateLon)
         coordinate = (lat, lon)
         type = try c.decode(JourneyMemoryType.self, forKey: .type)
+        locationStatus = try c.decodeIfPresent(JourneyMemoryLocationStatus.self, forKey: .locationStatus) ?? .resolved
+        locationSource = try c.decodeIfPresent(JourneyMemoryLocationSource.self, forKey: .locationSource) ?? .legacyCoordinate
     }
 
     func encode(to encoder: Encoder) throws {
@@ -128,6 +150,8 @@ struct JourneyMemory: Identifiable, Codable, Equatable {
         try c.encode(coordinate.0, forKey: .coordinateLat)
         try c.encode(coordinate.1, forKey: .coordinateLon)
         try c.encode(type, forKey: .type)
+        try c.encode(locationStatus, forKey: .locationStatus)
+        try c.encode(locationSource, forKey: .locationSource)
     }
 
     static func == (lhs: JourneyMemory, rhs: JourneyMemory) -> Bool {
@@ -142,7 +166,9 @@ struct JourneyMemory: Identifiable, Codable, Equatable {
         lhs.cityName == rhs.cityName &&
         lhs.coordinate.0 == rhs.coordinate.0 &&
         lhs.coordinate.1 == rhs.coordinate.1 &&
-        lhs.type == rhs.type
+        lhs.type == rhs.type &&
+        lhs.locationStatus == rhs.locationStatus &&
+        lhs.locationSource == rhs.locationSource
     }
 }
 
@@ -825,20 +851,38 @@ struct MapView: View {
                             m.timestamp = journeyRoute.memories[idx].timestamp
                             m.coordinate = journeyRoute.memories[idx].coordinate
                             m.type = .memory
+                            m.locationStatus = journeyRoute.memories[idx].locationStatus
+                            m.locationSource = journeyRoute.memories[idx].locationSource
                             journeyRoute.memories[idx] = m
                             if journeyRoute.endTime == nil { persistSnapshot(.memoryAdded) }
                             editingMemory = m
                             onboardingGuide.advance(.recordMemory)
                         } else {
-                            guard let loc = tracking.userLocation else { return }
                             m.id = UUID().uuidString
-                            m.timestamp = Date()
-                            m.coordinate = (loc.coordinate.latitude, loc.coordinate.longitude)
+                            let memoryTimestamp = Date()
+                            let locationResolution = JourneyMemoryLocationResolver.resolve(
+                                memoryTimestamp: memoryTimestamp,
+                                liveLocation: tracking.userLocation,
+                                lastKnownLocation: tracking.latestReliableLocationForMemories,
+                                recordedLocations: tracking.recordedLocationsForMemories
+                            )
+                            m.timestamp = memoryTimestamp
+                            m.coordinate = locationResolution.coordinate
                             m.type = .memory
+                            m.locationStatus = locationResolution.status
+                            m.locationSource = locationResolution.source
                             let mid = m.id
                             journeyRoute.memories.append(m)
                             if journeyRoute.endTime == nil { persistSnapshot(.memoryAdded) }
-                            assignCityToMemory(memoryID: mid, coordinate: loc.coordinate)
+                            if locationResolution.status != .pending {
+                                assignCityToMemory(
+                                    memoryID: mid,
+                                    coordinate: CLLocationCoordinate2D(
+                                        latitude: locationResolution.coordinate.0,
+                                        longitude: locationResolution.coordinate.1
+                                    )
+                                )
+                            }
                             onboardingGuide.advance(.recordMemory)
                         }
                     }
@@ -1457,7 +1501,9 @@ struct MapView: View {
             journeyStore: journeyStore,
             cityCache: cityCache,
             lifelogStore: lifelogStore,
-            source: .userConfirmedFinish
+            source: .userConfirmedFinish,
+            recordedLocations: tracking.recordedLocationsForMemories,
+            lastKnownLocation: tracking.latestReliableLocationForMemories
         ) { updated in
             journeyRoute = updated
             sharingJourney = updated
@@ -1595,7 +1641,9 @@ struct MapView: View {
         let thresholdMeters: CLLocationDistance = 20
 
         // Stable ordering helps keep grouping deterministic.
-        let src = journeyRoute.memories.sorted { $0.timestamp < $1.timestamp }
+        let src = journeyRoute.memories
+            .filter { $0.locationStatus != .pending }
+            .sorted { $0.timestamp < $1.timestamp }
 
         var clusters: [(key: String, center: CLLocationCoordinate2D, items: [JourneyMemory])] = []
 
@@ -2460,7 +2508,9 @@ private var hasUnsavedChanges: Bool {
             cityKey: existing?.cityKey,
             cityName: existing?.cityName,
             coordinate: existing?.coordinate ?? (0, 0),
-            type: .memory
+            type: .memory,
+            locationStatus: existing?.locationStatus ?? .pending,
+            locationSource: existing?.locationSource ?? .pending
         )
         onSave(draft)
         clearDraft()

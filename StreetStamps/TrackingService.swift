@@ -103,6 +103,14 @@ final class TrackingService: ObservableObject {
     private var lastLocation: CLLocation?
     private var rawCoords: [CLLocationCoordinate2D] = []
     private var acceptedLocations: [CLLocation] = []
+
+    var latestReliableLocationForMemories: CLLocation? {
+        lastLocation
+    }
+
+    var recordedLocationsForMemories: [CLLocation] {
+        acceptedLocations
+    }
     private let smoothingWindow: Int = 5
 
     // MARK: - Sampling / filtering knobs
