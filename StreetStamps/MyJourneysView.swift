@@ -6,6 +6,23 @@ import CryptoKit
 import ImageIO
 import UniformTypeIdentifiers
 
+private struct JourneyRouteSwipeBackEnabler: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> ViewController { ViewController() }
+    func updateUIViewController(_ uiViewController: ViewController, context: Context) {}
+
+    final class ViewController: UIViewController, UIGestureRecognizerDelegate {
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            navigationController?.interactivePopGestureRecognizer?.delegate = self
+            navigationController?.interactivePopGestureRecognizer?.isEnabled = true
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            (navigationController?.viewControllers.count ?? 0) > 1
+        }
+    }
+}
+
 struct MyJourneysView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: JourneyStore
@@ -1748,6 +1765,8 @@ struct JourneyRouteDetailView: View {
         .onDisappear {
             flow.popSidebarButtonHidden(token: sidebarHideToken)
         }
+        .toolbar(.hidden, for: .navigationBar)
+        .background(JourneyRouteSwipeBackEnabler())
         .navigationBarBackButtonHidden(true)
         .confirmationDialog(L10n.t("delete_journey_confirm_title"), isPresented: $showDeleteConfirm) {
             Button(L10n.t("delete"), role: .destructive) {

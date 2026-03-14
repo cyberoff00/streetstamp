@@ -14,9 +14,9 @@ final class TabRenderPolicyTests: XCTestCase {
     }
 
     func test_shouldRender_otherTabs_notSelected_stillRenderedWhenLoaded() {
-        let loaded: Set<NavigationTab> = [.start, .friends, .cities, .memory]
+        let loaded: Set<NavigationTab> = [.start, .friends, .cities, .profile]
         XCTAssertTrue(TabRenderPolicy.shouldRender(tab: .friends, selectedTab: .start, loadedTabs: loaded))
         XCTAssertTrue(TabRenderPolicy.shouldRender(tab: .cities, selectedTab: .start, loadedTabs: loaded))
-        XCTAssertTrue(TabRenderPolicy.shouldRender(tab: .memory, selectedTab: .start, loadedTabs: loaded))
+        XCTAssertTrue(TabRenderPolicy.shouldRender(tab: .profile, selectedTab: .start, loadedTabs: loaded))
     }
 }

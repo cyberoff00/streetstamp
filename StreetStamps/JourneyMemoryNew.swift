@@ -34,6 +34,7 @@ struct JourneyMemoryMainView: View {
     @Binding var showSidebar: Bool
     private let usesSidebarHeader: Bool
     private let hideLeadingControl: Bool
+    private let showHeader: Bool
     private let readOnly: Bool
     private let headerTitle: String?
     private let emptyTitleKey: String
@@ -43,6 +44,7 @@ struct JourneyMemoryMainView: View {
         showSidebar: Binding<Bool>,
         usesSidebarHeader: Bool = true,
         hideLeadingControl: Bool = false,
+        showHeader: Bool = true,
         readOnly: Bool = false,
         headerTitle: String? = nil,
         emptyTitleKey: String = "no_memories_yet",
@@ -51,6 +53,7 @@ struct JourneyMemoryMainView: View {
         self._showSidebar = showSidebar
         self.usesSidebarHeader = usesSidebarHeader
         self.hideLeadingControl = hideLeadingControl
+        self.showHeader = showHeader
         self.readOnly = readOnly
         self.headerTitle = headerTitle
         self.emptyTitleKey = emptyTitleKey
@@ -81,8 +84,9 @@ struct JourneyMemoryMainView: View {
             FigmaTheme.background.ignoresSafeArea()
             
             VStack(spacing: 0) {
-                // Header
-                headerView
+                if showHeader {
+                    headerView
+                }
                 
                 // Content
                 ScrollView {
@@ -725,14 +729,7 @@ private struct JourneyEntryRow: View {
     }
 
     private var previewText: String {
-        guard let mem = firstMemory else {
-            let overallMemory = journey.overallMemory?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return overallMemory.isEmpty ? L10n.t("tap_to_view_memories") : overallMemory
-        }
-        let notes = mem.notes.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !notes.isEmpty { return notes }
-        let title = mem.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return title.isEmpty ? L10n.t("tap_to_view_memories") : title
+        JourneyEntryPreviewText.make(journey: journey, memories: memories)
     }
     
     var body: some View {
@@ -781,6 +778,31 @@ private struct JourneyEntryRow: View {
         }
         .padding(.vertical, 16)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+enum JourneyEntryPreviewText {
+    static func make(journey: JourneyRoute, memories: [JourneyMemory]) -> String {
+        let journeyTitle = (journey.customTitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !journeyTitle.isEmpty {
+            return journeyTitle
+        }
+
+        let overallMemory = (journey.overallMemory ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let firstMemoryBody = memories
+            .sorted(by: { $0.timestamp < $1.timestamp })
+            .compactMap { memory -> String? in
+                let notes = memory.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+                return notes.isEmpty ? nil : notes
+            }
+            .first ?? ""
+
+        let parts = [overallMemory, firstMemoryBody].filter { !$0.isEmpty }
+        if !parts.isEmpty {
+            return parts.joined(separator: "\n")
+        }
+
+        return L10n.t("tap_to_view_memories")
     }
 }
 
@@ -1215,6 +1237,46 @@ struct JourneyMemoryDetailView: View {
 
     private var overallMemorySection: some View {
         VStack(alignment: .leading, spacing: 10) {
+            NavigationLink {
+                JourneyRouteDetailView(
+                    journeyID: journey.id,
+                    isReadOnly: readOnly,
+                    headerTitle: journeyDisplayTitle
+                )
+            } label: {
+                HStack(spacing: 14) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(L10n.t("journey_route_title"))
+                            .font(.system(size: 12, weight: .bold))
+                            .tracking(1.2)
+                            .foregroundColor(Color(red: 0.60, green: 0.63, blue: 0.69))
+
+                        Text(journeyDisplayTitle)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
+                            .lineLimit(2)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "map")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(FigmaTheme.primary)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(Color.black.opacity(0.35))
+                }
+                .padding(14)
+                .background(Color.white)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(FigmaTheme.border, lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+
             Text(L10n.t("overall_memory"))
                 .font(.system(size: 12, weight: .bold))
                 .tracking(1.2)
