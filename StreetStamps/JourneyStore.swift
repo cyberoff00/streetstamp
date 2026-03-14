@@ -76,6 +76,7 @@ final class JourneyStore: ObservableObject {
     @Published private(set) var journeys: [JourneyRoute] = []
     @Published var latestOngoing: JourneyRoute? = nil
     @Published private(set) var hasLoaded: Bool = false
+    @Published private(set) var isLoading: Bool = false
     @Published private(set) var trackTileRevision: Int = 0
 
     private var fileStore: JourneysFileStore
@@ -126,8 +127,11 @@ final class JourneyStore: ObservableObject {
 
     /// Load journeys from file-backed store.
     func load() {
+        guard !isLoading else { return }
         Task {
-            self.hasLoaded = false
+            self.isLoading = true
+            defer { self.isLoading = false }
+
             let ids = await indexStore.loadJourneyIDsAsync()
             guard !ids.isEmpty else {
                 self.journeys = []

@@ -318,11 +318,11 @@ enum BackendAPIError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .notConfigured: return "后端地址未配置"
-        case .unauthorized: return "请先登录"
-        case .invalidResponse: return "后端返回格式异常"
-        case .server(let msg): return msg
-        case .serverCode(_, let msg): return msg
+        case .notConfigured: return "网络配置错误，请稍后重试"
+        case .unauthorized: return "登录已过期，请重新登录"
+        case .invalidResponse: return "网络异常，请检查网络连接"
+        case .server(let msg): return msg.isEmpty ? "操作失败，请重试" : msg
+        case .serverCode(_, let msg): return msg.isEmpty ? "操作失败，请重试" : msg
         }
     }
 
@@ -480,7 +480,7 @@ final class BackendAPIClient {
         let url = try makeURL(path: path, queryItems: queryItems)
         var req = URLRequest(url: url)
         req.httpMethod = method
-        req.timeoutInterval = 45
+        req.timeoutInterval = 15
         let resolvedToken = try await resolvedAuthorizationToken(explicitToken: token)
         if let resolvedToken, !resolvedToken.isEmpty {
             req.setValue("Bearer \(resolvedToken)", forHTTPHeaderField: "Authorization")
@@ -490,37 +490,56 @@ final class BackendAPIClient {
             req.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
 
-        let (data, resp) = try await transport(req)
-        guard let http = resp as? HTTPURLResponse else {
-            throw BackendAPIError.invalidResponse
-        }
+        var lastError: Error?
+        for attempt in 0..<2 {
+            do {
+                let (data, resp) = try await transport(req)
+                guard let http = resp as? HTTPURLResponse else {
+                    throw BackendAPIError.invalidResponse
+                }
 
-        if http.statusCode == 401,
-           let resolvedToken,
-           !resolvedToken.isEmpty,
-           !shouldSkipAutoRefresh(path: path),
-           let refreshedToken = await tokenRefreshGate.refresh(client: self, failedAccessToken: resolvedToken),
-           refreshedToken != resolvedToken {
-            var retriedReq = req
-            retriedReq.setValue("Bearer \(refreshedToken)", forHTTPHeaderField: "Authorization")
-            let (retryData, retryResp) = try await transport(retriedReq)
-            guard let retryHTTP = retryResp as? HTTPURLResponse else {
-                throw BackendAPIError.invalidResponse
+                if http.statusCode == 401,
+                   let resolvedToken,
+                   !resolvedToken.isEmpty,
+                   !shouldSkipAutoRefresh(path: path),
+                   let refreshedToken = await tokenRefreshGate.refresh(client: self, failedAccessToken: resolvedToken),
+                   refreshedToken != resolvedToken {
+                    var retriedReq = req
+                    retriedReq.setValue("Bearer \(refreshedToken)", forHTTPHeaderField: "Authorization")
+                    let (retryData, retryResp) = try await transport(retriedReq)
+                    guard let retryHTTP = retryResp as? HTTPURLResponse else {
+                        throw BackendAPIError.invalidResponse
+                    }
+                    return try validateResponse(
+                        data: retryData,
+                        http: retryHTTP,
+                        path: path,
+                        usedAuthorizationToken: true
+                    )
+                }
+
+                return try validateResponse(
+                    data: data,
+                    http: http,
+                    path: path,
+                    usedAuthorizationToken: resolvedToken?.isEmpty == false
+                )
+            } catch {
+                lastError = error
+                let nsError = error as NSError
+                let isNetworkError = nsError.domain == NSURLErrorDomain &&
+                    (nsError.code == NSURLErrorTimedOut ||
+                     nsError.code == NSURLErrorCannotConnectToHost ||
+                     nsError.code == NSURLErrorNetworkConnectionLost)
+
+                if attempt == 0 && isNetworkError {
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    continue
+                }
+                throw error
             }
-            return try validateResponse(
-                data: retryData,
-                http: retryHTTP,
-                path: path,
-                usedAuthorizationToken: true
-            )
         }
-
-        return try validateResponse(
-            data: data,
-            http: http,
-            path: path,
-            usedAuthorizationToken: resolvedToken?.isEmpty == false
-        )
+        throw lastError ?? BackendAPIError.invalidResponse
     }
 
     private func shouldSkipAutoRefresh(path: String) -> Bool {
@@ -683,7 +702,7 @@ final class BackendAPIClient {
         let url = try makeURL(path: "/v1/auth/refresh")
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
-        req.timeoutInterval = 45
+        req.timeoutInterval = 15
         req.httpBody = body
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
 

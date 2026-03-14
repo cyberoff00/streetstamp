@@ -214,7 +214,7 @@ struct StreetStampsApp: App {
         appContentWithPresentation
             .task {
                 guard showSplash else { return }
-                try? await Task.sleep(nanoseconds: 3_350_000_000)
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
                 await MainActor.run {
                     hideSplash()
                 }
@@ -334,6 +334,10 @@ struct StreetStampsApp: App {
             }
             .onChange(of: sessionStore.currentAccessToken) { _, token in
                 guard let token, !token.isEmpty else { return }
+                guard journeyStore.journeys.isEmpty else {
+                    print("⚠️ 登录时检测到本地数据，跳过自动下载以防冲突")
+                    return
+                }
                 Task {
                     let count = try? await JourneyCloudMigrationService.downloadAndMerge(
                         sessionStore: sessionStore,

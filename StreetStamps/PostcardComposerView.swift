@@ -307,15 +307,24 @@ struct PostcardComposerView: View {
                 loadingPhoto = true
                 defer { loadingPhoto = false }
                 do {
-                    guard let data = try await item.loadTransferable(type: Data.self),
-                          let uiImage = UIImage(data: data) else { return }
+                    guard let data = try await item.loadTransferable(type: Data.self) else { return }
+
+                    let (previewImage, compressedData) = try await Task.detached(priority: .userInitiated) {
+                        guard let uiImage = UIImage(data: data) else {
+                            throw NSError(domain: "PostcardError", code: -1)
+                        }
+                        let prepared = uiImage.downscaled(maxPixel: MediaUploadPreparation.postcardMaxPixel)
+                        guard let jpeg = prepared.jpegData(compressionQuality: MediaUploadPreparation.postcardCompressionQuality) else {
+                            throw NSError(domain: "PostcardError", code: -2)
+                        }
+                        return (prepared, jpeg)
+                    }.value
+
                     let filename = "postcard_\(UUID().uuidString).jpg"
                     let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
-                    if let jpeg = MediaUploadPreparation.preparePostcardUploadData(image: uiImage) {
-                        try jpeg.write(to: url, options: .atomic)
-                        selectedImage = uiImage
-                        localImagePath = url.path
-                    }
+                    try compressedData.write(to: url, options: .atomic)
+                    selectedImage = previewImage
+                    localImagePath = url.path
                 } catch {
                     // ignore picker failure, user can retry
                 }

@@ -222,8 +222,8 @@ extension UIImage {
 }
 
 enum MediaUploadPreparation {
-    static let postcardMaxPixel: CGFloat = 2048
-    static let postcardCompressionQuality: CGFloat = 0.85
+    static let postcardMaxPixel: CGFloat = 1200
+    static let postcardCompressionQuality: CGFloat = 0.75
 
     static func preparePostcardUploadData(image: UIImage) -> Data? {
         let prepared = image.downscaled(maxPixel: postcardMaxPixel)
@@ -1618,7 +1618,13 @@ struct MapView: View {
         }
 
         return clusters.map { c in
-            (c.key, mapCoord(c.center), c.items)
+            let mapped = JourneyMemoryMapCoordinateResolver.mapCoordinate(
+                rawCoordinate: c.center,
+                preferredCityKey: c.items.first?.cityKey,
+                fallbackCountryISO2: journeyRoute.countryISO2,
+                fallbackCityKey: journeyRoute.startCityKey ?? journeyRoute.cityKey
+            )
+            return (c.key, mapped, c.items)
         }
     }
 }

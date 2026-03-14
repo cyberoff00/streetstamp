@@ -787,28 +787,26 @@ struct FriendsHubView: View {
 
         let key = feedLikeKey(friendID: friendID, journeyID: journeyID)
         guard !feedLikeLoadingKeys.contains(key) else { return }
+
+        let current = feedLikeStats[key] ?? (likes: 0, likedByMe: false)
+        let liked = current.likedByMe
+
+        feedLikeStats[key] = (likes: liked ? max(0, current.likes - 1) : current.likes + 1, likedByMe: !liked)
+
         feedLikeLoadingKeys.insert(key)
         defer { feedLikeLoadingKeys.remove(key) }
 
-        let liked = feedLikeStats[key]?.likedByMe ?? false
         do {
             let resp: JourneyLikeActionResponse
             if liked {
-                resp = try await BackendAPIClient.shared.unlikeJourney(
-                    token: token,
-                    ownerUserID: friendID,
-                    journeyID: journeyID
-                )
+                resp = try await BackendAPIClient.shared.unlikeJourney(token: token, ownerUserID: friendID, journeyID: journeyID)
             } else {
-                resp = try await BackendAPIClient.shared.likeJourney(
-                    token: token,
-                    ownerUserID: friendID,
-                    journeyID: journeyID
-                )
+                resp = try await BackendAPIClient.shared.likeJourney(token: token, ownerUserID: friendID, journeyID: journeyID)
             }
             feedLikeStats[key] = (likes: max(0, resp.likes), likedByMe: resp.likedByMe)
         } catch {
-            showFeedToast(String(format: L10n.t("journey_loading_failed_format"), error.localizedDescription))
+            feedLikeStats[key] = current
+            showFeedToast(L10n.t("operation_failed"))
         }
     }
 
@@ -817,7 +815,14 @@ struct FriendsHubView: View {
         guard !loadingRemote else { return }
         loadingRemote = true
         defer { loadingRemote = false }
+
+        let previousFriends = socialStore.friends
         await socialStore.reloadFromBackendIfPossible(accessToken: sessionStore.currentAccessToken)
+
+        if socialStore.friends.isEmpty && !previousFriends.isEmpty {
+            socialStore.friends = previousFriends
+        }
+
         await refreshSocialNotifications(showToastForLatestUnread: true)
         await refreshFriendRequests()
     }
