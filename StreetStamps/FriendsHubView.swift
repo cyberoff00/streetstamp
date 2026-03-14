@@ -818,10 +818,7 @@ struct FriendsHubView: View {
 
         let previousFriends = socialStore.friends
         await socialStore.reloadFromBackendIfPossible(accessToken: sessionStore.currentAccessToken)
-
-        if socialStore.friends.isEmpty && !previousFriends.isEmpty {
-            socialStore.friends = previousFriends
-        }
+        socialStore.restoreFriendsIfEmpty(previousFriends)
 
         await refreshSocialNotifications(showToastForLatestUnread: true)
         await refreshFriendRequests()
@@ -2295,29 +2292,32 @@ private final class FriendMirrorContext: ObservableObject {
     }
 
     static func signature(for snapshot: FriendProfileSnapshot) -> String {
-        let journeys = snapshot.journeys
-            .map {
-                let memorySignature = $0.memories
-                    .map {
-                        [
-                            $0.id,
-                            $0.title,
-                            $0.notes,
-                            String($0.timestamp.timeIntervalSince1970),
-                            $0.imageURLs.joined(separator: ","),
-                            $0.latitude.map(String.init) ?? "",
-                            $0.longitude.map(String.init) ?? "",
-                            $0.locationStatus ?? ""
-                        ].joined(separator: "|")
-                    }
-                    .joined(separator: ";")
-                return "\($0.id)|\($0.title)|\($0.distance)|\($0.routeCoordinates.count)|\($0.memories.count)|\($0.endTime?.timeIntervalSince1970 ?? 0)|\(memorySignature)"
-            }
-            .joined(separator: ";")
+        let journeys = snapshot.journeys.map(journeySignature).joined(separator: ";")
         let cards = snapshot.unlockedCityCards
             .map { "\($0.id)|\($0.name)|\($0.countryISO2 ?? "")" }
             .joined(separator: ";")
         return "\(snapshot.id)||\(journeys)||\(cards)"
+    }
+
+    private static func journeySignature(_ journey: FriendSharedJourney) -> String {
+        let memories = journey.memories.map(memorySignature).joined(separator: ";")
+        return "\(journey.id)|\(journey.title)|\(journey.distance)|\(journey.routeCoordinates.count)|\(journey.memories.count)|\(journey.endTime?.timeIntervalSince1970 ?? 0)|\(memories)"
+    }
+
+    private static func memorySignature(_ memory: FriendSharedMemory) -> String {
+        let latitude = memory.latitude.map { String($0) } ?? ""
+        let longitude = memory.longitude.map { String($0) } ?? ""
+        let components: [String] = [
+            memory.id,
+            memory.title,
+            memory.notes,
+            String(memory.timestamp.timeIntervalSince1970),
+            memory.imageURLs.joined(separator: ","),
+            latitude,
+            longitude,
+            memory.locationStatus ?? ""
+        ]
+        return components.joined(separator: "|")
     }
 
     func apply(snapshot: FriendProfileSnapshot) {

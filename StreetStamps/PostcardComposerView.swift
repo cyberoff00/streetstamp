@@ -123,133 +123,30 @@ struct PostcardComposerView: View {
         !selectedCityID.isEmpty && !localImagePath.isEmpty && !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    var body: some View {
+    private var cityRefreshTaskID: String {
+        cityCache.cachedCities.map { city in
+            let localizedCount = city.localizedDisplayNameByLocale?.count ?? 0
+            let levelCount = city.reservedAvailableLevelNames?.count ?? 0
+            return "\(city.id)|\(city.name)|\(city.reservedLevelRaw ?? "")|\(city.reservedParentRegionKey ?? "")|\(city.reservedAvailableLevelNamesLocaleID ?? "")|\(localizedCount)|\(levelCount)"
+        }.joined(separator: ";")
+    }
+
+    private var content: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 18) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(L10n.t("postcard_send_to"))
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(FigmaTheme.subtext)
-                    Text(friendName)
-                        .font(.system(size: 20, weight: .bold))
-                        .foregroundColor(FigmaTheme.text)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(18)
-                .postcardFeatureCardStyle()
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(L10n.t("postcard_city"))
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(FigmaTheme.subtext)
-
-                    Picker(L10n.t("postcard_city"), selection: $selectedCityID) {
-                        ForEach(cityOptions, id: \.id) { option in
-                            Text(option.name).tag(option.id)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .onChange(of: selectedCityID) { _, newID in
-                        selectedCityName = cityOptions.first(where: { $0.id == newID })?.name ?? ""
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(18)
-                .postcardFeatureCardStyle()
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(L10n.t("postcard_photo_limit"))
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(FigmaTheme.subtext)
-
-                    if let image = selectedImage {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(height: 180)
-                            .frame(maxWidth: .infinity)
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    }
-
-                    PhotosPicker(selection: $pickedItem, matching: .images, photoLibrary: .shared()) {
-                        Text(selectedImage == nil ? L10n.t("postcard_upload_local_photo") : L10n.t("postcard_replace_photo"))
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(FigmaTheme.primary)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-                    .disabled(loadingPhoto)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(18)
-                .postcardFeatureCardStyle()
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(L10n.t("postcard_message"))
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(FigmaTheme.subtext)
-
-                    TextEditor(text: $messageText)
-                        .frame(height: 120)
-                        .scrollContentBackground(.hidden)
-                        .padding(8)
-                        .background(Color.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .onChange(of: messageText) { _, newValue in
-                            if newValue.count > 80 {
-                                messageText = String(newValue.prefix(80))
-                            }
-                        }
-
-                    HStack {
-                        Spacer()
-                        Text("\(messageText.count)/80")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(FigmaTheme.subtext)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(18)
-                .postcardFeatureCardStyle()
-
-                NavigationLink(isActive: $showPreview) {
-                    PostcardPreviewView(
-                        friendID: friendID,
-                        friendName: friendName,
-                        selectedCityID: selectedCityID,
-                        selectedCityName: selectedCityName,
-                        selectedCityJourneyCount: selectedCityJourneyCount,
-                        messageText: messageText,
-                        localImagePath: localImagePath,
-                        selectedImage: selectedImage,
-                        allowedCityIDs: cityOptions.map(\.id),
-                        onSent: {
-                            onSent?()
-                            dismiss()
-                        }
-                    )
-                } label: {
-                    EmptyView()
-                }
-
-                Button {
-                    showPreview = true
-                } label: {
-                    Text(L10n.t("postcard_preview"))
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(canPreview ? FigmaTheme.primary : FigmaTheme.primary.opacity(0.35))
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .disabled(!canPreview)
+                recipientCard
+                cityPickerCard
+                photoPickerCard
+                messageCard
+                previewLink
+                previewButton
             }
             .padding(20)
         }
+    }
+
+    var body: some View {
+        content
         .background(FigmaTheme.background.ignoresSafeArea())
         .onAppear {
             guard PostcardSidebarVisibilityScope.composer.hidesGlobalSidebarButton else { return }
@@ -281,11 +178,7 @@ struct PostcardComposerView: View {
                 selectedCityName = first.name
             }
         }
-        .task(id: cityCache.cachedCities.map { city in
-            let localizedCount = city.localizedDisplayNameByLocale?.count ?? 0
-            let levelCount = city.reservedAvailableLevelNames?.count ?? 0
-            return "\(city.id)|\(city.name)|\(city.reservedLevelRaw ?? "")|\(city.reservedParentRegionKey ?? "")|\(city.reservedAvailableLevelNamesLocaleID ?? "")|\(localizedCount)|\(levelCount)"
-        }.joined(separator: ";")) {
+        .task(id: cityRefreshTaskID) {
             await refreshLocalizedCityNames()
             guard let first = cityOptions.first else {
                 selectedCityID = ""
@@ -330,6 +223,140 @@ struct PostcardComposerView: View {
                 }
             }
         }
+    }
+
+    private var recipientCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(L10n.t("postcard_send_to"))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(FigmaTheme.subtext)
+            Text(friendName)
+                .font(.system(size: 20, weight: .bold))
+                .foregroundColor(FigmaTheme.text)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .postcardFeatureCardStyle()
+    }
+
+    private var cityPickerCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L10n.t("postcard_city"))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(FigmaTheme.subtext)
+
+            Picker(L10n.t("postcard_city"), selection: $selectedCityID) {
+                ForEach(cityOptions, id: \.id) { option in
+                    Text(option.name).tag(option.id)
+                }
+            }
+            .pickerStyle(.menu)
+            .onChange(of: selectedCityID) { _, newID in
+                selectedCityName = cityOptions.first(where: { $0.id == newID })?.name ?? ""
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .postcardFeatureCardStyle()
+    }
+
+    private var photoPickerCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L10n.t("postcard_photo_limit"))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(FigmaTheme.subtext)
+
+            if let image = selectedImage {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(height: 180)
+                    .frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+
+            PhotosPicker(selection: $pickedItem, matching: .images, photoLibrary: .shared()) {
+                Text(selectedImage == nil ? L10n.t("postcard_upload_local_photo") : L10n.t("postcard_replace_photo"))
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(FigmaTheme.primary)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .disabled(loadingPhoto)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .postcardFeatureCardStyle()
+    }
+
+    private var messageCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L10n.t("postcard_message"))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(FigmaTheme.subtext)
+
+            TextEditor(text: $messageText)
+                .frame(height: 120)
+                .scrollContentBackground(.hidden)
+                .padding(8)
+                .background(Color.white)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .onChange(of: messageText) { _, newValue in
+                    if newValue.count > 80 {
+                        messageText = String(newValue.prefix(80))
+                    }
+                }
+
+            HStack {
+                Spacer()
+                Text("\(messageText.count)/80")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(FigmaTheme.subtext)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .postcardFeatureCardStyle()
+    }
+
+    private var previewLink: some View {
+        NavigationLink(isActive: $showPreview) {
+            PostcardPreviewView(
+                friendID: friendID,
+                friendName: friendName,
+                selectedCityID: selectedCityID,
+                selectedCityName: selectedCityName,
+                selectedCityJourneyCount: selectedCityJourneyCount,
+                messageText: messageText,
+                localImagePath: localImagePath,
+                selectedImage: selectedImage,
+                allowedCityIDs: cityOptions.map(\.id),
+                onSent: {
+                    onSent?()
+                    dismiss()
+                }
+            )
+        } label: {
+            EmptyView()
+        }
+    }
+
+    private var previewButton: some View {
+        Button {
+            showPreview = true
+        } label: {
+            Text(L10n.t("postcard_preview"))
+                .font(.system(size: 15, weight: .bold))
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(canPreview ? FigmaTheme.primary : FigmaTheme.primary.opacity(0.35))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(!canPreview)
     }
 }
 

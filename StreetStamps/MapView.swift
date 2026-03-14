@@ -218,7 +218,7 @@ enum PhotoStore {
 // MARK: - Image helpers
 
 extension UIImage {
-    fileprivate func downscaled(maxPixel: CGFloat) -> UIImage {
+    func downscaled(maxPixel: CGFloat) -> UIImage {
         let w = size.width
         let h = size.height
         guard w > 0, h > 0 else { return self }

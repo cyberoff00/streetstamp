@@ -11,6 +11,13 @@ struct JourneyMemoryLocationResolution: Equatable {
         status: .pending,
         source: .pending
     )
+
+    static func == (lhs: JourneyMemoryLocationResolution, rhs: JourneyMemoryLocationResolution) -> Bool {
+        lhs.coordinate.0 == rhs.coordinate.0 &&
+        lhs.coordinate.1 == rhs.coordinate.1 &&
+        lhs.status.rawValue == rhs.status.rawValue &&
+        lhs.source.rawValue == rhs.source.rawValue
+    }
 }
 
 enum JourneyMemoryLocationResolver {

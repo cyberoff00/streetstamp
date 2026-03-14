@@ -362,6 +362,12 @@ final class SocialGraphStore: ObservableObject {
         }
     }
 
+    func restoreFriendsIfEmpty(_ snapshots: [FriendProfileSnapshot]) {
+        guard friends.isEmpty, !snapshots.isEmpty else { return }
+        friends = snapshots
+        persistToDisk()
+    }
+
     private var fileURL: URL {
         let paths = StoragePath(userID: activeUserID)
         return paths.cachesDir.appendingPathComponent("friends_graph_v1.json")
