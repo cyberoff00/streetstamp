@@ -147,6 +147,49 @@ enum MapCoordAdapter {
     }
 }
 
+enum JourneyMemoryMapCoordinateResolver {
+    static func mapCoordinate(
+        rawCoordinate: CLLocationCoordinate2D,
+        preferredCityKey: String?,
+        fallbackCountryISO2: String?,
+        fallbackCityKey: String?
+    ) -> CLLocationCoordinate2D {
+        let normalizedPreferredCityKey = preferredCityKey?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let cityKeyForDecision: String? = {
+            if let normalizedPreferredCityKey, !normalizedPreferredCityKey.isEmpty {
+                return normalizedPreferredCityKey
+            }
+            return fallbackCityKey
+        }()
+        let countryForDecision: String? = {
+            guard cityKeyForDecision == nil else { return nil }
+            return fallbackCountryISO2
+        }()
+        return MapCoordAdapter.forMapKit(
+            rawCoordinate,
+            countryISO2: countryForDecision,
+            cityKey: cityKeyForDecision
+        )
+    }
+
+    static func mapCoordinate(
+        for memory: JourneyMemory,
+        fallbackCountryISO2: String?,
+        fallbackCityKey: String?
+    ) -> CLLocationCoordinate2D {
+        mapCoordinate(
+            rawCoordinate: CLLocationCoordinate2D(
+                latitude: memory.coordinate.0,
+                longitude: memory.coordinate.1
+            ),
+            preferredCityKey: memory.cityKey,
+            fallbackCountryISO2: fallbackCountryISO2,
+            fallbackCityKey: fallbackCityKey
+        )
+    }
+}
+
 struct CityDeepStyledSegment {
     let coords: [CLLocationCoordinate2D]
     let isGap: Bool

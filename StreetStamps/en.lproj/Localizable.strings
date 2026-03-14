@@ -829,3 +829,7 @@
 "settings_icloud_status_restore_failed_format" = "Last restore failed: %@";
 "settings_icloud_status_no_backup" = "No iCloud backup found for this account.";
 "settings_icloud_status_already_latest" = "Already restored the latest iCloud backup.";
+
+"onboarding_continue_later" = "Continue Later";
+"onboarding_skip_guide" = "Skip Guide";
+"about_postscript" = "Postscript";

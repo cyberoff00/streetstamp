@@ -13,6 +13,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.758.0",
     "@aws-sdk/client-sesv2": "^3.924.0",
+    "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "firebase-admin": "^13.1.0",

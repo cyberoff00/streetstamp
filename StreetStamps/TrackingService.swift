@@ -577,6 +577,7 @@ final class TrackingService: ObservableObject {
     func resumeJourney(startTime: Date? = nil, restoredPausedDuration: TimeInterval = 0) {
         isTracking = true
         isPaused = false
+        userLocation = nil
         lastLocation = nil
         lastRecordedLocationForStationary = nil
         stationarySince = nil
@@ -627,6 +628,7 @@ final class TrackingService: ObservableObject {
     func resumeFromPause() {
         guard isTracking else { return }
         isPaused = false
+        userLocation = nil
         lastLocation = nil
         lastRecordedLocationForStationary = nil
         deferredWeakDriftJump = nil

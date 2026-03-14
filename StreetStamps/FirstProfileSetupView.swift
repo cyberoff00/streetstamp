@@ -82,16 +82,12 @@ struct FirstProfileSetupView: View {
     private let presentation = FirstProfileSetupPresentationModel.minimal
     private let accent = FigmaTheme.primary
     private let warm = FigmaTheme.secondary
-    #if DEBUG
     private let isDebugPreview: Bool
     private let onDismissDebugPreview: (() -> Void)?
-    #endif
 
     init() {
-        #if DEBUG
         self.isDebugPreview = false
         self.onDismissDebugPreview = nil
-        #endif
     }
 
     #if DEBUG

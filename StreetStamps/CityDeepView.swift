@@ -196,7 +196,11 @@ struct CityDeepView: View {
         return all
             .sorted { $0.timestamp < $1.timestamp }
             .map { m in
-                let mapped = MapCoordAdapter.forMapKit(.init(latitude: m.coordinate.0, longitude: m.coordinate.1), countryISO2: effectiveCountryISO2)
+                let mapped = JourneyMemoryMapCoordinateResolver.mapCoordinate(
+                    for: m,
+                    fallbackCountryISO2: effectiveCountryISO2,
+                    fallbackCityKey: activeCityKey
+                )
                 return MemoryGroup(id: m.id, key: m.id, coordinate: mapped, items: [m])
             }
     }

@@ -1632,10 +1632,10 @@ struct JourneyRouteDetailView: View {
     private var memoryGroups: [JourneyDetailMap.MemoryGroup] {
         guard let j = journey else { return [] }
         return j.memories.map { memory in
-            let mapped = MapCoordAdapter.forMapKit(
-                CLLocationCoordinate2D(latitude: memory.coordinate.0, longitude: memory.coordinate.1),
-                countryISO2: j.countryISO2,
-                cityKey: j.cityKey
+            let mapped = JourneyMemoryMapCoordinateResolver.mapCoordinate(
+                for: memory,
+                fallbackCountryISO2: j.countryISO2,
+                fallbackCityKey: j.cityKey
             )
             return JourneyDetailMap.MemoryGroup(id: memory.id, coordinate: mapped, memory: memory)
         }

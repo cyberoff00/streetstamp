@@ -16,6 +16,7 @@ const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const { OAuth2Client } = require("google-auth-library");
 const { createRemoteJWKSet, jwtVerify } = require("jose");
 const { canSendPostcard } = require("./postcard-rules");
+const bcrypt = require("bcrypt");
 
 const PORT = Number(process.env.PORT || 18080);
 const JWT_SECRET = (process.env.JWT_SECRET || "change-me-in-production").trim();
@@ -31,7 +32,7 @@ const PGDATABASE = (process.env.PGDATABASE || "").trim();
 const PGSSL = String(process.env.PGSSL || "").trim().toLowerCase();
 const PG_STATE_KEY = (process.env.PG_STATE_KEY || "global").trim();
 const PG_MAX_CLIENTS = Number(process.env.PG_MAX_CLIENTS || 10);
-const JSON_BODY_LIMIT_MB = Number(process.env.JSON_BODY_LIMIT_MB || 6);
+const JSON_BODY_LIMIT_MB = Number(process.env.JSON_BODY_LIMIT_MB || 3);
 const MEDIA_UPLOAD_MAX_BYTES = Number(process.env.MEDIA_UPLOAD_MAX_BYTES || 10 * 1024 * 1024);
 const CORS_ALLOWED_ORIGINS = String(process.env.CORS_ALLOWED_ORIGINS || "").trim();
 const AUTH_RATE_LIMIT_WINDOW_MS = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000);
@@ -417,7 +418,15 @@ function hashSHA256(raw) {
 }
 
 function hashPassword(pw) {
-  return hashSHA256(`StreetStamps::${pw}`);
+  return bcrypt.hashSync(pw, 10);
+}
+
+function verifyPassword(pw, hash) {
+  try {
+    return bcrypt.compareSync(pw, hash);
+  } catch {
+    return false;
+  }
 }
 
 function genInviteCode() {
@@ -983,14 +992,8 @@ function baseDisplayName(raw) {
 
 function canUseDisplayName(displayName, excludedUserID = "") {
   const next = baseDisplayName(displayName);
-  const excluded = String(excludedUserID || "").trim();
-  for (const [uid, user] of Object.entries(db.users || {})) {
-    if (uid === excluded) continue;
-    if (baseDisplayName(user?.displayName) === next) {
-      return false;
-    }
-  }
-  return true;
+  const owner = displayNameIndex.get(next);
+  return !owner || owner === excludedUserID;
 }
 
 function allocateUniqueDisplayName(displayName, excludedUserID = "") {
@@ -1033,6 +1036,7 @@ function normalizeHistoricalDisplayNames() {
       user.displayName = next;
       changed = true;
     }
+    displayNameIndex.set(next, user.id);
   }
 
   return changed;
@@ -1095,7 +1099,7 @@ function normalizeJourneyMemories(rawMemories) {
   }));
 }
 
-function normalizeJourneyPayload(raw) {
+function normalizeJourneyPayload(raw, ownerUserID) {
   return {
     id: String(raw?.id || `j_${randHex(8)}`),
     title: String(raw?.title || "Journey").slice(0, 120),
@@ -1107,7 +1111,8 @@ function normalizeJourneyPayload(raw) {
     endTime: normalizeISOTime(raw?.endTime),
     visibility: normalizeVisibility(raw?.visibility),
     routeCoordinates: normalizeRouteCoordinates(raw?.routeCoordinates || raw?.coordinates),
-    memories: normalizeJourneyMemories(raw?.memories)
+    memories: normalizeJourneyMemories(raw?.memories),
+    ownerUserID: ownerUserID || undefined
   };
 }
 
@@ -1121,8 +1126,8 @@ function normalizeCityCardPayload(raw) {
   };
 }
 
-function mergeJourneyPayloads(existingJourneys, incomingJourneys, removedJourneyIDs, snapshotComplete) {
-  const normalizedIncoming = (incomingJourneys || []).map(normalizeJourneyPayload);
+function mergeJourneyPayloads(existingJourneys, incomingJourneys, removedJourneyIDs, snapshotComplete, ownerUserID) {
+  const normalizedIncoming = (incomingJourneys || []).map(j => normalizeJourneyPayload(j, ownerUserID));
   if (snapshotComplete) return normalizedIncoming;
 
   const removed = new Set((removedJourneyIDs || []).map((x) => String(x || "").trim()).filter(Boolean));
@@ -1573,15 +1578,25 @@ async function loadDB() {
 
 let db = emptyDB();
 let writeChain = Promise.resolve();
+let writeLock = false;
+const displayNameIndex = new Map();
 
 function saveDB() {
   writeChain = writeChain.then(async () => {
-    if (pgPool) {
-      await saveDBToPostgres(db);
-      return;
+    while (writeLock) {
+      await new Promise(resolve => setTimeout(resolve, 10));
     }
-    await ensureDirForFile(DATA_FILE);
-    await fsp.writeFile(DATA_FILE, JSON.stringify(db, null, 2), "utf8");
+    writeLock = true;
+    try {
+      if (pgPool) {
+        await saveDBToPostgres(db);
+        return;
+      }
+      await ensureDirForFile(DATA_FILE);
+      await fsp.writeFile(DATA_FILE, JSON.stringify(db, null, 2), "utf8");
+    } finally {
+      writeLock = false;
+    }
   });
   return writeChain;
 }
@@ -2461,7 +2476,25 @@ async function main() {
         item.provider === "email_password" && item.email === email
       ));
       if (!identity) return res.status(404).json({ message: "account not found" });
-      if (identity.passwordHash !== hashPassword(password)) return res.status(401).json({ message: "wrong email or password" });
+
+      // 验证密码（支持旧SHA256和新bcrypt）
+      let passwordValid = false;
+      if (identity.passwordHash.startsWith("$2")) {
+        // bcrypt格式
+        passwordValid = verifyPassword(password, identity.passwordHash);
+      } else {
+        // 旧SHA256格式，自动升级
+        const oldHash = hashSHA256(`StreetStamps::${password}`);
+        if (identity.passwordHash === oldHash) {
+          passwordValid = true;
+          // 升级到bcrypt
+          identity.passwordHash = hashPassword(password);
+          identity.updatedAt = nowUnix();
+          await saveDB();
+        }
+      }
+
+      if (!passwordValid) return res.status(401).json({ message: "wrong email or password" });
       if (!identity.emailVerified) return res.status(403).json({ message: "email not verified" });
 
       const user = db.users[identity.userID];
@@ -2980,7 +3013,7 @@ async function main() {
       const unlockedCityCards = Array.isArray(req.body?.unlockedCityCards) ? req.body.unlockedCityCards : [];
       const removedJourneyIDs = Array.isArray(req.body?.removedJourneyIDs) ? req.body.removedJourneyIDs : [];
       const snapshotComplete = parseTruthy(req.body?.snapshotComplete);
-      me.journeys = mergeJourneyPayloads(me.journeys || [], journeys, removedJourneyIDs, snapshotComplete);
+      me.journeys = mergeJourneyPayloads(me.journeys || [], journeys, removedJourneyIDs, snapshotComplete, uid);
       me.cityCards = mergeCityCardPayloads(me.cityCards || [], unlockedCityCards, snapshotComplete);
       await saveDB();
       return res.status(200).json({ journeys: me.journeys.length, cityCards: me.cityCards.length });

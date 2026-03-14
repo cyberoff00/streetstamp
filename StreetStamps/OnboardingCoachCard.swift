@@ -27,7 +27,7 @@ struct OnboardingCoachCard: View {
 
             HStack(spacing: 16) {
                 Button(action: onLater) {
-                    Text("稍后继续")
+                    Text(L10n.key("onboarding_continue_later"))
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.black.opacity(0.64))
                         .padding(.vertical, 4)
@@ -36,7 +36,7 @@ struct OnboardingCoachCard: View {
                     .buttonStyle(.plain)
 
                 Button(action: onSkip) {
-                    Text("跳过引导")
+                    Text(L10n.key("onboarding_skip_guide"))
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.black.opacity(0.45))
                         .padding(.vertical, 4)

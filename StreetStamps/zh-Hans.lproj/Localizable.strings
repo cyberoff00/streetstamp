@@ -825,3 +825,7 @@
 "settings_icloud_status_restore_failed_format" = "最近恢复失败：%@";
 "settings_icloud_status_no_backup" = "当前 iCloud 账号下没有可恢复备份。";
 "settings_icloud_status_already_latest" = "已是最新 iCloud 备份，无需重复恢复。";
+
+"onboarding_continue_later" = "稍后继续";
+"onboarding_skip_guide" = "跳过引导";
+"about_postscript" = "话外";
