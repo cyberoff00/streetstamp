@@ -281,6 +281,7 @@ struct MainView: View {
                         .foregroundColor(.white)
                 }
             }
+            .appFullSurfaceTapTarget(.circle)
         }
         .buttonStyle(.plain)
         .scaleEffect(isGuideStartStep ? 1.03 : 1.0)
@@ -392,21 +393,20 @@ struct MainView: View {
 
             private func completeJourneyAndSync(journey: JourneyRoute) {
                 ongoingJourney = journey
-                store.flushPersist(journey: journey)
+                JourneySaveCompletion.persistFinalizedJourney(journey, in: store)
                 triggerAutoCloudSyncAfterSave(savedJourney: journey)
             }
 
             private func triggerAutoCloudSyncAfterSave(savedJourney: JourneyRoute) {
                 guard savedJourney.visibility == .public || savedJourney.visibility == .friendsOnly else { return }
                 guard BackendConfig.isEnabled,
-                      let token = sessionStore.currentAccessToken,
-                      !token.isEmpty else { return }
+                      sessionStore.currentAccessToken?.isEmpty == false else { return }
 
                 Task {
                     do {
-                        _ = try await JourneyCloudMigrationService.migrateAll(
+                        try await JourneyCloudMigrationService.syncJourneyVisibilityChange(
+                            journey: savedJourney,
                             sessionStore: sessionStore,
-                            journeyStore: store,
                             cityCache: cityCache
                         )
                     } catch {

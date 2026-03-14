@@ -254,17 +254,17 @@ struct JourneyMemoryMainView: View {
     // MARK: - Empty State
     
     private var emptyState: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: FriendSharedEmptyStateStyle.verticalSpacing) {
             Image(systemName: "book.closed")
                 .font(.system(size: 48))
                 .foregroundColor(.gray.opacity(0.4))
             
             Text(L10n.key(emptyTitleKey))
-                .font(.system(size: 18, weight: .semibold))
+                .font(.system(size: FriendSharedEmptyStateStyle.titleFontSize, weight: .semibold))
                 .foregroundColor(.black)
             
             Text(L10n.key(emptySubtitleKey))
-                .font(.system(size: 14))
+                .font(.system(size: FriendSharedEmptyStateStyle.subtitleFontSize))
                 .foregroundColor(.gray)
                 .multilineTextAlignment(.center)
         }

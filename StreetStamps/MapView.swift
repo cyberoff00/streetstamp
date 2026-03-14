@@ -1158,6 +1158,7 @@ struct MapView: View {
                     .tracking(0.62)
                     .foregroundColor(Color.white.opacity(0.6))
             }
+            .appFullSurfaceTapTarget(.rectangle)
         }
         .buttonStyle(.plain)
     }
@@ -1278,16 +1279,25 @@ struct MapView: View {
                 }
             }
             if let canon = await ReverseGeocodeService.shared.canonical(for: loc) {
-                let display = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: canon.cityKey)
+                let resolvedKey = CityPlacemarkResolver.preferredStableCityKey(canonicalResult: canon)
+                let resolvedCanonicalName = CityPlacemarkResolver.stableCityName(
+                    from: resolvedKey,
+                    fallback: canon.cityName
+                )
+                let display = await ReverseGeocodeService.shared.displayTitle(
+                    for: loc,
+                    cityKey: resolvedKey,
+                    parentRegionKey: canon.parentRegionKey
+                )
                 await MainActor.run {
                     // ✅ Record start city key once; keep cityKey aligned to start city.
-                    let canonKey = canon.cityKey
+                    let canonKey = resolvedKey
                     let existingStart = (journeyRoute.startCityKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                     if existingStart.isEmpty || existingStart == "Unknown|" {
                         journeyRoute.startCityKey = canonKey
                     }
                     journeyRoute.cityKey = journeyRoute.startCityKey ?? canonKey
-                    journeyRoute.canonicalCity = canon.cityName
+                    journeyRoute.canonicalCity = resolvedCanonicalName
                     journeyRoute.countryISO2 = canon.iso2 ?? journeyRoute.countryISO2
 
                     let disp = (display ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1295,7 +1305,7 @@ struct MapView: View {
                         journeyRoute.cityName = disp
                         journeyRoute.currentCity = disp
                     } else {
-                        let fallback = (journeyRoute.cityName ?? canon.cityName).trimmingCharacters(in: .whitespacesAndNewlines)
+                        let fallback = (journeyRoute.cityName ?? resolvedCanonicalName).trimmingCharacters(in: .whitespacesAndNewlines)
                         journeyRoute.cityName = fallback
                         journeyRoute.currentCity = fallback
                     }
@@ -2054,6 +2064,29 @@ private struct MapModeOptionCard: View {
 // MARK: - Unified Memory Editor (System Camera, Photo Library, mirror toggle)
 // =======================================================
 
+enum MemoryEditorSurfaceStyle: Equatable {
+    case card
+    case page
+}
+
+struct MemoryEditorPresentation {
+    let notesMinHeight: CGFloat
+    let notesMaxHeight: CGFloat
+    let surfaceStyle: MemoryEditorSurfaceStyle
+
+    static let sheet = MemoryEditorPresentation(
+        notesMinHeight: 188,
+        notesMaxHeight: 240,
+        surfaceStyle: .card
+    )
+
+    static let fullScreen = MemoryEditorPresentation(
+        notesMinHeight: 320,
+        notesMaxHeight: 460,
+        surfaceStyle: .page
+    )
+}
+
 struct MemoryEditorSheet: View {
     @Binding var isPresented: Bool
     let userID: String
@@ -2295,10 +2328,12 @@ private var hasUnsavedChanges: Bool {
     }
 
     private var content: some View {
-        VStack(spacing: 0) {
+        let presentation = MemoryEditorPresentation.sheet
+
+        return VStack(spacing: 0) {
             VStack(spacing: 8) {
                 MemoryNotesEditor(text: $notes, isFocused: $notesFocused, placeholder: L10n.t("memory_notes_placeholder"))
-                    .frame(minHeight: 188, maxHeight: 240)
+                    .frame(minHeight: presentation.notesMinHeight, maxHeight: presentation.notesMaxHeight)
                     .padding(.horizontal, 6)
                     .padding(.top, 8)
 
@@ -2579,14 +2614,20 @@ struct MemoryEditorPage: View {
     }
 
     private var content: some View {
-        VStack(spacing: 0) {
-            VStack(spacing: 8) {
+        let presentation = MemoryEditorPresentation.fullScreen
+
+        return VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 14) {
                 MemoryNotesEditor(text: $notes, isFocused: $notesFocused, placeholder: L10n.t("memory_notes_placeholder"))
-                    .frame(minHeight: 188, maxHeight: 240)
-                    .padding(.horizontal, 6)
-                    .padding(.top, 8)
+                    .frame(minHeight: presentation.notesMinHeight, maxHeight: presentation.notesMaxHeight)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
 
                 if !imagePaths.isEmpty {
+                    Rectangle()
+                        .fill(FigmaTheme.border.opacity(0.9))
+                        .frame(height: 1)
+                        .padding(.bottom, 2)
+
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 10) {
                             ForEach(Array(imagePaths.enumerated()), id: \.offset) { idx, p in
@@ -2612,19 +2653,13 @@ struct MemoryEditorPage: View {
                             }
                         }
                         .padding(.horizontal, 4)
-                        .padding(.bottom, 8)
                     }
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 8)
-            .padding(.bottom, 8)
-            .frame(minHeight: 290)
-            .background(Color.white)
-            .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-            .padding(.horizontal, 12)
-            .padding(.top, 12)
-            .padding(.bottom, 10)
+            .padding(.horizontal, 24)
+            .padding(.top, 18)
+            .padding(.bottom, 12)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
             .onTapGesture {
                 notesFocused = false
                 endEditingGlobal()
@@ -3409,8 +3444,8 @@ private struct JourneyMKMapView: UIViewRepresentable {
 
             if poly.title == "tail" {
                 let renderer = MKPolylineRenderer(polyline: poly)
-                renderer.strokeColor = MapAppearanceSettings.routeBaseColor.withAlphaComponent(0.72)
-                renderer.lineWidth = 3.6
+                renderer.strokeColor = MapAppearanceSettings.routeBaseColor.withAlphaComponent(0.84)
+                renderer.lineWidth = 3.1
                 renderer.lineCap = .round
                 renderer.lineJoin = .round
                 return renderer
@@ -3434,25 +3469,25 @@ private struct JourneyMKMapView: UIViewRepresentable {
             let weight = CGFloat(max(0, min(1, styled.repeatWeight)))
 
             let halo = MKPolylineRenderer(polyline: styled)
-            halo.lineWidth = isGap ? max(1.0, coreWidth * 0.45) : (coreWidth * 1.04 + weight * 0.50)
+            halo.lineWidth = isGap ? max(0.9, coreWidth * 0.34) : (coreWidth * 0.72 + weight * 0.22)
             halo.lineCap = CGLineCap.round
             halo.lineJoin = CGLineJoin.round
-            halo.strokeColor = base.withAlphaComponent(isGap ? 0.06 : 0.08)
+            halo.strokeColor = base.withAlphaComponent(isGap ? 0.04 : 0.05)
             if isGap {
                 halo.lineDashPattern = RouteRenderStyleTokens.dashLengths.map { NSNumber(value: Double($0)) }
             }
 
             let freq = MKPolylineRenderer(polyline: styled)
-            freq.lineWidth = isGap ? 0 : (coreWidth * 0.96 + weight * 0.55)
+            freq.lineWidth = isGap ? 0 : (coreWidth * 0.64 + weight * 0.14)
             freq.lineCap = CGLineCap.round
             freq.lineJoin = CGLineJoin.round
-            freq.strokeColor = base.withAlphaComponent(isGap ? 0 : (0.08 + 0.10 * weight))
+            freq.strokeColor = base.withAlphaComponent(isGap ? 0 : (0.03 + 0.05 * weight))
 
             let core = MKPolylineRenderer(polyline: styled)
-            core.lineWidth = isGap ? max(1.1, coreWidth * 0.62) : (coreWidth * 0.88 + weight * 0.36)
+            core.lineWidth = isGap ? max(1.0, coreWidth * 0.56) : (coreWidth * 0.78 + weight * 0.12)
             core.lineCap = CGLineCap.round
             core.lineJoin = CGLineJoin.round
-            core.strokeColor = base.withAlphaComponent(isGap ? 0.46 : 0.97)
+            core.strokeColor = base.withAlphaComponent(isGap ? 0.54 : 0.99)
             if isGap {
                 core.lineDashPattern = RouteRenderStyleTokens.dashLengths.map { NSNumber(value: Double($0)) }
             }

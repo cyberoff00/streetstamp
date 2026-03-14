@@ -21,18 +21,27 @@ struct OnboardingCoachCard: View {
                     .frame(height: 46)
                     .background(Color.black)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .appFullSurfaceTapTarget(.roundedRect(14))
             }
             .buttonStyle(.plain)
 
             HStack(spacing: 16) {
-                Button("稍后继续", action: onLater)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.black.opacity(0.64))
+                Button(action: onLater) {
+                    Text("稍后继续")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.black.opacity(0.64))
+                        .padding(.vertical, 4)
+                        .appFullSurfaceTapTarget(.rectangle)
+                }
                     .buttonStyle(.plain)
 
-                Button("跳过引导", action: onSkip)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.black.opacity(0.45))
+                Button(action: onSkip) {
+                    Text("跳过引导")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.black.opacity(0.45))
+                        .padding(.vertical, 4)
+                        .appFullSurfaceTapTarget(.rectangle)
+                }
                     .buttonStyle(.plain)
             }
         }

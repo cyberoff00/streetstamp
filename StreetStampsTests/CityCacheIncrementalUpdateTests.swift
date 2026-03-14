@@ -133,6 +133,35 @@ final class CityCacheIncrementalUpdateTests: XCTestCase {
     }
 
     @MainActor
+    func test_updateCityLevelReserveProfilePersistsExplicitSourceLocaleForCanonicalLabels() throws {
+        let (cache, _) = try makeCache(userID: "citycache-reserve-locale-\(UUID().uuidString)")
+        let journey = makeJourney(
+            id: "journey-1",
+            cityKey: "Shanghai|CN",
+            cityName: "Shanghai",
+            iso: "CN",
+            memoryCount: 0
+        )
+
+        cache.applyJourneyMutation(oldJourney: nil, newJourney: journey)
+        cache.updateCityLevelReserveProfile(
+            cityKey: "Shanghai|CN",
+            level: .admin,
+            parentRegionKey: "Shanghai|CN",
+            availableLevels: [
+                .admin: "Shanghai",
+                .locality: "Shanghai"
+            ],
+            availableLevelsLocaleIdentifier: "en_US",
+            anchor: journey.startCoordinate,
+            force: true
+        )
+
+        let cached = try XCTUnwrap(cache.cachedCities.first(where: { $0.id == "Shanghai|CN" }))
+        XCTAssertEqual(cached.reservedAvailableLevelNamesLocaleID, "en_US")
+    }
+
+    @MainActor
     private func makeCache(userID: String) throws -> (CityCache, JourneyStore) {
         let paths = StoragePath(userID: userID)
         try? FileManager.default.removeItem(at: paths.userRoot)

@@ -318,6 +318,7 @@
 "explorer_fallback" = "USER";
 "finish_upper" = "FINISH";
 "friends_active_ago" = "Active %@";
+"friends_recent_journey_ago" = "Recent journey %@";
 "friends_add_failed" = "Failed to add friend: %@";
 "friends_add_method_handle" = "Handle";
 "friends_add_method_invite" = "Invite Code";
@@ -594,13 +595,15 @@
 "profile_name_updated" = "Display name updated";
 "profile_setup_title" = "SET UP YOUR TRAVELER";
 "profile_setup_subtitle" = "Pick your look and claim a nickname before you enter StreetStamps.";
-"profile_setup_avatar_hint" = "Your first look can be changed again later.";
+"profile_setup_avatar_title" = "SET YOUR STARTING LOOK";
+"profile_setup_avatar_hint" = "Explore more in Equipment later.";
 "profile_setup_edit_look" = "EDIT MY LOOK";
 "profile_setup_nickname_label" = "NICKNAME";
 "profile_setup_nickname_placeholder" = "SKYWALKER";
 "profile_setup_nickname_hint" = "Nicknames are unique now, so pick one that feels like you.";
 "profile_setup_ready_title" = "One last step";
 "profile_setup_ready_body" = "We'll save this nickname and outfit to your account so your friends see the same traveler everywhere.";
+"profile_setup_skip" = "SKIP";
 "profile_setup_confirm" = "ENTER STREETSTAMPS";
 "account_exclusive_id_empty" = "Exclusive ID cannot be empty";
 "account_exclusive_id_rules" = "Exclusive ID only supports letters, numbers, and underscores";

@@ -450,16 +450,13 @@ struct MyJourneysView: View {
 
         Task {
             defer { visibilityUpdatingIDs.remove(journey.id) }
-
-            guard target != .private else { return }
             guard BackendConfig.isEnabled,
-                  let token = sessionStore.currentAccessToken,
-                  !token.isEmpty else { return }
+                  sessionStore.currentAccessToken?.isEmpty == false else { return }
 
             do {
-                _ = try await JourneyCloudMigrationService.migrateAll(
+                try await JourneyCloudMigrationService.syncJourneyVisibilityChange(
+                    journey: updated,
                     sessionStore: sessionStore,
-                    journeyStore: store,
                     cityCache: cityCache
                 )
                 refreshJourneyLikes()

@@ -29,19 +29,6 @@
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES"
       shouldAutocreateTestPlan = "YES">
-      <Testables>
-         <TestableReference
-            skipped = "NO"
-            parallelizable = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "A7A100142F70000100AA0001"
-               BuildableName = "StreetStampsTests.xctest"
-               BlueprintName = "StreetStampsTests"
-               ReferencedContainer = "container:StreetStamps.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
-      </Testables>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Release"
@@ -66,6 +53,18 @@
       <CommandLineArguments>
          <CommandLineArgument
             argument = "-CityThumbnailDebug "
+            isEnabled = "YES">
+         </CommandLineArgument>
+         <CommandLineArgument
+            argument = "-CityDeepDebug"
+            isEnabled = "YES">
+         </CommandLineArgument>
+         <CommandLineArgument
+            argument = "-CityThumbnailDebug"
+            isEnabled = "YES">
+         </CommandLineArgument>
+         <CommandLineArgument
+            argument = "-CityThumbnailDebugVerbose"
             isEnabled = "YES">
          </CommandLineArgument>
          <CommandLineArgument

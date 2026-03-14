@@ -75,6 +75,7 @@ struct FriendSharedMemory: Identifiable, Codable, Hashable {
 struct FriendSharedJourney: Identifiable, Codable, Hashable {
     var id: String
     var title: String
+    var cityID: String?
     var activityTag: String?
     var overallMemory: String?
     var distance: Double
@@ -85,12 +86,13 @@ struct FriendSharedJourney: Identifiable, Codable, Hashable {
     var memories: [FriendSharedMemory]
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, activityTag, overallMemory, distance, startTime, endTime, visibility, routeCoordinates, coordinates, memories
+        case id, title, cityID, cityId, activityTag, overallMemory, distance, startTime, endTime, visibility, routeCoordinates, coordinates, memories
     }
 
     init(
         id: String,
         title: String,
+        cityID: String? = nil,
         activityTag: String?,
         overallMemory: String?,
         distance: Double,
@@ -102,6 +104,7 @@ struct FriendSharedJourney: Identifiable, Codable, Hashable {
     ) {
         self.id = id
         self.title = title
+        self.cityID = cityID
         self.activityTag = activityTag
         self.overallMemory = overallMemory
         self.distance = distance
@@ -116,6 +119,9 @@ struct FriendSharedJourney: Identifiable, Codable, Hashable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         title = (try? c.decode(String.self, forKey: .title)) ?? "Journey"
+        cityID =
+            (try? c.decode(String.self, forKey: .cityID))
+            ?? (try? c.decode(String.self, forKey: .cityId))
         activityTag = try? c.decode(String.self, forKey: .activityTag)
         overallMemory = try? c.decode(String.self, forKey: .overallMemory)
         distance = (try? c.decode(Double.self, forKey: .distance)) ?? 0
@@ -133,6 +139,7 @@ struct FriendSharedJourney: Identifiable, Codable, Hashable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
         try c.encode(title, forKey: .title)
+        try c.encodeIfPresent(cityID, forKey: .cityID)
         try c.encodeIfPresent(activityTag, forKey: .activityTag)
         try c.encodeIfPresent(overallMemory, forKey: .overallMemory)
         try c.encode(distance, forKey: .distance)
@@ -231,6 +238,7 @@ extension FriendSharedJourney {
             title: route.customTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
                 ? (route.customTitle ?? "")
                 : route.displayCityName,
+            cityID: FriendJourneyCityIdentity.stableCityID(from: route),
             activityTag: route.activityTag,
             overallMemory: route.overallMemory,
             distance: route.distance,

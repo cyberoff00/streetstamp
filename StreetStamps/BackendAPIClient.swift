@@ -66,6 +66,7 @@ struct BackendMemoryUploadDTO: Codable {
 struct BackendJourneyUploadDTO: Codable {
     var id: String
     var title: String
+    var cityID: String?
     var activityTag: String?
     var overallMemory: String?
     var distance: Double

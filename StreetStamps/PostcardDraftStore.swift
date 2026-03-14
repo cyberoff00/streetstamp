@@ -8,6 +8,14 @@ enum PostcardDraftStatus: String, Codable {
 }
 
 struct PostcardDraft: Codable, Identifiable, Equatable {
+    struct SendDiagnostics: Codable, Equatable {
+        var photoResolveDurationMs: Int
+        var uploadDurationMs: Int
+        var sendRequestDurationMs: Int
+        var totalDurationMs: Int
+        var completedAt: Date
+    }
+
     var draftID: String
     var clientDraftID: String
     var toUserID: String
@@ -21,6 +29,7 @@ struct PostcardDraft: Codable, Identifiable, Equatable {
     var lastError: String?
     var messageID: String?
     var sentAt: Date?
+    var sendDiagnostics: SendDiagnostics?
     var createdAt: Date
     var updatedAt: Date
 

@@ -79,6 +79,25 @@ actor ReverseGeocodeService {
         let level: CityPlacemarkResolver.CardLevel
         let parentRegionKey: String?
         let availableLevels: [CityPlacemarkResolver.CardLevel: String]
+        let localeIdentifier: String
+
+        init(
+            cityName: String,
+            iso2: String?,
+            cityKey: String,
+            level: CityPlacemarkResolver.CardLevel,
+            parentRegionKey: String?,
+            availableLevels: [CityPlacemarkResolver.CardLevel: String],
+            localeIdentifier: String = Locale.current.identifier
+        ) {
+            self.cityName = cityName
+            self.iso2 = iso2
+            self.cityKey = cityKey
+            self.level = level
+            self.parentRegionKey = parentRegionKey
+            self.availableLevels = availableLevels
+            self.localeIdentifier = localeIdentifier
+        }
     }
     // MARK: - Public API
 
@@ -128,7 +147,8 @@ actor ReverseGeocodeService {
                     cityKey: canon.cityKey,
                     level: canon.level,
                     parentRegionKey: canon.parentRegionKey,
-                    availableLevels: canon.availableLevelNames
+                    availableLevels: canon.availableLevelNames,
+                    localeIdentifier: self.fixedLocale.identifier
                 ))
             }
         }
@@ -185,7 +205,8 @@ actor ReverseGeocodeService {
                     cityKey: canon.cityKey,
                     level: canon.level,
                     parentRegionKey: canon.parentRegionKey,
-                    availableLevels: canon.availableLevelNames
+                    availableLevels: canon.availableLevelNames,
+                    localeIdentifier: Locale.current.identifier
                 ))
             }
         }

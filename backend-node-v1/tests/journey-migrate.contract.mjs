@@ -91,6 +91,7 @@ function makeJourney(id, visibility = 'friendsOnly') {
   return {
     id,
     title: `Journey ${id}`,
+    cityID: 'paris|fr',
     distance: 3200,
     startTime: '2026-03-07T10:00:00.000Z',
     endTime: '2026-03-07T11:00:00.000Z',
@@ -135,6 +136,10 @@ async function run() {
     assert.deepEqual(
       initialProfile.journeys.map((x) => x.id).sort(),
       ['j_a', 'j_c']
+    );
+    assert.deepEqual(
+      initialProfile.journeys.map((x) => x.cityID),
+      ['paris|fr', 'paris|fr']
     );
     assert.deepEqual(
       initialProfile.unlockedCityCards.map((x) => x.id).sort(),

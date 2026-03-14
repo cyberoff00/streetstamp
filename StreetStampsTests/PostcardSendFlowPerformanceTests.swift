@@ -70,6 +70,10 @@ final class PostcardSendFlowPerformanceTests: XCTestCase {
 
         let updated = try XCTUnwrap(postcardCenter.drafts.first(where: { $0.draftID == draft.draftID }))
         XCTAssertEqual(updated.status, .sent)
+        XCTAssertNotNil(updated.sendDiagnostics)
+        XCTAssertGreaterThan(updated.sendDiagnostics?.uploadDurationMs ?? 0, 0)
+        XCTAssertGreaterThan(updated.sendDiagnostics?.sendRequestDurationMs ?? 0, 0)
+        XCTAssertGreaterThan(updated.sendDiagnostics?.totalDurationMs ?? 0, 0)
         XCTAssertLessThan(
             elapsed,
             1.0,

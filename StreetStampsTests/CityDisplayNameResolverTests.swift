@@ -2,11 +2,20 @@ import XCTest
 @testable import StreetStamps
 
 final class CityDisplayNameResolverTests: XCTestCase {
-    func test_cityLevelReconcilePolicy_fetchesFreshProfileWhenCachedOptionsExist() {
-        XCTAssertTrue(
+    func test_cityLevelReconcilePolicy_skipsFreshProfileWhenCachedOptionsExist() {
+        XCTAssertFalse(
             CityLevelReconcilePolicy.shouldFetchFreshProfile(
                 isLoading: false,
                 hasExistingOptions: true
+            )
+        )
+    }
+
+    func test_cityLevelReconcilePolicy_fetchesFreshProfileWhenCachedOptionsMissing() {
+        XCTAssertTrue(
+            CityLevelReconcilePolicy.shouldFetchFreshProfile(
+                isLoading: false,
+                hasExistingOptions: false
             )
         )
     }
@@ -256,6 +265,42 @@ final class CityDisplayNameResolverTests: XCTestCase {
         )
 
         XCTAssertEqual(resolved, "济州特别自治道")
+    }
+
+    func test_stableCityKeyUsesCanonicalLevelNameInsteadOfLocalizedDisplayName() {
+        let key = CityPlacemarkResolver.stableCityKey(
+            selectedLevel: .admin,
+            canonicalAvailableLevels: [
+                .admin: "Shanghai",
+                .locality: "Shanghai"
+            ],
+            fallbackCityKey: "Shanghai|CN",
+            iso2: "CN"
+        )
+
+        XCTAssertEqual(key, "Shanghai|CN")
+    }
+
+    func test_preferredStableCityKeyUsesStoredHierarchyPreference() {
+        let parentRegionKey = "resolver-preferred-key-\(UUID().uuidString)"
+        CityLevelPreferenceStore.shared.setPreferredLevel(.admin, for: parentRegionKey)
+
+        let key = CityPlacemarkResolver.preferredStableCityKey(
+            canonicalResult: ReverseGeocodeService.CanonicalResult(
+                cityName: "Xinyi Township",
+                iso2: "TW",
+                cityKey: "Xinyi Township|TW",
+                level: .locality,
+                parentRegionKey: parentRegionKey,
+                availableLevels: [
+                    .locality: "Xinyi Township",
+                    .admin: "Taiwan"
+                ],
+                localeIdentifier: "en_US"
+            )
+        )
+
+        XCTAssertEqual(key, "Taiwan|TW")
     }
 
     func test_preferredAvailableLevelNamesRejectsEnglishStoredLabelsForChineseLocale() {

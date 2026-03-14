@@ -67,6 +67,7 @@ const FIREBASE_SERVICE_ACCOUNT_PATH = (process.env.GOOGLE_APPLICATION_CREDENTIAL
 const FIREBASE_SERVICE_ACCOUNT_JSON = (process.env.FIREBASE_SERVICE_ACCOUNT_JSON || "").trim();
 const FIREBASE_LEGACY_EMAIL = normalizeEmail(process.env.FIREBASE_LEGACY_EMAIL || "yinterestingy@gmail.com");
 const FIREBASE_LEGACY_APP_USER_ID = (process.env.FIREBASE_LEGACY_APP_USER_ID || "").trim();
+const LEGACY_EMAIL_REVERIFY_EMAIL = normalizeEmail(process.env.LEGACY_EMAIL_REVERIFY_EMAIL || "yinterestingy@163.com");
 
 const visibilityPrivate = "private";
 const visibilityFriendsOnly = "friendsOnly";
@@ -86,6 +87,18 @@ const upload = multer({
   }
 });
 const rateLimitState = new Map();
+
+function timingNowNs() {
+  return process.hrtime.bigint();
+}
+
+function elapsedMs(startNs) {
+  return Number((process.hrtime.bigint() - startNs) / 1000000n);
+}
+
+function logTiming(event, fields) {
+  console.info(`[timing] ${JSON.stringify({ event, ...fields })}`);
+}
 
 const pgEnabled = Boolean(DATABASE_URL || (PGHOST && PGUSER && PGDATABASE));
 let pgPool = null;
@@ -770,6 +783,29 @@ function findVerifiedEmailPasswordIdentity(email) {
   )) || null;
 }
 
+function findEmailPasswordIdentity(email) {
+  const normalized = normalizeEmail(email);
+  if (!normalized) return null;
+  return Object.values(db.authIdentities || {}).find((item) => (
+    item.provider === "email_password"
+      && item.email === normalized
+  )) || null;
+}
+
+function canRecoverLegacyEmailRegistration(email) {
+  const normalized = normalizeEmail(email);
+  if (!normalized || normalized !== LEGACY_EMAIL_REVERIFY_EMAIL) return false;
+
+  const indexedUserID = existingUserID(db.emailIndex?.[normalized]);
+  if (!indexedUserID || !db.users?.[indexedUserID]) return false;
+
+  const hasModernEmailIdentity = Object.values(db.authIdentities || {}).some((item) => (
+    item.provider === "email_password"
+      && item.email === normalized
+  ));
+  return !hasModernEmailIdentity;
+}
+
 function createDefaultUser(provider, email = "") {
   const uid = `u_${randHex(12)}`;
   const invite = genInviteCode();
@@ -1009,6 +1045,14 @@ function ensureProfileSetupCompleted(user, defaultValue) {
   return true;
 }
 
+function resolvedProfileSetupCompleted(user, defaultValue = true) {
+  if (!user || typeof user !== "object") return Boolean(defaultValue);
+  if (typeof user.profileSetupCompleted === "boolean") {
+    return user.profileSetupCompleted;
+  }
+  return Boolean(defaultValue);
+}
+
 function authSuccessPayload(user, provider, email, accessToken, refreshToken) {
   return {
     userId: user.id,
@@ -1016,7 +1060,7 @@ function authSuccessPayload(user, provider, email, accessToken, refreshToken) {
     email: email || null,
     accessToken,
     refreshToken,
-    needsProfileSetup: !Boolean(user.profileSetupCompleted)
+    needsProfileSetup: !resolvedProfileSetupCompleted(user, true)
   };
 }
 
@@ -1055,6 +1099,7 @@ function normalizeJourneyPayload(raw) {
   return {
     id: String(raw?.id || `j_${randHex(8)}`),
     title: String(raw?.title || "Journey").slice(0, 120),
+    cityID: String(raw?.cityID || raw?.cityId || "").trim() || null,
     activityTag: raw?.activityTag == null ? null : String(raw.activityTag).slice(0, 32),
     overallMemory: raw?.overallMemory == null ? null : String(raw.overallMemory).slice(0, 4000),
     distance: Number(raw?.distance || 0),
@@ -1982,7 +2027,7 @@ function profileDTOForViewer(target, isSelf, isFriend) {
     inviteCode: target.inviteCode,
     profileVisibility: visibility,
     displayName: target.displayName,
-    profileSetupCompleted: Boolean(target.profileSetupCompleted),
+    profileSetupCompleted: resolvedProfileSetupCompleted(target, true),
     email: isSelf ? (target.email || null) : null,
     bio: target.bio,
     loadout: normalizeLoadout(target.loadout),
@@ -2225,7 +2270,33 @@ async function main() {
       if (!isStrongPassword(password)) {
         return res.status(400).json({ message: "password must be at least 8 characters and include a letter, number, and special character" });
       }
-      if (db.emailIndex[email]) return res.status(409).json({ message: "email already exists" });
+      const existingEmailIdentity = findEmailPasswordIdentity(email);
+      if (db.emailIndex[email] && !canRecoverLegacyEmailRegistration(email)) {
+        if (existingEmailIdentity && !parseTruthy(existingEmailIdentity.emailVerified)) {
+          const existingUser = db.users?.[existingEmailIdentity.userID];
+          if (!existingUser) return res.status(409).json({ message: "email already exists" });
+
+          const now = nowUnix();
+          const passwordHash = hashPassword(password);
+          existingEmailIdentity.passwordHash = passwordHash;
+          existingEmailIdentity.updatedAt = now;
+          existingUser.passwordHash = passwordHash;
+          if (displayName) {
+            existingUser.displayName = displayName;
+          }
+          const verificationToken = issueEmailVerificationToken(existingEmailIdentity.userID, email);
+          await saveDB();
+          await deliverVerificationEmail(email, verificationToken);
+
+          return res.status(200).json({
+            userId: existingEmailIdentity.userID,
+            email,
+            emailVerificationRequired: true,
+            needsProfileSetup: !resolvedProfileSetupCompleted(existingUser, true)
+          });
+        }
+        return res.status(409).json({ message: "email already exists" });
+      }
 
       const uid = `u_${randHex(12)}`;
       const invite = genInviteCode();
@@ -3023,6 +3094,7 @@ async function main() {
   });
 
   app.post("/v1/postcards/send", writeRateLimiter, async (req, res) => {
+    const requestStartedAt = timingNowNs();
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -3119,13 +3191,27 @@ async function main() {
       if (target.receivedPostcards.length > 1000) target.receivedPostcards = target.receivedPostcards.slice(0, 1000);
 
       pushPostcardReceivedNotification(target, me, canonicalMessage);
+      const saveStartedAt = timingNowNs();
       await saveDB();
+      const saveDurationMs = elapsedMs(saveStartedAt);
+
+      logTiming("postcard_send", {
+        userID: uid,
+        toUserID: target.id,
+        cityID,
+        saveDurationMs,
+        totalDurationMs: elapsedMs(requestStartedAt)
+      });
 
       return res.status(200).json({
         messageID: canonicalMessage.messageID,
         sentAt: canonicalMessage.sentAt
       });
-    } catch {
+    } catch (error) {
+      logTiming("postcard_send_error", {
+        totalDurationMs: elapsedMs(requestStartedAt),
+        message: error && error.message ? error.message : "unauthorized"
+      });
       return res.status(401).json({ message: "unauthorized" });
     }
   });
@@ -3399,6 +3485,7 @@ async function main() {
   });
 
   app.post("/v1/media/upload", uploadRateLimiter, upload.single("file"), async (req, res) => {
+    const requestStartedAt = timingNowNs();
     try {
       const uid = parseBearer(req);
       if (!db.users[uid]) return res.status(404).json({ message: "user not found" });
@@ -3409,21 +3496,43 @@ async function main() {
 
       if (r2Client) {
         try {
+          const r2UploadStartedAt = timingNowNs();
           await uploadToR2OrThrow(objectKey, req.file.buffer, req.file.mimetype);
           const url = r2PublicURL(objectKey);
-          if (url) return res.status(200).json({ objectKey, url });
+          if (url) {
+            logTiming("media_upload", {
+              userID: uid,
+              backend: "r2",
+              bytes: req.file.buffer.length,
+              uploadDurationMs: elapsedMs(r2UploadStartedAt),
+              totalDurationMs: elapsedMs(requestStartedAt)
+            });
+            return res.status(200).json({ objectKey, url });
+          }
         } catch (e) {
           console.error("r2 upload failed, fallback to local disk:", e && e.message ? e.message : e);
         }
       }
 
       const fullPath = path.join(MEDIA_DIR, objectKey);
+      const diskWriteStartedAt = timingNowNs();
       await fsp.mkdir(path.dirname(fullPath), { recursive: true });
       await fsp.writeFile(fullPath, req.file.buffer);
       const base = derivePublicBase(req);
       const url = base ? `${base}/media/${objectKey}` : `/media/${objectKey}`;
+      logTiming("media_upload", {
+        userID: uid,
+        backend: "disk",
+        bytes: req.file.buffer.length,
+        writeDurationMs: elapsedMs(diskWriteStartedAt),
+        totalDurationMs: elapsedMs(requestStartedAt)
+      });
       return res.status(200).json({ objectKey, url });
-    } catch {
+    } catch (error) {
+      logTiming("media_upload_error", {
+        totalDurationMs: elapsedMs(requestStartedAt),
+        message: error && error.message ? error.message : "unauthorized"
+      });
       return res.status(401).json({ message: "unauthorized" });
     }
   });

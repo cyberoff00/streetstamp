@@ -4,6 +4,16 @@ import UIKit
 #if canImport(FirebaseCore)
 import FirebaseCore
 #endif
+
+enum FirstProfileSetupPresentation {
+    static func shouldPresent(
+        requiresProfileSetup: Bool,
+        debugOverrideEnabled: Bool
+    ) -> Bool {
+        requiresProfileSetup || debugOverrideEnabled
+    }
+}
+
 @main
 struct StreetStampsApp: App {
     @UIApplicationDelegateAdaptor(AppNotificationDelegate.self) private var appDelegate
@@ -27,6 +37,31 @@ struct StreetStampsApp: App {
     @State private var showSplash = true
     @State private var scheduledTileRebuild: DispatchWorkItem?
     @State private var trackTileRebuildTask: Task<Void, Never>?
+#if DEBUG
+    @State private var showDebugFirstProfileSetupPreview = true
+#endif
+
+    private var debugFirstProfileSetupOverrideEnabled: Bool {
+#if DEBUG
+        return showDebugFirstProfileSetupPreview
+#else
+        return false
+#endif
+    }
+
+    @ViewBuilder
+    private var firstProfileSetupScreen: some View {
+#if DEBUG
+        FirstProfileSetupView(
+            isDebugPreview: showDebugFirstProfileSetupPreview && !sessionStore.requiresProfileSetup,
+            onDismissDebugPreview: {
+                showDebugFirstProfileSetupPreview = false
+            }
+        )
+#else
+        FirstProfileSetupView()
+#endif
+    }
 
     private var lifelogBackgroundMode: LifelogBackgroundMode {
         LifelogBackgroundMode(rawValue: lifelogBackgroundModeRaw) ?? .defaultMode
@@ -155,11 +190,22 @@ struct StreetStampsApp: App {
             }
             .fullScreenCover(
                 isPresented: Binding(
-                    get: { sessionStore.requiresProfileSetup },
-                    set: { _ in }
+                    get: {
+                        FirstProfileSetupPresentation.shouldPresent(
+                            requiresProfileSetup: sessionStore.requiresProfileSetup,
+                            debugOverrideEnabled: debugFirstProfileSetupOverrideEnabled
+                        )
+                    },
+                    set: { presented in
+#if DEBUG
+                        if !presented {
+                            showDebugFirstProfileSetupPreview = false
+                        }
+#endif
+                    }
                 )
             ) {
-                FirstProfileSetupView()
+                firstProfileSetupScreen
                     .environmentObject(sessionStore)
             }
     }

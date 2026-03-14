@@ -399,7 +399,7 @@ struct SettingsView: View {
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(FigmaTheme.text)
                         .frame(width: 42, height: 42)
-                        .contentShape(Circle())
+                        .appFullSurfaceTapTarget(.circle)
                 }
                 .buttonStyle(.plain)
             } else {
@@ -1126,6 +1126,7 @@ struct SettingsView: View {
                         .fill(isSelected ? Color.white : Color.clear)
                 )
                 .shadow(color: Color.black.opacity(isSelected ? 0.08 : 0), radius: 6, x: 0, y: 2)
+                .appFullSurfaceTapTarget(.roundedRect(20))
         }
         .buttonStyle(.plain)
     }
@@ -1185,6 +1186,7 @@ struct SettingsView: View {
                     .padding(.horizontal, 4)
                     .shadow(color: Color.black.opacity(0.15), radius: 4, x: 0, y: 2)
             }
+            .appFullSurfaceTapTarget(.capsule)
         }
         .buttonStyle(.plain)
     }
@@ -1258,6 +1260,7 @@ struct SettingsView: View {
         .padding(.horizontal, 20)
         .frame(minHeight: rowHeight)
         .figmaSurfaceCard(radius: 34)
+        .appFullSurfaceTapTarget(.roundedRect(34))
     }
 
     private func showPlaceholder(_ title: String) {

@@ -242,7 +242,7 @@ struct SidebarMenuItem: View {
                     .fill(isSelected ? Color(red: 82 / 255, green: 183 / 255, blue: 136 / 255) : Color(red: 0.984, green: 0.984, blue: 0.976))
             )
             .shadow(color: isSelected ? Color(red: 82 / 255, green: 183 / 255, blue: 136 / 255).opacity(0.22) : .clear, radius: 12, x: 0, y: 7)
-            .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .appFullSurfaceTapTarget(.roundedRect(24))
         }
         .buttonStyle(.plain)
     }

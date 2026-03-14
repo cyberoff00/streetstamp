@@ -312,6 +312,7 @@
 "explorer_fallback" = "EXPLORER";
 "finish_upper" = "FINISH";
 "friends_active_ago" = "Active %@";
+"friends_recent_journey_ago" = "最近旅程：%@";
 "friends_add_failed" = "Failed to add friend: %@";
 "friends_add_method_handle" = "Handle";
 "friends_add_method_invite" = "Invite Code";
@@ -501,11 +502,13 @@
 "profile_summary_stats_format" = "%d 城市  %d 記憶";
 "profile_setup_title" = "先設定你的旅行形象";
 "profile_setup_subtitle" = "先換好造型，再取一個暱稱，然後進入 StreetStamps。";
-"profile_setup_avatar_hint" = "這個初始造型之後也可以再改。";
+"profile_setup_avatar_title" = "設定初始形象";
+"profile_setup_avatar_hint" = "後續可在裝備頁探索更多";
 "profile_setup_edit_look" = "去換裝";
 "profile_setup_nickname_label" = "暱稱";
 "profile_setup_nickname_placeholder" = "SKYWALKER";
 "profile_setup_nickname_hint" = "暱稱現在不能和別人重複，選一個最像你的吧。";
 "profile_setup_ready_title" = "差最後一步";
 "profile_setup_ready_body" = "儲存後，你的暱稱和穿搭會同步到帳號裡，好友看到的就是這一版。";
+"profile_setup_skip" = "跳過";
 "profile_setup_confirm" = "進入 STREETSTAMPS";

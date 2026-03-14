@@ -139,10 +139,15 @@ final class TrackingService: ObservableObject {
     /// If speed is unknown (-1), we infer speed from last-recorded location.
     /// This multiplier provides hysteresis so we don't flap between stationary/moving.
     private let stationaryExitMoveMultiplier: Double = 1.8
+    private let weakDriftDeferMinDistanceMeters: Double = 55
+    private let weakDriftDecisionWindow: TimeInterval = 90
+    private let weakDriftReturnRadiusMeters: Double = 20
+    private let weakDriftConfirmationDistanceMeters: Double = 32
 
     private var lastRecordedLocationForStationary: CLLocation?
     private var stationarySince: Date?
     private var isInForegroundStationaryPowerMode: Bool = false
+    private var deferredWeakDriftJump: DeferredWeakDriftJump?
 
     var lockAccuracy: Double = 25
     var lockConsecutiveCount: Int = 2
@@ -218,6 +223,11 @@ final class TrackingService: ObservableObject {
     private var longStationaryAnchorTime: Date?
     private let longStationaryWindow: TimeInterval = 60 * 60
     private let longStationaryThresholdMeters: Double = 100
+
+    private struct DeferredWeakDriftJump {
+        let anchor: CLLocation
+        let candidate: CLLocation
+    }
     private let longStationaryNotificationID = "streetstamps.long_stationary_reminder"
     private let longStationaryNotificationPermissionAskedKey = "streetstamps.long_stationary_reminder.notification_asked.v1"
 
@@ -410,6 +420,7 @@ final class TrackingService: ObservableObject {
         lastRecordedLocationForStationary = nil
         stationarySince = nil
         isInForegroundStationaryPowerMode = false
+        deferredWeakDriftJump = nil
 
         isLocationLocked = false
         lockStreak = 0
@@ -588,6 +599,7 @@ final class TrackingService: ObservableObject {
         // Return location manager to low-power mode when tracking stops.
         isInForegroundStationaryPowerMode = false
         stationarySince = nil
+        deferredWeakDriftJump = nil
         if !hub.isUsingMock {
             hub.enterLowPower()
         }
@@ -602,6 +614,7 @@ final class TrackingService: ObservableObject {
         isPaused = true
         lastLocation = nil
         lastRecordedLocationForStationary = nil
+        deferredWeakDriftJump = nil
         resetLongStationaryReminderState()
         wasExplicitlyPaused = true  // ✅ 标记为主动暂停
         if currentPauseStartedAt == nil {
@@ -616,6 +629,7 @@ final class TrackingService: ObservableObject {
         isPaused = false
         lastLocation = nil
         lastRecordedLocationForStationary = nil
+        deferredWeakDriftJump = nil
         resetLongStationaryReminderState()
         requestLongStationaryNotificationPermissionIfNeeded()
         wasExplicitlyPaused = false  // ✅ 恢复后清除标记
@@ -905,11 +919,44 @@ final class TrackingService: ObservableObject {
             // Dynamic min-move: worse accuracy => larger threshold to avoid GPS drift scribbles.
             // Use a stronger multiplier so small GPS drift won't be recorded as movement.
             let dynamicMinMove = max(stationaryBaseMinMoveMeters, 0.9 * max(0, loc.horizontalAccuracy))
+            let nearAnchorRadius = max(dynamicMinMove * 1.2, weakDriftReturnRadiusMeters)
+            let driftConfirmDistance = max(dynamicMinMove * 1.4, weakDriftConfirmationDistanceMeters)
 
             let stationaryCandidate = (dRec < dynamicMinMove) && (speedUsed < stationarySpeedThreshold)
             let exitCandidate = (dRec >= dynamicMinMove * stationaryExitMoveMultiplier) || (speedUsed >= stationarySpeedThreshold * 1.5)
 
+            if let deferred = deferredWeakDriftJump {
+                let anchorDistance = loc.distance(from: deferred.anchor)
+                let candidateDistance = loc.distance(from: deferred.candidate)
+                let decisionAge = loc.timestamp.timeIntervalSince(deferred.candidate.timestamp)
+
+                if anchorDistance <= nearAnchorRadius && decisionAge <= weakDriftDecisionWindow {
+                    deferredWeakDriftJump = nil
+                    droppedByJumpCount += 1
+                    droppedByStationaryCount += 1
+                    return
+                }
+
+                let confirmedMovement =
+                    anchorDistance >= driftConfirmDistance &&
+                    (
+                        candidateDistance <= max(dynamicMinMove * 1.8, weakDriftConfirmationDistanceMeters) ||
+                        speedUsed >= max(stationarySpeedThreshold * 2.4, 1.8) ||
+                        !accuracyWeak ||
+                        decisionAge > 45
+                    )
+
+                if confirmedMovement {
+                    deferredWeakDriftJump = nil
+                } else {
+                    deferredWeakDriftJump = DeferredWeakDriftJump(anchor: deferred.anchor, candidate: loc)
+                    droppedByStationaryCount += 1
+                    return
+                }
+            }
+
             if stationaryCandidate {
+                deferredWeakDriftJump = nil
                 if stationarySince == nil {
                     stationarySince = loc.timestamp
                 }
@@ -925,6 +972,17 @@ final class TrackingService: ObservableObject {
                 }
 
                 // Don't record a new route point while stationary.
+                droppedByStationaryCount += 1
+                return
+            } else if shouldDeferWeakDriftJump(
+                loc,
+                anchor: lastRec,
+                distanceFromAnchor: dRec,
+                speedUsed: speedUsed,
+                dynamicMinMove: dynamicMinMove,
+                accuracyWeak: accuracyWeak
+            ) {
+                deferredWeakDriftJump = DeferredWeakDriftJump(anchor: lastRec, candidate: loc)
                 droppedByStationaryCount += 1
                 return
             } else if isInForegroundStationaryPowerMode && exitCandidate {
@@ -1101,6 +1159,31 @@ final class TrackingService: ObservableObject {
         publishIfNeeded()
         refreshDurations(now: loc.timestamp)
         rebuildRenderCache(force: false)
+    }
+
+    private func shouldDeferWeakDriftJump(
+        _ loc: CLLocation,
+        anchor: CLLocation,
+        distanceFromAnchor: CLLocationDistance,
+        speedUsed: CLLocationSpeed,
+        dynamicMinMove: CLLocationDistance,
+        accuracyWeak: Bool
+    ) -> Bool {
+        guard accuracyWeak else { return false }
+        guard stationarySince != nil || isInForegroundStationaryPowerMode else { return false }
+
+        let decisionAge = loc.timestamp.timeIntervalSince(anchor.timestamp)
+        guard decisionAge <= weakDriftDecisionWindow else { return false }
+
+        let deferDistance = max(
+            dynamicMinMove * stationaryExitMoveMultiplier,
+            weakAccuracyBypassMinDistance * 2.6,
+            weakDriftDeferMinDistanceMeters
+        )
+        guard distanceFromAnchor >= deferDistance else { return false }
+
+        let lowConfidenceSpeed = speedUsed < max(stationarySpeedThreshold * 2.3, 1.8)
+        return lowConfidenceSpeed
     }
 
     func elapsedDuration(at now: Date = Date()) -> TimeInterval {

@@ -22,7 +22,6 @@ struct MainTabLayout {
 
 enum MainSidebarDestination: String, Identifiable, CaseIterable {
     case profile
-    case accountCenter
     case settings
     case equipment
     case postcards
@@ -45,8 +44,6 @@ enum MainSidebarDestination: String, Identifiable, CaseIterable {
         switch self {
         case .profile:
             return NavigationChrome(title: L10n.t("profile_title"), leadingAccessory: .none, titleLevel: .secondary)
-        case .accountCenter:
-            return NavigationChrome(title: L10n.t("account_center_title"), leadingAccessory: .none, titleLevel: .secondary)
         case .settings:
             return NavigationChrome(title: L10n.t("settings_title"), leadingAccessory: .none, titleLevel: .secondary)
         case .equipment:
@@ -146,8 +143,6 @@ struct MainTabView: View {
                 switch destination {
                 case .profile:
                     ProfileView()
-                case .accountCenter:
-                    AccountCenterView()
                 case .settings:
                     SettingsView()
                 case .equipment:
@@ -507,7 +502,7 @@ private struct MainSidebarMenuView: View {
             }
 
             Button {
-                onSelectDestination(.accountCenter)
+                onSelectDestination(.profile)
                 withAnimation(.easeOut(duration: 0.25)) {
                     isPresented = false
                 }

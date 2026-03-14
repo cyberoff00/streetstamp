@@ -3,6 +3,16 @@ import MapKit
 import UIKit
 import HealthKit
 
+enum LifelogStepMilestoneCloseButtonPlacement: Equatable {
+    case topTrailing
+}
+
+enum LifelogStepMilestonePresentation {
+    static let supportsBackdropDismiss = true
+    static let showsFooterCloseButton = false
+    static let closeButtonPlacement: LifelogStepMilestoneCloseButtonPlacement = .topTrailing
+}
+
 enum LifelogRenderModeSelector {
     static let nearModeLatitudeDeltaThreshold: CLLocationDegrees = 0.05
     static let nearModeLongitudeDeltaThreshold: CLLocationDegrees = 0.05
@@ -1632,27 +1642,38 @@ struct LifelogView: View {
         ZStack {
             Color.black.opacity(0.36)
                 .ignoresSafeArea()
+                .onTapGesture {
+                    if LifelogStepMilestonePresentation.supportsBackdropDismiss {
+                        dismissStepModal()
+                    }
+                }
 
             VStack(alignment: .center, spacing: 14) {
-                ZStack(alignment: .trailing) {
+                HStack {
+                    Spacer()
+                    if LifelogStepMilestonePresentation.closeButtonPlacement == .topTrailing {
+                        Button {
+                            dismissStepModal()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(FigmaTheme.subtext)
+                                .frame(width: 30, height: 30)
+                                .background(FigmaTheme.background)
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+
+                ZStack {
                     Image(systemName: "shoeprints.fill")
                         .font(.system(size: 16, weight: .bold))
                         .foregroundColor(FigmaTheme.primary)
                         .padding(8)
                         .background(FigmaTheme.primary.opacity(0.12))
                         .clipShape(Circle())
-
-                    Button {
-                        dismissStepModal()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(FigmaTheme.subtext)
-                            .frame(width: 30, height: 30)
-                            .background(FigmaTheme.background)
-                            .clipShape(Circle())
-                    }
-                    .buttonStyle(.plain)
                 }
                 .frame(maxWidth: .infinity)
 
@@ -1669,16 +1690,18 @@ struct LifelogView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                     .multilineTextAlignment(.center)
 
-                Button(L10n.t("lifelog_steps_modal_close")) {
-                    dismissStepModal()
+                if LifelogStepMilestonePresentation.showsFooterCloseButton {
+                    Button(L10n.t("lifelog_steps_modal_close")) {
+                        dismissStepModal()
+                    }
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(FigmaTheme.primary)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .buttonStyle(.plain)
                 }
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(FigmaTheme.primary)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .buttonStyle(.plain)
             }
             .padding(20)
             .background(FigmaTheme.card)

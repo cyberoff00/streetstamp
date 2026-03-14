@@ -304,6 +304,7 @@
 "explorer_fallback" = "EXPLORER";
 "finish_upper" = "FINISH";
 "friends_active_ago" = "Active %@";
+"friends_recent_journey_ago" = "Recent journey %@";
 "friends_add_failed" = "Failed to add friend: %@";
 "friends_add_method_handle" = "Handle";
 "friends_add_method_invite" = "Invite Code";

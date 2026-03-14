@@ -8,6 +8,12 @@ struct JourneyMigrationReport {
     var localOnlyPrivateJourneys: Int
 }
 
+struct JourneyIncrementalSyncPlan {
+    var payload: BackendMigrationRequest
+    var uploadedMemories: Int
+    var uploadedMediaFiles: Int
+}
+
 enum JourneyCloudMigrationService {
     static func shouldMergeDownloadedProfile(expectedAccountUserID: String?, remoteProfileID: String) -> Bool {
         let expected = expectedAccountUserID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -77,6 +83,79 @@ enum JourneyCloudMigrationService {
         )
     }
 
+    static func makeSingleJourneySyncPlan(
+        journey: JourneyRoute,
+        cachedCities: [CachedCity],
+        userID: String,
+        token: String
+    ) async throws -> JourneyIncrementalSyncPlan {
+        let payloadResult = try await buildJourneyPayloads(
+            journeys: [journey],
+            userID: userID,
+            token: token
+        )
+        let cards = cachedCities
+            .filter { !($0.isTemporary ?? false) }
+            .map { FriendCityCard(id: $0.id, name: $0.name, countryISO2: $0.countryISO2) }
+
+        return JourneyIncrementalSyncPlan(
+            payload: BackendMigrationRequest(
+                journeys: payloadResult.journeys,
+                unlockedCityCards: cards,
+                removedJourneyIDs: nil,
+                snapshotComplete: false
+            ),
+            uploadedMemories: payloadResult.memoriesCount,
+            uploadedMediaFiles: payloadResult.uploadedMediaCount
+        )
+    }
+
+    static func makeJourneyRemovalPayload(
+        journeyID: String,
+        unlockedCityCards: [FriendCityCard]
+    ) -> BackendMigrationRequest {
+        BackendMigrationRequest(
+            journeys: [],
+            unlockedCityCards: unlockedCityCards,
+            removedJourneyIDs: [journeyID],
+            snapshotComplete: false
+        )
+    }
+
+    @MainActor
+    static func syncJourneyVisibilityChange(
+        journey: JourneyRoute,
+        sessionStore: UserSessionStore,
+        cityCache: CityCache
+    ) async throws {
+        guard BackendConfig.isEnabled else { return }
+        guard let token = sessionStore.currentAccessToken, !token.isEmpty else {
+            throw BackendAPIError.unauthorized
+        }
+
+        let cards = cityCache.cachedCities
+            .filter { !($0.isTemporary ?? false) }
+            .map { FriendCityCard(id: $0.id, name: $0.name, countryISO2: $0.countryISO2) }
+
+        let payload: BackendMigrationRequest
+        if journey.visibility == .public || journey.visibility == .friendsOnly {
+            let plan = try await makeSingleJourneySyncPlan(
+                journey: journey,
+                cachedCities: cityCache.cachedCities,
+                userID: sessionStore.currentUserID,
+                token: token
+            )
+            payload = plan.payload
+        } else {
+            payload = makeJourneyRemovalPayload(
+                journeyID: journey.id,
+                unlockedCityCards: cards
+            )
+        }
+
+        try await BackendAPIClient.shared.migrateJourneys(token: token, payload: payload)
+    }
+
     private static func removedRemoteJourneyIDsIfNeeded(
         token: String,
         hasLoaded: Bool,
@@ -136,6 +215,7 @@ enum JourneyCloudMigrationService {
                 BackendJourneyUploadDTO(
                     id: route.id,
                     title: finalTitle,
+                    cityID: FriendJourneyCityIdentity.stableCityID(from: route),
                     activityTag: route.activityTag,
                     overallMemory: route.overallMemory,
                     distance: route.distance,
@@ -224,7 +304,7 @@ enum JourneyCloudMigrationService {
     /// Converts a cloud FriendSharedJourney into a local JourneyRoute.
     private static func cloudJourneyToRoute(_ journey: FriendSharedJourney, cards: [FriendCityCard]) -> JourneyRoute {
         let routeCoords = journey.routeCoordinates
-        let cityID = resolveCityID(for: journey, cards: cards)
+        let cityID = FriendJourneyCityIdentity.resolveCityID(for: journey, cards: cards)
         let cityCard = cards.first(where: { $0.id == cityID })
         let cityName = CityDisplayTitlePresentation.title(
             cityKey: cityCard?.id ?? cityID,
@@ -275,27 +355,6 @@ enum JourneyCloudMigrationService {
             activityTag: journey.activityTag,
             overallMemory: journey.overallMemory
         )
-    }
-
-    private static func resolveCityID(for journey: FriendSharedJourney, cards: [FriendCityCard]) -> String {
-        guard !cards.isEmpty else { return "Unknown|" }
-        let normalizedTitle = journey.title
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-        if let hit = cards.first(where: {
-            $0.name.trimmingCharacters(in: .whitespacesAndNewlines)
-                .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current) == normalizedTitle
-        }) {
-            return hit.id
-        }
-        if let fuzzy = cards.first(where: {
-            let k = $0.name.trimmingCharacters(in: .whitespacesAndNewlines)
-                .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-            return !k.isEmpty && !normalizedTitle.isEmpty && (normalizedTitle.contains(k) || k.contains(normalizedTitle))
-        }) {
-            return fuzzy.id
-        }
-        return cards[0].id
     }
 
     // MARK: - Helpers

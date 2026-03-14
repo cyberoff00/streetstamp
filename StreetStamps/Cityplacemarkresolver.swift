@@ -385,6 +385,47 @@ enum CityPlacemarkResolver {
         )
     }
 
+    static func stableCityKey(
+        selectedLevel: CardLevel?,
+        canonicalAvailableLevels: [CardLevel: String],
+        fallbackCityKey: String,
+        iso2: String?
+    ) -> String {
+        let fallback = fallbackCityKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedISO = (iso2 ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+
+        if let selectedLevel,
+           let canonicalName = canonicalAvailableLevels[selectedLevel]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !canonicalName.isEmpty {
+            return normalizedISO.isEmpty ? canonicalName : "\(canonicalName)|\(normalizedISO)"
+        }
+
+        return fallback
+    }
+
+    static func preferredStableCityKey(
+        canonicalResult: ReverseGeocodeService.CanonicalResult
+    ) -> String {
+        stableCityKey(
+            selectedLevel: CityLevelPreferenceStore.shared.preferredLevel(for: canonicalResult.parentRegionKey),
+            canonicalAvailableLevels: canonicalResult.availableLevels,
+            fallbackCityKey: canonicalResult.cityKey,
+            iso2: canonicalResult.iso2
+        )
+    }
+
+    static func stableCityName(from cityKey: String, fallback: String) -> String {
+        let trimmedFallback = fallback.trimmingCharacters(in: .whitespacesAndNewlines)
+        let split = cityKey
+            .components(separatedBy: "|")
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return split.isEmpty ? trimmedFallback : split
+    }
+
     private static let strategyCountry: Set<String> = ["SG", "HK", "MO", "TW", "MC", "VA", "LI", "AD", "LU", "MT", "BH", "SC", "MV", "SM"]
     private static let strategySubAdmin: Set<String> = ["CN", "GB", "AU", "NZ", "FR", "IT", "ES", "NL", "CH", "ID", "PH", "VN", "MY", "BE", "SE", "NO", "DK"]
 

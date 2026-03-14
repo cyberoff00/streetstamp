@@ -10,7 +10,19 @@ private enum CityDeepPalette {
 enum CityLevelReconcilePolicy {
     static func shouldFetchFreshProfile(isLoading: Bool, hasExistingOptions: Bool) -> Bool {
         guard !isLoading else { return false }
-        return true
+        return !hasExistingOptions
+    }
+}
+
+private enum CityDeepDebugLogger {
+    static func log(_ domain: String, _ message: String) {
+#if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        let enabled = args.contains("-CityDeepDebug")
+            || UserDefaults.standard.bool(forKey: "city.deep.debug.enabled")
+        guard enabled else { return }
+        print("🏙️ [CityDeep][\(domain)] \(message)")
+#endif
     }
 }
 
@@ -586,7 +598,12 @@ struct CityDeepView: View {
                 return
             }
 
-            let targetKey = "\(selectedName)|\(iso)"
+            let targetKey = CityPlacemarkResolver.stableCityKey(
+                selectedLevel: level,
+                canonicalAvailableLevels: canonical.availableLevels,
+                fallbackCityKey: sourceKey,
+                iso2: canonical.iso2
+            )
             let targetCached = sourceCitiesByKey[targetKey]
             let displayLevels = CityPlacemarkResolver.resolvedStableLevelNamesForDisplay(
                 storedAvailableLevelNamesRaw: targetCached?.reservedAvailableLevelNames,
@@ -719,6 +736,10 @@ struct CityDeepView: View {
 
     private func loadReservedLevelSelection() {
         let baseLevel = activeCachedCity?.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) }
+        CityDeepDebugLogger.log(
+            "loadReservedLevelSelection",
+            "cityKey=\(activeCityKey) baseLevel=\(baseLevel?.rawValue ?? "nil") parentRegionKey=\(activeCachedCity?.reservedParentRegionKey ?? "nil") hasStoredLevelNames=\((activeCachedCity?.reservedAvailableLevelNames?.isEmpty == false) ? "true" : "false")"
+        )
         if let labels = CityPlacemarkResolver.preferredAvailableLevelNamesForDisplay(
             activeCachedCity?.reservedAvailableLevelNames,
             storedLocaleIdentifier: activeCachedCity?.reservedAvailableLevelNamesLocaleID,
@@ -751,26 +772,47 @@ struct CityDeepView: View {
 
     private func initializeReservedLevelProfileIfNeeded(showPickerWhenReady: Bool) {
         let hasExistingOptions = !cityLevelOptions.isEmpty
-        guard CityLevelReconcilePolicy.shouldFetchFreshProfile(
+        let shouldFetch = CityLevelReconcilePolicy.shouldFetchFreshProfile(
             isLoading: cityLevelLoading,
             hasExistingOptions: hasExistingOptions
-        ) else { return }
+        )
+        CityDeepDebugLogger.log(
+            "initializeReservedLevelProfileIfNeeded",
+            "cityKey=\(activeCityKey) showPickerWhenReady=\(showPickerWhenReady) isLoading=\(cityLevelLoading) hasExistingOptions=\(hasExistingOptions) shouldFetch=\(shouldFetch)"
+        )
+        guard shouldFetch else { return }
 
         if showPickerWhenReady && hasExistingOptions {
             showCityLevelPicker = true
         }
 
         let shouldShowPickerAfterRefresh = showPickerWhenReady && !hasExistingOptions
-        guard let reserveAnchor = reserveJourneyStart, CLLocationCoordinate2DIsValid(reserveAnchor) else { return }
+        guard let reserveAnchor = reserveJourneyStart, CLLocationCoordinate2DIsValid(reserveAnchor) else {
+            CityDeepDebugLogger.log(
+                "initializeReservedLevelProfileIfNeeded",
+                "cityKey=\(activeCityKey) skip=missingReserveAnchor"
+            )
+            return
+        }
 
         cityLevelLoading = true
         let loc = CLLocation(latitude: reserveAnchor.latitude, longitude: reserveAnchor.longitude)
         Task {
+            CityDeepDebugLogger.log(
+                "initializeReservedLevelProfileIfNeeded",
+                "cityKey=\(activeCityKey) action=fetchFreshProfile anchor=\(reserveAnchor.latitude),\(reserveAnchor.longitude)"
+            )
             let canonical = await canonicalWithRetry(for: loc)
             let localized = await localizedHierarchyWithRetry(for: loc)
             await MainActor.run {
                 cityLevelLoading = false
-                guard let canonical else { return }
+                guard let canonical else {
+                    CityDeepDebugLogger.log(
+                        "initializeReservedLevelProfileIfNeeded",
+                        "cityKey=\(activeCityKey) result=canonical_nil localizedNil=\(localized == nil)"
+                    )
+                    return
+                }
                 let liveLabels = localized?.availableLevels ?? canonical.availableLevels
                 let labels = CityPlacemarkResolver.resolvedStableLevelNamesForDisplay(
                     storedAvailableLevelNamesRaw: activeCachedCity?.reservedAvailableLevelNames,
@@ -797,6 +839,10 @@ struct CityDeepView: View {
                 cityLevelOptionLabels = labels
                 cityLevelOptions = options
                 cityLevelCurrentSelection = resolveCurrentLevel(labels: labels, parentRegionKey: canonical.parentRegionKey, options: options)
+                CityDeepDebugLogger.log(
+                    "initializeReservedLevelProfileIfNeeded",
+                    "cityKey=\(activeCityKey) result=updated currentSelection=\(cityLevelCurrentSelection?.rawValue ?? "nil") parentRegionKey=\(canonical.parentRegionKey ?? "nil") options=\(options.map { $0.rawValue }.joined(separator: ",")) localizedSource=\(localized == nil ? "canonicalFallback" : "localizedHierarchy")"
+                )
                 reconcileActiveCityKeyWithSelectionIfNeeded(
                     canonical: canonical,
                     labels: labels,
@@ -831,8 +877,13 @@ struct CityDeepView: View {
         guard !selectedName.isEmpty else { return }
 
         let iso = (canonical.iso2 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        let targetKey = "\(selectedName)|\(iso)"
         let sourceKey = activeCityKey
+        let targetKey = CityPlacemarkResolver.stableCityKey(
+            selectedLevel: selectedLevel,
+            canonicalAvailableLevels: canonical.availableLevels,
+            fallbackCityKey: sourceKey,
+            iso2: canonical.iso2
+        )
         guard targetKey != sourceKey else { return }
 
         let candidateJourneyIDs = cityJourneyIDs
@@ -1068,10 +1119,19 @@ struct CityDeepView: View {
 
     private func localizedHierarchyWithRetry(for location: CLLocation) async -> ReverseGeocodeService.CanonicalResult? {
         if let first = await ReverseGeocodeService.shared.localizedHierarchy(for: location) {
+            CityDeepDebugLogger.log(
+                "localizedHierarchyWithRetry",
+                "cityKey=\(activeCityKey) attempt=1 result=hit parentRegionKey=\(first.parentRegionKey ?? "nil") locale=\(first.localeIdentifier)"
+            )
             return first
         }
         try? await Task.sleep(nanoseconds: 1_650_000_000)
-        return await ReverseGeocodeService.shared.localizedHierarchy(for: location)
+        let second = await ReverseGeocodeService.shared.localizedHierarchy(for: location)
+        CityDeepDebugLogger.log(
+            "localizedHierarchyWithRetry",
+            "cityKey=\(activeCityKey) attempt=2 result=\(second == nil ? "nil" : "hit")"
+        )
+        return second
     }
 
     private func refreshRegionAndBoundary() {

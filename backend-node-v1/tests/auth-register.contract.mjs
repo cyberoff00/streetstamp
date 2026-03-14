@@ -19,7 +19,7 @@ async function waitForHealth(port) {
   throw new Error("server did not become healthy");
 }
 
-function startServer({ port, dataFile, mediaDir }) {
+function startServer({ port, dataFile, mediaDir, outboxFile }) {
   return spawn("node", ["server.js"], {
     cwd: SERVER_DIR,
     env: {
@@ -28,7 +28,8 @@ function startServer({ port, dataFile, mediaDir }) {
       DATA_FILE: dataFile,
       MEDIA_DIR: mediaDir,
       MEDIA_PUBLIC_BASE: `http://127.0.0.1:${port}`,
-      DATABASE_URL: ""
+      DATABASE_URL: "",
+      TEST_EMAIL_OUTBOX_FILE: outboxFile
     },
     stdio: "ignore"
   });
@@ -51,13 +52,47 @@ async function requestJSON(port, method, pathName, body) {
   return { status: resp.status, data };
 }
 
+async function readOutbox(outboxFile) {
+  try {
+    return JSON.parse(await fs.readFile(outboxFile, "utf8"));
+  } catch (error) {
+    if (error && error.code === "ENOENT") return [];
+    throw error;
+  }
+}
+
 async function run() {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "auth-register-"));
   const dataFile = path.join(tmp, "data.json");
   const mediaDir = path.join(tmp, "media");
+  const outboxFile = path.join(tmp, "outbox.json");
   await fs.writeFile(dataFile, JSON.stringify({
-    users: {},
-    emailIndex: {},
+    users: {
+      u_legacy163: {
+        id: "u_legacy163",
+        provider: "email",
+        email: "yinterestingy@163.com",
+        passwordHash: "legacy-hash",
+        inviteCode: "LEGACY163",
+        handle: "legacy163",
+        handleChangeUsed: false,
+        profileVisibility: "friends_only",
+        displayName: "Legacy 163",
+        profileSetupCompleted: true,
+        bio: "Legacy account",
+        loadout: {},
+        journeys: [],
+        cityCards: [],
+        friendIDs: [],
+        notifications: [],
+        sentPostcards: [],
+        receivedPostcards: [],
+        createdAt: 1
+      }
+    },
+    emailIndex: {
+      "yinterestingy@163.com": "u_legacy163"
+    },
     inviteIndex: {},
     oauthIndex: {},
     firebaseIdentityIndex: {},
@@ -71,7 +106,7 @@ async function run() {
     postcardsIndex: {}
   }, null, 2), "utf8");
 
-  const child = startServer({ port: PORT, dataFile, mediaDir });
+  const child = startServer({ port: PORT, dataFile, mediaDir, outboxFile });
 
   try {
     await waitForHealth(PORT);
@@ -81,18 +116,21 @@ async function run() {
       password: "12345678!"
     });
     assert.equal(missingLetter.status, 400);
+    assert.equal((await readOutbox(outboxFile)).length, 0);
 
     const missingNumber = await requestJSON(PORT, "POST", "/v1/auth/register", {
       email: "missing-number@example.com",
       password: "Password!"
     });
     assert.equal(missingNumber.status, 400);
+    assert.equal((await readOutbox(outboxFile)).length, 0);
 
     const missingSpecial = await requestJSON(PORT, "POST", "/v1/auth/register", {
       email: "missing-special@example.com",
       password: "Password1"
     });
     assert.equal(missingSpecial.status, 400);
+    assert.equal((await readOutbox(outboxFile)).length, 0);
 
     const good = await requestJSON(PORT, "POST", "/v1/auth/register", {
       email: "valid@example.com",
@@ -103,12 +141,24 @@ async function run() {
     assert.equal(good.data.emailVerificationRequired, true);
     assert.equal(typeof good.data.userId, "string");
     assert.equal(good.data.needsProfileSetup, true);
+    assert.equal((await readOutbox(outboxFile)).length, 1);
 
     const duplicate = await requestJSON(PORT, "POST", "/v1/auth/register", {
       email: "valid@example.com",
       password: "Password1!"
     });
-    assert.equal(duplicate.status, 409);
+    assert.equal(duplicate.status, 200);
+    assert.equal(duplicate.data.userId, good.data.userId);
+    assert.equal(duplicate.data.emailVerificationRequired, true);
+    assert.equal((await readOutbox(outboxFile)).length, 2);
+
+    const recoveredLegacy = await requestJSON(PORT, "POST", "/v1/auth/register", {
+      email: "yinterestingy@163.com",
+      password: "Password1!",
+      displayName: "Recovered User"
+    });
+    assert.equal(recoveredLegacy.status, 200);
+    assert.equal(recoveredLegacy.data.emailVerificationRequired, true);
 
     const state = JSON.parse(await fs.readFile(dataFile, "utf8"));
     const identity = Object.values(state.authIdentities).find((item) => item.email === "valid@example.com");
@@ -116,9 +166,19 @@ async function run() {
     assert.equal(identity.provider, "email_password");
     assert.equal(identity.emailVerified, false);
 
+    const recoveredIdentity = Object.values(state.authIdentities).find((item) => item.email === "yinterestingy@163.com");
+    assert.ok(recoveredIdentity, "expected recovered legacy email identity to be persisted");
+    assert.equal(recoveredIdentity.provider, "email_password");
+    assert.equal(recoveredIdentity.emailVerified, false);
+    assert.equal(state.emailIndex["yinterestingy@163.com"], recoveredLegacy.data.userId);
+
     const createdUser = state.users[good.data.userId];
     assert.ok(createdUser, "expected registered user to be persisted");
     assert.equal(createdUser.profileSetupCompleted, false);
+
+    const recoveredUser = state.users[recoveredLegacy.data.userId];
+    assert.ok(recoveredUser, "expected recovered legacy user to be persisted");
+    assert.equal(recoveredUser.displayName, "Recovered User");
 
     console.log("auth register contract: PASS");
   } finally {

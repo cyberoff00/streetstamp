@@ -480,6 +480,7 @@ struct EquipmentView: View {
                     Circle()
                         .stroke(isSelected ? Color.black : Color.black.opacity(0.12), lineWidth: isSelected ? 2.2 : 1)
                 )
+                .appFullSurfaceTapTarget(.circle)
         }
         .buttonStyle(.plain)
     }
@@ -506,6 +507,7 @@ struct EquipmentView: View {
                             isLocked: ownership == .locked,
                             price: itemPrice
                         )
+                        .appFullSurfaceTapTarget(.roundedRect(16))
                     }
                     .buttonStyle(.plain)
                 }

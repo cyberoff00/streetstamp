@@ -771,6 +771,7 @@ final class CityCache: ObservableObject {
         level: CityPlacemarkResolver.CardLevel?,
         parentRegionKey: String?,
         availableLevels: [CityPlacemarkResolver.CardLevel: String]?,
+        availableLevelsLocaleIdentifier: String? = nil,
         anchor: CLLocationCoordinate2D?,
         force: Bool
     ) {
@@ -796,7 +797,9 @@ final class CityCache: ObservableObject {
         if let availableLevels {
             let mapped = Dictionary(uniqueKeysWithValues: availableLevels.map { ($0.key.rawValue, $0.value) })
             cachedCities[idx].reservedAvailableLevelNames = mapped
-            cachedCities[idx].reservedAvailableLevelNamesLocaleID = Locale.current.identifier
+            let localeID = (availableLevelsLocaleIdentifier ?? Locale.current.identifier)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            cachedCities[idx].reservedAvailableLevelNamesLocaleID = localeID.isEmpty ? Locale.current.identifier : localeID
         }
         if let anchor, anchor.isValid, cachedCities[idx].anchor == nil {
             cachedCities[idx].anchor = LatLon(anchor)
@@ -1018,14 +1021,20 @@ final class CityCache: ObservableObject {
                 guard let self else { return }
 
                 if let r = result {
+                    let preferredKey = CityPlacemarkResolver.preferredStableCityKey(canonicalResult: r)
+                    let preferredName = CityPlacemarkResolver.stableCityName(
+                        from: preferredKey,
+                        fallback: r.cityName
+                    )
                     _ = self.finishCompleteWithCanonical(
                         journey: journey,
-                        canonicalKey: r.cityKey,
-                        canonicalName: r.cityName,
+                        canonicalKey: preferredKey,
+                        canonicalName: preferredName,
                         iso: (r.iso2 ?? ""),
                         reserveLevel: r.level,
                         reserveParentRegionKey: r.parentRegionKey,
                         reserveAvailableLevels: r.availableLevels,
+                        reserveAvailableLevelsLocaleIdentifier: r.localeIdentifier,
                         reserveAnchor: journey.startCoordinate
                     )
                     return
@@ -1114,6 +1123,7 @@ final class CityCache: ObservableObject {
         reserveLevel: CityPlacemarkResolver.CardLevel?,
         reserveParentRegionKey: String?,
         reserveAvailableLevels: [CityPlacemarkResolver.CardLevel: String]?,
+        reserveAvailableLevelsLocaleIdentifier: String? = nil,
         reserveAnchor: CLLocationCoordinate2D?
     ) -> CityEvent? {
         let key = canonicalKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1142,6 +1152,7 @@ final class CityCache: ObservableObject {
             level: reserveLevel,
             parentRegionKey: reserveParentRegionKey,
             availableLevels: reserveAvailableLevels,
+            availableLevelsLocaleIdentifier: reserveAvailableLevelsLocaleIdentifier,
             anchor: reserveAnchor,
             force: false
         )
@@ -1430,18 +1441,10 @@ final class CityCache: ObservableObject {
     // MARK: - Reverse geocode (fixed locale + cancel)
     // ===================================================
 
-    private struct GeocodeResult {
-        let cityName: String
-        let iso2: String?
-        let cityKey: String
-        let level: CityPlacemarkResolver.CardLevel
-        let parentRegionKey: String?
-        let availableLevels: [CityPlacemarkResolver.CardLevel: String]
-    }
-
-
-
-    private func reverseGeocodeCity(_ location: CLLocation, completion: @escaping (GeocodeResult?) -> Void) {
+    private func reverseGeocodeCity(
+        _ location: CLLocation,
+        completion: @escaping (ReverseGeocodeService.CanonicalResult?) -> Void
+    ) {
         // ✅ cancel stale callbacks (but do NOT spam system geocoder)
         geocodeTask?.cancel()
 
@@ -1450,15 +1453,7 @@ final class CityCache: ObservableObject {
             if Task.isCancelled { return }
 
             await MainActor.run {
-                guard let result else { completion(nil); return }
-                completion(.init(
-                    cityName: result.cityName,
-                    iso2: result.iso2,
-                    cityKey: result.cityKey,
-                    level: result.level,
-                    parentRegionKey: result.parentRegionKey,
-                    availableLevels: result.availableLevels
-                ))
+                completion(result)
             }
         }
     }

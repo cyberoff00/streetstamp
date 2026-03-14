@@ -43,7 +43,7 @@ final class AppFlowCoordinatorTests: XCTestCase {
     @MainActor
     func testConsumePendingSidebarDestinationClearsDestination() {
         let coordinator = AppFlowCoordinator()
-        coordinator.requestOpenSidebarDestination(.accountCenter)
+        coordinator.requestOpenSidebarDestination(.equipment)
 
         coordinator.consumePendingSidebarDestination()
 

@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 extension Notification.Name {
     static let postcardSentGoToInbox = Notification.Name("postcardSentGoToInbox")
@@ -23,10 +24,40 @@ enum PostcardSendErrorPresentation {
 
 @MainActor
 final class PostcardCenter: ObservableObject {
+    private struct SendTimingProbe {
+        private let startedAt = ContinuousClock.now
+        private let clock = ContinuousClock()
+        var photoResolveDurationMs = 0
+        var uploadDurationMs = 0
+        var sendRequestDurationMs = 0
+
+        func snapshot() -> PostcardDraft.SendDiagnostics {
+            PostcardDraft.SendDiagnostics(
+                photoResolveDurationMs: photoResolveDurationMs,
+                uploadDurationMs: uploadDurationMs,
+                sendRequestDurationMs: sendRequestDurationMs,
+                totalDurationMs: Self.elapsedMilliseconds(since: startedAt, now: clock.now),
+                completedAt: Date()
+            )
+        }
+
+        static func elapsedMilliseconds(
+            since start: ContinuousClock.Instant,
+            now: ContinuousClock.Instant
+        ) -> Int {
+            let duration = start.duration(to: now)
+            let millisecondsFromSeconds = duration.components.seconds * 1_000
+            let millisecondsFromAttoseconds = duration.components.attoseconds / 1_000_000_000_000_000
+            return max(1, Int(millisecondsFromSeconds + millisecondsFromAttoseconds))
+        }
+    }
+
     @Published private(set) var drafts: [PostcardDraft] = []
     @Published private(set) var sentItems: [BackendPostcardMessageDTO] = []
     @Published private(set) var receivedItems: [BackendPostcardMessageDTO] = []
     @Published private(set) var lastSyncError: String? = nil
+
+    private let logger = Logger(subsystem: "StreetStamps", category: "PostcardSend")
 
     private var activeUserID: String
 
@@ -68,6 +99,7 @@ final class PostcardCenter: ObservableObject {
             lastError: nil,
             messageID: nil,
             sentAt: nil,
+            sendDiagnostics: nil,
             createdAt: now,
             updatedAt: now
         )
@@ -164,10 +196,17 @@ final class PostcardCenter: ObservableObject {
         persist()
 
         do {
-            let remotePhotoURL = try await resolvePhotoURL(
+            var timingProbe = SendTimingProbe()
+            let photoResolveStartedAt = ContinuousClock.now
+            let photoResolution = try await resolvePhotoURL(
                 source: draft.photoLocalPath,
                 token: token
             )
+            timingProbe.photoResolveDurationMs = SendTimingProbe.elapsedMilliseconds(
+                since: photoResolveStartedAt,
+                now: ContinuousClock.now
+            )
+            timingProbe.uploadDurationMs = photoResolution.uploadDurationMs
             let payload = SendPostcardRequest(
                 clientDraftID: draft.clientDraftID,
                 toUserID: draft.toUserID,
@@ -175,21 +214,29 @@ final class PostcardCenter: ObservableObject {
                 cityJourneyCount: max(1, cityJourneyCount),
                 cityName: draft.cityName,
                 messageText: String(draft.message.prefix(80)),
-                photoURL: remotePhotoURL,
+                photoURL: photoResolution.url,
                 allowedCityIDs: allowedCityIDs
             )
+            let sendStartedAt = ContinuousClock.now
             let response = try await BackendAPIClient.shared.sendPostcard(token: token, req: payload)
+            timingProbe.sendRequestDurationMs = SendTimingProbe.elapsedMilliseconds(
+                since: sendStartedAt,
+                now: ContinuousClock.now
+            )
+            let diagnostics = timingProbe.snapshot()
 
             guard let currentIndex = drafts.firstIndex(where: { $0.draftID == draftID }) else { return }
             var current = drafts[currentIndex]
-            current.photoLocalPath = remotePhotoURL
+            current.photoLocalPath = photoResolution.url
             current.status = .sent
             current.messageID = response.messageID
             current.sentAt = response.sentAt
+            current.sendDiagnostics = diagnostics
             current.lastError = nil
             current.updatedAt = Date()
             drafts[currentIndex] = current
             persist()
+            logSendDiagnostics(status: "sent", draftID: draftID, diagnostics: diagnostics)
             // Keep "send" completion snappy; refresh inbox in background.
             Task { [weak self] in
                 await self?.refreshFromBackend(token: token)
@@ -199,6 +246,9 @@ final class PostcardCenter: ObservableObject {
             var current = drafts[currentIndex]
             current.status = .failed
             current.lastError = PostcardSendErrorPresentation.message(for: error)
+            if current.sendDiagnostics == nil {
+                current.sendDiagnostics = SendTimingProbe().snapshot()
+            }
             current.updatedAt = Date()
             drafts[currentIndex] = current
             persist()
@@ -219,13 +269,16 @@ final class PostcardCenter: ObservableObject {
         PostcardDraftStore.save(drafts, userID: activeUserID)
     }
 
-    private func resolvePhotoURL(source: String, token: String) async throws -> String {
+    private func resolvePhotoURL(
+        source: String,
+        token: String
+    ) async throws -> (url: String, uploadDurationMs: Int) {
         let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             throw BackendAPIError.server("postcard image missing")
         }
         if trimmed.lowercased().hasPrefix("http://") || trimmed.lowercased().hasPrefix("https://") {
-            return trimmed
+            return (trimmed, 0)
         }
 
         let fileURL = URL(fileURLWithPath: trimmed)
@@ -235,13 +288,23 @@ final class PostcardCenter: ObservableObject {
 
         let data = try await Self.readFileDataAsync(from: fileURL)
         let mime = mimeType(for: fileURL.pathExtension)
+        let uploadStart = ContinuousClock.now
         let upload = try await BackendAPIClient.shared.uploadMedia(
             token: token,
             data: data,
             fileName: fileURL.lastPathComponent,
             mimeType: mime
         )
-        return upload.url
+        return (
+            upload.url,
+            SendTimingProbe.elapsedMilliseconds(since: uploadStart, now: ContinuousClock.now)
+        )
+    }
+
+    private func logSendDiagnostics(status: String, draftID: String, diagnostics: PostcardDraft.SendDiagnostics) {
+        logger.log(
+            "[PostcardTiming] status=\(status, privacy: .public) draftID=\(draftID, privacy: .public) prepare=\(diagnostics.photoResolveDurationMs)ms upload=\(diagnostics.uploadDurationMs)ms send=\(diagnostics.sendRequestDurationMs)ms total=\(diagnostics.totalDurationMs)ms"
+        )
     }
 
     private func mimeType(for ext: String) -> String {

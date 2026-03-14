@@ -20,4 +20,15 @@ final class CityCacheCallsiteTests: XCTestCase {
 
         XCTAssertFalse(source.contains("cityCache.rebuildFromJourneyStore()"))
     }
+
+    func test_cityCacheFallbackUsesCanonicalReverseGeocodeResult() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourceURL = root.appendingPathComponent("StreetStamps/CityCache.swift")
+        let source = try String(contentsOf: sourceURL)
+
+        XCTAssertTrue(source.contains("completion: @escaping (ReverseGeocodeService.CanonicalResult?) -> Void"))
+        XCTAssertFalse(source.contains("private struct GeocodeResult"))
+    }
 }

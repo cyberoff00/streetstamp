@@ -6,18 +6,25 @@
       "inviteCode": "43E5299E",
       "handle": "u_e872904bd056bc8ff430e6",
       "profileVisibility": "friendsOnly",
-      "displayName": "Explorer",
+      "displayName": "Explorer3",
       "bio": "Travel Enthusiastic",
       "loadout": {
         "bodyId": "body",
         "headId": "head",
-        "skinId": "skin_default",
-        "hairId": "hair_boy_default",
-        "outfitId": "outfit_boy_suit",
+        "hairId": "hair_0001",
+        "suitId": null,
+        "upperId": "upper_0001",
+        "underId": "under_0001",
+        "savedUpperIdForSuit": "upper_0001",
+        "savedUnderIdForSuit": "under_0001",
+        "hatId": null,
+        "glassId": null,
         "accessoryIds": [
           "acc_headphone"
         ],
-        "expressionId": "expr_default"
+        "expressionId": "expr_0001",
+        "hairColorHex": "#2B2A28",
+        "bodyColorHex": "#E8BE9C"
       },
       "journeys": [
         {
@@ -90,7 +97,11 @@
       ],
       "friendIDs": [],
       "notifications": [],
-      "createdAt": 1771765101
+      "createdAt": 1771765101,
+      "handleChangeUsed": false,
+      "profileSetupCompleted": true,
+      "sentPostcards": [],
+      "receivedPostcards": []
     },
     "u_aaf3aaea3f91190f71bec985": {
       "id": "u_aaf3aaea3f91190f71bec985",
@@ -100,18 +111,25 @@
       "inviteCode": "29F6D858",
       "handle": "u1_177176510130892",
       "profileVisibility": "friendsOnly",
-      "displayName": "Explorer",
+      "displayName": "Explorer2",
       "bio": "Travel Enthusiastic",
       "loadout": {
         "bodyId": "body",
         "headId": "head",
-        "skinId": "skin_default",
-        "hairId": "hair_boy_default",
-        "outfitId": "outfit_boy_suit",
+        "hairId": "hair_0001",
+        "suitId": null,
+        "upperId": "upper_0001",
+        "underId": "under_0001",
+        "savedUpperIdForSuit": "upper_0001",
+        "savedUnderIdForSuit": "under_0001",
+        "hatId": null,
+        "glassId": null,
         "accessoryIds": [
           "acc_headphone"
         ],
-        "expressionId": "expr_default"
+        "expressionId": "expr_0001",
+        "hairColorHex": "#2B2A28",
+        "bodyColorHex": "#E8BE9C"
       },
       "journeys": [
         {
@@ -184,7 +202,11 @@
       ],
       "friendIDs": [],
       "notifications": [],
-      "createdAt": 1771765101
+      "createdAt": 1771765101,
+      "handleChangeUsed": false,
+      "profileSetupCompleted": true,
+      "sentPostcards": [],
+      "receivedPostcards": []
     },
     "u_3ecf75fbc43035c357cdba5d": {
       "id": "u_3ecf75fbc43035c357cdba5d",
@@ -199,19 +221,30 @@
       "loadout": {
         "bodyId": "body",
         "headId": "head",
-        "skinId": "skin_default",
-        "hairId": "hair_boy_default",
-        "outfitId": "outfit_boy_suit",
+        "hairId": "hair_0001",
+        "suitId": null,
+        "upperId": "upper_0001",
+        "underId": "under_0001",
+        "savedUpperIdForSuit": "upper_0001",
+        "savedUnderIdForSuit": "under_0001",
+        "hatId": null,
+        "glassId": null,
         "accessoryIds": [
           "acc_headphone"
         ],
-        "expressionId": "expr_default"
+        "expressionId": "expr_0001",
+        "hairColorHex": "#2B2A28",
+        "bodyColorHex": "#E8BE9C"
       },
       "journeys": [],
       "cityCards": [],
       "friendIDs": [],
       "notifications": [],
-      "createdAt": 1771765101
+      "createdAt": 1771765101,
+      "handleChangeUsed": false,
+      "profileSetupCompleted": true,
+      "sentPostcards": [],
+      "receivedPostcards": []
     },
     "u_51474f24e5ad708a08c2ad87": {
       "id": "u_51474f24e5ad708a08c2ad87",
@@ -219,18 +252,25 @@
       "inviteCode": "36A41D4C",
       "handle": "u_51474f24e5ad708a08c2ad",
       "profileVisibility": "friendsOnly",
-      "displayName": "Explorer",
+      "displayName": "Explorer5",
       "bio": "Travel Enthusiastic",
       "loadout": {
         "bodyId": "body",
         "headId": "head",
-        "skinId": "skin_default",
-        "hairId": "hair_boy_default",
-        "outfitId": "outfit_boy_suit",
+        "hairId": "hair_0001",
+        "suitId": null,
+        "upperId": "upper_0001",
+        "underId": "under_0001",
+        "savedUpperIdForSuit": "upper_0001",
+        "savedUnderIdForSuit": "under_0001",
+        "hatId": null,
+        "glassId": null,
         "accessoryIds": [
           "acc_headphone"
         ],
-        "expressionId": "expr_default"
+        "expressionId": "expr_0001",
+        "hairColorHex": "#2B2A28",
+        "bodyColorHex": "#E8BE9C"
       },
       "journeys": [
         {
@@ -267,7 +307,11 @@
       ],
       "friendIDs": [],
       "notifications": [],
-      "createdAt": 1771765237
+      "createdAt": 1771765237,
+      "handleChangeUsed": false,
+      "profileSetupCompleted": true,
+      "sentPostcards": [],
+      "receivedPostcards": []
     },
     "u_06b419f275fa8f8277a9e878": {
       "id": "u_06b419f275fa8f8277a9e878",
@@ -277,18 +321,25 @@
       "inviteCode": "9A15EAB8",
       "handle": "u1_17717652378107",
       "profileVisibility": "friendsOnly",
-      "displayName": "Explorer",
+      "displayName": "Explorer4",
       "bio": "Travel Enthusiastic",
       "loadout": {
         "bodyId": "body",
         "headId": "head",
-        "skinId": "skin_default",
-        "hairId": "hair_boy_default",
-        "outfitId": "outfit_boy_suit",
+        "hairId": "hair_0001",
+        "suitId": null,
+        "upperId": "upper_0001",
+        "underId": "under_0001",
+        "savedUpperIdForSuit": "upper_0001",
+        "savedUnderIdForSuit": "under_0001",
+        "hatId": null,
+        "glassId": null,
         "accessoryIds": [
           "acc_headphone"
         ],
-        "expressionId": "expr_default"
+        "expressionId": "expr_0001",
+        "hairColorHex": "#2B2A28",
+        "bodyColorHex": "#E8BE9C"
       },
       "journeys": [
         {
@@ -361,7 +412,11 @@
       ],
       "friendIDs": [],
       "notifications": [],
-      "createdAt": 1771765237
+      "createdAt": 1771765237,
+      "handleChangeUsed": false,
+      "profileSetupCompleted": true,
+      "sentPostcards": [],
+      "receivedPostcards": []
     },
     "u_e88dcc5846a3d18d012d1998": {
       "id": "u_e88dcc5846a3d18d012d1998",
@@ -371,24 +426,35 @@
       "inviteCode": "8A31BE89",
       "handle": "u2_17717652378107",
       "profileVisibility": "friendsOnly",
-      "displayName": "Explorer",
+      "displayName": "Explorer6",
       "bio": "Travel Enthusiastic",
       "loadout": {
         "bodyId": "body",
         "headId": "head",
-        "skinId": "skin_default",
-        "hairId": "hair_boy_default",
-        "outfitId": "outfit_boy_suit",
+        "hairId": "hair_0001",
+        "suitId": null,
+        "upperId": "upper_0001",
+        "underId": "under_0001",
+        "savedUpperIdForSuit": "upper_0001",
+        "savedUnderIdForSuit": "under_0001",
+        "hatId": null,
+        "glassId": null,
         "accessoryIds": [
           "acc_headphone"
         ],
-        "expressionId": "expr_default"
+        "expressionId": "expr_0001",
+        "hairColorHex": "#2B2A28",
+        "bodyColorHex": "#E8BE9C"
       },
       "journeys": [],
       "cityCards": [],
       "friendIDs": [],
       "notifications": [],
-      "createdAt": 1771765237
+      "createdAt": 1771765237,
+      "handleChangeUsed": false,
+      "profileSetupCompleted": true,
+      "sentPostcards": [],
+      "receivedPostcards": []
     },
     "u_fe984b0f6a326f35ef769128": {
       "id": "u_fe984b0f6a326f35ef769128",
@@ -398,18 +464,25 @@
       "inviteCode": "27E51A6D",
       "handle": "u1_177176527325036",
       "profileVisibility": "friendsOnly",
-      "displayName": "Explorer",
+      "displayName": "Explorer7",
       "bio": "Travel Enthusiastic",
       "loadout": {
         "bodyId": "body",
         "headId": "head",
-        "skinId": "skin_default",
-        "hairId": "hair_boy_default",
-        "outfitId": "outfit_boy_suit",
+        "hairId": "hair_0001",
+        "suitId": null,
+        "upperId": "upper_0001",
+        "underId": "under_0001",
+        "savedUpperIdForSuit": "upper_0001",
+        "savedUnderIdForSuit": "under_0001",
+        "hatId": null,
+        "glassId": null,
         "accessoryIds": [
           "acc_headphone"
         ],
-        "expressionId": "expr_default"
+        "expressionId": "expr_0001",
+        "hairColorHex": "#2B2A28",
+        "bodyColorHex": "#E8BE9C"
       },
       "journeys": [
         {
@@ -458,7 +531,11 @@
           "read": false
         }
       ],
-      "createdAt": 1771765273
+      "createdAt": 1771765273,
+      "handleChangeUsed": false,
+      "profileSetupCompleted": true,
+      "sentPostcards": [],
+      "receivedPostcards": []
     },
     "u_b05234ec650eeea13cce034f": {
       "id": "u_b05234ec650eeea13cce034f",
@@ -468,18 +545,25 @@
       "inviteCode": "B0A749FA",
       "handle": "u2_177176527325036",
       "profileVisibility": "friendsOnly",
-      "displayName": "Explorer",
+      "displayName": "Explorer8",
       "bio": "Travel Enthusiastic",
       "loadout": {
         "bodyId": "body",
         "headId": "head",
-        "skinId": "skin_default",
-        "hairId": "hair_boy_default",
-        "outfitId": "outfit_boy_suit",
+        "hairId": "hair_0001",
+        "suitId": null,
+        "upperId": "upper_0001",
+        "underId": "under_0001",
+        "savedUpperIdForSuit": "upper_0001",
+        "savedUnderIdForSuit": "under_0001",
+        "hatId": null,
+        "glassId": null,
         "accessoryIds": [
           "acc_headphone"
         ],
-        "expressionId": "expr_default"
+        "expressionId": "expr_0001",
+        "hairColorHex": "#2B2A28",
+        "bodyColorHex": "#E8BE9C"
       },
       "journeys": [],
       "cityCards": [],
@@ -487,7 +571,11 @@
         "u_fe984b0f6a326f35ef769128"
       ],
       "notifications": [],
-      "createdAt": 1771765274
+      "createdAt": 1771765274,
+      "handleChangeUsed": false,
+      "profileSetupCompleted": true,
+      "sentPostcards": [],
+      "receivedPostcards": []
     }
   },
   "emailIndex": {
@@ -512,6 +600,11 @@
     "google:3b28c9d1e7ec4a22eb291514e4f512f1942895e3714a059556ab0d4798d8f9ab": "u_e872904bd056bc8ff430e619",
     "google:724d0a232e353bf496ed275615fa846bff494c7fea8ee35cfcb973acbebdd605": "u_51474f24e5ad708a08c2ad87"
   },
+  "firebaseIdentityIndex": {},
+  "authIdentities": {},
+  "emailVerificationTokens": {},
+  "passwordResetTokens": {},
+  "refreshTokens": {},
   "handleIndex": {
     "u_e872904bd056bc8ff430e6": "u_e872904bd056bc8ff430e619",
     "u1_177176510130892": "u_aaf3aaea3f91190f71bec985",
@@ -531,5 +624,7 @@
       ],
       "updatedAt": "2026-02-22T13:01:14.282Z"
     }
-  }
+  },
+  "friendRequestsIndex": {},
+  "postcardsIndex": {}
 }

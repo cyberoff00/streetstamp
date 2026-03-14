@@ -8,6 +8,16 @@ final class StartupWarmupService {
 
     private init() {}
 
+    private func log(_ message: String) {
+#if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        let enabled = args.contains("-CityThumbnailDebug")
+            || UserDefaults.standard.bool(forKey: "city.thumbnail.debug.enabled")
+        guard enabled else { return }
+        print("🔥 [CityThumbWarmup] \(message)")
+#endif
+    }
+
     func start(cities: [City], appearanceRaw: String, renderCacheStore: CityRenderCacheStore, limit: Int = 24) {
         let selected = Self.selectCities(from: cities, limit: limit)
         guard !selected.isEmpty else { return }
@@ -16,10 +26,14 @@ final class StartupWarmupService {
             let key = CityThumbnailLoader.renderCacheKey(for: $0, appearanceRaw: appearanceRaw)
             return warmedRenderKeys.insert(key).inserted
         }
+        log("start totalCities=\(cities.count) selected=\(selected.count) warming=\(citiesToWarm.count) appearance=\(appearanceRaw)")
         guard !citiesToWarm.isEmpty else { return }
 
         Task(priority: .utility) {
             for city in citiesToWarm {
+                await MainActor.run {
+                    self.log("warm city=\(city.id) name=\(city.localizedName)")
+                }
                 await CityThumbnailLoader.ensurePersistentCache(for: city, appearanceRaw: appearanceRaw, renderCacheStore: renderCacheStore)
             }
         }

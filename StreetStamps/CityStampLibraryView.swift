@@ -5,6 +5,12 @@ import Combine
 import CoreLocation
 import UIKit
 
+enum FriendSharedEmptyStateStyle {
+    static let titleFontSize: CGFloat = 18
+    static let subtitleFontSize: CGFloat = 14
+    static let verticalSpacing: CGFloat = 16
+}
+
 // =======================================================
 // MARK: - CityStampLibraryView
 // =======================================================
@@ -77,6 +83,14 @@ struct CityStampLibraryView: View {
         self.emptySubtitleKey = emptySubtitleKey
     }
 
+    private var displayCities: [City] {
+        if !vm.cities.isEmpty {
+            return vm.cities
+        }
+        guard store.hasLoaded else { return [] }
+        return CityLibraryVM.buildCities(journeyStore: store, cityCache: cache)
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             UITheme.bg.ignoresSafeArea()
@@ -107,14 +121,14 @@ struct CityStampLibraryView: View {
             if store.hasLoaded {
                 vm.load(journeyStore: store, cityCache: cache)
                 digestByCityID = makeDigestMap(from: cache.cachedCities)
-                StartupWarmupService.shared.start(cities: vm.cities, appearanceRaw: MapAppearanceSettings.current.rawValue, renderCacheStore: renderCacheStore, limit: 16)
+                StartupWarmupService.shared.start(cities: displayCities, appearanceRaw: MapAppearanceSettings.current.rawValue, renderCacheStore: renderCacheStore, limit: 16)
             }
         }
         .onChange(of: store.hasLoaded) { loaded in
             if loaded {
                 vm.load(journeyStore: store, cityCache: cache)
                 digestByCityID = makeDigestMap(from: cache.cachedCities)
-                StartupWarmupService.shared.start(cities: vm.cities, appearanceRaw: MapAppearanceSettings.current.rawValue, renderCacheStore: renderCacheStore, limit: 16)
+                StartupWarmupService.shared.start(cities: displayCities, appearanceRaw: MapAppearanceSettings.current.rawValue, renderCacheStore: renderCacheStore, limit: 16)
             }
         }
         .onReceive(cache.$cachedCities) { nextCities in
@@ -141,7 +155,7 @@ struct CityStampLibraryView: View {
             }
 
             digestByCityID = nextDigests
-            StartupWarmupService.shared.start(cities: vm.cities, appearanceRaw: MapAppearanceSettings.current.rawValue, renderCacheStore: renderCacheStore, limit: 16)
+            StartupWarmupService.shared.start(cities: displayCities, appearanceRaw: MapAppearanceSettings.current.rawValue, renderCacheStore: renderCacheStore, limit: 16)
         }
         .alert(L10n.t("delete_city_alert_title"), isPresented: $showDeleteCityAlert, presenting: cityToDelete) { city in
             Button(L10n.t("delete"), role: .destructive) {
@@ -216,7 +230,7 @@ struct CityStampLibraryView: View {
                 ],
                 spacing: rowGap
             ) {
-                ForEach(vm.cities) { city in
+                ForEach(displayCities) { city in
                     if allowCityDetailNavigation {
                         NavigationLink(destination: CityDeepView(city: city)) {
                             CityStampCard(city: city, cardWidth: cardW)
@@ -241,7 +255,7 @@ struct CityStampLibraryView: View {
                 }
             }
 
-            if vm.cities.isEmpty {
+            if displayCities.isEmpty {
                 emptyState(
                     title: L10n.key(emptyTitleKey),
                     subtitle: L10n.key(emptySubtitleKey)
@@ -253,13 +267,13 @@ struct CityStampLibraryView: View {
     }
 
     private func emptyState(title: LocalizedStringKey, subtitle: LocalizedStringKey) -> some View {
-        VStack(spacing: 10) {
+        VStack(spacing: FriendSharedEmptyStateStyle.verticalSpacing) {
             Text(title)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: FriendSharedEmptyStateStyle.titleFontSize, weight: .semibold))
                 .foregroundColor(UITheme.softBlack)
 
             Text(subtitle)
-                .font(.system(size: 12))
+                .font(.system(size: FriendSharedEmptyStateStyle.subtitleFontSize))
                 .foregroundColor(UITheme.subText)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
@@ -815,10 +829,34 @@ final class CityThumbnailLoader: ObservableObject {
 
     nonisolated static func ensurePersistentCache(for city: City, appearanceRaw: String, renderCacheStore: CityRenderCacheStore) async {
         let key = renderCacheKey(for: city, appearanceRaw: appearanceRaw)
-        if CityImageMemoryCache.shared.image(forKey: key) != nil { return }
+        if CityImageMemoryCache.shared.image(forKey: key) != nil {
+            await MainActor.run {
+                CityThumbnailDebugLogger.shared.log(
+                    .memoryHit,
+                    cityID: city.id,
+                    "ensurePersistentCache city=\(city.id) source=memory_hit key=\(key)"
+                )
+            }
+            return
+        }
         if let diskCached = renderCacheStore.image(forKey: key) {
             CityImageMemoryCache.shared.set(diskCached, forKey: key)
+            await MainActor.run {
+                CityThumbnailDebugLogger.shared.log(
+                    .diskHit,
+                    cityID: city.id,
+                    "ensurePersistentCache city=\(city.id) source=disk_hit key=\(key)"
+                )
+            }
             return
+        }
+
+        await MainActor.run {
+            CityThumbnailDebugLogger.shared.log(
+                .renderMiss,
+                cityID: city.id,
+                "ensurePersistentCache city=\(city.id) source=render_miss key=\(key)"
+            )
         }
 
         let fetchedBoundary = await CityBoundaryService.shared.boundaryPolygon(
@@ -831,6 +869,13 @@ final class CityThumbnailLoader: ObservableObject {
 
         CityImageMemoryCache.shared.set(img, forKey: key)
         renderCacheStore.save(img, forKey: key)
+        await MainActor.run {
+            CityThumbnailDebugLogger.shared.log(
+                .renderComplete,
+                cityID: city.id,
+                "ensurePersistentCache city=\(city.id) action=saved_to_disk key=\(key)"
+            )
+        }
     }
 
     private func renderOnDemand(city: City, appearanceRaw: String, key: String, renderCacheStore: CityRenderCacheStore) {

@@ -148,6 +148,24 @@ final class UserScopedProfileStateStoreTests: XCTestCase {
         XCTAssertFalse(UserScopedProfileStateStore.isProfileSetupPending(for: firstUserID, defaults: defaults))
     }
 
+    func test_firstProfileSetupDecisionRejectsEmptyNicknameForConfirmAndSkip() {
+        XCTAssertEqual(
+            FirstProfileSetupSubmission.decision(for: .confirm, nickname: "   "),
+            .blocked(message: "Display name cannot be empty")
+        )
+        XCTAssertEqual(
+            FirstProfileSetupSubmission.decision(for: .skip, nickname: "\n"),
+            .blocked(message: "Display name cannot be empty")
+        )
+    }
+
+    func test_firstProfileSetupDecisionTrimsNicknameBeforeSubmitting() {
+        XCTAssertEqual(
+            FirstProfileSetupSubmission.decision(for: .skip, nickname: "  CLAIRE  "),
+            .submit(displayName: "CLAIRE")
+        )
+    }
+
     @MainActor
     func test_applyAuthTracksPendingProfileSetupInSessionStore() {
         let store = UserSessionStore()
@@ -170,6 +188,19 @@ final class UserScopedProfileStateStoreTests: XCTestCase {
 
         XCTAssertFalse(store.requiresProfileSetup)
         XCTAssertFalse(UserScopedProfileStateStore.isProfileSetupPending(for: "account_profile_setup"))
+    }
+
+    @MainActor
+    func test_guestSessionRequiresProfileSetupUntilCompleted() {
+        let store = UserSessionStore()
+
+        XCTAssertTrue(store.requiresProfileSetup)
+        XCTAssertTrue(UserScopedProfileStateStore.isProfileSetupPending(for: store.currentUserID))
+
+        store.markProfileSetupCompleted()
+
+        XCTAssertFalse(store.requiresProfileSetup)
+        XCTAssertFalse(UserScopedProfileStateStore.isProfileSetupPending(for: store.currentUserID))
     }
 
     func test_decodeLoadoutMigratesRemovedHair009ToHair0007() throws {

@@ -136,12 +136,17 @@ struct FriendsHubView: View {
     @State private var postcardInboxIntent = PostcardInboxIntent(box: "received", messageID: nil)
     @State private var myExclusiveID = ""
     @State private var myInviteCode = ""
+    @State private var myRemoteProfile: BackendProfileDTO?
     @State private var showAuthEntry = false
 
     private var sortedFriends: [FriendProfileSnapshot] {
         socialStore.friends.sorted { lhs, rhs in
             lastActiveDate(of: lhs) > lastActiveDate(of: rhs)
         }
+    }
+
+    private func lastActiveDate(of friend: FriendProfileSnapshot) -> Date {
+        FriendListPresencePresentation.recentJourneyDate(for: friend) ?? friend.createdAt
     }
 
     private var currentUserID: String {
@@ -152,28 +157,17 @@ struct FriendsHubView: View {
         let uid = currentUserID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !uid.isEmpty else { return nil }
         let name = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let journeys = journeyStore.journeys.map(FriendSharedJourney.from(route:))
         let fallbackInvite = SocialGraphStore.generateInviteCode(source: uid)
         let invite = myInviteCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         let handle = myExclusiveID.trimmingCharacters(in: .whitespacesAndNewlines)
         let fallbackHandle = SocialGraphStore.generateInviteCode(source: name).lowercased()
-        return FriendProfileSnapshot(
-            id: uid,
-            handle: handle.isEmpty ? fallbackHandle : handle,
-            inviteCode: invite.isEmpty ? fallbackInvite : invite,
-            profileVisibility: .friendsOnly,
-            displayName: name.isEmpty ? L10n.t("explorer_fallback") : name,
-            bio: "",
-            loadout: AvatarLoadoutStore.load().normalizedForCurrentAvatar(),
-            stats: ProfileStatsSnapshot(
-                totalJourneys: journeys.count,
-                totalDistance: journeys.reduce(0) { $0 + $1.distance },
-                totalMemories: journeys.reduce(0) { $0 + $1.memories.count },
-                totalUnlockedCities: 0
-            ),
-            journeys: journeys,
-            unlockedCityCards: [],
-            createdAt: Date()
+        return FriendsSelfProfileBuilder.makeSnapshot(
+            remoteProfile: myRemoteProfile,
+            fallbackUserID: uid,
+            fallbackDisplayName: name.isEmpty ? L10n.t("explorer_fallback") : name,
+            fallbackExclusiveID: handle.isEmpty ? fallbackHandle : handle,
+            fallbackInviteCode: invite.isEmpty ? fallbackInvite : invite,
+            fallbackLoadout: AvatarLoadoutStore.load()
         )
     }
 
@@ -266,7 +260,10 @@ struct FriendsHubView: View {
                                     Button {
                                         activeRoute = .profile(friend.id)
                                     } label: {
-                                        AllFriendsCard(friend: friend, activeText: activeText(for: friend))
+                                        AllFriendsCard(
+                                            friend: friend,
+                                            subtitleText: FriendListPresencePresentation.subtitle(for: friend)
+                                        )
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -541,7 +538,7 @@ struct FriendsHubView: View {
                     Text(String(format: L10n.t("friends_exclusive_id_format"), handleText))
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(FigmaTheme.subtext)
-                    Text(shortAgoText(from: request.createdAt))
+                    Text(FriendListPresencePresentation.shortAgoText(from: request.createdAt, now: Date(), localize: L10n.t))
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(FigmaTheme.subtext.opacity(0.8))
                 }
@@ -578,25 +575,6 @@ struct FriendsHubView: View {
             .foregroundColor(.secondary)
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.top, 28)
-    }
-
-    private func lastActiveDate(of friend: FriendProfileSnapshot) -> Date {
-        friend.journeys
-            .compactMap { $0.endTime ?? $0.startTime }
-            .max() ?? friend.createdAt
-    }
-
-    private func activeText(for friend: FriendProfileSnapshot) -> String {
-        let date = lastActiveDate(of: friend)
-        return String(format: L10n.t("friends_active_ago"), shortAgoText(from: date).lowercased())
-    }
-
-    private func shortAgoText(from date: Date) -> String {
-        let delta = max(1, Int(Date().timeIntervalSince(date)))
-        if delta < 3600 { return String(format: L10n.t("friends_ago_minutes_format"), max(1, delta / 60)) }
-        if delta < 86400 { return String(format: L10n.t("friends_ago_hours_format"), max(1, delta / 3600)) }
-        if delta < 7 * 86400 { return String(format: L10n.t("friends_ago_days_format"), max(1, delta / 86400)) }
-        return String(format: L10n.t("friends_ago_weeks_format"), max(1, delta / (7 * 86400)))
     }
 
     private func resolvedDisplayNameForInvite() -> String {
@@ -703,28 +681,7 @@ struct FriendsHubView: View {
     }
 
     private func resolvedFriendCityID(for journey: FriendSharedJourney, cards: [FriendCityCard]) -> String {
-        guard !cards.isEmpty else { return "Unknown|" }
-        let normalizedTitle = journey.title
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-            .lowercased()
-        if let hit = cards.first(where: {
-            $0.name.trimmingCharacters(in: .whitespacesAndNewlines)
-                .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-                .lowercased() == normalizedTitle
-        }) {
-            return hit.id
-        }
-        if let fuzzy = cards.first(where: {
-            let normalizedName = $0.name
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-                .lowercased()
-            return !normalizedName.isEmpty && !normalizedTitle.isEmpty && (normalizedTitle.contains(normalizedName) || normalizedName.contains(normalizedTitle))
-        }) {
-            return fuzzy.id
-        }
-        return cards[0].id
+        FriendJourneyCityIdentity.resolveCityID(for: journey, cards: cards)
     }
 
     private func resolvedFriendCityTitle(for journey: FriendSharedJourney, cards: [FriendCityCard]) -> String {
@@ -916,10 +873,12 @@ struct FriendsHubView: View {
         guard BackendConfig.isEnabled,
               let token = sessionStore.currentAccessToken,
               !token.isEmpty else {
+            myRemoteProfile = nil
             return
         }
         do {
             let me = try await BackendAPIClient.shared.fetchMyProfile(token: token)
+            myRemoteProfile = me
             if let id = me.resolvedExclusiveID?.trimmingCharacters(in: .whitespacesAndNewlines),
                !id.isEmpty {
                 myExclusiveID = id
@@ -931,6 +890,7 @@ struct FriendsHubView: View {
                 myInviteCode = SocialGraphStore.generateInviteCode(source: me.id)
             }
         } catch {
+            myRemoteProfile = nil
             // Keep invite entry available with local fallback.
         }
     }
@@ -1256,7 +1216,7 @@ private struct FriendActivityCard: View {
                     }
                 }
             }
-            .contentShape(Rectangle())
+            .appFullSurfaceTapTarget(.rectangle)
             .onTapGesture(perform: onOpenEvent)
 
             HStack(spacing: 10) {
@@ -1291,6 +1251,7 @@ private struct FriendActivityCard: View {
                         .padding(.vertical, 7)
                         .background(Color.black.opacity(0.05))
                         .clipShape(Capsule())
+                        .appFullSurfaceTapTarget(.capsule)
                     }
                     .buttonStyle(.plain)
                     .disabled(!canLike || likeLoading)
@@ -1305,7 +1266,7 @@ private struct FriendActivityCard: View {
 
 private struct AllFriendsCard: View {
     let friend: FriendProfileSnapshot
-    let activeText: String
+    let subtitleText: String?
 
     private var distanceLabel: String {
         "\(Int((friend.stats.totalDistance / 1000.0).rounded()))km"
@@ -1326,9 +1287,11 @@ private struct AllFriendsCard: View {
                 Text(friend.displayName)
                     .font(.system(size: 15, weight: .bold))
                     .foregroundColor(FigmaTheme.text)
-                Text(activeText)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(FigmaTheme.subtext)
+                if let subtitleText {
+                    Text(subtitleText)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(FigmaTheme.subtext)
+                }
             }
 
             Spacer(minLength: 12)
@@ -1345,6 +1308,41 @@ private struct AllFriendsCard: View {
         }
         .padding(16)
         .figmaSurfaceCard(radius: 28)
+    }
+}
+
+enum FriendListPresencePresentation {
+    static func subtitle(
+        for friend: FriendProfileSnapshot,
+        now: Date = Date(),
+        localize: (String) -> String = L10n.t
+    ) -> String? {
+        guard let recentJourneyDate = recentJourneyDate(for: friend) else {
+            return nil
+        }
+
+        return String(
+            format: localize("friends_recent_journey_ago"),
+            shortAgoText(from: recentJourneyDate, now: now, localize: localize).lowercased()
+        )
+    }
+
+    fileprivate static func recentJourneyDate(for friend: FriendProfileSnapshot) -> Date? {
+        friend.journeys
+            .compactMap { $0.endTime ?? $0.startTime }
+            .max()
+    }
+
+    fileprivate static func shortAgoText(
+        from date: Date,
+        now: Date,
+        localize: (String) -> String
+    ) -> String {
+        let delta = max(1, Int(now.timeIntervalSince(date)))
+        if delta < 3600 { return String(format: localize("friends_ago_minutes_format"), max(1, delta / 60)) }
+        if delta < 86400 { return String(format: localize("friends_ago_hours_format"), max(1, delta / 3600)) }
+        if delta < 7 * 86400 { return String(format: localize("friends_ago_days_format"), max(1, delta / 86400)) }
+        return String(format: localize("friends_ago_weeks_format"), max(1, delta / (7 * 86400)))
     }
 }
 
@@ -2388,7 +2386,7 @@ private final class FriendMirrorContext: ObservableObject {
 
     nonisolated private static func toJourneyRoute(friendJourney: FriendSharedJourney, cards: [FriendCityCard]) -> JourneyRoute {
         let routeCoords = friendJourney.routeCoordinates
-        let cityID = resolveCityID(for: friendJourney, cards: cards)
+        let cityID = FriendJourneyCityIdentity.resolveCityID(for: friendJourney, cards: cards)
         let cityCard = cards.first(where: { $0.id == cityID })
         let cityName = CityDisplayTitlePresentation.title(
             cityKey: cityCard?.id ?? cityID,
@@ -2441,27 +2439,6 @@ private final class FriendMirrorContext: ObservableObject {
         )
     }
 
-    nonisolated private static func resolveCityID(for journey: FriendSharedJourney, cards: [FriendCityCard]) -> String {
-        guard !cards.isEmpty else { return "Unknown|" }
-        let normalizedTitle = normalizeKey(journey.title)
-        if let hit = cards.first(where: { normalizeKey($0.name) == normalizedTitle }) {
-            return hit.id
-        }
-        if let fuzzy = cards.first(where: {
-            let k = normalizeKey($0.name)
-            return !k.isEmpty && !normalizedTitle.isEmpty && (normalizedTitle.contains(k) || k.contains(normalizedTitle))
-        }) {
-            return fuzzy.id
-        }
-        return cards[0].id
-    }
-
-    nonisolated private static func normalizeKey(_ input: String) -> String {
-        input
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-            .lowercased()
-    }
 }
 
 private struct FriendJourneysScreen: View {

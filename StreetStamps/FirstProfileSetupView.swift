@@ -1,5 +1,74 @@
 import SwiftUI
 
+enum FirstProfileSetupAction {
+    case confirm
+    case skip
+}
+
+struct FirstProfileSetupActionPresentation: Equatable {
+    let usesFullSurfaceHitTarget: Bool
+}
+
+enum FirstProfileSetupSection: Equatable {
+    case nickname
+    case avatar
+    case actions
+}
+
+struct FirstProfileSetupPresentationModel: Equatable {
+    let heroTitleKey: String
+    let heroHelperKey: String
+    let showsSubtitle: Bool
+    let showsNicknameHint: Bool
+    let showsSummaryCard: Bool
+    let showsHeroCardTitle: Bool
+    let usesScrollLayout: Bool
+    let contentOrder: [FirstProfileSetupSection]
+    let skipButtonTopOffset: CGFloat
+    let skipAction: FirstProfileSetupActionPresentation
+    let editLookAction: FirstProfileSetupActionPresentation
+    let confirmAction: FirstProfileSetupActionPresentation
+
+    static let minimal = FirstProfileSetupPresentationModel(
+        heroTitleKey: "profile_setup_avatar_title",
+        heroHelperKey: "profile_setup_avatar_hint",
+        showsSubtitle: false,
+        showsNicknameHint: false,
+        showsSummaryCard: false,
+        showsHeroCardTitle: false,
+        usesScrollLayout: true,
+        contentOrder: [.nickname, .avatar],
+        skipButtonTopOffset: -6,
+        skipAction: FirstProfileSetupActionPresentation(usesFullSurfaceHitTarget: true),
+        editLookAction: FirstProfileSetupActionPresentation(usesFullSurfaceHitTarget: true),
+        confirmAction: FirstProfileSetupActionPresentation(usesFullSurfaceHitTarget: true)
+    )
+}
+
+enum FirstProfileSetupSubmission: Equatable {
+    case blocked(message: String)
+    case submit(displayName: String)
+
+    static func decision(for action: FirstProfileSetupAction, nickname: String) -> FirstProfileSetupSubmission {
+        let trimmedName = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            return .blocked(message: L10n.t("profile_name_empty"))
+        }
+        _ = action
+        return .submit(displayName: trimmedName)
+    }
+}
+
+enum FirstProfileSetupDebugPreviewBehavior {
+    static func shouldDismissImmediately(
+        for action: FirstProfileSetupAction,
+        isDebugPreview: Bool,
+        hasAccessToken: Bool
+    ) -> Bool {
+        isDebugPreview && action == .skip && !hasAccessToken
+    }
+}
+
 struct FirstProfileSetupView: View {
     @EnvironmentObject private var sessionStore: UserSessionStore
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
@@ -10,8 +79,30 @@ struct FirstProfileSetupView: View {
     @State private var submitting = false
     @State private var errorMessage: String?
 
+    private let presentation = FirstProfileSetupPresentationModel.minimal
     private let accent = FigmaTheme.primary
     private let warm = FigmaTheme.secondary
+    #if DEBUG
+    private let isDebugPreview: Bool
+    private let onDismissDebugPreview: (() -> Void)?
+    #endif
+
+    init() {
+        #if DEBUG
+        self.isDebugPreview = false
+        self.onDismissDebugPreview = nil
+        #endif
+    }
+
+    #if DEBUG
+    init(
+        isDebugPreview: Bool = false,
+        onDismissDebugPreview: (() -> Void)? = nil
+    ) {
+        self.isDebugPreview = isDebugPreview
+        self.onDismissDebugPreview = onDismissDebugPreview
+    }
+    #endif
 
     var body: some View {
         ZStack {
@@ -19,19 +110,22 @@ struct FirstProfileSetupView: View {
                 .ignoresSafeArea()
 
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 20) {
+                VStack(spacing: 0) {
+                    topBar
+                    Spacer(minLength: 10)
                     titleBlock
-                    avatarCard
-                    nicknameCard
-                    actionsCard
+                    Spacer(minLength: 18)
+                    contentCards
+                    Spacer(minLength: 16)
                     confirmButton
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 28)
                 .padding(.bottom, 24)
+                .frame(maxWidth: .infinity)
             }
         }
-        .interactiveDismissDisabled()
+        .interactiveDismissDisabled(!debugPreviewEnabled)
         .fullScreenCover(isPresented: $showEquipmentEditor) {
             NavigationStack {
                 EquipmentView(loadout: $loadout)
@@ -56,6 +150,14 @@ struct FirstProfileSetupView: View {
                 nickname = suggestedNickname
             }
         }
+    }
+
+    private var debugPreviewEnabled: Bool {
+        #if DEBUG
+        isDebugPreview
+        #else
+        false
+        #endif
     }
 
     private var suggestedNickname: String {
@@ -92,52 +194,110 @@ struct FirstProfileSetupView: View {
     }
 
     private var titleBlock: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: presentation.showsSubtitle ? 8 : 0) {
             Text(L10n.t("profile_setup_title"))
                 .appHeaderStyle()
                 .multilineTextAlignment(.center)
 
-            Text(L10n.t("profile_setup_subtitle"))
-                .appBodyStrongStyle()
-                .foregroundColor(FigmaTheme.subtext)
-                .multilineTextAlignment(.center)
+            if presentation.showsSubtitle {
+                Text(L10n.t("profile_setup_subtitle"))
+                    .appBodyStrongStyle()
+                    .foregroundColor(FigmaTheme.subtext)
+                    .multilineTextAlignment(.center)
+            }
         }
-        .padding(.top, 8)
+    }
+
+    private var topBar: some View {
+        HStack {
+            Spacer()
+
+            Button {
+                Task { await submit(.skip) }
+            } label: {
+                Text(submitting ? L10n.t("processing") : L10n.t("profile_setup_skip"))
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(FigmaTheme.subtext)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color.white.opacity(0.92))
+                    .clipShape(Capsule())
+                    .contentShape(Capsule())
+            }
+            .disabled(submitting)
+        }
+        .padding(.top, presentation.skipButtonTopOffset)
+    }
+
+    @ViewBuilder
+    private var contentCards: some View {
+        ForEach(Array(presentation.contentOrder.enumerated()), id: \.offset) { index, section in
+            if index > 0 {
+                Spacer(minLength: 16)
+            }
+
+            switch section {
+            case .nickname:
+                nicknameCard
+            case .avatar:
+                avatarCard
+            case .actions:
+                if presentation.showsSummaryCard {
+                    actionsCard
+                }
+            }
+        }
+
+        if presentation.showsSummaryCard && !presentation.contentOrder.contains(.actions) {
+            Spacer(minLength: 16)
+            actionsCard
+        }
     }
 
     private var avatarCard: some View {
-        VStack(spacing: 18) {
+        VStack(alignment: .leading, spacing: 16) {
+            if presentation.showsHeroCardTitle {
+                Text(L10n.t(presentation.heroTitleKey))
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(FigmaTheme.text)
+            }
+
             ZStack {
                 RoundedRectangle(cornerRadius: 32, style: .continuous)
                     .fill(Color.white.opacity(0.9))
 
                 VStack(spacing: 12) {
-                    RobotRendererView(size: 170, face: .front, loadout: loadout)
-                    Text(L10n.t("profile_setup_avatar_hint"))
+                    RobotRendererView(size: 154, face: .front, loadout: loadout)
+                    Text(L10n.t(presentation.heroHelperKey))
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(.black.opacity(0.55))
+                        .multilineTextAlignment(.center)
                 }
-                .padding(.vertical, 18)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 16)
             }
-            .frame(height: 250)
+            .frame(height: 220)
             .overlay(
                 RoundedRectangle(cornerRadius: 32, style: .continuous)
                     .stroke(Color.black.opacity(0.04), lineWidth: 1)
             )
 
-            Button(L10n.t("profile_setup_edit_look")) {
+            Button {
                 showEquipmentEditor = true
+            } label: {
+                Text(L10n.t("profile_setup_edit_look"))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                    .background(Color.white.opacity(0.96))
+                    .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 26, style: .continuous)
+                            .stroke(warm.opacity(0.35), lineWidth: 2)
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(warm)
             }
-            .frame(maxWidth: .infinity)
-            .frame(height: 52)
-            .background(Color.white.opacity(0.96))
-            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .stroke(warm.opacity(0.35), lineWidth: 2)
-            )
-            .font(.system(size: 15, weight: .bold))
-            .foregroundColor(warm)
             .buttonStyle(CardPressButtonStyle(pressedScale: 0.985, pressedOpacity: 0.95))
         }
         .padding(18)
@@ -179,9 +339,11 @@ struct FirstProfileSetupView: View {
                     .stroke(Color.black.opacity(0.03), lineWidth: 1)
             )
 
-            Text(L10n.t("profile_setup_nickname_hint"))
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.black.opacity(0.52))
+            if presentation.showsNicknameHint {
+                Text(L10n.t("profile_setup_nickname_hint"))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.black.opacity(0.52))
+            }
         }
         .padding(18)
         .background(FigmaTheme.card.opacity(0.92))
@@ -214,27 +376,41 @@ struct FirstProfileSetupView: View {
     }
 
     private var confirmButton: some View {
-        Button(submitting ? L10n.t("processing") : L10n.t("profile_setup_confirm")) {
-            Task { await submit() }
+        Button {
+            Task { await submit(.confirm) }
+        } label: {
+            Text(submitting ? L10n.t("processing") : L10n.t("profile_setup_confirm"))
+                .frame(maxWidth: .infinity)
+                .frame(height: 58)
+                .background(accent)
+                .foregroundColor(.white)
+                .font(.system(size: 17, weight: .semibold))
+                .clipShape(RoundedRectangle(cornerRadius: 29, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: 29, style: .continuous))
         }
         .disabled(submitting)
-        .frame(maxWidth: .infinity)
-        .frame(height: 58)
-        .background(accent)
-        .foregroundColor(.white)
-        .font(.system(size: 17, weight: .semibold))
-        .clipShape(RoundedRectangle(cornerRadius: 29, style: .continuous))
         .shadow(color: accent.opacity(0.28), radius: 20, x: 0, y: 12)
     }
 
     @MainActor
-    private func submit() async {
-        let trimmedName = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else {
-            errorMessage = L10n.t("profile_name_empty")
+    private func submit(_ action: FirstProfileSetupAction) async {
+        let decision = FirstProfileSetupSubmission.decision(for: action, nickname: nickname)
+        guard case .submit(let displayName) = decision else {
+            if case .blocked(let message) = decision {
+                errorMessage = message
+            }
             return
         }
-        guard let token = sessionStore.currentAccessToken, !token.isEmpty else {
+        let token = sessionStore.currentAccessToken ?? ""
+        if FirstProfileSetupDebugPreviewBehavior.shouldDismissImmediately(
+            for: action,
+            isDebugPreview: debugPreviewEnabled,
+            hasAccessToken: !token.isEmpty
+        ) {
+            onDismissDebugPreview?()
+            return
+        }
+        guard !token.isEmpty else {
             errorMessage = BackendAPIError.unauthorized.localizedDescription
             return
         }
@@ -245,7 +421,7 @@ struct FirstProfileSetupView: View {
         do {
             let profile = try await BackendAPIClient.shared.completeProfileSetup(
                 token: token,
-                displayName: trimmedName,
+                displayName: displayName,
                 loadout: loadout
             )
             let resolvedLoadout = (profile.loadout ?? loadout).normalizedForCurrentAvatar()
@@ -253,6 +429,9 @@ struct FirstProfileSetupView: View {
             UserScopedProfileStateStore.saveCurrentLoadout(resolvedLoadout, for: sessionStore.currentUserID)
             profileName = profile.displayName
             sessionStore.markProfileSetupCompleted()
+            if debugPreviewEnabled {
+                onDismissDebugPreview?()
+            }
         } catch {
             errorMessage = error.localizedDescription
         }

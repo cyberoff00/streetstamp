@@ -74,12 +74,50 @@ async function run() {
   const mediaDir = path.join(tmp, "media");
   const outboxFile = path.join(tmp, "outbox.json");
   await fs.writeFile(dataFile, JSON.stringify({
-    users: {},
-    emailIndex: {},
+    users: {
+      u_legacy_profile: {
+        id: "u_legacy_profile",
+        provider: "email",
+        email: "legacy-session@example.com",
+        passwordHash: "2df9b2aac8d1d63e4fdc96d0ac15f132716b3c7880f26f587d4afce873b4b1d3",
+        inviteCode: "LEGACY001",
+        handle: "legacysession",
+        handleChangeUsed: false,
+        profileVisibility: "friendsOnly",
+        displayName: "Legacy Session",
+        bio: "Travel Enthusiastic",
+        loadout: {
+          hairId: "hair_0001",
+          expressionId: "expr_0001"
+        },
+        journeys: [],
+        cityCards: [],
+        friendIDs: [],
+        notifications: [],
+        sentPostcards: [],
+        receivedPostcards: [],
+        createdAt: 1
+      }
+    },
+    emailIndex: {
+      "legacy-session@example.com": "u_legacy_profile"
+    },
     inviteIndex: {},
     oauthIndex: {},
     firebaseIdentityIndex: {},
-    authIdentities: {},
+    authIdentities: {
+      aid_legacy_profile: {
+        id: "aid_legacy_profile",
+        userID: "u_legacy_profile",
+        provider: "email_password",
+        providerSubject: "legacy-session@example.com",
+        email: "legacy-session@example.com",
+        emailVerified: true,
+        passwordHash: "2df9b2aac8d1d63e4fdc96d0ac15f132716b3c7880f26f587d4afce873b4b1d3",
+        createdAt: 1,
+        updatedAt: 1
+      }
+    },
     emailVerificationTokens: {},
     passwordResetTokens: {},
     refreshTokens: {},
@@ -142,6 +180,17 @@ async function run() {
       refreshToken: login.data.refreshToken
     });
     assert.equal(refreshAfterLogout.status, 401);
+
+    const legacyLogin = await requestJSON(PORT, "POST", "/v1/auth/login", null, {
+      email: "legacy-session@example.com",
+      password: "Password1!"
+    });
+    assert.equal(legacyLogin.status, 200);
+    assert.equal(legacyLogin.data.needsProfileSetup, false);
+
+    const legacyProfile = await requestJSON(PORT, "GET", "/v1/profile/me", legacyLogin.data.accessToken);
+    assert.equal(legacyProfile.status, 200);
+    assert.equal(legacyProfile.data.profileSetupCompleted, true);
 
     console.log("auth session contract: PASS");
   } finally {

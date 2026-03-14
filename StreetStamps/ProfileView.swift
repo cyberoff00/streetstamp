@@ -1557,6 +1557,7 @@ struct ProfileActionButton: View {
             .frame(maxWidth: .infinity, minHeight: 58)
             .background(FigmaTheme.mutedBackground)
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .appFullSurfaceTapTarget(.roundedRect(20))
         }
         .buttonStyle(.plain)
     }
@@ -1591,6 +1592,7 @@ struct ExpandableSection<Content: View>: View {
                 }
                 .padding(.horizontal, 14)
                 .frame(minHeight: 44)
+                .appFullSurfaceTapTarget(.rectangle)
             }
             .buttonStyle(.plain)
             
@@ -1632,7 +1634,7 @@ struct SectionLinkRow: View {
         }
         .padding(.horizontal, 14)
         .frame(minHeight: 44)
-        .contentShape(Rectangle())
+        .appFullSurfaceTapTarget(.rectangle)
     }
 }
 
@@ -1696,7 +1698,7 @@ struct StatNavRow: View {
                 .foregroundColor(FigmaTheme.text.opacity(0.35))
                 .padding(.leading, 4)
         }
-        .contentShape(Rectangle())
+        .appFullSurfaceTapTarget(.rectangle)
     }
 }
 

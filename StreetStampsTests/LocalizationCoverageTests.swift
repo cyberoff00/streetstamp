@@ -37,6 +37,17 @@ final class LocalizationCoverageTests: XCTestCase {
         XCTAssertEqual(simplifiedChinese["friend_profile_stomp_success_format"], "你在 %@ 的沙发上坐了一坐")
     }
 
+    func test_firstProfileSetupUsesSimplifiedHeroCopyInEnglishAndSimplifiedChinese() throws {
+        let appRoot = projectRoot().appendingPathComponent("StreetStamps", isDirectory: true)
+        let english = try loadStringsFile(at: appRoot.appendingPathComponent("en.lproj/Localizable.strings"))
+        let simplifiedChinese = try loadStringsFile(at: appRoot.appendingPathComponent("zh-Hans.lproj/Localizable.strings"))
+
+        XCTAssertEqual(english["profile_setup_avatar_title"], "SET YOUR STARTING LOOK")
+        XCTAssertEqual(english["profile_setup_avatar_hint"], "Explore more in Equipment later.")
+        XCTAssertEqual(simplifiedChinese["profile_setup_avatar_title"], "设置初始形象")
+        XCTAssertEqual(simplifiedChinese["profile_setup_avatar_hint"], "后续可在装备页探索更多")
+    }
+
     func test_requiredFormalUserFacingKeysExistInEnglishAndSimplifiedChinese() throws {
         let appRoot = projectRoot().appendingPathComponent("StreetStamps", isDirectory: true)
         let english = try loadStringsFile(at: appRoot.appendingPathComponent("en.lproj/Localizable.strings"))

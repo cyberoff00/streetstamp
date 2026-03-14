@@ -230,16 +230,19 @@ struct AuthEntryView: View {
     }
 
     private var authPrimaryButton: some View {
-        Button(submitting ? L10n.t("processing") : mode.primaryButtonTitle) {
+        Button {
             submitEmailAuth()
+        } label: {
+            Text(submitting ? L10n.t("processing") : mode.primaryButtonTitle)
+                .frame(maxWidth: .infinity)
+                .frame(height: 58)
+                .background(accent)
+                .foregroundColor(.white)
+                .font(.system(size: 17, weight: .semibold))
+                .clipShape(RoundedRectangle(cornerRadius: 29, style: .continuous))
+                .appFullSurfaceTapTarget(.roundedRect(29))
         }
         .disabled(submitting)
-        .frame(maxWidth: .infinity)
-        .frame(height: 58)
-        .background(accent)
-        .foregroundColor(.white)
-        .font(.system(size: 17, weight: .semibold))
-        .clipShape(RoundedRectangle(cornerRadius: 29, style: .continuous))
         .shadow(color: accent.opacity(0.28), radius: 20, x: 0, y: 12)
     }
 
@@ -305,18 +308,21 @@ struct AuthEntryView: View {
     }
 
     private var guestButton: some View {
-        Button(L10n.t("continue_as_guest")) {
+        Button {
             showGuestNotice = true
+        } label: {
+            Text(L10n.t("continue_as_guest"))
+                .frame(maxWidth: .infinity)
+                .frame(height: 50)
+                .background(Color.clear)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 25, style: .continuous)
+                        .stroke(warm.opacity(0.5), lineWidth: 2)
+                )
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(warm)
+                .appFullSurfaceTapTarget(.roundedRect(25))
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: 50)
-        .background(Color.clear)
-        .overlay(
-            RoundedRectangle(cornerRadius: 25, style: .continuous)
-                .stroke(warm.opacity(0.5), lineWidth: 2)
-        )
-        .font(.system(size: 14, weight: .bold))
-        .foregroundColor(warm)
         .padding(.top, 6)
     }
 
@@ -400,6 +406,7 @@ struct AuthEntryView: View {
             .overlay(
                 RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(Color.black.opacity(0.04), lineWidth: 1)
             )
+            .appFullSurfaceTapTarget(.roundedRect(26))
         }
         .buttonStyle(CardPressButtonStyle(pressedScale: 0.985, pressedOpacity: 0.95))
     }

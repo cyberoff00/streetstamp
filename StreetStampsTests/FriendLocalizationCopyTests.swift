@@ -48,4 +48,13 @@ final class FriendLocalizationCopyTests: XCTestCase {
         XCTAssertEqual(simplifiedChinese["friend_memories_empty_title"], "TA 暂无旅程记忆")
         XCTAssertEqual(simplifiedChinese["friend_memories_empty_subtitle"], "TA 还没有公开旅程记忆。")
     }
+
+    func test_friendListSubtitleCopyUsesRecentJourneyLabelInsteadOfActivity() throws {
+        let appRoot = projectRoot().appendingPathComponent("StreetStamps", isDirectory: true)
+        let english = try loadStringsFile(at: appRoot.appendingPathComponent("en.lproj/Localizable.strings"))
+        let simplifiedChinese = try loadStringsFile(at: appRoot.appendingPathComponent("zh-Hans.lproj/Localizable.strings"))
+
+        XCTAssertEqual(english["friends_recent_journey_ago"], "Recent journey %@")
+        XCTAssertEqual(simplifiedChinese["friends_recent_journey_ago"], "最近旅程：%@")
+    }
 }
