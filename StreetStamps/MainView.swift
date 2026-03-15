@@ -55,7 +55,7 @@ struct MainView: View {
                 VStack(spacing: 0) {
                     Spacer().frame(height: titleTop)
 
-                    Text(L10n.key("main_unlock_new_journey"))
+                    Text(L10n.t("main_unlock_new_journey"))
                         .font(.system(size: 26, weight: .black))
                         .tracking(-0.6)
                         .lineSpacing(9)

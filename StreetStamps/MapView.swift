@@ -520,6 +520,16 @@ struct JourneyRoute: Codable {
 
 //
 extension JourneyRoute {
+    var stableCityKey: String? {
+        let candidates = [startCityKey, cityKey]
+        for candidate in candidates {
+            let trimmed = (candidate ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            return trimmed
+        }
+        return nil
+    }
+
     func merged(with other: JourneyRoute) -> JourneyRoute {
         guard self.id == other.id else { return other }
 
@@ -542,6 +552,16 @@ extension JourneyRoute {
             else { byId[m.id] = m }
         }
         out.memories = Array(byId.values).sorted(by: { $0.timestamp > $1.timestamp })
+        if let stableCityKey = other.stableCityKey ?? self.stableCityKey {
+            out.startCityKey = stableCityKey
+            out.cityKey = stableCityKey
+        }
+        if let endCityKey = {
+            let trimmed = (other.endCityKey ?? self.endCityKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }() {
+            out.endCityKey = endCityKey
+        }
         out.visibility = other.visibility
         if let t = other.customTitle, !t.isEmpty { out.customTitle = t }
         if let tag = other.activityTag, !tag.isEmpty { out.activityTag = tag }

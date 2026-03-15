@@ -80,7 +80,11 @@ actor ICloudSyncService {
         guard await isAccountAvailable() else { return false }
 
         do {
-            guard let record = try await fetchRecord(userID: userID) else {
+            var record = try await fetchRecord()
+            if record == nil {
+                record = try await fetchLegacyRecord(userID: userID)
+            }
+            guard let record else {
                 if force {
                     writeStatus(userID: userID, status: "no_backup")
                 }
@@ -124,10 +128,15 @@ actor ICloudSyncService {
                 options: 0
             )
 
-            let record = try await fetchRecord(userID: userID) ?? CKRecord(
-                recordType: recordType,
-                recordID: recordID(for: userID)
-            )
+            let record: CKRecord
+            if let existing = try await fetchRecord() {
+                record = existing
+            } else {
+                record = CKRecord(
+                    recordType: recordType,
+                    recordID: try await getRecordID()
+                )
+            }
             record[userIDField] = userID as CKRecordValue
             record[appVersionField] = appVersion() as CKRecordValue
             record[exportedAtField] = Date() as CKRecordValue
@@ -191,9 +200,9 @@ actor ICloudSyncService {
         return url
     }
 
-    private func recordID(for userID: String) -> CKRecord.ID {
-        let safe = userID.replacingOccurrences(of: "/", with: "_")
-        return CKRecord.ID(recordName: "backup_\(safe)")
+    private func getRecordID() async throws -> CKRecord.ID {
+        let userRecordID = try await container.userRecordID()
+        return CKRecord.ID(recordName: "backup_\(userRecordID.recordName)")
     }
 
     nonisolated static func lastRestoreMarkerKey(for userID: String) -> String {
@@ -233,10 +242,28 @@ actor ICloudSyncService {
         }
     }
 
-    private func fetchRecord(userID: String) async throws -> CKRecord? {
+    private func fetchRecord() async throws -> CKRecord? {
         do {
+            let recordID = try await getRecordID()
             return try await withCheckedThrowingContinuation { continuation in
-                database.fetch(withRecordID: recordID(for: userID)) { record, error in
+                database.fetch(withRecordID: recordID) { record, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume(returning: record)
+                    }
+                }
+            }
+        } catch let ckError as CKError where ckError.code == .unknownItem {
+            return nil
+        }
+    }
+
+    private func fetchLegacyRecord(userID: String) async throws -> CKRecord? {
+        do {
+            let legacyID = CKRecord.ID(recordName: "backup_\(userID.replacingOccurrences(of: "/", with: "_"))")
+            return try await withCheckedThrowingContinuation { continuation in
+                database.fetch(withRecordID: legacyID) { record, error in
                     if let error {
                         continuation.resume(throwing: error)
                     } else {

@@ -589,7 +589,15 @@ final class CityCache: ObservableObject {
         do {
             let data = try Data(contentsOf: fileURL)
             let decoded = try JSONDecoder().decode([CachedCity].self, from: data)
-            self.cachedCities = decoded
+            // Deduplicate by city ID
+            var seen = Set<String>()
+            self.cachedCities = decoded.filter { city in
+                if seen.contains(city.id) {
+                    return false
+                }
+                seen.insert(city.id)
+                return true
+            }
         } catch {
             self.cachedCities = []
         }
@@ -624,7 +632,7 @@ final class CityCache: ObservableObject {
               !dict.isEmpty
         else { return }
 
-        let localeID = Locale.current.identifier
+        let localeID = LanguagePreference.shared.effectiveLocaleIdentifier
         var changed = false
 
         for i in cachedCities.indices {
@@ -781,7 +789,7 @@ final class CityCache: ObservableObject {
             "reserveProfileWrite",
             CityLocalizationDebugTrace.reserveProfileWrite(
                 cityKey: cityKey,
-                locale: .current,
+                locale: LanguagePreference.shared.displayLocale,
                 level: level,
                 parentRegionKey: parentRegionKey,
                 availableLevels: availableLevels
@@ -797,9 +805,10 @@ final class CityCache: ObservableObject {
         if let availableLevels {
             let mapped = Dictionary(uniqueKeysWithValues: availableLevels.map { ($0.key.rawValue, $0.value) })
             cachedCities[idx].reservedAvailableLevelNames = mapped
-            let localeID = (availableLevelsLocaleIdentifier ?? Locale.current.identifier)
+            let fallbackLocaleID = LanguagePreference.shared.effectiveLocaleIdentifier
+            let localeID = (availableLevelsLocaleIdentifier ?? fallbackLocaleID)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            cachedCities[idx].reservedAvailableLevelNamesLocaleID = localeID.isEmpty ? Locale.current.identifier : localeID
+            cachedCities[idx].reservedAvailableLevelNamesLocaleID = localeID.isEmpty ? fallbackLocaleID : localeID
         }
         if let anchor, anchor.isValid, cachedCities[idx].anchor == nil {
             cachedCities[idx].anchor = LatLon(anchor)
@@ -988,10 +997,12 @@ final class CityCache: ObservableObject {
             return nil
         }
         let split = splitCityKey(key)
-        let fallbackName = journey.canonicalCity.trimmingCharacters(in: .whitespacesAndNewlines)
-        let finalName = split.name.isEmpty ? (fallbackName.isEmpty ? journey.displayCityName : fallbackName) : split.name
+        let canonicalName = journey.canonicalCity.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalName = split.name.isEmpty ? canonicalName : split.name
+        guard !finalName.isEmpty else { return nil }
         let fallbackISO = (journey.countryISO2 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         let finalISO = split.iso.isEmpty ? fallbackISO : split.iso
+        guard !finalISO.isEmpty, finalISO.count == 2 else { return nil }
         return (key, finalName, finalISO)
     }
 

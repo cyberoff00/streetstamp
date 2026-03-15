@@ -16,4 +16,12 @@ final class LifelogStepMilestonePresentationTests: XCTestCase {
             .topTrailing
         )
     }
+
+    func test_stepMilestoneModal_hidesCelebrationHeadline() {
+        XCTAssertFalse(LifelogStepMilestonePresentation.showsCelebrationHeadline)
+    }
+
+    func test_stepMilestoneModal_usesCompactTopPadding() {
+        XCTAssertEqual(LifelogStepMilestonePresentation.topPadding, 14)
+    }
 }

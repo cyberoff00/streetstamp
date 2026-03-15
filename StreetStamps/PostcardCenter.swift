@@ -149,6 +149,26 @@ final class PostcardCenter: ObservableObject {
         )
     }
 
+    func enqueueSendInBackground(draftID: String, token: String?, allowedCityIDs: [String], cityJourneyCount: Int) {
+        if let idx = drafts.firstIndex(where: { $0.draftID == draftID }) {
+            var draft = drafts[idx]
+            draft.status = .sending
+            draft.lastError = nil
+            draft.updatedAt = Date()
+            drafts[idx] = draft
+            persist()
+        }
+        Task { [weak self] in
+            await self?.enqueueSend(
+                draftID: draftID,
+                token: token,
+                allowedCityIDs: allowedCityIDs,
+                cityJourneyCount: cityJourneyCount,
+                increaseRetry: false
+            )
+        }
+    }
+
     func refreshFromBackend(token: String?) async {
         guard let token, !token.isEmpty else { return }
         do {

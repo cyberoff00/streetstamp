@@ -38,9 +38,8 @@ private enum FriendsRoute: Hashable, Identifiable {
     case profile(String)
     case journeys(String)
     case cities(String)
-    case equipment(String)
     case publicMemories(String)
-    case journey(friendID: String, journeyID: String)
+    case journey(friendID: String, snapshot: FriendProfileSnapshot?, journeyID: String)
 
     var id: String {
         switch self {
@@ -50,11 +49,9 @@ private enum FriendsRoute: Hashable, Identifiable {
             return "journeys_\(friendID)"
         case .cities(let friendID):
             return "cities_\(friendID)"
-        case .equipment(let friendID):
-            return "equipment_\(friendID)"
         case .publicMemories(let friendID):
             return "public_memories_\(friendID)"
-        case .journey(let friendID, let journeyID):
+        case .journey(let friendID, _, let journeyID):
             return "journey_\(friendID)_\(journeyID)"
         }
     }
@@ -355,7 +352,7 @@ struct FriendsHubView: View {
                                 onOpenEvent: {
                                     ensureSelfSnapshotInSocialStoreIfNeeded(friendID: friend.id)
                                     if let jid = event.journeyID {
-                                        activeRoute = .journey(friendID: friend.id, journeyID: jid)
+                                        activeRoute = .journey(friendID: friend.id, snapshot: friend, journeyID: jid)
                                     } else {
                                         activeRoute = .profile(friend.id)
                                     }
@@ -463,12 +460,10 @@ struct FriendsHubView: View {
                 FriendJourneysScreen(friendID: friendID)
             case .cities(let friendID):
                 FriendCitiesScreen(friendID: friendID)
-            case .equipment(let friendID):
-                FriendEquipmentScreen(friendID: friendID)
             case .publicMemories(let friendID):
                 FriendPublicMemoriesScreen(friendID: friendID)
-            case .journey(let friendID, let journeyID):
-                FriendJourneyRouteScreen(friendID: friendID, journeyID: journeyID)
+            case .journey(let friendID, let snapshot, let journeyID):
+                FriendJourneyRouteScreen(friendID: friendID, fallbackSnapshot: snapshot, journeyID: journeyID)
             }
         }
 
@@ -1322,7 +1317,7 @@ private struct AllFriendsCard: View {
     let subtitleText: String?
 
     private var distanceLabel: String {
-        "\(Int((friend.stats.totalDistance / 1000.0).rounded()))km"
+        String(format: L10n.t("friends_distance_compact_format"), (friend.stats.totalDistance / 1000.0).rounded())
     }
 
     private var cityLabel: String {
@@ -1768,6 +1763,20 @@ private struct FriendProfileScreen: View {
                 friendName: (friend ?? fallbackFriend).displayName
             )
         }
+        .navigationDestination(item: $activeRoute) { route in
+            switch route {
+            case .profile(let friendID):
+                FriendProfileScreen(friendID: friendID)
+            case .journeys(let friendID):
+                FriendJourneysScreen(friendID: friendID)
+            case .cities(let friendID):
+                FriendCitiesScreen(friendID: friendID)
+            case .publicMemories(let friendID):
+                FriendPublicMemoriesScreen(friendID: friendID)
+            case .journey(let friendID, let snapshot, let journeyID):
+                FriendJourneyRouteScreen(friendID: friendID, fallbackSnapshot: snapshot, journeyID: journeyID)
+            }
+        }
     }
 
     private var friendTopControls: some View {
@@ -1853,18 +1862,6 @@ private struct FriendProfileScreen: View {
                         }
 
                         HStack(spacing: 8) {
-                            Image(systemName: "mappin.and.ellipse")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(Color(red: 156.0 / 255.0, green: 163.0 / 255.0, blue: 175.0 / 255.0))
-
-                            Text(String(format: "%.1f km", max(0, friend.stats.totalDistance / 1000.0)))
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(Color(red: 156.0 / 255.0, green: 163.0 / 255.0, blue: 175.0 / 255.0))
-
-                            Text("•")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(Color(red: 156.0 / 255.0, green: 163.0 / 255.0, blue: 175.0 / 255.0))
-
                             Text(String(format: L10n.t("friends_joined_format"), heroJoinedDateText(friend.createdAt)))
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundColor(Color(red: 156.0 / 255.0, green: 163.0 / 255.0, blue: 175.0 / 255.0))
@@ -2493,7 +2490,8 @@ private final class FriendMirrorContext: ObservableObject {
 
     nonisolated private static func persistCities(from snapshot: FriendProfileSnapshot, mirroredRoutes: [JourneyRoute], paths: StoragePath) {
         let routesByCityID = Dictionary(grouping: mirroredRoutes) { $0.startCityKey ?? $0.cityKey }
-        let cities: [CachedCity] = snapshot.unlockedCityCards.map { card in
+        let deduplicatedCards = Dictionary(grouping: snapshot.unlockedCityCards) { $0.id }.compactMapValues { $0.first }.map { $0.value }
+        let cities: [CachedCity] = deduplicatedCards.map { card in
             let js = routesByCityID[card.id] ?? []
             let memories = js.reduce(0) { $0 + $1.memories.count }
             let anchorCoord = js.first?.allCLCoords.first
@@ -2520,7 +2518,7 @@ private final class FriendMirrorContext: ObservableObject {
     }
 
     nonisolated private static func buildMirroredRoutes(from snapshot: FriendProfileSnapshot) -> [JourneyRoute] {
-        let cards = snapshot.unlockedCityCards
+        let cards = Dictionary(grouping: snapshot.unlockedCityCards) { $0.id }.compactMapValues { $0.first }.map { $0.value }
         return snapshot.journeys
             .sorted { ($0.endTime ?? $0.startTime ?? .distantPast) > ($1.endTime ?? $1.startTime ?? .distantPast) }
             .map { toJourneyRoute(friendJourney: $0, cards: cards) }
@@ -2706,98 +2704,6 @@ private struct FriendCitiesScreen: View {
     }
 }
 
-private struct FriendEquipmentScreen: View {
-    @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var socialStore: SocialGraphStore
-    @ObservedObject private var catalogStore: AvatarCatalogStore = .shared
-
-    let friendID: String
-
-    private var friend: FriendProfileSnapshot? {
-        socialStore.friends.first(where: { $0.id == friendID })
-    }
-
-    private func equippedName(categoryID: String, itemID: String?) -> String {
-        guard let itemID, !itemID.isEmpty else { return "None" }
-        let nameKey = catalogStore.item(categoryId: categoryID, itemId: itemID)?.nameKey ?? itemID
-        return L10n.t(nameKey)
-    }
-
-    private func equippedAccessoryNames(_ itemIDs: [String]) -> String {
-        let visible = itemIDs.filter { !$0.isEmpty && $0 != "none" }
-        guard !visible.isEmpty else { return "None" }
-        return visible.map { equippedName(categoryID: "accessory", itemID: $0) }.joined(separator: ", ")
-    }
-
-    var body: some View {
-        Group {
-            if let friend {
-                ScrollView {
-                    VStack(spacing: 12) {
-                        RobotRendererView(size: 150, face: .front, loadout: friend.loadout)
-                            .frame(width: 180, height: 180)
-                            .background(Color(red: 227.0/255.0, green: 239.0/255.0, blue: 235.0/255.0))
-                            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            FriendEquipmentRow(title: "Hair", value: equippedName(categoryID: "hair", itemID: friend.loadout.hairId))
-                            FriendEquipmentRow(title: "Upper", value: equippedName(categoryID: "upper", itemID: friend.loadout.upperId))
-                            FriendEquipmentRow(title: "Under", value: equippedName(categoryID: "under", itemID: friend.loadout.underId))
-                            FriendEquipmentRow(title: "Hat", value: equippedName(categoryID: "hat", itemID: friend.loadout.hatId))
-                            FriendEquipmentRow(title: "Glasses", value: equippedName(categoryID: "glass", itemID: friend.loadout.glassId))
-                            FriendEquipmentRow(title: "Accessory", value: equippedAccessoryNames(friend.loadout.accessoryIds))
-                            FriendEquipmentRow(title: "Expression", value: equippedName(categoryID: "expression", itemID: friend.loadout.expressionId))
-                        }
-                        .padding(14)
-                        .background(Color.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    }
-                    .padding(12)
-                }
-                .background(Color(red: 251.0/255.0, green: 251.0/255.0, blue: 249.0/255.0).ignoresSafeArea())
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    UnifiedNavigationHeader(
-                        chrome: NavigationChrome(
-                            title: "\(friend.displayName) Equipment",
-                            leadingAccessory: .back,
-                            titleLevel: .secondary
-                        ),
-                        horizontalPadding: 16,
-                        topPadding: 8,
-                        bottomPadding: 12,
-                        onLeadingTap: { dismiss() }
-                    ) {
-                        Color.clear
-                    }
-                }
-                .toolbar(.hidden, for: .navigationBar)
-            } else {
-                Text(L10n.t("content_unavailable"))
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.secondary)
-            }
-        }
-    }
-}
-
-private struct FriendEquipmentRow: View {
-    let title: String
-    let value: String
-
-    var body: some View {
-        HStack {
-            Text(title)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(FigmaTheme.text.opacity(0.7))
-            Spacer()
-            Text(value)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(FigmaTheme.text)
-        }
-        .padding(.vertical, 4)
-    }
-}
-
 private struct FriendPublicMemoriesScreen: View {
     @EnvironmentObject private var socialStore: SocialGraphStore
     @EnvironmentObject private var sessionStore: UserSessionStore
@@ -2858,20 +2764,22 @@ private struct FriendJourneyRouteScreen: View {
     @Environment(\.locale) private var locale
 
     let friendID: String
+    private let fallbackSnapshot: FriendProfileSnapshot?
     let journeyID: String
 
     @StateObject private var mirror: FriendMirrorContext
     @State private var sidebarHideToken = UUID().uuidString
 
-    init(friendID: String, journeyID: String) {
+    init(friendID: String, fallbackSnapshot: FriendProfileSnapshot?, journeyID: String) {
         self.friendID = friendID
+        self.fallbackSnapshot = fallbackSnapshot
         self.journeyID = journeyID
         _mirror = StateObject(wrappedValue: FriendMirrorContext(friendID: friendID))
     }
 
     var body: some View {
         Group {
-            if let friend = socialStore.friends.first(where: { $0.id == friendID }) {
+            if let friend = socialStore.friends.first(where: { $0.id == friendID }) ?? fallbackSnapshot {
                 JourneyRouteDetailView(
                     journeyID: journeyID,
                     isReadOnly: true,

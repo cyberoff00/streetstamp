@@ -11,6 +11,8 @@ import Foundation
 struct JourneyMemoryDetailDraft: Codable, Equatable {
     var memories: [JourneyMemory]
     var focusedMemoryID: String?
+    var overallMemory: String
+    var overallMemoryImagePaths: [String]
 }
 
 enum JourneyMemoryDetailDraftStore {

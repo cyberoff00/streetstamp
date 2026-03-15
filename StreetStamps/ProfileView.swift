@@ -10,6 +10,7 @@ import SwiftUI
 import UIKit
 import CoreLocation
 import AVFoundation
+import PhotosUI
 
 struct ProfileView: View {
     @Environment(\.scenePhase) private var scenePhase
@@ -1413,17 +1414,23 @@ private struct ProfileInviteScannerSheet: View {
     @Environment(\.dismiss) private var dismiss
     let onScanned: (String) -> Void
 
+    @State private var pickedPhotoItem: PhotosPickerItem?
+    @State private var isImportingFromAlbum = false
+    @State private var didResolveCode = false
     @State private var scannerError: String?
+    @State private var showPhotoPicker = false
 
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
                 ProfileInviteScannerRepresentable(
                     onDetected: { code in
-                        dismiss()
-                        onScanned(code)
+                        completeScan(with: code)
                     },
-                    onFailure: { scannerError = $0 }
+                    onFailure: { message in
+                        guard !didResolveCode else { return }
+                        scannerError = message
+                    }
                 )
                 .ignoresSafeArea()
 
@@ -1448,7 +1455,22 @@ private struct ProfileInviteScannerSheet: View {
                     bottomPadding: 12,
                     onLeadingTap: { dismiss() }
                 ) {
-                    Color.clear
+                    Button {
+                        guard !isImportingFromAlbum && !didResolveCode else { return }
+                        showPhotoPicker = true
+                    } label: {
+                        Image(systemName: isImportingFromAlbum ? "hourglass" : "photo")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(FigmaTheme.text)
+                            .frame(width: 42, height: 42)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isImportingFromAlbum || didResolveCode)
+                    .accessibilityLabel(
+                        isImportingFromAlbum
+                            ? L10n.t("friends_qr_importing")
+                            : L10n.t("friends_qr_import_from_album")
+                    )
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
@@ -1460,7 +1482,43 @@ private struct ProfileInviteScannerSheet: View {
             } message: {
                 Text(scannerError ?? "")
             }
+            .onChange(of: pickedPhotoItem) { _, item in
+                guard let item else { return }
+                Task { await importQRCodeFromPhoto(item) }
+            }
+            .photosPicker(isPresented: $showPhotoPicker, selection: $pickedPhotoItem, matching: .images)
         }
+    }
+
+    @MainActor
+    private func importQRCodeFromPhoto(_ item: PhotosPickerItem) async {
+        guard !didResolveCode else { return }
+        isImportingFromAlbum = true
+        defer {
+            isImportingFromAlbum = false
+            pickedPhotoItem = nil
+        }
+
+        guard let data = try? await item.loadTransferable(type: Data.self),
+              let image = UIImage(data: data) else {
+            scannerError = L10n.t("friends_qr_read_failed")
+            return
+        }
+
+        guard let code = QRCodeImageDecoder.decode(image: image) else {
+            scannerError = L10n.t("friends_qr_not_detected")
+            return
+        }
+
+        completeScan(with: code)
+    }
+
+    @MainActor
+    private func completeScan(with code: String) {
+        guard !didResolveCode else { return }
+        didResolveCode = true
+        dismiss()
+        onScanned(code)
     }
 }
 
@@ -1814,7 +1872,7 @@ struct RecentJourneysView: View {
     private func refreshCityLocalizations() async {
         var coordByKey: [String: CLLocationCoordinate2D] = [:]
         for journey in recentJourneys {
-            let key = (journey.startCityKey ?? journey.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = journey.stableCityKey ?? ""
             guard !key.isEmpty, key != "Unknown|", coordByKey[key] == nil else { continue }
             if let start = journey.startCoordinate, start.isValid {
                 coordByKey[key] = start

@@ -91,11 +91,11 @@
 
 "journey_memory" = "Journey Memory";
 "journey_memories" = "Journey Memory";
-"friend_city_cards_title" = "City Cards";
-"friend_city_cards" = "City Cards";
-"friend_journey_memories" = "Journey Memories";
-"friend_postcards" = "Postcards";
-"friend_activity_record_entry" = "Activity Record";
+"friend_city_cards_title" = "CITY CARDS";
+"friend_city_cards" = "CITY CARDS";
+"friend_journey_memories" = "JOURNEY MEMORY";
+"friend_postcards" = "POSTCARD";
+"friend_activity_record_entry" = "ACTIVITY RECORD";
 "friend_profile_stat_trips" = "TRIPS";
 "friend_profile_stat_memories" = "MEMORIES";
 "friend_profile_stat_cities" = "CITIES";
@@ -337,6 +337,10 @@
 "friends_add_submit" = "Add Friend";
 "friends_add_submitting" = "Adding...";
 "friends_add_title" = "Add Friend";
+"friends_qr_importing" = "Recognizing...";
+"friends_qr_import_from_album" = "Import from Photos";
+"friends_qr_read_failed" = "Couldn't read this image. Try a different one.";
+"friends_qr_not_detected" = "No QR code was detected in this image.";
 "friends_badge_city" = "CITY";
 "friends_badge_journey" = "JOURNEY";
 "friends_badge_memory" = "MEMORY";
@@ -496,6 +500,7 @@
 "lifelog_steps_modal_title" = "Today's Steps";
 "lifelog_steps_modal_subtitle" = "Keep moving. We'll remind you again after 1,000 more steps today.";
 "lifelog_steps_modal_close" = "Close";
+"lifelog_steps_modal_summary_format" = "Today you left %@ more footsteps on WORLDO";
 "postcard_profile_title" = "POSTCARD";
 "postcard_profile_subtitle" = "Sent · Received";
 "postcard_nav_title" = "Postcards";
@@ -846,6 +851,7 @@
 "settings_icloud_sync_unavailable_desc" = "iCloud is unavailable. Sign in to iCloud in system settings to enable cloud sync.";
 "settings_restore_from_icloud" = "Restore From iCloud";
 "settings_restore_from_icloud_success" = "Restored latest iCloud backup.";
+"settings_restart_app_to_see_changes" = "Please restart the app to see equipment updates.";
 "settings_restore_from_icloud_no_backup" = "No newer iCloud backup was found.";
 "settings_icloud_sync_enabled_hint" = "iCloud sync is enabled. New data will upload automatically.";
 "settings_icloud_sync_disabled_hint" = "iCloud sync is disabled. Data will stay local on this device.";
@@ -861,3 +867,6 @@
 "onboarding_continue_later" = "Continue Later";
 "onboarding_skip_guide" = "Skip Guide";
 "about_postscript" = "Postscript";
+"friend_stats_summary_format" = "%d journeys · %d memories · %d cards";
+"delete_memory_confirm_title" = "Confirm the deletion？";
+"delete_memory_confirm_message" = "The journey won't be recovered ";

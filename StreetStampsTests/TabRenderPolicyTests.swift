@@ -8,9 +8,9 @@ final class TabRenderPolicyTests: XCTestCase {
         XCTAssertTrue(TabRenderPolicy.shouldRender(tab: .friends, selectedTab: .friends, loadedTabs: loaded))
     }
 
-    func test_shouldRender_lifelog_notSelected_notRenderedEvenIfLoaded() {
+    func test_shouldRender_lifelog_notSelected_stillRenderedWhenLoaded() {
         let loaded: Set<NavigationTab> = [.start, .lifelog]
-        XCTAssertFalse(TabRenderPolicy.shouldRender(tab: .lifelog, selectedTab: .start, loadedTabs: loaded))
+        XCTAssertTrue(TabRenderPolicy.shouldRender(tab: .lifelog, selectedTab: .start, loadedTabs: loaded))
     }
 
     func test_shouldRender_otherTabs_notSelected_stillRenderedWhenLoaded() {

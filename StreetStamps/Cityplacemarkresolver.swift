@@ -884,7 +884,7 @@ enum JourneyCityNamePresentation {
         for journey: JourneyRoute,
         cachedCitiesByKey: [String: CachedCity]
     ) -> String? {
-        let key = (journey.startCityKey ?? journey.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = journey.stableCityKey ?? ""
         guard !key.isEmpty else { return nil }
         return cachedCitiesByKey[key]?.reservedParentRegionKey
     }
@@ -904,7 +904,7 @@ enum JourneyCityNamePresentation {
         cachedCitiesByKey: [String: CachedCity],
         locale: Locale = .current
     ) -> String {
-        let key = (journey.startCityKey ?? journey.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = journey.stableCityKey ?? ""
         if let localized = localizedCityNameByKey[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
            !localized.isEmpty {
             return localized

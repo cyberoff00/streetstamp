@@ -3,6 +3,62 @@ import CoreLocation
 @testable import StreetStamps
 
 final class JourneyFinalizerTests: XCTestCase {
+    func test_resolveCompletedRouteCityFields_alignsStableStartIdentityAcrossJourneyFields() {
+        let parentRegionKey = "journey-finalizer-parent-\(UUID().uuidString)"
+        CityLevelPreferenceStore.shared.setPreferredLevel(.admin, for: parentRegionKey)
+
+        let route = JourneyRoute(
+            id: "same-city-identity",
+            startTime: Date(timeIntervalSince1970: 1_700_000_000),
+            endTime: Date(timeIntervalSince1970: 1_700_000_600),
+            cityKey: "Xinyi Township|TW",
+            canonicalCity: "Xinyi Township",
+            countryISO2: "TW",
+            currentCity: "台湾",
+            cityName: "台湾"
+        )
+
+        let startCanonical = ReverseGeocodeService.CanonicalResult(
+            cityName: "Xinyi Township",
+            iso2: "TW",
+            cityKey: "Xinyi Township|TW",
+            level: .locality,
+            parentRegionKey: parentRegionKey,
+            availableLevels: [
+                .locality: "Xinyi Township",
+                .admin: "Taiwan"
+            ],
+            localeIdentifier: "en_US"
+        )
+
+        let endCanonical = ReverseGeocodeService.CanonicalResult(
+            cityName: "Taiwan",
+            iso2: "TW",
+            cityKey: "Taiwan|TW",
+            level: .admin,
+            parentRegionKey: parentRegionKey,
+            availableLevels: [
+                .locality: "Xinyi Township",
+                .admin: "Taiwan"
+            ],
+            localeIdentifier: "en_US"
+        )
+
+        let finalized = JourneyFinalizer.resolveCompletedRouteCityFields(
+            route: route,
+            startCanonical: startCanonical,
+            endCanonical: endCanonical
+        )
+
+        XCTAssertEqual(finalized.startCityKey, "Taiwan|TW")
+        XCTAssertEqual(finalized.cityKey, "Taiwan|TW")
+        XCTAssertEqual(finalized.canonicalCity, "Taiwan")
+        XCTAssertEqual(finalized.endCityKey, "Taiwan|TW")
+        XCTAssertEqual(finalized.cityName, "台湾")
+        XCTAssertEqual(finalized.currentCity, "台湾")
+        XCTAssertEqual(finalized.countryISO2, "TW")
+    }
+
     @MainActor
     func test_finalize_marksStationaryDriftJourneyTooShort() async throws {
         let userID = "journey-finalizer-drift-\(UUID().uuidString)"

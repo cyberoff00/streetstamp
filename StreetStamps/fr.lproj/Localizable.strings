@@ -506,6 +506,10 @@
 "profile_notifications_title" = "Activity";
 "profile_open_app_to_scan" = "Open Worldo -> Friends -> Scan QR Code";
 "profile_place_qr_in_frame" = "Place the friend's invite QR code inside the frame";
+"friends_qr_importing" = "Recognizing...";
+"friends_qr_import_from_album" = "Import from Photos";
+"friends_qr_read_failed" = "Couldn't read this image. Try a different one.";
+"friends_qr_not_detected" = "No QR code was detected in this image.";
 "profile_recent_journeys" = "RECENT JOURNEYS";
 "profile_scan_camera_input_unavailable" = "Unable to access camera input.";
 "profile_scan_camera_permission_unavailable" = "Camera permission is unavailable. Please allow access in Settings.";

@@ -50,6 +50,7 @@ struct StoragePath: Sendable {
     var photosDir: URL { userRoot.appendingPathComponent("Photos", isDirectory: true) }
     var thumbnailsDir: URL { userRoot.appendingPathComponent("Thumbnails", isDirectory: true) }
     var trackTilesDir: URL { cachesDir.appendingPathComponent("track_tiles", isDirectory: true) }
+    var quarantineDir: URL { userRoot.appendingPathComponent("Quarantine", isDirectory: true) }
 
     // MARK: - Files
 
@@ -66,6 +67,7 @@ struct StoragePath: Sendable {
     /// Can be removed in a future version once all users have migrated.
     var routeCacheURL: URL { cachesDir.appendingPathComponent("route_cache.json", isDirectory: false) }
     var trackTileManifestURL: URL { trackTilesDir.appendingPathComponent("manifest.json", isDirectory: false) }
+    var journeyRepairSourcesURL: URL { cachesDir.appendingPathComponent("journey_repair_sources.json", isDirectory: false) }
 
     /// Marker file to ensure one-time migrations.
     var migrationMarkerV1: URL { userRoot.appendingPathComponent(".migrated_v1", isDirectory: false) }
@@ -92,6 +94,7 @@ struct StoragePath: Sendable {
         try ensureDirectory(cachesDir)
         try ensureDirectory(photosDir)
         try ensureDirectory(thumbnailsDir)
+        try ensureDirectory(quarantineDir)
     }
 
     func ensureDirectory(_ url: URL) throws {

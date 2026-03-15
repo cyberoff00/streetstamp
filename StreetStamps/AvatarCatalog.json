@@ -50,7 +50,10 @@
         { "id": "pat_001", "nameKey": "Pat 001", "layer": "accessory", "images": { "front": "front_pat001", "right": null, "back": null, "left": null } },
         { "id": "pat_002", "nameKey": "Pat 002", "layer": "accessory", "images": { "front": "front_pat002", "right": null, "back": null, "left": null } },
         { "id": "pat_003", "nameKey": "Pat 003", "layer": "accessory", "images": { "front": "front_pat003", "right": null, "back": null, "left": null } },
-        { "id": "pat_004", "nameKey": "Pat 004", "layer": "accessory", "images": { "front": "front_pat004", "right": null, "back": null, "left": null } }
+        { "id": "pat_004", "nameKey": "Pat 004", "layer": "accessory", "images": { "front": "front_pat004", "right": null, "back": null, "left": null } },
+        { "id": "pat_005", "nameKey": "Pat 005", "layer": "accessory", "images": { "front": "front_pat005", "right": null, "back": null, "left": null } },
+        { "id": "pat_006", "nameKey": "Pat 006", "layer": "accessory", "images": { "front": "front_pat006", "right": null, "back": null, "left": null } },
+        { "id": "pat_007", "nameKey": "Pat 007", "layer": "accessory", "images": { "front": "front_pat007", "right": null, "back": null, "left": null } }
       ]
     },
     {
@@ -87,7 +90,9 @@
         { "id": "suit_0005", "nameKey": "Suit 0005", "layer": "suit", "images": { "front": "front_suit005", "right": null, "back": null, "left": null } },
         { "id": "suit_0006", "nameKey": "Suit 0006", "layer": "suit", "images": { "front": "front_suit006", "right": null, "back": null, "left": null } },
         { "id": "suit_0007", "nameKey": "Suit 0007", "layer": "suit", "images": { "front": "front_suit007", "right": null, "back": null, "left": null } },
-        { "id": "suit_0008", "nameKey": "Suit 0008", "layer": "suit", "images": { "front": "front_suit008", "right": null, "back": null, "left": null } }
+        { "id": "suit_0008", "nameKey": "Suit 0008", "layer": "suit", "images": { "front": "front_suit008", "right": null, "back": null, "left": null } },
+        { "id": "suit_0009", "nameKey": "Suit 0009", "layer": "suit", "images": { "front": "front_suit009", "right": null, "back": null, "left": null } },
+        { "id": "suit_0010", "nameKey": "Suit 0010", "layer": "suit", "images": { "front": "front_suit010", "right": null, "back": null, "left": null } }
       ]
     },
     {
@@ -111,7 +116,8 @@
         { "id": "upper_0013", "nameKey": "Upper 0013", "layer": "upper", "images": { "front": "front_upper012", "right": null, "back": null, "left": null } },
         { "id": "upper_0014", "nameKey": "Upper 0014", "layer": "upper", "images": { "front": "front_upper013", "right": null, "back": null, "left": null } },
         { "id": "upper_0015", "nameKey": "Upper 0015", "layer": "upper", "images": { "front": "front_upper014", "right": null, "back": null, "left": null } },
-        { "id": "upper_0016", "nameKey": "Upper 0016", "layer": "upper", "images": { "front": "front_upper015", "right": null, "back": null, "left": null } }
+        { "id": "upper_0016", "nameKey": "Upper 0016", "layer": "upper", "images": { "front": "front_upper015", "right": null, "back": null, "left": null } },
+        { "id": "upper_0017", "nameKey": "Upper 0017", "layer": "upper", "images": { "front": "front_upper016", "right": null, "back": null, "left": null } }
       ]
     },
     {
@@ -126,7 +132,8 @@
         { "id": "under_0004", "nameKey": "Under 0004", "layer": "under", "images": { "front": "front_under003", "right": null, "back": null, "left": null } },
         { "id": "under_0005", "nameKey": "Under 0005", "layer": "under", "images": { "front": "front_under004", "right": null, "back": null, "left": null } },
         { "id": "under_0006", "nameKey": "Under 0006", "layer": "under", "images": { "front": "front_under005", "right": null, "back": null, "left": null } },
-        { "id": "under_0007", "nameKey": "Under 0007", "layer": "under", "images": { "front": "front_under006", "right": null, "back": null, "left": null } }
+        { "id": "under_0007", "nameKey": "Under 0007", "layer": "under", "images": { "front": "front_under006", "right": null, "back": null, "left": null } },
+        { "id": "under_0008", "nameKey": "Under 0008", "layer": "under", "images": { "front": "front_under007", "right": null, "back": null, "left": null } }
       ]
     },
     {
@@ -191,7 +198,12 @@
         { "id": "acc_004", "nameKey": "Accessory 004", "layer": "accessory", "images": { "front": "front_ac004", "right": null, "back": null, "left": null } },
         { "id": "acc_005", "nameKey": "Accessory 005", "layer": "accessory", "images": { "front": "front_ac005", "right": null, "back": null, "left": null } },
         { "id": "acc_006", "nameKey": "Accessory 006", "layer": "accessory", "images": { "front": "front_ac007", "right": null, "back": null, "left": null } },
-        { "id": "acc_007", "nameKey": "Accessory 007", "layer": "accessory", "images": { "front": "front_ac008", "right": null, "back": null, "left": null } }
+        { "id": "acc_007", "nameKey": "Accessory 007", "layer": "accessory", "images": { "front": "front_ac008", "right": null, "back": null, "left": null } },
+        { "id": "acc_008", "nameKey": "Accessory 008", "layer": "accessory", "images": { "front": "front_ac009", "right": null, "back": null, "left": null } },
+        { "id": "acc_009", "nameKey": "Accessory 009", "layer": "accessory", "images": { "front": "front_ac010", "right": null, "back": null, "left": null } },
+        { "id": "acc_010", "nameKey": "Accessory 010", "layer": "accessory", "images": { "front": "front_ac011", "right": null, "back": null, "left": null } },
+        { "id": "acc_011", "nameKey": "Accessory 011", "layer": "accessory", "images": { "front": "front_ac012", "right": null, "back": null, "left": null } },
+        { "id": "acc_012", "nameKey": "Accessory 012", "layer": "accessory", "images": { "front": "front_ac013", "right": null, "back": null, "left": null } }
       ]
     }
   ]

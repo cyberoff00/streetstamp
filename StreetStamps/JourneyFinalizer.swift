@@ -14,6 +14,45 @@ enum JourneyFinalizeSource {
 }
 
 enum JourneyFinalizer {
+    static func resolveCompletedRouteCityFields(
+        route: JourneyRoute,
+        startCanonical: ReverseGeocodeService.CanonicalResult?,
+        endCanonical: ReverseGeocodeService.CanonicalResult?
+    ) -> JourneyRoute {
+        var updated = route
+
+        let unknownLocalized = L10n.t("unknown")
+        let existingDisplayName = (updated.cityName ?? updated.currentCity)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasResolvedDisplayName = !existingDisplayName.isEmpty
+            && existingDisplayName.caseInsensitiveCompare("Unknown") != .orderedSame
+            && existingDisplayName != unknownLocalized
+
+        if let startCanonical {
+            let stableStartKey = CityPlacemarkResolver.preferredStableCityKey(canonicalResult: startCanonical)
+            let stableStartName = CityPlacemarkResolver.stableCityName(
+                from: stableStartKey,
+                fallback: startCanonical.cityName
+            )
+
+            updated.startCityKey = stableStartKey
+            updated.cityKey = stableStartKey
+            updated.canonicalCity = stableStartName
+            updated.countryISO2 = startCanonical.iso2 ?? updated.countryISO2
+
+            if !hasResolvedDisplayName {
+                updated.cityName = stableStartName
+                updated.currentCity = stableStartName
+            }
+        }
+
+        if let endCanonical {
+            updated.endCityKey = CityPlacemarkResolver.preferredStableCityKey(canonicalResult: endCanonical)
+            updated.countryISO2 = endCanonical.iso2 ?? updated.countryISO2
+        }
+
+        return updated
+    }
 
     /// Finalize a journey by:
     /// - ensuring start/end city keys are resolved (best-effort),
@@ -94,15 +133,37 @@ enum JourneyFinalizer {
 
         geocoder.reverseGeocodeLocation(startLoc, preferredLocale: fixedLocale) { startPMs, _ in
             let startCanon = startPMs?.first.map { CityPlacemarkResolver.resolveCanonical(from: $0) }
-            let startKey = startCanon?.cityKey ?? ""
 
             geocoder.reverseGeocodeLocation(endLoc, preferredLocale: fixedLocale) { endPMs, _ in
                 let endCanon = endPMs?.first.map { CityPlacemarkResolver.resolveCanonical(from: $0) }
-                let endKey = endCanon?.cityKey ?? ""
+                let startCanonical = startCanon.map {
+                    ReverseGeocodeService.CanonicalResult(
+                        cityName: $0.city,
+                        iso2: $0.iso2,
+                        cityKey: $0.cityKey,
+                        level: $0.level,
+                        parentRegionKey: $0.parentRegionKey,
+                        availableLevels: $0.availableLevelNames,
+                        localeIdentifier: fixedLocale.identifier
+                    )
+                }
+                let endCanonical = endCanon.map {
+                    ReverseGeocodeService.CanonicalResult(
+                        cityName: $0.city,
+                        iso2: $0.iso2,
+                        cityKey: $0.cityKey,
+                        level: $0.level,
+                        parentRegionKey: $0.parentRegionKey,
+                        availableLevels: $0.availableLevelNames,
+                        localeIdentifier: fixedLocale.identifier
+                    )
+                }
 
-                // ✅ 写入城市key
-                r.startCityKey = startKey.isEmpty ? nil : startKey
-                r.endCityKey   = endKey.isEmpty ? nil : endKey
+                r = resolveCompletedRouteCityFields(
+                    route: r,
+                    startCanonical: startCanonical,
+                    endCanonical: endCanonical
+                )
 
                 // ✅ Always use city mode (intercity concept removed)
                 // All journeys belong to their starting city

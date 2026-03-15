@@ -810,6 +810,8 @@ struct JourneyMemoryDetailView: View {
     @State private var snapshotBeforeEdit: [JourneyMemory] = []
     @State private var draftOverallMemory: String = ""
     @State private var snapshotOverallMemoryBeforeEdit: String = ""
+    @State private var draftOverallMemoryImagePaths: [String] = []
+    @State private var snapshotOverallMemoryImagePathsBeforeEdit: [String] = []
 
     // Which memory's text field is focused (used to keep caret visible in the outer ScrollView).
     @FocusState private var focusedMemoryID: String?
@@ -824,7 +826,7 @@ struct JourneyMemoryDetailView: View {
     // Photo / Camera (edit mode)
     @State private var showCamera: Bool = false
     @State private var showPhotoLibrary: Bool = false
-    @State private var activeMemoryIndex: Int? = nil
+    @State private var activePhotoTarget: ActivePhotoTarget? = nil
     @State private var mirrorSelfie: Bool = false
     @State private var sidebarHideToken = UUID().uuidString
 
@@ -852,6 +854,11 @@ struct JourneyMemoryDetailView: View {
         self.cityName = cityName
         self.countryName = countryName
         self.readOnly = readOnly
+    }
+
+    private enum ActivePhotoTarget: Equatable {
+        case overallMemory
+        case memory(index: Int)
     }
     
     
@@ -980,6 +987,8 @@ struct JourneyMemoryDetailView: View {
                 snapshotBeforeEdit = sortedMemories
                 draftOverallMemory = journey.overallMemory ?? ""
                 snapshotOverallMemoryBeforeEdit = draftOverallMemory
+                draftOverallMemoryImagePaths = journey.overallMemoryImagePaths
+                snapshotOverallMemoryImagePathsBeforeEdit = journey.overallMemoryImagePaths
                 isEditing = false
                 focusedMemoryID = nil
                 return
@@ -989,8 +998,10 @@ struct JourneyMemoryDetailView: View {
                let saved = JourneyMemoryDetailDraftStore.load(userID: uid, journeyID: journey.id) {
                 draftMemories = saved.memories
                 snapshotBeforeEdit = saved.memories
-                draftOverallMemory = journey.overallMemory ?? ""
+                draftOverallMemory = saved.overallMemory
                 snapshotOverallMemoryBeforeEdit = draftOverallMemory
+                draftOverallMemoryImagePaths = saved.overallMemoryImagePaths
+                snapshotOverallMemoryImagePathsBeforeEdit = saved.overallMemoryImagePaths
                 isEditing = true
                 focusedMemoryID = saved.focusedMemoryID
                 JourneyMemoryDetailResumeStore.set(false, userID: uid, journeyID: journey.id)
@@ -1000,6 +1011,8 @@ struct JourneyMemoryDetailView: View {
                 snapshotBeforeEdit = sortedMemories
                 draftOverallMemory = journey.overallMemory ?? ""
                 snapshotOverallMemoryBeforeEdit = draftOverallMemory
+                draftOverallMemoryImagePaths = journey.overallMemoryImagePaths
+                snapshotOverallMemoryImagePathsBeforeEdit = journey.overallMemoryImagePaths
             }
         }
         .onDisappear {
@@ -1090,7 +1103,7 @@ struct JourneyMemoryDetailView: View {
         }
         .fullScreenCover(isPresented: $showPhotoLibrary) {
             PhotoLibraryPicker(
-                selectionLimit: max(1, 3 - (activeMemoryIndex.flatMap { draftMemories.indices.contains($0) ? draftMemories[$0].imagePaths.count : 0 } ?? 0)),
+                selectionLimit: max(1, remainingPhotoSlotsForActiveTarget()),
                 onImages: { images in
                     showPhotoLibrary = false
                     appendLibraryImagesToActiveMemory(images)
@@ -1352,15 +1365,66 @@ struct JourneyMemoryDetailView: View {
                     .padding(12)
                     .background(FigmaTheme.background)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                HStack(spacing: 12) {
+                    Button {
+                        openCameraForOverallMemory()
+                    } label: {
+                        Image(systemName: "camera.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
+                            .frame(width: 40, height: 40)
+                            .background(Color.black.opacity(0.05))
+                            .clipShape(Circle())
+                    }
+                    .disabled(draftOverallMemoryImagePaths.count >= 3)
+                    .opacity(draftOverallMemoryImagePaths.count >= 3 ? 0.35 : 1.0)
+
+                    Button {
+                        openPhotoLibraryForOverallMemory()
+                    } label: {
+                        Image(systemName: "photo.on.rectangle.angled")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
+                            .frame(width: 40, height: 40)
+                            .background(Color.black.opacity(0.05))
+                            .clipShape(Circle())
+                    }
+                    .disabled(draftOverallMemoryImagePaths.count >= 3)
+                    .opacity(draftOverallMemoryImagePaths.count >= 3 ? 0.35 : 1.0)
+
+                    Text(String(format: L10n.t("photo_count"), draftOverallMemoryImagePaths.count, 3))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.gray)
+
+                    Spacer()
+                }
+
+                if !draftOverallMemoryImagePaths.isEmpty {
+                    EditableMemoryImagesView(
+                        imagePaths: $draftOverallMemoryImagePaths,
+                        userID: sessionStore.currentUserID
+                    )
+                }
             } else {
-                Text(draftOverallMemory)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(Color(red: 0.48, green: 0.54, blue: 0.62))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .frame(minHeight: 52, alignment: .topLeading)
-                    .padding(12)
-                    .background(FigmaTheme.background)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                if !draftOverallMemory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(draftOverallMemory)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(Color(red: 0.48, green: 0.54, blue: 0.62))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(minHeight: 52, alignment: .topLeading)
+                        .padding(12)
+                        .background(FigmaTheme.background)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+            }
+
+            if !isEditing && !journey.overallMemoryImagePaths.isEmpty {
+                MemoryImagesView(
+                    imagePaths: journey.overallMemoryImagePaths,
+                    remoteImageURLs: [],
+                    userID: sessionStore.currentUserID
+                )
             }
         }
         .padding(.horizontal, 32)
@@ -1372,6 +1436,7 @@ struct JourneyMemoryDetailView: View {
     private func beginEditing() {
         snapshotBeforeEdit = draftMemories
         snapshotOverallMemoryBeforeEdit = draftOverallMemory
+        snapshotOverallMemoryImagePathsBeforeEdit = draftOverallMemoryImagePaths
         isEditing = true
         // Enter edit mode without auto-focusing any field; user controls scroll position.
         focusedMemoryID = nil
@@ -1380,6 +1445,7 @@ struct JourneyMemoryDetailView: View {
     private func cancelEditing() {
         draftMemories = snapshotBeforeEdit
         draftOverallMemory = snapshotOverallMemoryBeforeEdit
+        draftOverallMemoryImagePaths = snapshotOverallMemoryImagePathsBeforeEdit
         isEditing = false
         endEditing()
 
@@ -1399,11 +1465,13 @@ struct JourneyMemoryDetailView: View {
         j.memories = draftMemories
         let trimmedOverall = draftOverallMemory.trimmingCharacters(in: .whitespacesAndNewlines)
         j.overallMemory = trimmedOverall.isEmpty ? nil : trimmedOverall
+        j.overallMemoryImagePaths = draftOverallMemoryImagePaths
         store.upsertSnapshotThrottled(j, coordCount: j.coordinates.count)
         store.flushPersist(journey: j)
 
         snapshotBeforeEdit = draftMemories
         snapshotOverallMemoryBeforeEdit = draftOverallMemory
+        snapshotOverallMemoryImagePathsBeforeEdit = draftOverallMemoryImagePaths
         isEditing = false
         endEditing()
 
@@ -1416,36 +1484,82 @@ struct JourneyMemoryDetailView: View {
     private func persistDetailDraftIfNeeded(force: Bool = false) {
         guard isEditing || force else { return }
         let uid = sessionStore.currentUserID
-        let draft = JourneyMemoryDetailDraft(memories: draftMemories, focusedMemoryID: focusedMemoryID)
+        let draft = JourneyMemoryDetailDraft(
+            memories: draftMemories,
+            focusedMemoryID: focusedMemoryID,
+            overallMemory: draftOverallMemory,
+            overallMemoryImagePaths: draftOverallMemoryImagePaths
+        )
         JourneyMemoryDetailDraftStore.save(draft, userID: uid, journeyID: journey.id)
         JourneyMemoryDetailResumeStore.set(true, userID: uid, journeyID: journey.id)
     }
 
     // MARK: - Photo add helpers (edit mode)
+    private func remainingPhotoSlotsForActiveTarget() -> Int {
+        switch activePhotoTarget {
+        case .overallMemory:
+            return 3 - draftOverallMemoryImagePaths.count
+        case .memory(let idx):
+            guard draftMemories.indices.contains(idx) else { return 3 }
+            return 3 - draftMemories[idx].imagePaths.count
+        case nil:
+            return 3
+        }
+    }
+
     private func openCamera(for index: Int) {
-        activeMemoryIndex = index
+        activePhotoTarget = .memory(index: index)
         showCamera = true
     }
 
     private func openPhotoLibrary(for index: Int) {
-        activeMemoryIndex = index
+        activePhotoTarget = .memory(index: index)
+        showPhotoLibrary = true
+    }
+
+    private func openCameraForOverallMemory() {
+        activePhotoTarget = .overallMemory
+        showCamera = true
+    }
+
+    private func openPhotoLibraryForOverallMemory() {
+        activePhotoTarget = .overallMemory
         showPhotoLibrary = true
     }
 
     private func appendCapturedToActiveMemory(_ image: UIImage) {
-        guard let idx = activeMemoryIndex, draftMemories.indices.contains(idx) else { return }
-        guard draftMemories[idx].imagePaths.count < 3 else { return }
-        if let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) {
-            draftMemories[idx].imagePaths.append(filename)
+        guard let target = activePhotoTarget else { return }
+        switch target {
+        case .overallMemory:
+            guard draftOverallMemoryImagePaths.count < 3 else { return }
+            if let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) {
+                draftOverallMemoryImagePaths.append(filename)
+            }
+        case .memory(let idx):
+            guard draftMemories.indices.contains(idx), draftMemories[idx].imagePaths.count < 3 else { return }
+            if let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) {
+                draftMemories[idx].imagePaths.append(filename)
+            }
         }
     }
 
     private func appendLibraryImagesToActiveMemory(_ images: [UIImage]) {
-        guard let idx = activeMemoryIndex, draftMemories.indices.contains(idx) else { return }
-        for image in images {
-            if draftMemories[idx].imagePaths.count >= 3 { break }
-            if let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) {
-                draftMemories[idx].imagePaths.append(filename)
+        guard let target = activePhotoTarget else { return }
+        switch target {
+        case .overallMemory:
+            for image in images {
+                if draftOverallMemoryImagePaths.count >= 3 { break }
+                if let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) {
+                    draftOverallMemoryImagePaths.append(filename)
+                }
+            }
+        case .memory(let idx):
+            guard draftMemories.indices.contains(idx) else { return }
+            for image in images {
+                if draftMemories[idx].imagePaths.count >= 3 { break }
+                if let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) {
+                    draftMemories[idx].imagePaths.append(filename)
+                }
             }
         }
     }
@@ -1980,13 +2094,15 @@ private struct ShareImageItem: Identifiable {
 
 struct JourneyMemoryDetailExportPresentation {
     let overallMemoryText: String
+    let overallMemoryImagePaths: [String]
 
-    init(overallMemory: String?) {
+    init(overallMemory: String?, overallMemoryImagePaths: [String]) {
         self.overallMemoryText = overallMemory?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.overallMemoryImagePaths = overallMemoryImagePaths
     }
 
     var shouldShowOverallMemory: Bool {
-        !overallMemoryText.isEmpty
+        !overallMemoryText.isEmpty || !overallMemoryImagePaths.isEmpty
     }
 }
 
@@ -2057,7 +2173,10 @@ private struct JourneyMemoryDetailExportSnapshotView: View {
     }
 
     private var presentation: JourneyMemoryDetailExportPresentation {
-        JourneyMemoryDetailExportPresentation(overallMemory: overallMemory)
+        JourneyMemoryDetailExportPresentation(
+            overallMemory: overallMemory,
+            overallMemoryImagePaths: journey.overallMemoryImagePaths
+        )
     }
 
     var body: some View {
@@ -2163,14 +2282,24 @@ private struct JourneyMemoryDetailExportSnapshotView: View {
                 .tracking(1.2)
                 .foregroundColor(Color(red: 0.60, green: 0.63, blue: 0.69))
 
-            Text(presentation.overallMemoryText)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundColor(Color(red: 0.48, green: 0.54, blue: 0.62))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(minHeight: 52, alignment: .topLeading)
-                .padding(12)
-                .background(FigmaTheme.background)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            if !presentation.overallMemoryText.isEmpty {
+                Text(presentation.overallMemoryText)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(Color(red: 0.48, green: 0.54, blue: 0.62))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(minHeight: 52, alignment: .topLeading)
+                    .padding(12)
+                    .background(FigmaTheme.background)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+
+            if !presentation.overallMemoryImagePaths.isEmpty {
+                MemoryImagesView(
+                    imagePaths: presentation.overallMemoryImagePaths,
+                    remoteImageURLs: [],
+                    userID: userID
+                )
+            }
         }
         .padding(.horizontal, 32)
         .padding(.top, -8)

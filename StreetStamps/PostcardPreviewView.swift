@@ -166,7 +166,6 @@ struct PostcardPreviewView: View {
     private func sendNow() async {
         isSending = true
         errorText = nil
-        defer { isSending = false }
 
         // Send the raw (downsampled) photo – NOT the composed postcard image.
         // The recipient's client reconstructs the full postcard from metadata.
@@ -180,23 +179,14 @@ struct PostcardPreviewView: View {
             message: messageText
         )
 
-        await postcardCenter.enqueueSend(
+        postcardCenter.enqueueSendInBackground(
             draftID: draft.draftID,
             token: sessionStore.currentAccessToken,
             allowedCityIDs: allowedCityIDs,
             cityJourneyCount: selectedCityJourneyCount
         )
-
-        if let latest = postcardCenter.drafts.first(where: { $0.draftID == draft.draftID }), latest.status == .sent {
-            sentSuccessfully = true
-            return
-        }
-
-        if let latest = postcardCenter.drafts.first(where: { $0.draftID == draft.draftID }) {
-            errorText = latest.lastError ?? L10n.t("postcard_send_failed")
-        } else {
-            errorText = L10n.t("postcard_send_failed")
-        }
+        isSending = false
+        dismiss()
     }
 
     /// Save the downsampled raw photo to a temp file for upload.

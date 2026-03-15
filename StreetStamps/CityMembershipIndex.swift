@@ -91,7 +91,7 @@ struct CityMembershipContribution: Equatable {
     init?(journey: JourneyRoute?) {
         guard let journey, journey.isCompleted else { return nil }
 
-        let rawKey = (journey.startCityKey ?? journey.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawKey = journey.stableCityKey ?? ""
         let cityKey = rawKey.isEmpty ? journey.canonicalCityKeyFallback : rawKey
         guard !cityKey.isEmpty else { return nil }
 

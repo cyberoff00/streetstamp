@@ -468,7 +468,6 @@ final class UserSessionStore: ObservableObject {
 
     private static func loadOrCreateActiveLocalProfileID(guestID: String) -> String {
         if let existing = UserDefaults.standard.string(forKey: activeLocalProfileIDKey),
-           existing.hasPrefix("local_"),
            !existing.isEmpty {
             return existing
         }
@@ -531,7 +530,13 @@ final class UserSessionStore: ObservableObject {
            ) {
             let ids = dirs.compactMap { url -> String? in
                 guard (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { return nil }
-                return url.lastPathComponent
+                let name = url.lastPathComponent
+                // 排除当前版本的目录，只扫描真正的历史数据
+                if name.hasPrefix("local_") || name.hasPrefix("account_") ||
+                   name.hasPrefix("friend_preview_") || name.hasPrefix("temp_") {
+                    return nil
+                }
+                return name
             }
             rawCandidates.append(contentsOf: ids)
         }
@@ -656,16 +661,34 @@ final class UserSessionStore: ObservableObject {
     }
 
     private func autoRecoverLegacySourcesIfNeeded(targetUserID: String) {
+        // 🔴 CRITICAL FIX: 禁用自动恢复，防止数据污染
+        // 问题：自动恢复会把 friend_preview_* 和其他用户的数据错误合并
+        // 解决：只在用户明确操作时才恢复数据
+
+        // 只恢复真正的历史数据（同一个 guestID 的不同前缀）
+        let safeSourceUserIDs = legacyRecoverySourceUserIDs(for: targetUserID).filter { sourceUserID in
+            // 只允许恢复 guest_{当前guestID} 到 local_{当前guestID}
+            if targetUserID.hasPrefix("local_"), sourceUserID.hasPrefix("guest_") {
+                let localGuestID = String(targetUserID.dropFirst("local_".count))
+                let guestGuestID = String(sourceUserID.dropFirst("guest_".count))
+                return localGuestID == guestGuestID
+            }
+            return false
+        }
+
+        guard !safeSourceUserIDs.isEmpty else { return }
+
         var recoveredByTarget = loadAutoRecoveredGuestSources()
         var recoveredSources = Set(recoveredByTarget[targetUserID] ?? [])
         var changed = false
 
-        for sourceUserID in legacyRecoverySourceUserIDs(for: targetUserID) {
+        for sourceUserID in safeSourceUserIDs {
             if recoveredSources.contains(sourceUserID) { continue }
             do {
                 _ = try GuestDataRecoveryService.recover(from: sourceUserID, to: targetUserID)
                 recoveredSources.insert(sourceUserID)
                 changed = true
+                print("✅ 安全恢复: \(sourceUserID) -> \(targetUserID)")
             } catch {
                 print("⚠️ auto recover \(sourceUserID) -> \(targetUserID) failed: \(error)")
             }
@@ -816,20 +839,36 @@ final class UserSessionStore: ObservableObject {
         guestID: String,
         sourceDevice: String
     ) {
+        // 🔴 CRITICAL FIX: 禁用自动恢复，防止数据污染
+        let allSourceUserIDs = legacyRecoverySourceUserIDsWorker(
+            for: targetUserID,
+            guestID: guestID,
+            sourceDevice: sourceDevice
+        )
+
+        // 只恢复真正的历史数据（同一个 guestID 的不同前缀）
+        let safeSourceUserIDs = allSourceUserIDs.filter { sourceUserID in
+            if targetUserID.hasPrefix("local_"), sourceUserID.hasPrefix("guest_") {
+                let localGuestID = String(targetUserID.dropFirst("local_".count))
+                let guestGuestID = String(sourceUserID.dropFirst("guest_".count))
+                return localGuestID == guestGuestID
+            }
+            return false
+        }
+
+        guard !safeSourceUserIDs.isEmpty else { return }
+
         var recoveredByTarget = loadAutoRecoveredGuestSourcesWorker()
         var recoveredSources = Set(recoveredByTarget[targetUserID] ?? [])
         var changed = false
 
-        for sourceUserID in legacyRecoverySourceUserIDsWorker(
-            for: targetUserID,
-            guestID: guestID,
-            sourceDevice: sourceDevice
-        ) {
+        for sourceUserID in safeSourceUserIDs {
             if recoveredSources.contains(sourceUserID) { continue }
             do {
                 _ = try GuestDataRecoveryService.recover(from: sourceUserID, to: targetUserID)
                 recoveredSources.insert(sourceUserID)
                 changed = true
+                print("✅ 安全恢复: \(sourceUserID) -> \(targetUserID)")
             } catch {
                 print("⚠️ auto recover \(sourceUserID) -> \(targetUserID) failed: \(error)")
             }

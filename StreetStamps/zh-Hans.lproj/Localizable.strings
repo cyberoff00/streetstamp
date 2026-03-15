@@ -492,6 +492,7 @@
 "lifelog_steps_modal_title" = "今日步数";
 "lifelog_steps_modal_subtitle" = "继续加油，今天再增加 1000 步我们会再次提醒你。";
 "lifelog_steps_modal_close" = "关闭";
+"lifelog_steps_modal_summary_format" = "今天你在WORLDO上留下了许多足迹";
 "postcard_profile_title" = "明信片";
 "postcard_profile_subtitle" = "我寄出的 · 我收到的";
 "postcard_nav_title" = "明信片";
@@ -836,6 +837,7 @@
 "settings_icloud_sync_unavailable_desc" = "iCloud 当前不可用，请先在系统设置登录 iCloud。";
 "settings_restore_from_icloud" = "从 iCloud 恢复数据";
 "settings_restore_from_icloud_success" = "已恢复最新 iCloud 备份。";
+"settings_restart_app_to_see_changes" = "请重启 App 以查看装备更新。";
 "settings_restore_from_icloud_no_backup" = "没有找到更新的 iCloud 备份。";
 "settings_icloud_sync_enabled_hint" = "已开启 iCloud 同步，后续数据会自动上传。";
 "settings_icloud_sync_disabled_hint" = "已关闭 iCloud 同步，数据仅保存在本机。";

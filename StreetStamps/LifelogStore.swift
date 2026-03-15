@@ -30,7 +30,7 @@ final class LifelogStore: ObservableObject {
         var moodByDay: [String: String]?
     }
 
-    private struct LifelogTrackPoint: Codable {
+    struct LifelogTrackPoint: Codable {
         var id: String
         var lat: Double
         var lon: Double

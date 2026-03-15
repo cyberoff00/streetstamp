@@ -2,6 +2,45 @@ import XCTest
 @testable import StreetStamps
 
 final class CityDisplayNameResolverTests: XCTestCase {
+    override func tearDown() {
+        super.tearDown()
+        LanguagePreference.shared.currentLanguage = nil
+    }
+
+    func test_languagePreferenceDisplayLocalePrefersAppLanguageSelection() {
+        LanguagePreference.shared.currentLanguage = "en"
+
+        XCTAssertEqual(LanguagePreference.shared.effectiveLocaleIdentifier, "en")
+        XCTAssertEqual(LanguagePreference.shared.displayLocale.identifier, "en")
+    }
+
+    func test_cityLocalizedNameUsesAppDisplayLanguageInsteadOfSystemLocale() {
+        LanguagePreference.shared.currentLanguage = "en"
+        let city = City(
+            displayName: nil,
+            id: "Taipei|TW",
+            name: "Taipei",
+            countryISO2: "TW",
+            journeys: [],
+            boundaryPolygon: nil,
+            anchor: nil,
+            explorations: 1,
+            memories: 0,
+            thumbnailBasePath: nil,
+            thumbnailRoutePath: nil,
+            reservedLevelRaw: nil,
+            reservedParentRegionKey: nil,
+            reservedAvailableLevelNames: nil,
+            reservedAvailableLevelNamesLocaleID: nil,
+            localizedDisplayNameByLocale: [
+                "en": "Taipei",
+                "zh-Hans": "台北"
+            ]
+        )
+
+        XCTAssertEqual(city.localizedName, "Taipei")
+    }
+
     func test_cityLevelReconcilePolicy_skipsFreshProfileWhenCachedOptionsExist() {
         XCTAssertFalse(
             CityLevelReconcilePolicy.shouldFetchFreshProfile(

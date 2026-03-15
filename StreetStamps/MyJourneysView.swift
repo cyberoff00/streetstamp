@@ -294,7 +294,7 @@ struct MyJourneysView: View {
     private func refreshCityLocalizations() async {
         var coordByKey: [String: CLLocationCoordinate2D] = [:]
         for journey in allJourneys {
-            let key = (journey.startCityKey ?? journey.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = journey.stableCityKey ?? ""
             guard !key.isEmpty, key != "Unknown|", coordByKey[key] == nil else { continue }
             if let start = journey.startCoordinate, start.isValid {
                 coordByKey[key] = start
@@ -1562,7 +1562,7 @@ struct JourneyRouteDetailView: View {
 
     private func refreshLocalizedCityTitle() async {
         guard let journey else { return }
-        let key = (journey.startCityKey ?? journey.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = journey.stableCityKey ?? ""
         guard !key.isEmpty, key != "Unknown|" else { return }
 
         if let cachedCity = cachedCitiesByKey[key] {

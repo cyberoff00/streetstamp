@@ -299,6 +299,11 @@ enum JourneyCloudMigrationService {
             journeyStore.addCompletedJourney(route)
         }
 
+        let sourceEntries = Dictionary(
+            uniqueKeysWithValues: imported.map { ($0.id, JourneyRepairSource.accountCache(accountUserID: profile.id)) }
+        )
+        JourneyRepairSourceStore.merge(sourceEntries, userID: sessionStore.activeLocalProfileID)
+
         cityCache.rebuildFromJourneyStore()
 
         return imported.count

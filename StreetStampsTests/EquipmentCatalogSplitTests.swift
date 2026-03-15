@@ -69,14 +69,56 @@ final class EquipmentCatalogSplitTests: XCTestCase {
         XCTAssertTrue(hair.items.contains(where: { $0.images.front == "front_hair009" }))
         XCTAssertTrue(hair.items.contains(where: { $0.images.front == "front_hair012" }))
         XCTAssertTrue(suits.items.contains(where: { $0.images.front == "front_suit008" }))
+        XCTAssertTrue(suits.items.contains(where: { $0.images.front == "front_suit009" }))
         XCTAssertTrue(upper.items.contains(where: { $0.images.front == "front_upper015" }))
+        XCTAssertTrue(upper.items.contains(where: { $0.images.front == "front_upper016" }))
         XCTAssertTrue(under.items.contains(where: { $0.images.front == "front_under006" }))
+        XCTAssertTrue(under.items.contains(where: { $0.images.front == "front_under007" }))
         XCTAssertTrue(hats.items.contains(where: { $0.images.front == "front_hat012" }))
         XCTAssertTrue(glasses.items.contains(where: { $0.images.front == "front_glass012" }))
         XCTAssertTrue(accessories.items.contains(where: { $0.images.front == "front_ac007" }))
         XCTAssertTrue(accessories.items.contains(where: { $0.images.front == "front_ac008" }))
+        XCTAssertTrue(accessories.items.contains(where: { $0.images.front == "front_ac009" }))
         XCTAssertTrue(shoes.items.contains(where: { $0.images.front == "front_shoes001" }))
         XCTAssertTrue(shoes.items.contains(where: { $0.images.front == "front_shoes002" }))
+    }
+
+    func test_avatarCatalogAppendsSixNewestEquipmentAssetsToMatchingCategories() throws {
+        let catalog = try loadCatalog()
+
+        let pats = try XCTUnwrap(catalog.categories.first(where: { $0.id == "pat" }))
+        let suits = try XCTUnwrap(catalog.categories.first(where: { $0.id == "suit" }))
+        let accessories = try XCTUnwrap(catalog.categories.first(where: { $0.id == "accessory" }))
+
+        XCTAssertTrue(accessories.items.contains(where: { $0.id == "acc_011" && $0.images.front == "front_ac012" }))
+        XCTAssertTrue(accessories.items.contains(where: { $0.id == "acc_012" && $0.images.front == "front_ac013" }))
+
+        XCTAssertTrue(pats.items.contains(where: { $0.id == "pat_005" && $0.images.front == "front_pat005" }))
+        XCTAssertTrue(pats.items.contains(where: { $0.id == "pat_006" && $0.images.front == "front_pat006" }))
+        XCTAssertTrue(pats.items.contains(where: { $0.id == "pat_007" && $0.images.front == "front_pat007" }))
+
+        XCTAssertTrue(suits.items.contains(where: { $0.id == "suit_0010" && $0.images.front == "front_suit010" }))
+    }
+
+    func test_fallbackCatalogKeepsNewestImportedEquipmentItems() throws {
+        let catalog = AvatarCatalogStore.fallbackCatalog()
+
+        let suits = try XCTUnwrap(catalog.categories.first(where: { $0.id == "suit" }))
+        let upper = try XCTUnwrap(catalog.categories.first(where: { $0.id == "upper" }))
+        let under = try XCTUnwrap(catalog.categories.first(where: { $0.id == "under" }))
+        let pats = try XCTUnwrap(catalog.categories.first(where: { $0.id == "pat" }))
+        let accessories = try XCTUnwrap(catalog.categories.first(where: { $0.id == "accessory" }))
+
+        XCTAssertEqual(suits.items.last?.id, "suit_0010")
+        XCTAssertEqual(suits.items.last?.images.front, "front_suit010")
+        XCTAssertEqual(upper.items.last?.id, "upper_0017")
+        XCTAssertEqual(upper.items.last?.images.front, "front_upper016")
+        XCTAssertEqual(under.items.last?.id, "under_0008")
+        XCTAssertEqual(under.items.last?.images.front, "front_under007")
+        XCTAssertEqual(pats.items.last?.id, "pat_007")
+        XCTAssertEqual(pats.items.last?.images.front, "front_pat007")
+        XCTAssertEqual(accessories.items.last?.id, "acc_012")
+        XCTAssertEqual(accessories.items.last?.images.front, "front_ac013")
     }
 
     func test_equipmentCategoryIconsMapHatGlassAndAccessoryToDedicatedAssets() {

@@ -249,9 +249,9 @@ struct SettingsView: View {
     let showsBackButton: Bool
 
     @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var sessionStore: UserSessionStore
-    @EnvironmentObject private var journeyStore: JourneyStore
-    @EnvironmentObject private var cityCache: CityCache
+    @EnvironmentObject var sessionStore: UserSessionStore
+    @EnvironmentObject var journeyStore: JourneyStore
+    @EnvironmentObject var cityCache: CityCache
     @EnvironmentObject private var lifelogStore: LifelogStore
     @ObservedObject private var languagePreference = LanguagePreference.shared
 
@@ -289,6 +289,9 @@ struct SettingsView: View {
     @State private var showBackgroundModeInfo = false
     @State private var iCloudAvailable = false
     @State private var isRestoringFromICloud = false
+    @State var isRepairingData = false
+    @State var repairMessage = ""
+    @State var showRepairMessage = false
 
     private var appearance: MapAppearanceStyle {
         get { MapAppearanceStyle(rawValue: mapAppearanceRaw) ?? .dark }
@@ -344,6 +347,7 @@ struct SettingsView: View {
                 mapAppearanceSection
                 trackingAssistSection
                 generalSection
+                dataRepairSection
                 infoSection
             }
             .padding(.horizontal, 18)
@@ -1247,7 +1251,7 @@ struct SettingsView: View {
         .buttonStyle(.plain)
     }
 
-    private func sectionTitle(_ text: String) -> some View {
+    func sectionTitle(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 12, weight: .semibold))
             .tracking(0.6)
@@ -1332,9 +1336,11 @@ struct SettingsView: View {
         if enabled {
             journeyStore.flushPersist()
             lifelogStore.flushPersistNow()
-            let paths = StoragePath(userID: sessionStore.activeLocalProfileID)
+            let localUserID = sessionStore.activeLocalProfileID
+            let accountID = sessionStore.accountUserID ?? localUserID
+            let paths = StoragePath(userID: localUserID)
             await ICloudSyncService.shared.uploadSnapshotIfEnabled(
-                userID: sessionStore.activeLocalProfileID,
+                userID: accountID,
                 paths: paths,
                 reason: "settings_toggle_on"
             )
@@ -1351,10 +1357,11 @@ struct SettingsView: View {
         isRestoringFromICloud = true
         defer { isRestoringFromICloud = false }
 
-        let userID = sessionStore.activeLocalProfileID
-        let paths = StoragePath(userID: userID)
+        let localUserID = sessionStore.activeLocalProfileID
+        let accountID = sessionStore.accountUserID ?? localUserID
+        let paths = StoragePath(userID: localUserID)
         let restored = await ICloudSyncService.shared.restoreLatestIfNeeded(
-            userID: userID,
+            userID: accountID,
             paths: paths,
             force: true
         )
@@ -1363,7 +1370,9 @@ struct SettingsView: View {
             journeyStore.load()
             cityCache.rebuildFromJourneyStore()
             lifelogStore.load()
-            accountMessage = L10n.t("settings_restore_from_icloud_success")
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            print("🔄 iCloud restore: journeys=\(journeyStore.journeys.count), cities=\(cityCache.cachedCities.count)")
+            accountMessage = L10n.t("settings_restore_from_icloud_success") + "\n" + L10n.t("settings_restart_app_to_see_changes")
         } else {
             accountMessage = L10n.t("settings_restore_from_icloud_no_backup")
         }

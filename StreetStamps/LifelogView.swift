@@ -11,6 +11,12 @@ enum LifelogStepMilestonePresentation {
     static let supportsBackdropDismiss = true
     static let showsFooterCloseButton = false
     static let closeButtonPlacement: LifelogStepMilestoneCloseButtonPlacement = .topTrailing
+    static let showsCelebrationHeadline = false
+    static let contentSpacing: CGFloat = 14
+    static let heroIconDiameter: CGFloat = 60
+    static let heroIconSize: CGFloat = 24
+    static let topPadding: CGFloat = 14
+    static let horizontalPadding: CGFloat = 22
 }
 
 enum LifelogRenderModeSelector {
@@ -67,6 +73,38 @@ enum LifelogRenderModeSelector {
 private struct LifelogShareImageItem: Identifiable {
     let id = UUID()
     let image: UIImage
+}
+
+enum LifelogRenderRefreshPolicy {
+    static func placeholderSnapshot(
+        currentSnapshot: LifelogRenderSnapshot,
+        targetDay: Date,
+        cachedSnapshot: LifelogRenderSnapshot?
+    ) -> LifelogRenderSnapshot {
+        if let cachedSnapshot {
+            return cachedSnapshot
+        }
+
+        if hasVisibleContent(currentSnapshot) {
+            return currentSnapshot
+        }
+
+        return LifelogRenderSnapshot(
+            selectedDay: targetDay,
+            cachedPathCoordsWGS84: [],
+            farRouteSegments: [],
+            footprintRuns: [],
+            selectedDayCenterCoordinate: nil,
+            isHighQuality: false
+        )
+    }
+
+    private static func hasVisibleContent(_ snapshot: LifelogRenderSnapshot) -> Bool {
+        !snapshot.cachedPathCoordsWGS84.isEmpty ||
+        !snapshot.farRouteSegments.isEmpty ||
+        !snapshot.footprintRuns.isEmpty ||
+        snapshot.selectedDayCenterCoordinate != nil
+    }
 }
 
 enum LifelogFootprintSampler {
@@ -1370,25 +1408,19 @@ struct LifelogView: View {
             "schedule generation=\(generation) day=\(debugDayString(targetDay)) " +
             "viewport=\(viewport != nil) country=\(countryISO2 ?? "nil")"
         )
-        let isSwitchingDay: Bool = {
-            guard let currentDay = renderSnapshot.selectedDay else { return true }
-            return !Calendar.current.isDate(currentDay, inSameDayAs: targetDay)
-        }()
-        if let cached = lifelogRenderCache.cachedRenderSnapshot(
+        let cachedSnapshot = lifelogRenderCache.cachedRenderSnapshot(
             day: targetDay,
             countryISO2: countryISO2,
             viewport: viewport
-        ) {
-            applyRenderSnapshotIfCurrent(cached, generation: generation)
-        } else if isSwitchingDay {
+        )
+        if let cachedSnapshot {
+            applyRenderSnapshotIfCurrent(cachedSnapshot, generation: generation)
+        } else {
             applyRenderSnapshotIfCurrent(
-                LifelogRenderSnapshot(
-                    selectedDay: targetDay,
-                    cachedPathCoordsWGS84: [],
-                    farRouteSegments: [],
-                    footprintRuns: [],
-                    selectedDayCenterCoordinate: nil,
-                    isHighQuality: false
+                LifelogRenderRefreshPolicy.placeholderSnapshot(
+                    currentSnapshot: renderSnapshot,
+                    targetDay: targetDay,
+                    cachedSnapshot: cachedSnapshot
                 ),
                 generation: generation
             )
@@ -1664,25 +1696,7 @@ struct LifelogView: View {
                     }
                 }
 
-            VStack(alignment: .center, spacing: 16) {
-                HStack {
-                    Spacer()
-                    if LifelogStepMilestonePresentation.closeButtonPlacement == .topTrailing {
-                        Button {
-                            dismissStepModal()
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundColor(FigmaTheme.subtext)
-                                .frame(width: 30, height: 30)
-                                .background(FigmaTheme.background)
-                                .clipShape(Circle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .frame(maxWidth: .infinity)
-
+            VStack(alignment: .center, spacing: LifelogStepMilestonePresentation.contentSpacing) {
                 ZStack {
                     Circle()
                         .fill(
@@ -1692,18 +1706,23 @@ struct LifelogView: View {
                                 endPoint: .bottomTrailing
                             )
                         )
-                        .frame(width: 72, height: 72)
+                        .frame(
+                            width: LifelogStepMilestonePresentation.heroIconDiameter,
+                            height: LifelogStepMilestonePresentation.heroIconDiameter
+                        )
 
                     Image(systemName: "shoeprints.fill")
-                        .font(.system(size: 28, weight: .bold))
+                        .font(.system(size: LifelogStepMilestonePresentation.heroIconSize, weight: .bold))
                         .foregroundColor(FigmaTheme.primary)
                 }
                 .frame(maxWidth: .infinity)
 
-                VStack(spacing: 8) {
-                    Text("🎉 太棒了！")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundColor(FigmaTheme.primary)
+                VStack(spacing: 6) {
+                    if LifelogStepMilestonePresentation.showsCelebrationHeadline {
+                        Text("🎉 太棒了！")
+                            .font(.system(size: 18, weight: .bold, design: .rounded))
+                            .foregroundColor(FigmaTheme.primary)
+                    }
 
                     Text(L10n.t("lifelog_steps_modal_title"))
                         .font(.system(size: 20, weight: .black, design: .rounded))
@@ -1719,7 +1738,7 @@ struct LifelogView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                     .multilineTextAlignment(.center)
 
-                Text("今天你在地球上又留下了 \(formattedStepCount(stepModalStepCount)) 步足迹")
+                Text(String(format: L10n.t("lifelog_steps_modal_summary_format"), formattedStepCount(stepModalStepCount)))
                     .font(.system(size: 15, weight: .medium, design: .rounded))
                     .foregroundColor(FigmaTheme.subtext)
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -1739,13 +1758,32 @@ struct LifelogView: View {
                     .buttonStyle(.plain)
                 }
             }
-            .padding(20)
+            .padding(.top, LifelogStepMilestonePresentation.topPadding)
+            .padding(.horizontal, LifelogStepMilestonePresentation.horizontalPadding)
+            .padding(.bottom, 22)
             .background(FigmaTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .stroke(FigmaTheme.border, lineWidth: 1)
             )
+            .overlay(alignment: .topTrailing) {
+                if LifelogStepMilestonePresentation.closeButtonPlacement == .topTrailing {
+                    Button {
+                        dismissStepModal()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(FigmaTheme.subtext)
+                            .frame(width: 28, height: 28)
+                            .background(FigmaTheme.background.opacity(0.92))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 12)
+                    .padding(.trailing, 12)
+                }
+            }
             .shadow(color: Color.black.opacity(0.16), radius: 20, x: 0, y: 8)
             .padding(.horizontal, 20)
         }

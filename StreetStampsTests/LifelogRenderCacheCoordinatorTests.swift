@@ -2,6 +2,30 @@ import XCTest
 @testable import StreetStamps
 
 final class LifelogRenderCacheCoordinatorTests: XCTestCase {
+    func test_placeholderSnapshotWhileSwitchingDay_prefersExistingSnapshotOverEmptyState() {
+        let currentDay = Calendar.current.startOfDay(for: Date())
+        let targetDay = Calendar.current.date(byAdding: .day, value: -1, to: currentDay) ?? currentDay
+        let existing = LifelogRenderSnapshot(
+            selectedDay: currentDay,
+            cachedPathCoordsWGS84: [CoordinateCodable(lat: 37.7749, lon: -122.4194)],
+            farRouteSegments: [],
+            footprintRuns: [[CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194)]],
+            selectedDayCenterCoordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
+            isHighQuality: true
+        )
+
+        let placeholder = LifelogRenderRefreshPolicy.placeholderSnapshot(
+            currentSnapshot: existing,
+            targetDay: targetDay,
+            cachedSnapshot: nil
+        )
+
+        XCTAssertEqual(placeholder.selectedDay, currentDay)
+        XCTAssertEqual(placeholder.cachedPathCoordsWGS84.count, 1)
+        XCTAssertEqual(placeholder.footprintRuns.count, 1)
+        XCTAssertTrue(placeholder.isHighQuality)
+    }
+
     @MainActor
     func test_noteCountryAttributionRefresh_invalidatesTodayOnlyAndUpdatesWarmupCountry() {
         let coordinator = LifelogRenderCacheCoordinator()

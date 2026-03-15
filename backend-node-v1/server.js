@@ -1162,7 +1162,18 @@ function mergeCityCardPayloads(existingCards, incomingCards, snapshotComplete) {
     out.push(card);
   }
 
-  return out;
+  // Deduplicate final result by city ID
+  const seen = new Map();
+  const deduplicated = [];
+  for (const card of out) {
+    const id = String(card.id);
+    if (!seen.has(id)) {
+      seen.set(id, true);
+      deduplicated.push(card);
+    }
+  }
+
+  return deduplicated;
 }
 
 function safeExt(fileName) {

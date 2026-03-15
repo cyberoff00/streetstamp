@@ -80,4 +80,73 @@ final class PostcardSendFlowPerformanceTests: XCTestCase {
             "enqueueSend should return without waiting for sent/received refresh requests to finish"
         )
     }
+
+    @MainActor
+    func test_enqueueSendInBackground_returnsImmediatelyWhileUploadContinues() async throws {
+        let postcardCenter = PostcardCenter(userID: "perf-user-\(UUID().uuidString)")
+        let localImageURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("postcard-test-\(UUID().uuidString).jpg")
+        try Data([0xFF, 0xD8, 0xFF]).write(to: localImageURL, options: .atomic)
+
+        BackendAPIClient.shared.installTestingTransport { request in
+            let path = request.url?.path ?? ""
+            let url = try XCTUnwrap(request.url)
+            let headers = ["Content-Type": "application/json"]
+
+            if path == "/v1/media/upload" {
+                try await Task.sleep(nanoseconds: 2_000_000_000)
+                let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: headers)!
+                let body = #"{"objectKey":"obj-1","url":"https://example.com/postcard.jpg"}"#.data(using: .utf8)!
+                return (body, response)
+            }
+
+            if path == "/v1/postcards/send" {
+                let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: headers)!
+                let body = #"{"messageID":"msg-1","sentAt":"2026-01-01T00:00:00.000Z"}"#.data(using: .utf8)!
+                return (body, response)
+            }
+
+            if path == "/v1/postcards" {
+                let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: headers)!
+                let body = #"{"items":[]}"#.data(using: .utf8)!
+                return (body, response)
+            }
+
+            XCTFail("Unexpected request path: \(path)")
+            let response = HTTPURLResponse(url: url, statusCode: 404, httpVersion: nil, headerFields: headers)!
+            let body = #"{"message":"not found"}"#.data(using: .utf8)!
+            return (body, response)
+        }
+
+        let draft = postcardCenter.createDraft(
+            toUserID: "friend-1",
+            toDisplayName: "Friend",
+            cityID: "city-1",
+            cityName: "London",
+            photoLocalPath: localImageURL.path,
+            message: "hello"
+        )
+
+        let start = Date()
+        postcardCenter.enqueueSendInBackground(
+            draftID: draft.draftID,
+            token: "token-1",
+            allowedCityIDs: ["city-1"],
+            cityJourneyCount: 1
+        )
+        let elapsed = Date().timeIntervalSince(start)
+
+        let sendingDraft = try XCTUnwrap(postcardCenter.drafts.first(where: { $0.draftID == draft.draftID }))
+        XCTAssertEqual(sendingDraft.status, .sending)
+        XCTAssertLessThan(
+            elapsed,
+            0.2,
+            "background enqueue should not wait for the upload request to finish"
+        )
+
+        try await Task.sleep(nanoseconds: 2_300_000_000)
+
+        let sentDraft = try XCTUnwrap(postcardCenter.drafts.first(where: { $0.draftID == draft.draftID }))
+        XCTAssertEqual(sentDraft.status, .sent)
+    }
 }

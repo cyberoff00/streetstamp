@@ -125,6 +125,12 @@ enum GuestDataRecoveryService {
         )
 
         let mergedJourneyCount = max(0, targetAfterIDs.count - targetBeforeIDs.count)
+        let importedJourneyIDs = Array(Set(targetAfterIDs).subtracting(targetBeforeIDs))
+        let sourceTag = repairSource(for: sourceUserID)
+        if sourceTag != .unknown {
+            let entries = Dictionary(uniqueKeysWithValues: importedJourneyIDs.map { ($0, sourceTag) })
+            JourneyRepairSourceStore.merge(entries, userID: targetUserID)
+        }
 
         return GuestRecoveryResult(
             mergedJourneyCount: mergedJourneyCount,
@@ -134,6 +140,16 @@ enum GuestDataRecoveryService {
             replacedLifelog: replacedLifelog,
             mergedMood: mergedMood
         )
+    }
+
+    private static func repairSource(for sourceUserID: String) -> JourneyRepairSource {
+        if sourceUserID.hasPrefix("guest_") {
+            return .deviceGuest(guestID: String(sourceUserID.dropFirst("guest_".count)))
+        }
+        if sourceUserID.hasPrefix("account_") {
+            return .accountCache(accountUserID: String(sourceUserID.dropFirst("account_".count)))
+        }
+        return .unknown
     }
 
     private static func summarize(userID: String) -> GuestRecoveryCandidate {

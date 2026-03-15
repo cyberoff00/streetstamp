@@ -39,11 +39,12 @@ struct City: Identifiable {
     /// `displayName` is already normalized through `CityPlacemarkResolver.displayTitle`,
     /// so it should win over any stale persisted localized cache.
     var localizedName: String {
+        let localeID = LanguagePreference.shared.effectiveLocaleIdentifier
         if let displayName,
            !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return displayName
         }
-        if let localized = localizedDisplayNameByLocale?[Locale.current.identifier]?
+        if let localized = localizedDisplayNameByLocale?[localeID]?
             .trimmingCharacters(in: .whitespacesAndNewlines),
            !localized.isEmpty {
             return localized
@@ -60,7 +61,7 @@ final class CityLibraryVM: ObservableObject {
     nonisolated static func normalizedPrefetchedDisplayTitle(
         for city: City,
         candidateLocalizedTitle: String?,
-        locale: Locale = .current
+        locale: Locale = LanguagePreference.shared.displayLocale
     ) -> String {
         let trimmedCandidate = candidateLocalizedTitle?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -118,7 +119,7 @@ final class CityLibraryVM: ObservableObject {
     private func makeCity(from cached: CachedCity, journeysById: [String: JourneyRoute]) -> City {
         let js = cached.journeyIds.compactMap { journeysById[$0] }.filter { $0.isCompleted }
         return City(
-            displayName: CityPlacemarkResolver.displayTitle(for: cached, locale: .current),
+            displayName: CityPlacemarkResolver.displayTitle(for: cached, locale: LanguagePreference.shared.displayLocale),
             id: cached.id,
             name: cached.name,
             countryISO2: cached.countryISO2,
@@ -162,7 +163,7 @@ final class CityLibraryVM: ObservableObject {
         for c in cached {
             out.append(
                 City(
-                    displayName: CityPlacemarkResolver.displayTitle(for: c, locale: .current),
+                    displayName: CityPlacemarkResolver.displayTitle(for: c, locale: LanguagePreference.shared.displayLocale),
                     id: c.id,
                     name: c.name,
                     countryISO2: c.countryISO2,
@@ -198,6 +199,7 @@ final class CityLibraryVM: ObservableObject {
         var localizedUpdates: [(cityKey: String, displayName: String)] = []
 
         for city in snapshot {
+            let displayLocale = LanguagePreference.shared.displayLocale
             let coord = city.anchor ?? city.allCoordinates.first
             guard let coord,
                   CLLocationCoordinate2DIsValid(coord),
@@ -217,7 +219,7 @@ final class CityLibraryVM: ObservableObject {
                 parentRegionKey: city.reservedParentRegionKey,
                 preferredLevel: city.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
                 localizedDisplayNameByLocale: city.localizedDisplayNameByLocale,
-                locale: .current
+                locale: displayLocale
             )
             if !unified.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 await MainActor.run {
@@ -236,12 +238,12 @@ final class CityLibraryVM: ObservableObject {
                 let t = Self.normalizedPrefetchedDisplayTitle(
                     for: city,
                     candidateLocalizedTitle: cached,
-                    locale: .current
+                    locale: displayLocale
                 ).trimmingCharacters(in: .whitespacesAndNewlines)
                 if !t.isEmpty {
                     CityLocalizationDebugLogger.log(
                         "cityCardPrefetch",
-                        "cityKey=\(city.id) locale=\(Locale.current.identifier) source=cachedDisplayTitle candidate=\(cached) resolved=\(t)"
+                        "cityKey=\(city.id) locale=\(displayLocale.identifier) source=cachedDisplayTitle candidate=\(cached) resolved=\(t)"
                     )
                     await MainActor.run {
                         if let idx = self.cities.firstIndex(where: { $0.id == city.id }) {
@@ -266,12 +268,12 @@ final class CityLibraryVM: ObservableObject {
                 let t = Self.normalizedPrefetchedDisplayTitle(
                     for: city,
                     candidateLocalizedTitle: fetched,
-                    locale: .current
+                    locale: displayLocale
                 ).trimmingCharacters(in: .whitespacesAndNewlines)
                 if !t.isEmpty {
                     CityLocalizationDebugLogger.log(
                         "cityCardPrefetch",
-                        "cityKey=\(city.id) locale=\(Locale.current.identifier) source=displayTitle candidate=\(fetched) resolved=\(t)"
+                        "cityKey=\(city.id) locale=\(displayLocale.identifier) source=displayTitle candidate=\(fetched) resolved=\(t)"
                     )
                     await MainActor.run {
                         if let idx = self.cities.firstIndex(where: { $0.id == city.id }) {
@@ -289,7 +291,7 @@ final class CityLibraryVM: ObservableObject {
         // Batch-persist localized names to CityCache for cold-start access
         if !localizedUpdates.isEmpty {
             await MainActor.run {
-                self.cityCache?.updateLocalizedDisplayNames(localizedUpdates, locale: .current)
+                self.cityCache?.updateLocalizedDisplayNames(localizedUpdates, locale: LanguagePreference.shared.displayLocale)
             }
         }
     }
@@ -299,6 +301,7 @@ final class CityLibraryVM: ObservableObject {
             self.cities.first(where: { $0.id == cityID })
         }
         guard let city else { return }
+        let displayLocale = LanguagePreference.shared.displayLocale
 
         let coord = city.anchor ?? city.allCoordinates.first
         guard let coord,
@@ -317,7 +320,7 @@ final class CityLibraryVM: ObservableObject {
             parentRegionKey: city.reservedParentRegionKey,
             preferredLevel: city.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
             localizedDisplayNameByLocale: city.localizedDisplayNameByLocale,
-            locale: .current
+            locale: displayLocale
         )
         if !unified.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             await MainActor.run {
@@ -335,18 +338,18 @@ final class CityLibraryVM: ObservableObject {
             let t = Self.normalizedPrefetchedDisplayTitle(
                 for: city,
                 candidateLocalizedTitle: cached,
-                locale: .current
+                locale: displayLocale
             ).trimmingCharacters(in: .whitespacesAndNewlines)
             if !t.isEmpty {
                 CityLocalizationDebugLogger.log(
                     "cityCardPrefetch",
-                    "cityKey=\(city.id) locale=\(Locale.current.identifier) source=cachedDisplayTitle.single candidate=\(cached) resolved=\(t)"
+                    "cityKey=\(city.id) locale=\(displayLocale.identifier) source=cachedDisplayTitle.single candidate=\(cached) resolved=\(t)"
                 )
                 await MainActor.run {
                     if let idx = self.cities.firstIndex(where: { $0.id == cityID }) {
                         self.cities[idx].displayName = t
                     }
-                    self.cityCache?.updateLocalizedDisplayName(cityKey: key, locale: .current, displayName: t)
+                    self.cityCache?.updateLocalizedDisplayName(cityKey: key, locale: displayLocale, displayName: t)
                 }
             }
             return
@@ -357,18 +360,18 @@ final class CityLibraryVM: ObservableObject {
             let t = Self.normalizedPrefetchedDisplayTitle(
                 for: city,
                 candidateLocalizedTitle: fetched,
-                locale: .current
+                locale: displayLocale
             ).trimmingCharacters(in: .whitespacesAndNewlines)
             if !t.isEmpty {
                 CityLocalizationDebugLogger.log(
                     "cityCardPrefetch",
-                    "cityKey=\(city.id) locale=\(Locale.current.identifier) source=displayTitle.single candidate=\(fetched) resolved=\(t)"
+                    "cityKey=\(city.id) locale=\(displayLocale.identifier) source=displayTitle.single candidate=\(fetched) resolved=\(t)"
                 )
                 await MainActor.run {
                     if let idx = self.cities.firstIndex(where: { $0.id == cityID }) {
                         self.cities[idx].displayName = t
                     }
-                    self.cityCache?.updateLocalizedDisplayName(cityKey: key, locale: .current, displayName: t)
+                    self.cityCache?.updateLocalizedDisplayName(cityKey: key, locale: displayLocale, displayName: t)
                 }
             }
         }

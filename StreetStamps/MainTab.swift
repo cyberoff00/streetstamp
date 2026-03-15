@@ -338,8 +338,7 @@ enum TabRenderPolicy {
     }
 
     static func keepsViewAliveAfterSelection(_ tab: NavigationTab) -> Bool {
-        // Lifelog hosts a heavy map stack; keep it off-tree when not active.
-        tab != .lifelog
+        true
     }
 }
 

@@ -68,7 +68,7 @@ enum DataMigrator {
         let legacyPhotosDir = docs.appendingPathComponent("StreetStampsPhotos", isDirectory: true)
         try moveContentsIfExists(from: legacyPhotosDir, to: paths.photosDir, fm: fm)
 
-        try rebuildJourneyIndexIfNeeded(journeysDir: paths.journeysDir, fm: fm)
+        try rebuildJourneyIndex(journeysDir: paths.journeysDir, fm: fm)
 
         // Write marker (atomic-ish)
         let markerData = Data("migrated_v1".utf8)
@@ -148,7 +148,7 @@ enum DataMigrator {
         let legacyPhotosDir = docs.appendingPathComponent("StreetStampsPhotos", isDirectory: true)
         try moveContentsIfExists(from: legacyPhotosDir, to: paths.photosDir, fm: fm)
 
-        try rebuildJourneyIndexIfNeeded(journeysDir: paths.journeysDir, fm: fm)
+        try rebuildJourneyIndex(journeysDir: paths.journeysDir, fm: fm)
     }
     
     // MARK: - Intercity Routes to Starting City Migration (V3)
@@ -333,16 +333,9 @@ enum DataMigrator {
         return value.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" }.map(String.init).joined()
     }
 
-    private static func rebuildJourneyIndexIfNeeded(journeysDir: URL, fm: FileManager) throws {
+    private static func rebuildJourneyIndex(journeysDir: URL, fm: FileManager) throws {
         guard fm.fileExists(atPath: journeysDir.path) else { return }
         let indexURL = journeysDir.appendingPathComponent("index.json", isDirectory: false)
-
-        if fm.fileExists(atPath: indexURL.path),
-           let data = try? Data(contentsOf: indexURL),
-           let ids = try? JSONDecoder().decode([String].self, from: data),
-           !ids.isEmpty {
-            return
-        }
 
         let entries = try fm.contentsOfDirectory(at: journeysDir, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
         var ids: [String] = []

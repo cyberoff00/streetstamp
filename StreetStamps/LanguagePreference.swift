@@ -19,4 +19,12 @@ final class LanguagePreference: ObservableObject {
         }
         return Locale.preferredLanguages
     }
+
+    var effectiveLocaleIdentifier: String {
+        effectiveLanguages.first ?? Locale.current.identifier
+    }
+
+    var displayLocale: Locale {
+        Locale(identifier: effectiveLocaleIdentifier)
+    }
 }

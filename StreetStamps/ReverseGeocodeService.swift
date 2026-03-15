@@ -88,7 +88,7 @@ actor ReverseGeocodeService {
             level: CityPlacemarkResolver.CardLevel,
             parentRegionKey: String?,
             availableLevels: [CityPlacemarkResolver.CardLevel: String],
-            localeIdentifier: String = Locale.current.identifier
+            localeIdentifier: String = LanguagePreference.shared.effectiveLocaleIdentifier
         ) {
             self.cityName = cityName
             self.iso2 = iso2
@@ -166,7 +166,8 @@ actor ReverseGeocodeService {
 
     /// Localized hierarchy snapshot for UI labels. Uses `Locale.current`.
     func localizedHierarchy(for location: CLLocation) async -> CanonicalResult? {
-        let localeCell = "\(cellKey(for: location))|\(Locale.current.identifier)"
+        let displayLocale = LanguagePreference.shared.displayLocale
+        let localeCell = "\(cellKey(for: location))|\(displayLocale.identifier)"
 
         if let cached = localizedHierarchyCacheByLocaleCell[localeCell] {
             return cached
@@ -190,7 +191,7 @@ actor ReverseGeocodeService {
         localizedHierarchyInFlightByLocaleCell[localeCell] = []
 
         let result: CanonicalResult? = await withCheckedContinuation { cont in
-            canonicalGeocoder.reverseGeocodeLocation(location, preferredLocale: Locale.current) { placemarks, error in
+            canonicalGeocoder.reverseGeocodeLocation(location, preferredLocale: displayLocale) { placemarks, error in
                 if let nsErr = error as NSError? {
                     Task { await self.handlePossibleThrottle(nsErr) }
                 }
@@ -206,7 +207,7 @@ actor ReverseGeocodeService {
                     level: canon.level,
                     parentRegionKey: canon.parentRegionKey,
                     availableLevels: canon.availableLevelNames,
-                    localeIdentifier: Locale.current.identifier
+                    localeIdentifier: displayLocale.identifier
                 ))
             }
         }
@@ -216,7 +217,7 @@ actor ReverseGeocodeService {
             CityLocalizationDebugLogger.log(
                 "localizedHierarchy",
                 CityLocalizationDebugTrace.localizedHierarchy(
-                    locale: Locale.current,
+                    locale: displayLocale,
                     cellKey: localeCell,
                     result: result
                 )
@@ -234,7 +235,8 @@ actor ReverseGeocodeService {
     /// - Uses Locale.current.
     /// - Returns cached title immediately; otherwise nil if rate-limited/throttled.
     func displayTitle(for location: CLLocation, cityKey: String, parentRegionKey: String? = nil) async -> String? {
-        let localeKey = displayCacheKey(cityKey: cityKey, locale: Locale.current, parentRegionKey: parentRegionKey)
+        let displayLocale = LanguagePreference.shared.displayLocale
+        let localeKey = displayCacheKey(cityKey: cityKey, locale: displayLocale, parentRegionKey: parentRegionKey)
         if let cached = displayCacheByLocaleKey[localeKey] {
             return cached
         }
@@ -257,7 +259,7 @@ actor ReverseGeocodeService {
         displayInFlightByLocaleKey[localeKey] = []
 
         let title: String? = await withCheckedContinuation { cont in
-            displayGeocoder.reverseGeocodeLocation(location, preferredLocale: Locale.current) { placemarks, error in
+            displayGeocoder.reverseGeocodeLocation(location, preferredLocale: displayLocale) { placemarks, error in
                 if let nsErr = error as NSError? {
                     // Completion may be invoked off-actor; hop back before mutating actor state.
                     Task { await self.handlePossibleThrottle(nsErr) }
@@ -273,7 +275,7 @@ actor ReverseGeocodeService {
                     fallbackTitle: disp.title,
                     parentRegionKey: parentRegionKey,
                     preferredLevel: disp.level,
-                    locale: Locale.current
+                    locale: displayLocale
                 )
                 cont.resume(returning: title)
             }
@@ -283,7 +285,7 @@ actor ReverseGeocodeService {
             displayCacheByLocaleKey[localeKey] = title
             CityLocalizationDebugLogger.log(
                 "displayCacheWrite",
-                "locale=\(Locale.current.identifier) cacheKey=\(localeKey) title=\(title)"
+                "locale=\(displayLocale.identifier) cacheKey=\(localeKey) title=\(title)"
             )
             schedulePersist()
         }
