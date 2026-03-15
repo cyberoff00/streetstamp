@@ -98,6 +98,7 @@ struct PostcardInboxView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
+        .background(SwipeBackEnabler())
         .task {
             await refreshInbox()
             if focusMessageID != nil {
@@ -142,6 +143,7 @@ struct PostcardInboxView: View {
                     nickname: myDisplayName.uppercased(),
                     messageText: item.messageText,
                     photoSource: photoSource(for: item),
+                    photoURL: item.photoURL,
                     avatarLoadout: PostcardInboxPresentation.avatarLoadout(
                         for: item,
                         box: .sent,
@@ -150,7 +152,8 @@ struct PostcardInboxView: View {
                         friendLoadoutsByUserID: friendLoadoutsByUserID
                     ),
                     sentDate: item.sentAt,
-                    metaLabel: "\(L10n.t("postcard_to_prefix"))\(recipientLabel)"
+                    metaLabel: "\(L10n.t("postcard_to_prefix"))\(recipientLabel)",
+                    reaction: item.reaction
                 )
             }
 
@@ -165,6 +168,7 @@ struct PostcardInboxView: View {
                     nickname: myDisplayName.uppercased(),
                     messageText: draft.message,
                     photoSource: draftPhotoSource(draft),
+                    photoURL: nil,
                     avatarLoadout: myLoadout,
                     sentDate: draft.sentAt ?? draft.updatedAt,
                     metaLabel: "\(L10n.t("postcard_to_prefix"))\(recipientLabel)",
@@ -192,6 +196,7 @@ struct PostcardInboxView: View {
                     nickname: senderLabel.uppercased(),
                     messageText: item.messageText,
                     photoSource: photoSource(for: item),
+                    photoURL: item.photoURL,
                     avatarLoadout: PostcardInboxPresentation.avatarLoadout(
                         for: item,
                         box: .received,
@@ -200,8 +205,19 @@ struct PostcardInboxView: View {
                         friendLoadoutsByUserID: friendLoadoutsByUserID
                     ),
                     sentDate: item.sentAt,
-                    metaLabel: "\(L10n.t("postcard_from_prefix"))\(senderLabel)"
+                    metaLabel: "\(L10n.t("postcard_from_prefix"))\(senderLabel)",
+                    messageID: item.messageID,
+                    token: sessionStore.currentAccessToken
                 )
+                .onAppear {
+                    Task {
+                        guard let token = sessionStore.currentAccessToken else { return }
+                        try? await BackendAPIClient.shared.markPostcardViewed(
+                            token: token,
+                            messageID: item.messageID
+                        )
+                    }
+                }
             }
         }
     }
@@ -320,26 +336,53 @@ private struct PostcardCardRow: View {
     let nickname: String
     let messageText: String
     let photoSource: PostcardPhotoSource
+    let photoURL: String?
     let avatarLoadout: RobotLoadout
     let sentDate: Date
     let metaLabel: String
     var statusBadge: String? = nil
+    var messageID: String? = nil
+    var token: String? = nil
+    var reaction: PostcardReaction? = nil
 
     @State private var isFront = true
     @State private var saveToastText: String?
+    @State private var showFullImage = false
+    @State private var postcardViewID = UUID()
+    @State private var showEmojiPicker = false
+    @State private var showCommentInput = false
+    @State private var reactionExpanded = false
 
     var body: some View {
         VStack(spacing: 10) {
-            FlippablePostcardView(
-                cityName: cityName,
-                nickname: nickname,
-                messageText: messageText,
-                photoSource: photoSource,
-                avatarLoadout: avatarLoadout,
-                isFront: $isFront,
-                sentDate: sentDate,
-                onLongPress: { saveCurrentFaceToPhotos() }
-            )
+            ZStack(alignment: .topLeading) {
+                FlippablePostcardView(
+                    cityName: cityName,
+                    nickname: nickname,
+                    messageText: messageText,
+                    photoSource: photoSource,
+                    avatarLoadout: avatarLoadout,
+                    isFront: $isFront,
+                    sentDate: sentDate,
+                    onLongPress: {
+                        Task { await saveCurrentFaceToPhotos() }
+                    }
+                )
+
+                if isFront, let _ = photoURL {
+                    Button {
+                        showFullImage = true
+                    } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(6)
+                            .background(Color.black.opacity(0.4))
+                            .clipShape(Circle())
+                    }
+                    .padding(10)
+                }
+            }
 
             HStack(spacing: 8) {
                 Text(metaLabel)
@@ -358,27 +401,133 @@ private struct PostcardCardRow: View {
             }
             .padding(.horizontal, 4)
 
+            if let reaction {
+                VStack(alignment: .leading, spacing: 6) {
+                    if let emoji = reaction.reactionEmoji, !emoji.isEmpty {
+                        Text(emoji)
+                            .font(.system(size: 20))
+                    } else if reaction.viewedAt != nil {
+                        Text("✓ \(L10n.t("postcard_viewed"))")
+                            .font(.system(size: 11))
+                            .foregroundColor(FigmaTheme.subtext)
+                    }
+
+                    if let comment = reaction.comment, !comment.isEmpty {
+                        Text(comment)
+                            .font(.system(size: 12))
+                            .foregroundColor(FigmaTheme.text)
+                            .padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.gray.opacity(0.1))
+                            .cornerRadius(8)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
+            }
+
+            if messageID != nil && token != nil {
+                HStack(spacing: 8) {
+                    Button {
+                        withAnimation { showEmojiPicker.toggle() }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.system(size: 16))
+                            .foregroundColor(FigmaTheme.text)
+                    }
+
+                    if showEmojiPicker {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 12) {
+                                ForEach(["❤️", "👍", "😂", "😮", "🔥", "👏", "🎉", "😍", "🤔", "👀"], id: \.self) { emoji in
+                                    Button(emoji) {
+                                        Task { await sendReaction(emoji) }
+                                        withAnimation { showEmojiPicker = false }
+                                    }
+                                    .font(.system(size: 24))
+                                }
+                                Button {
+                                    showCommentInput = true
+                                    showEmojiPicker = false
+                                } label: {
+                                    Image(systemName: "text.bubble")
+                                        .font(.system(size: 20))
+                                        .foregroundColor(FigmaTheme.text)
+                                        .frame(width: 32, height: 32)
+                                }
+                            }
+                        }
+                        .transition(.opacity)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
+            }
+
             if let saveToastText {
                 Text(saveToastText)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.green)
             }
         }
+        .sheet(isPresented: $showFullImage) {
+            if let photoURL {
+                FullImageViewer(imageURL: photoURL)
+            }
+        }
+        .sheet(isPresented: $showCommentInput) {
+            if let messageID, let token {
+                CommentInputSheet(messageID: messageID, token: token)
+            }
+        }
     }
 
-    private func saveCurrentFaceToPhotos() {
-        guard #available(iOS 16.0, *), let image = renderFaceImage(isFront: isFront) else {
-            saveToastText = "保存失败"
+    private func sendReaction(_ emoji: String) async {
+        guard let messageID, let token else { return }
+        let req = PostcardReactionRequest(reactionEmoji: emoji, comment: nil)
+        try? await BackendAPIClient.shared.reactToPostcard(token: token, messageID: messageID, req: req)
+        await MainActor.run {
+            saveToastText = "已发送 \(emoji)"
             clearSaveToastSoon()
+        }
+    }
+
+    private func saveCurrentFaceToPhotos() async {
+        guard #available(iOS 16.0, *) else {
+            await MainActor.run {
+                saveToastText = "保存失败"
+                clearSaveToastSoon()
+            }
             return
         }
-        UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
-        saveToastText = isFront ? "已保存明信片正面" : "已保存明信片反面"
-        clearSaveToastSoon()
+
+        let loadedSource: PostcardPhotoSource
+        if case .remoteURL(let urlString) = photoSource,
+           let url = URL(string: urlString),
+           let (data, _) = try? await URLSession.shared.data(from: url),
+           let image = UIImage(data: data) {
+            loadedSource = .uiImage(image)
+        } else {
+            loadedSource = photoSource
+        }
+
+        guard let image = renderFaceImage(isFront: isFront, photoSource: loadedSource) else {
+            await MainActor.run {
+                saveToastText = "保存失败"
+                clearSaveToastSoon()
+            }
+            return
+        }
+
+        await MainActor.run {
+            UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+            saveToastText = isFront ? "已保存明信片正面" : "已保存明信片反面"
+            clearSaveToastSoon()
+        }
     }
 
     @available(iOS 16.0, *)
-    private func renderFaceImage(isFront: Bool) -> UIImage? {
+    private func renderFaceImage(isFront: Bool, photoSource: PostcardPhotoSource) -> UIImage? {
         let width: CGFloat = 540
         let height: CGFloat = width / (3.0 / 2.0)
 
@@ -390,7 +539,7 @@ private struct PostcardCardRow: View {
                     nickname: nickname,
                     photoSource: photoSource,
                     avatarLoadout: avatarLoadout,
-                    cornerRadius: 22
+                    cornerRadius: 0
                 )
             )
         } else {
@@ -401,14 +550,13 @@ private struct PostcardCardRow: View {
                     messageText: messageText,
                     avatarLoadout: avatarLoadout,
                     sentDate: sentDate,
-                    cornerRadius: 22
+                    cornerRadius: 0
                 )
             )
         }
 
         let renderView = faceView
             .frame(width: width, height: height)
-            .background(Color.white)
 
         let renderer = ImageRenderer(content: renderView)
         renderer.scale = 2
@@ -419,6 +567,137 @@ private struct PostcardCardRow: View {
     private func clearSaveToastSoon() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             saveToastText = nil
+        }
+    }
+}
+
+// MARK: - Comment Input Sheet
+
+private struct CommentInputSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let messageID: String
+    let token: String
+    @State private var commentText = ""
+    @State private var isSending = false
+
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 16) {
+                TextField(L10n.t("postcard_comment_placeholder"), text: $commentText, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(3...5)
+                    .padding()
+
+                Text("\(commentText.count)/50")
+                    .font(.system(size: 12))
+                    .foregroundColor(commentText.count > 50 ? .red : FigmaTheme.subtext)
+
+                Spacer()
+            }
+            .navigationTitle(L10n.t("postcard_add_comment"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(L10n.t("cancel")) { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(L10n.t("send")) {
+                        Task { await sendComment() }
+                    }
+                    .disabled(commentText.isEmpty || commentText.count > 50 || isSending)
+                }
+            }
+        }
+    }
+
+    private func sendComment() async {
+        isSending = true
+        let req = PostcardReactionRequest(reactionEmoji: nil, comment: commentText)
+        try? await BackendAPIClient.shared.reactToPostcard(token: token, messageID: messageID, req: req)
+        await MainActor.run { dismiss() }
+    }
+}
+
+// MARK: - Full Image Viewer
+
+private struct FullImageViewer: View {
+    @Environment(\.dismiss) private var dismiss
+    let imageURL: String
+    @State private var image: UIImage?
+    @State private var saveToast = false
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .ignoresSafeArea()
+            } else {
+                ProgressView()
+                    .tint(.white)
+            }
+
+            VStack {
+                HStack {
+                    Spacer()
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(12)
+                            .background(Color.black.opacity(0.5))
+                            .clipShape(Circle())
+                    }
+                    .padding()
+                }
+                Spacer()
+                if image != nil {
+                    Button {
+                        if let image {
+                            UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+                            saveToast = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                saveToast = false
+                            }
+                        }
+                    } label: {
+                        Text("保存原图")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 12)
+                            .background(Color.blue)
+                            .clipShape(Capsule())
+                    }
+                    .padding(.bottom, 40)
+                }
+            }
+
+            if saveToast {
+                VStack {
+                    Spacer()
+                    Text("已保存到相册")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 10)
+                        .background(Color.black.opacity(0.7))
+                        .clipShape(Capsule())
+                        .padding(.bottom, 120)
+                }
+            }
+        }
+        .task {
+            guard let url = URL(string: imageURL) else { return }
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                image = UIImage(data: data)
+            } catch {}
         }
     }
 }

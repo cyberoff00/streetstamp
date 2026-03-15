@@ -1558,6 +1558,7 @@ struct JourneyRouteDetailView: View {
     let journeyID: String
     let isReadOnly: Bool
     let headerTitle: String?
+    let userID: String?
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: JourneyStore
@@ -1577,11 +1578,13 @@ struct JourneyRouteDetailView: View {
     init(
         journeyID: String,
         isReadOnly: Bool = false,
-        headerTitle: String? = nil
+        headerTitle: String? = nil,
+        userID: String? = nil
     ) {
         self.journeyID = journeyID
         self.isReadOnly = isReadOnly
         self.headerTitle = headerTitle
+        self.userID = userID
     }
 
     private var journey: JourneyRoute? {
@@ -1719,7 +1722,8 @@ struct JourneyRouteDetailView: View {
                     allowsEditing: false,
                     maxCardWidth: 300,
                     maxCardHeight: 440,
-                    onUpdated: { _ in }
+                    onUpdated: { _ in },
+                    userID: userID
                 )
                 .environmentObject(sessionStore)
             } else if !isReadOnly, let tappedMemory = editingMemory {

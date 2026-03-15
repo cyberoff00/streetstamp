@@ -117,17 +117,14 @@ private struct UnifiedLockScreenView: View {
 
             Spacer(minLength: 0)
 
-            Button(intent: OpenCaptureIntent()) {
+            ZStack {
+                Circle()
+                    .fill(WidgetTheme.buttonGreen)
+                    .frame(width: 66, height: 66)
                 Image(systemName: "square.and.pencil")
                     .font(.system(size: 23, weight: .bold))
                     .foregroundColor(WidgetTheme.noteIcon)
-                    .frame(width: 66, height: 66)
-                    .background(
-                        Circle()
-                            .fill(WidgetTheme.buttonGreen)
-                    )
             }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)

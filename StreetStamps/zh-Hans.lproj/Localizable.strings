@@ -17,10 +17,17 @@
 
 "tab_start" = "开始";
 "tab_cities" = "城市卡片";
-"tab_memory" = "旅程记忆";
+"tab_memory" = "记忆";
+"tab_worldo" = "WORLDO";
+"collection_page_title" = "城市记忆";
 "tab_lifelog" = "足迹";
 "globe_view"="全球视图";
 "profile"="个人主页";
+"activity_record_title" = "活动记录";
+"activity_stat_journeys" = "旅程";
+"activity_stat_memories" = "记忆";
+"activity_stat_cards" = "卡片";
+"activity_stat_distance_km" = "距离（公里）";
 "toast_city_added" = "已创建 %@ 城市卡并加入城市卡";
 
 "start_upper" = "开始";
@@ -375,6 +382,10 @@
 "lifelog_permission_settings_action" = "去设置开启";
 "lifelog_permission_settings_message" = "开启“始终允许”后才可以离线记录轨迹。所有轨迹仅保存在本机，无需担心隐私问题。";
 "lifelog_permission_settings_title" = "需要“始终允许”权限";
+"lifelog_always_guide_title" = "开启终生轨迹记录";
+"lifelog_always_guide_message" = "将定位权限改为“始终允许”，即使你忘记记录旅程，我们也能低功耗记录你的终生轨迹";
+"lifelog_always_guide_enable" = "去开启";
+"lifelog_always_guide_skip" = "稍后再说";
 "lifelog_title" = "足迹";
 "memories_title" = "记忆";
 "my_journey_title_upper" = "我的旅程";
@@ -732,6 +743,13 @@
 "postcard_received_title_format" = "%@ 给你寄来一张明信片";
 "postcard_received_title_fallback" = "你收到一张明信片";
 "postcard_received_body_format" = "来自 %@";
+"postcard_viewed" = "已查看";
+"postcard_reacted" = "做出了反应";
+"postcard_add_reaction" = "添加反应";
+"postcard_select_reaction" = "选择一个反应";
+"postcard_or_comment" = "或者留言";
+"postcard_add_comment" = "添加评论";
+"postcard_comment_placeholder" = "写下你的评论...";
 "notification_journey_like_format" = "%@ 赞了你的旅程「%@」";
 "notification_profile_stomp_format" = "%@在你的沙发上坐了一坐";
 "notification_friend_request_format" = "%@ 向你发送了好友申请";
@@ -809,6 +827,9 @@
 "lifelog_mood_option_notbad" = "一般";
 "lifelog_mood_option_happy" = "开心";
 "profile_summary_stats_format" = "%d 城市  %d 记忆";
+"profile_activity_record" = "活动记录";
+"profile_stats_format" = "%d 旅程 · %d 记忆 · %d 卡片";
+"activity_ring_help" = "外圈：等级进度（完成1公里以上的旅程升级）\n中圈：记忆收集进度（每50个记忆满环）\n内圈：城市解锁进度（每10个城市满环）";
 "settings_icloud_sync_title" = "iCloud 同步";
 "settings_icloud_sync_desc" = "自动同步并恢复你的旅程、足迹和关键设置。";
 "settings_icloud_sync_unavailable_desc" = "iCloud 当前不可用，请先在系统设置登录 iCloud。";
@@ -829,3 +850,26 @@
 "onboarding_continue_later" = "稍后继续";
 "onboarding_skip_guide" = "跳过引导";
 "about_postscript" = "话外";
+
+"voice_broadcast_milestone" = "已完成 %d 公里。用时 %d 分钟。平均配速 %@ 分钟每公里。";
+
+"friends_add_method_invite_code" = "邀请码";
+"friends_add_method_exclusive_id" = "专属ID";
+"friends_add_method_qr_token" = "二维码";
+"friends_section_pending_approval" = "待你通过";
+"friends_section_my_friends" = "我的好友";
+"friends_qr_upload_photo" = "上传二维码";
+"friends_qr_sending" = "发送中…";
+"friends_qr_send_request" = "发送好友申请";
+"friends_qr_invalid_content" = "二维码内容无法识别，请确认对方分享的是 StreetStamps 邀请码/链接。";
+"friends_qr_recognized" = "已识别邀请信息，点击「发送好友申请」即可。";
+"friends_input_invite_code_hint" = "输入邀请码（A1B2C3D4）";
+"friends_input_exclusive_id_hint" = "输入好友专属ID（示例：@alice）";
+"friends_input_qr_token_hint" = "粘贴二维码 token 或链接";
+"friends_activity_record_title" = "活动记录";
+"friends_qr_importing" = "识别中…";
+"friends_qr_import_from_album" = "从相册导入";
+"friends_qr_read_failed" = "无法读取这张图片，请换一张再试。";
+"friends_qr_not_detected" = "未在该图片中识别到二维码。";
+"friends_camera_permission_unavailable" = "摄像头权限不可用，请在系统设置中允许访问。";
+"friend_stats_summary_format" = "%d 旅程 · %d 记忆 · %d 卡片";

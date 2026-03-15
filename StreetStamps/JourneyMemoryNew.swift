@@ -62,7 +62,6 @@ struct JourneyMemoryMainView: View {
 
     private var allMemoryJourneys: [JourneyRoute] {
         store.journeys
-            .filter(\.hasJourneyMemoryListContent)
             .sorted { ($0.endTime ?? $0.startTime ?? .distantPast) > ($1.endTime ?? $1.startTime ?? .distantPast) }
     }
 
@@ -562,27 +561,6 @@ private struct JourneyMemoryCalendarRangePopover: View {
 
 // =======================================================
 // MARK: - Swipe back enabler (keep interactive pop when nav bar is hidden)
-// =======================================================
-
-private struct SwipeBackEnabler: UIViewControllerRepresentable {
-    func makeUIViewController(context: Context) -> SwipeBackVC { SwipeBackVC() }
-    func updateUIViewController(_ uiViewController: SwipeBackVC, context: Context) {}
-
-    final class SwipeBackVC: UIViewController, UIGestureRecognizerDelegate {
-        override func viewDidAppear(_ animated: Bool) {
-            super.viewDidAppear(animated)
-            // Re-enable edge swipe.
-            navigationController?.interactivePopGestureRecognizer?.delegate = self
-            navigationController?.interactivePopGestureRecognizer?.isEnabled = true
-        }
-
-        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-            // Only when there's actually something to pop.
-            (navigationController?.viewControllers.count ?? 0) > 1
-        }
-    }
-}
-
 // =======================================================
 // MARK: - City Group Data Model
 // =======================================================
@@ -1243,6 +1221,7 @@ struct JourneyMemoryDetailView: View {
                     isReadOnly: readOnly,
                     headerTitle: journeyDisplayTitle
                 )
+                .environmentObject(store)
             } label: {
                 HStack(spacing: 14) {
                     VStack(alignment: .leading, spacing: 4) {

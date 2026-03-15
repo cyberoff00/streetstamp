@@ -121,6 +121,7 @@ struct SettingsGeneralRowPresentation: Equatable {
     enum Destination: Hashable {
         case importGPX
         case notifications
+        case language
         case debugTools
     }
 }
@@ -158,6 +159,14 @@ enum SettingsGeneralPresentation {
                 badgeText: nil,
                 rowHeight: 64,
                 destination: .notifications
+            ),
+            SettingsGeneralRowPresentation(
+                title: "语言 / Language",
+                icon: "globe",
+                iconColor: FigmaTheme.primary,
+                badgeText: nil,
+                rowHeight: 64,
+                destination: .language
             )
         ]
 
@@ -244,6 +253,7 @@ struct SettingsView: View {
     @EnvironmentObject private var journeyStore: JourneyStore
     @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var lifelogStore: LifelogStore
+    @ObservedObject private var languagePreference = LanguagePreference.shared
 
     @AppStorage(MapAppearanceSettings.storageKey) private var mapAppearanceRaw = MapAppearanceSettings.current.rawValue
     @AppStorage(AppSettings.voiceBroadcastEnabledKey) private var voiceBroadcastEnabled = true
@@ -345,6 +355,7 @@ struct SettingsView: View {
             settingsHeader
         }
         .toolbar(.hidden, for: .navigationBar)
+        .background(SwipeBackEnabler())
         .alert(L10n.t("settings_coming_soon_title"), isPresented: $showComingSoon) {
             Button(L10n.t("ok"), role: .cancel) {}
         } message: {
@@ -504,6 +515,8 @@ struct SettingsView: View {
             gpxImportEntryView
         case .notifications:
             notificationsView
+        case .language:
+            languageSettingsView
         case .debugTools:
             #if DEBUG
             SettingsDebugToolsEntryView()
@@ -511,6 +524,49 @@ struct SettingsView: View {
             EmptyView()
             #endif
         }
+    }
+
+    private var languageSettingsView: some View {
+        SettingsDetailPage(title: "语言 / Language") {
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 10) {
+                    sectionTitle("语言 / Language")
+
+                    VStack(spacing: 0) {
+                        languageOption(code: nil, name: "跟随系统")
+                        Divider().padding(.leading, 16)
+                        languageOption(code: "zh-Hans", name: "简体中文")
+                        Divider().padding(.leading, 16)
+                        languageOption(code: "en", name: "English")
+                    }
+                    .figmaSurfaceCard(radius: 30)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 20)
+            .padding(.bottom, 36)
+        }
+    }
+
+    private func languageOption(code: String?, name: String) -> some View {
+        Button {
+            languagePreference.currentLanguage = code
+        } label: {
+            HStack {
+                Text(name)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(FigmaTheme.text)
+                Spacer()
+                if languagePreference.currentLanguage == code {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(FigmaTheme.primary)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+        }
+        .buttonStyle(.plain)
     }
 
     private var notificationsView: some View {

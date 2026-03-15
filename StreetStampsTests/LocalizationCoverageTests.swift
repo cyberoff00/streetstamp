@@ -307,6 +307,31 @@ final class LocalizationCoverageTests: XCTestCase {
         XCTAssertEqual(L10n.upper("profile_invite_friends", locale: english), "INVITE FRIENDS")
     }
 
+    func test_projectDoesNotContainDuplicateLocalizationDirectoriesOrKnownRegions() throws {
+        let root = projectRoot()
+        let appRoot = root.appendingPathComponent("StreetStamps", isDirectory: true)
+        let fileManager = FileManager.default
+        let entries = try fileManager.contentsOfDirectory(atPath: appRoot.path)
+        let duplicateLocalizationDirectories = entries
+            .filter { $0.hasSuffix(".lproj") && $0.contains(" 2") }
+            .sorted()
+
+        XCTAssertTrue(
+            duplicateLocalizationDirectories.isEmpty,
+            "Unexpected duplicate localization directories: \(duplicateLocalizationDirectories)"
+        )
+
+        let projectFile = root.appendingPathComponent("StreetStamps.xcodeproj/project.pbxproj")
+        let projectContents = try String(contentsOf: projectFile, encoding: .utf8)
+        XCTAssertFalse(projectContents.contains("\"en 2\""))
+        XCTAssertFalse(projectContents.contains("\"es 2\""))
+        XCTAssertFalse(projectContents.contains("\"fr 2\""))
+        XCTAssertFalse(projectContents.contains("\"ja 2\""))
+        XCTAssertFalse(projectContents.contains("\"ko 2\""))
+        XCTAssertFalse(projectContents.contains("\"zh-Hans 2\""))
+        XCTAssertFalse(projectContents.contains("\"zh-Hant 2\""))
+    }
+
     private func projectRoot() -> URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

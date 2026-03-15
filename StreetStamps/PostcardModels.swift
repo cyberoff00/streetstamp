@@ -36,6 +36,7 @@ struct BackendPostcardMessageDTO: Codable, Identifiable {
     var sentAt: Date
     var clientDraftID: String
     var status: String?
+    var reaction: PostcardReaction?
 
     var id: String { messageID }
 
@@ -54,6 +55,7 @@ struct BackendPostcardMessageDTO: Codable, Identifiable {
         case sentAt
         case clientDraftID
         case status
+        case reaction
     }
 
     init(from decoder: Decoder) throws {
@@ -73,6 +75,7 @@ struct BackendPostcardMessageDTO: Codable, Identifiable {
         sentAt = (try? c.decode(Date.self, forKey: .sentAt)) ?? Date()
         clientDraftID = (try? c.decode(String.self, forKey: .clientDraftID)) ?? ""
         status = try? c.decode(String.self, forKey: .status)
+        reaction = try? c.decode(PostcardReaction.self, forKey: .reaction)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -90,6 +93,7 @@ struct BackendPostcardMessageDTO: Codable, Identifiable {
         try c.encode(sentAt, forKey: .sentAt)
         try c.encode(clientDraftID, forKey: .clientDraftID)
         try c.encodeIfPresent(status, forKey: .status)
+        try c.encodeIfPresent(reaction, forKey: .reaction)
     }
 }
 
@@ -102,4 +106,25 @@ struct BackendSendPostcardResponse: Codable {
     var messageID: String
     var sentAt: Date
     var idempotent: Bool?
+}
+
+// MARK: - Postcard Reactions
+
+struct PostcardReaction: Codable, Identifiable {
+    var id: String
+    var postcardMessageID: String
+    var fromUserID: String
+    var viewedAt: Date?
+    var reactionEmoji: String?
+    var comment: String?
+    var reactedAt: Date?
+}
+
+struct PostcardReactionRequest: Codable {
+    var reactionEmoji: String?
+    var comment: String?
+}
+
+struct PostcardReactionResponse: Codable {
+    var reaction: PostcardReaction
 }

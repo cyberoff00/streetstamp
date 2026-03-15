@@ -1100,7 +1100,9 @@ struct MapView: View {
             return
         }
         editingMemory = nil
-        showMemoryEditor = true
+        DispatchQueue.main.async {
+            self.showMemoryEditor = true
+        }
         flow.consumeWidgetCapture()
     }
 
@@ -1819,6 +1821,7 @@ struct MemoryDetailPage: View {
     let maxCardWidth: CGFloat
     let maxCardHeight: CGFloat
     let onUpdated: (JourneyMemory?) -> Void
+    let userID: String?
 
     @State private var showViewer: Bool = false
     @State private var viewerIndex: Int = 0
@@ -1830,7 +1833,8 @@ struct MemoryDetailPage: View {
         allowsEditing: Bool,
         maxCardWidth: CGFloat = 340,
         maxCardHeight: CGFloat = 520,
-        onUpdated: @escaping (JourneyMemory?) -> Void
+        onUpdated: @escaping (JourneyMemory?) -> Void,
+        userID: String? = nil
     ) {
         self.memory = memory
         self._isPresented = isPresented
@@ -1838,6 +1842,7 @@ struct MemoryDetailPage: View {
         self.maxCardWidth = maxCardWidth
         self.maxCardHeight = maxCardHeight
         self.onUpdated = onUpdated
+        self.userID = userID
     }
 
     var body: some View {
@@ -1898,7 +1903,7 @@ struct MemoryDetailPage: View {
                                                 .fill(Color(UIColor(white: 0.92, alpha: 1)))
                                                 .frame(width: 88, height: 88)
 
-                                            if let img = PhotoStore.loadImage(named: p, userID: sessionStore.currentUserID) {
+                                            if let img = PhotoStore.loadImage(named: p, userID: userID ?? sessionStore.currentUserID) {
                                                 Image(uiImage: img)
                                                     .resizable()
                                                     .scaledToFill()
@@ -1912,7 +1917,7 @@ struct MemoryDetailPage: View {
                                             showViewer = true
                                         }
                                     }
-                                    ForEach(memory.remoteImageURLs, id: \.self) { rawURL in
+                                    ForEach(Array(memory.remoteImageURLs.enumerated()), id: \.offset) { idx, rawURL in
                                         if let url = URL(string: rawURL) {
                                             AsyncImage(url: url) { phase in
                                                 switch phase {
@@ -1939,6 +1944,10 @@ struct MemoryDetailPage: View {
                                                         .frame(width: 88, height: 88)
                                                 }
                                             }
+                                            .onTapGesture {
+                                                viewerIndex = memory.imagePaths.count + idx
+                                                showViewer = true
+                                            }
                                         }
                                     }
                                 }
@@ -1963,7 +1972,8 @@ struct MemoryDetailPage: View {
         .fullScreenCover(isPresented: $showViewer) {
             PhotoViewer(
                 imagePaths: memory.imagePaths,
-                userID: sessionStore.currentUserID,
+                remoteImageURLs: memory.remoteImageURLs,
+                userID: userID ?? sessionStore.currentUserID,
                 startIndex: viewerIndex,
                 onClose: { showViewer = false }
             )
@@ -2836,29 +2846,37 @@ struct MemoryEditorPage: View {
 
 struct PhotoViewer: View {
     let imagePaths: [String]
+    let remoteImageURLs: [String]
     let userID: String
     let startIndex: Int
     let onClose: () -> Void
 
     @State private var index: Int
 
-    init(imagePaths: [String], userID: String, startIndex: Int, onClose: @escaping () -> Void) {
+    init(imagePaths: [String], remoteImageURLs: [String] = [], userID: String, startIndex: Int, onClose: @escaping () -> Void) {
         self.imagePaths = imagePaths
+        self.remoteImageURLs = remoteImageURLs
         self.userID = userID
         self.startIndex = startIndex
         self.onClose = onClose
-        _index = State(initialValue: max(0, min(startIndex, imagePaths.count - 1)))
+        let total = imagePaths.count + remoteImageURLs.count
+        _index = State(initialValue: max(0, min(startIndex, total - 1)))
     }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            if !imagePaths.isEmpty {
+            let totalCount = imagePaths.count + remoteImageURLs.count
+            if totalCount > 0 {
                 TabView(selection: $index) {
                     ForEach(Array(imagePaths.enumerated()), id: \.offset) { i, p in
                         ZoomableImage(path: p, userID: userID)
                             .tag(i)
+                    }
+                    ForEach(Array(remoteImageURLs.enumerated()), id: \.offset) { i, url in
+                        ZoomableRemoteImage(url: url)
+                            .tag(imagePaths.count + i)
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .automatic))
@@ -2875,7 +2893,7 @@ struct PhotoViewer: View {
                             .clipShape(Circle())
                     }
                     Spacer()
-                    Text("\(index + 1)/\(max(1, imagePaths.count))")
+                    Text("\(index + 1)/\(max(1, totalCount))")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(.white)
                         .padding(.horizontal, 10)
@@ -2928,12 +2946,63 @@ private struct ZoomableImage: View {
     }
 }
 
+private struct ZoomableRemoteImage: View {
+    let url: String
+
+    @State private var scale: CGFloat = 1
+    @State private var lastScale: CGFloat = 1
+
+    var body: some View {
+        Group {
+            if let imageURL = URL(string: url) {
+                AsyncImage(url: imageURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFit()
+                            .scaleEffect(scale)
+                            .gesture(
+                                MagnificationGesture()
+                                    .onChanged { v in
+                                        scale = max(1, min(4, lastScale * v))
+                                    }
+                                    .onEnded { _ in
+                                        lastScale = scale
+                                    }
+                            )
+                            .onTapGesture(count: 2) {
+                                if scale > 1 { scale = 1; lastScale = 1 }
+                                else { scale = 2; lastScale = 2 }
+                            }
+                    case .failure:
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 40, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.7))
+                    case .empty:
+                        ProgressView()
+                            .tint(.white)
+                    @unknown default:
+                        EmptyView()
+                    }
+                }
+            } else {
+                Image(systemName: "photo")
+                    .font(.system(size: 40, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.7))
+            }
+        }
+        .padding(.horizontal, 8)
+    }
+}
+
 
 struct MemoryGroupDetailPage: View {
     @EnvironmentObject private var sessionStore: UserSessionStore
     let memories: [JourneyMemory]
     @Binding var isPresented: Bool
     let onOpenDetail: (JourneyMemory) -> Void
+    let userID: String?
 
     var body: some View {
         ZStack {
@@ -2989,7 +3058,7 @@ struct MemoryGroupDetailPage: View {
                                         ScrollView(.horizontal, showsIndicators: false) {
                                             HStack(spacing: 10) {
                                                 ForEach(mem.imagePaths.prefix(6), id: \.self) { p in
-                                                    if let img = PhotoStore.loadImage(named: p, userID: sessionStore.currentUserID) {
+                                                    if let img = PhotoStore.loadImage(named: p, userID: userID ?? sessionStore.currentUserID) {
                                                         Image(uiImage: img)
                                                             .resizable()
                                                             .scaledToFill()

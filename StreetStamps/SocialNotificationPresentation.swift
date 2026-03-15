@@ -43,6 +43,9 @@ enum SocialNotificationPresentation {
                 displayName
             )
 
+        case "postcard_reaction":
+            return item.message
+
         default:
             return item.message
         }
@@ -58,6 +61,8 @@ enum SocialNotificationPresentation {
     private static func badgeTitleKey(for item: BackendNotificationItem) -> String {
         switch item.type {
         case "postcard_received":
+            return "postcard_notification_badge"
+        case "postcard_reaction":
             return "postcard_notification_badge"
         case "journey_like":
             return "social_notice_like"

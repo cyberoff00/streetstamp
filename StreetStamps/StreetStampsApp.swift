@@ -290,6 +290,7 @@ struct StreetStampsApp: App {
             .onChange(of: sessionStore.activeLocalProfileID) { oldUserID, uid in
                 Task {
                     UserScopedProfileStateStore.switchActiveUser(from: oldUserID, to: uid)
+                    CityLevelPreferenceStore.shared.setCurrentUserID(uid)
                     let paths = StoragePath(userID: uid)
                     await sessionStore.bootstrapFileSystemAsync()
                     await LifelogMigrationService.migrateLegacyLifelogIfNeededAsync(paths: paths)

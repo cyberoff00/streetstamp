@@ -6,6 +6,7 @@ const express = require("express");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
+const compression = require("compression");
 let Pool = null;
 try {
   ({ Pool } = require("pg"));
@@ -31,7 +32,7 @@ const PGPASSWORD = (process.env.PGPASSWORD || "").trim();
 const PGDATABASE = (process.env.PGDATABASE || "").trim();
 const PGSSL = String(process.env.PGSSL || "").trim().toLowerCase();
 const PG_STATE_KEY = (process.env.PG_STATE_KEY || "global").trim();
-const PG_MAX_CLIENTS = Number(process.env.PG_MAX_CLIENTS || 10);
+const PG_MAX_CLIENTS = Number(process.env.PG_MAX_CLIENTS || 20);
 const JSON_BODY_LIMIT_MB = Number(process.env.JSON_BODY_LIMIT_MB || 3);
 const MEDIA_UPLOAD_MAX_BYTES = Number(process.env.MEDIA_UPLOAD_MAX_BYTES || 10 * 1024 * 1024);
 const CORS_ALLOWED_ORIGINS = String(process.env.CORS_ALLOWED_ORIGINS || "").trim();
@@ -418,7 +419,7 @@ function hashSHA256(raw) {
 }
 
 function hashPassword(pw) {
-  return bcrypt.hashSync(pw, 10);
+  return bcrypt.hashSync(pw, 8);
 }
 
 function verifyPassword(pw, hash) {
@@ -1095,7 +1096,10 @@ function normalizeJourneyMemories(rawMemories) {
     title: String(m?.title || "").slice(0, 120),
     notes: String(m?.notes || "").slice(0, 4000),
     timestamp: normalizeISOTime(m?.timestamp) || new Date().toISOString(),
-    imageURLs: Array.isArray(m?.imageURLs) ? m.imageURLs.map((x) => String(x || "")).filter(Boolean).slice(0, 32) : []
+    imageURLs: Array.isArray(m?.imageURLs) ? m.imageURLs.map((x) => String(x || "")).filter(Boolean).slice(0, 32) : [],
+    latitude: typeof m?.latitude === "number" && Number.isFinite(m.latitude) ? m.latitude : null,
+    longitude: typeof m?.longitude === "number" && Number.isFinite(m.longitude) ? m.longitude : null,
+    locationStatus: ["resolved", "fallback", "pending"].includes(m?.locationStatus) ? m.locationStatus : null
   }));
 }
 
@@ -1957,6 +1961,36 @@ function pushPostcardReceivedNotification(owner, fromUser, postcard) {
   }
 }
 
+function pushPostcardReactionNotification(owner, fromUser, postcard, reactionEmoji, comment) {
+  ensureUserNotifications(owner);
+  let message = `${fromUser.displayName} `;
+  if (reactionEmoji) {
+    message += `${reactionEmoji} 了你的明信片`;
+  } else if (comment) {
+    message += `评论了你的明信片`;
+  } else {
+    message += `查看了你的明信片`;
+  }
+
+  owner.notifications.unshift({
+    id: `n_${randHex(10)}`,
+    type: "postcard_reaction",
+    fromUserID: fromUser.id,
+    fromDisplayName: fromUser.displayName,
+    journeyID: null,
+    journeyTitle: null,
+    message: message,
+    createdAt: new Date().toISOString(),
+    read: false,
+    postcardMessageID: postcard.messageID,
+    reactionEmoji: reactionEmoji || null,
+    comment: comment || null
+  });
+  if (owner.notifications.length > 400) {
+    owner.notifications = owner.notifications.slice(0, 400);
+  }
+}
+
 function isFriendOf(viewer, targetID) {
   return (viewer.friendIDs || []).includes(targetID);
 }
@@ -2150,6 +2184,7 @@ async function main() {
     }
     return next();
   });
+  app.use(compression());
   app.use(express.json({
     limit: `${Number.isFinite(JSON_BODY_LIMIT_MB) && JSON_BODY_LIMIT_MB > 0 ? JSON_BODY_LIMIT_MB : 6}mb`
   }));
@@ -3263,12 +3298,97 @@ async function main() {
         .map((item) => normalizePostcardMessage(item))
         .filter(Boolean)
         .filter((item) => String(item.photoURL || "").trim().length > 0)
-        .map((item) => ({
-          ...item,
-          photoURL: absolutizePostcardPhotoURL(item.photoURL, req)
-        }))
+        .map((item) => {
+          const reaction = (me.postcardReactions || {})[item.messageID];
+          return {
+            ...item,
+            photoURL: absolutizePostcardPhotoURL(item.photoURL, req),
+            reaction: reaction || null
+          };
+        })
         .sort((a, b) => Date.parse(b.sentAt || "") - Date.parse(a.sentAt || ""));
       return res.status(200).json({ items, cursor: null });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.post("/v1/postcards/:messageID/view", writeRateLimiter, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = db.users[uid];
+      if (!me) return res.status(404).json({ message: "user not found" });
+
+      const messageID = String(req.params.messageID || "").trim();
+      if (!messageID) return res.status(400).json({ message: "messageID required" });
+
+      ensurePostcardCollections(me);
+      const postcard = (me.receivedPostcards || []).find((p) => p.messageID === messageID);
+      if (!postcard) return res.status(404).json({ message: "postcard not found" });
+
+      const sender = db.users[postcard.fromUserID];
+      if (!sender) return res.status(404).json({ message: "sender not found" });
+
+      if (!sender.postcardReactions) sender.postcardReactions = {};
+      if (!sender.postcardReactions[messageID]) {
+        sender.postcardReactions[messageID] = {
+          id: `pr_${randHex(12)}`,
+          postcardMessageID: messageID,
+          fromUserID: me.id,
+          viewedAt: new Date().toISOString(),
+          reactionEmoji: null,
+          comment: null,
+          reactedAt: null
+        };
+        await saveDB();
+      }
+
+      return res.status(200).json({ success: true });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.post("/v1/postcards/:messageID/react", writeRateLimiter, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = db.users[uid];
+      if (!me) return res.status(404).json({ message: "user not found" });
+
+      const messageID = String(req.params.messageID || "").trim();
+      const reactionEmoji = String(req.body?.reactionEmoji || "").trim();
+      const comment = String(req.body?.comment || "").trim();
+
+      if (!messageID) return res.status(400).json({ message: "messageID required" });
+      if (comment.length > 50) return res.status(400).json({ message: "comment too long (max 50 chars)" });
+
+      ensurePostcardCollections(me);
+      const postcard = (me.receivedPostcards || []).find((p) => p.messageID === messageID);
+      if (!postcard) return res.status(404).json({ message: "postcard not found" });
+
+      const sender = db.users[postcard.fromUserID];
+      if (!sender) return res.status(404).json({ message: "sender not found" });
+
+      if (!sender.postcardReactions) sender.postcardReactions = {};
+      const existing = sender.postcardReactions[messageID];
+      const nowISO = new Date().toISOString();
+
+      sender.postcardReactions[messageID] = {
+        id: existing?.id || `pr_${randHex(12)}`,
+        postcardMessageID: messageID,
+        fromUserID: me.id,
+        viewedAt: existing?.viewedAt || nowISO,
+        reactionEmoji: reactionEmoji || null,
+        comment: comment || null,
+        reactedAt: nowISO
+      };
+
+      pushPostcardReactionNotification(sender, me, postcard, reactionEmoji, comment);
+      await saveDB();
+
+      return res.status(200).json({
+        reaction: sender.postcardReactions[messageID]
+      });
     } catch {
       return res.status(401).json({ message: "unauthorized" });
     }
@@ -3585,6 +3705,13 @@ async function main() {
 
   app.listen(PORT, () => {
     console.log(`[streetstamps-node-v1] listening on :${PORT}`);
+    setInterval(() => {
+      const mem = process.memoryUsage();
+      console.log(`[memory] rss=${(mem.rss/1024/1024).toFixed(0)}MB heap=${(mem.heapUsed/1024/1024).toFixed(0)}MB`);
+      if (mem.heapUsed > 1500 * 1024 * 1024) {
+        console.warn('[memory] high memory usage detected');
+      }
+    }, 60000);
   });
 }
 

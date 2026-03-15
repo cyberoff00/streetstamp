@@ -27,9 +27,9 @@ private enum AddFriendMethod: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .inviteCode: return "邀请码"
-        case .exclusiveID: return "专属ID"
-        case .qrToken: return "二维码"
+        case .inviteCode: return L10n.t("friends_add_method_invite_code")
+        case .exclusiveID: return L10n.t("friends_add_method_exclusive_id")
+        case .qrToken: return L10n.t("friends_add_method_qr_token")
         }
     }
 }
@@ -114,6 +114,7 @@ struct FriendsHubView: View {
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
 
     @State private var tab: FriendsTopTab = .activity
+    @State private var dragOffset: CGFloat = 0
     @State private var showAddFriendSheet = false
     @State private var loadingRemote = false
     @State private var activeRoute: FriendsRoute?
@@ -138,6 +139,7 @@ struct FriendsHubView: View {
     @State private var myInviteCode = ""
     @State private var myRemoteProfile: BackendProfileDTO?
     @State private var showAuthEntry = false
+    @State private var showQRScanner = false
 
     private var sortedFriends: [FriendProfileSnapshot] {
         socialStore.friends.sorted { lhs, rhs in
@@ -205,84 +207,60 @@ struct FriendsHubView: View {
 
                 Divider().overlay(Color.black.opacity(0.06))
 
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 16) {
-                        if tab == .activity {
-                            if feedEvents.isEmpty {
-                                emptyState(L10n.t("friends_empty_activity"))
-                            } else {
-                                ForEach(feedEvents) { event in
-                                    if let friend = feedProfileByID[event.friendID] {
-                                        FriendActivityCard(
-                                            friend: friend,
-                                            event: event,
-                                            likeCount: likeCountForEvent(event),
-                                            likedByMe: likedByMeForEvent(event),
-                                            likeLoading: likeLoadingForEvent(event),
-                                            canLike: event.friendID != currentUserID,
-                                            onToggleLike: {
-                                                guard let journeyID = event.journeyID else { return }
-                                                Task {
-                                                    await toggleFeedLike(friendID: friend.id, journeyID: journeyID)
-                                                }
-                                            },
-                                            onOpenProfile: {
-                                                ensureSelfSnapshotInSocialStoreIfNeeded(friendID: friend.id)
-                                                activeRoute = .profile(friend.id)
-                                            },
-                                            onOpenEvent: {
-                                                ensureSelfSnapshotInSocialStoreIfNeeded(friendID: friend.id)
-                                                if let jid = event.journeyID {
-                                                    activeRoute = .journey(friendID: friend.id, journeyID: jid)
-                                                } else {
-                                                    activeRoute = .profile(friend.id)
-                                                }
-                                            }
-                                        )
-                                    }
-                                }
-                            }
-                        } else {
-                            if !incomingFriendRequests.isEmpty {
-                                friendRequestSectionTitle("待你通过")
-                                ForEach(incomingFriendRequests) { req in
-                                    friendRequestCard(request: req, isIncoming: true)
-                                }
-                            }
+                GeometryReader { geo in
+                    HStack(spacing: 0) {
+                        activityContent
+                            .frame(width: geo.size.width)
 
-                            if sortedFriends.isEmpty {
-                                if incomingFriendRequests.isEmpty {
-                                    emptyState(L10n.t("friends_empty_all"))
-                                }
-                            } else {
-                                friendRequestSectionTitle("我的好友")
-                                ForEach(sortedFriends) { friend in
-                                    Button {
-                                        activeRoute = .profile(friend.id)
-                                    } label: {
-                                        AllFriendsCard(
-                                            friend: friend,
-                                            subtitleText: FriendListPresencePresentation.subtitle(for: friend)
-                                        )
-                                    }
-                                    .buttonStyle(.plain)
+                        allFriendsContent
+                            .frame(width: geo.size.width)
+                    }
+                    .offset(x: tab == .activity ? dragOffset : -geo.size.width + dragOffset)
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 20)
+                            .onChanged { value in
+                                let horizontal = abs(value.translation.width)
+                                let vertical = abs(value.translation.height)
+                                guard horizontal > vertical else { return }
+
+                                let startX = value.startLocation.x
+                                let edgeThreshold: CGFloat = 30
+                                if tab == .allFriends || startX > edgeThreshold {
+                                    dragOffset = value.translation.width
                                 }
                             }
-                        }
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.top, 12)
-                    .padding(.bottom, 54)
+                            .onEnded { value in
+                                let horizontal = abs(value.translation.width)
+                                let vertical = abs(value.translation.height)
+                                guard horizontal > vertical else {
+                                    dragOffset = 0
+                                    return
+                                }
+
+                                let startX = value.startLocation.x
+                                let edgeThreshold: CGFloat = 30
+                                guard tab == .allFriends || startX > edgeThreshold else {
+                                    dragOffset = 0
+                                    return
+                                }
+                                let threshold: CGFloat = 80
+                                withAnimation(.easeOut(duration: 0.25)) {
+                                    if value.translation.width < -threshold && tab == .activity {
+                                        tab = .allFriends
+                                    } else if value.translation.width > threshold && tab == .allFriends {
+                                        tab = .activity
+                                    }
+                                    dragOffset = 0
+                                }
+                            }
+                    )
                 }
-                .refreshable {
-                    await refreshRemoteFriends()
-                }
-                .background(FigmaTheme.background)
             } else {
                 loggedOutState
             }
         }
         .background(FigmaTheme.background.ignoresSafeArea())
+        .background(SwipeBackEnabler())
         .navigationBarBackButtonHidden(true)
         .navigationBarHidden(true)
         .navigationDestination(item: $activeRoute) { route in
@@ -383,762 +361,855 @@ struct FriendsHubView: View {
             postcardInboxIntent = PostcardInboxIntent(box: "sent", messageID: nil)
             showPostcardInboxSheet = true
         }
+        .onAppear {
+            Task {
+                await refreshRemoteFriends()
+            }
+        }
     }
 
-    private var loggedOutState: some View {
-        VStack(spacing: 18) {
-            Spacer(minLength: 48)
-
-            VStack(spacing: 12) {
-                Image(systemName: "person.2.slash")
-                    .font(.system(size: 34, weight: .semibold))
-                    .foregroundColor(FigmaTheme.text)
-
-                Text(L10n.t("friends_logged_out_title"))
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundColor(FigmaTheme.text)
-
-                Text(L10n.t("friends_logged_out_message"))
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(FigmaTheme.subtext)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(3)
+    private var activityContent: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 16) {
+                if feedEvents.isEmpty {
+                    emptyState(L10n.t("friends_empty_activity"))
+                } else {
+                    ForEach(feedEvents) { event in
+                        if let friend = feedProfileByID[event.friendID] {
+                            FriendActivityCard(
+                                friend: friend,
+                                event: event,
+                                likeCount: likeCountForEvent(event),
+                                likedByMe: likedByMeForEvent(event),
+                                likeLoading: likeLoadingForEvent(event),
+                                canLike: event.friendID != currentUserID,
+                                onToggleLike: {
+                                    guard let journeyID = event.journeyID else { return }
+                                    Task {
+                                        await toggleFeedLike(friendID: friend.id, journeyID: journeyID)
+                                    }
+                                },
+                                onOpenProfile: {
+                                    ensureSelfSnapshotInSocialStoreIfNeeded(friendID: friend.id)
+                                    activeRoute = .profile(friend.id)
+                                },
+                                onOpenEvent: {
+                                    ensureSelfSnapshotInSocialStoreIfNeeded(friendID: friend.id)
+                                    if let jid = event.journeyID {
+                                        activeRoute = .journey(friendID: friend.id, journeyID: jid)
+                                    } else {
+                                        activeRoute = .profile(friend.id)
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
             }
-            .padding(.horizontal, 28)
-
-            Button {
-                showAuthEntry = true
-            } label: {
-                Text(L10n.t("friends_go_login"))
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 50)
-                    .background(Color.black)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 28)
-
-            Spacer()
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            .padding(.bottom, 54)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .refreshable {
+            await refreshRemoteFriends()
+        }
         .background(FigmaTheme.background)
     }
 
-    @ViewBuilder
-    private func destination(for route: FriendsRoute) -> some View {
-        switch route {
-        case .profile(let friendID):
-            FriendProfileScreen(friendID: friendID)
-        case .journeys(let friendID):
-            FriendJourneysScreen(friendID: friendID)
-        case .cities(let friendID):
-            FriendCitiesScreen(friendID: friendID)
-        case .equipment(let friendID):
-            FriendEquipmentScreen(friendID: friendID)
-        case .publicMemories(let friendID):
-            FriendPublicMemoriesScreen(friendID: friendID)
-        case .journey(let friendID, let journeyID):
-            FriendJourneyRouteScreen(friendID: friendID, journeyID: journeyID)
+    private var allFriendsContent: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 16) {
+                if !incomingFriendRequests.isEmpty {
+                    friendRequestSectionTitle(L10n.t("friends_section_pending_approval"))
+                    ForEach(incomingFriendRequests) { req in
+                        friendRequestCard(request: req, isIncoming: true)
+                    }
+                }
+
+                if sortedFriends.isEmpty {
+                    if incomingFriendRequests.isEmpty {
+                        emptyState(L10n.t("friends_empty_all"))
+                    }
+                } else {
+                    ForEach(sortedFriends) { friend in
+                        Button {
+                            activeRoute = .profile(friend.id)
+                        } label: {
+                            AllFriendsCard(
+                                friend: friend,
+                                subtitleText: FriendListPresencePresentation.subtitle(for: friend)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            .padding(.bottom, 54)
         }
+        .refreshable {
+            await refreshRemoteFriends()
+        }
+        .background(FigmaTheme.background)
     }
 
-    private var header: some View {
-        UnifiedTabPageHeader(title: L10n.t("friends_title"), titleLevel: .primary, horizontalPadding: 16, topPadding: 14, bottomPadding: 12) {
-            Color.clear
-        } trailing: {
-            if !sessionStore.isLoggedIn {
+    private var loggedOutState: some View {
+            VStack(spacing: 18) {
+                Spacer(minLength: 48)
+
+                VStack(spacing: 12) {
+                    Image(systemName: "person.2.slash")
+                        .font(.system(size: 34, weight: .semibold))
+                        .foregroundColor(FigmaTheme.text)
+
+                    Text(L10n.t("friends_logged_out_title"))
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundColor(FigmaTheme.text)
+
+                    Text(L10n.t("friends_logged_out_message"))
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(FigmaTheme.subtext)
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(3)
+                }
+                .padding(.horizontal, 28)
+
                 Button {
                     showAuthEntry = true
                 } label: {
                     Text(L10n.t("friends_go_login"))
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(FigmaTheme.text)
-                }
-                .buttonStyle(.plain)
-            } else if tab == .allFriends {
-                Button {
-                    showInviteFriendSheet = true
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundColor(FigmaTheme.text)
-                }
-                .buttonStyle(.plain)
-            } else {
-                Button {
-                    showSocialNotificationsSheet = true
-                } label: {
-                    ZStack(alignment: .topTrailing) {
-                        Image(systemName: "bell.badge.fill")
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundColor(FigmaTheme.text)
-
-                        if unreadSocialCount > 0 {
-                            Text("\(min(unreadSocialCount, 99))")
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 2)
-                                .background(Color.red)
-                                .clipShape(Capsule())
-                                .offset(x: 10, y: -8)
-                        }
-                    }
-                    .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    private var tabSwitcher: some View {
-        HStack {
-            Picker("Friends", selection: $tab) {
-                ForEach(FriendsTopTab.allCases) { item in
-                    Text(item.title).tag(item)
-                }
-            }
-            .pickerStyle(.segmented)
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 8)
-    }
-
-    private func friendRequestSectionTitle(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 12, weight: .bold))
-            .foregroundColor(FigmaTheme.subtext)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 4)
-    }
-
-    private func friendRequestCard(request: BackendFriendRequestDTO, isIncoming: Bool) -> some View {
-        let profile = isIncoming ? request.fromUser : request.toUser
-        let loading = requestActionLoadingIDs.contains(request.id)
-
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                RobotRendererView(size: 36, face: .front, loadout: (profile.loadout ?? .defaultBoy).normalizedForCurrentAvatar())
-                    .frame(width: 56, height: 56)
-                    .background(Color(red: 227.0 / 255.0, green: 239.0 / 255.0, blue: 235.0 / 255.0))
-                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-
-                VStack(alignment: .leading, spacing: 4) {
-                    let handleText: String = {
-                        let raw = profile.handle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                        if raw.isEmpty { return L10n.t("unknown_id") }
-                        return "@\(raw)"
-                    }()
-                    Text(profile.displayName)
                         .font(.system(size: 15, weight: .bold))
-                        .foregroundColor(FigmaTheme.text)
-                    Text(String(format: L10n.t("friends_exclusive_id_format"), handleText))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(FigmaTheme.subtext)
-                    Text(FriendListPresencePresentation.shortAgoText(from: request.createdAt, now: Date(), localize: L10n.t))
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(FigmaTheme.subtext.opacity(0.8))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                        .background(Color.black)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
-                Spacer(minLength: 8)
-            }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 28)
 
-            if isIncoming {
-                HStack(spacing: 10) {
-                    Button(loading ? L10n.t("profile_sending") : L10n.t("friends_accept")) {
-                        Task { await acceptFriendRequest(request.id) }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(loading)
-
-                    Button(L10n.t("friends_ignore")) {
-                        Task { await rejectFriendRequest(request.id) }
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(loading)
-                }
-            } else {
-                Text(L10n.t("friends_waiting_approval"))
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(FigmaTheme.subtext)
+                Spacer()
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(FigmaTheme.background)
         }
-        .padding(16)
-        .figmaSurfaceCard(radius: 24)
-    }
 
-    private func emptyState(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundColor(.secondary)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.top, 28)
-    }
-
-    private func resolvedDisplayNameForInvite() -> String {
-        let value = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return value.isEmpty ? L10n.t("explorer_fallback") : value
-    }
-
-    private func resolvedExclusiveIDForInvite() -> String {
-        let id = myExclusiveID.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !id.isEmpty { return id }
-        let source = sessionStore.accountUserID ?? sessionStore.currentUserID
-        return SocialGraphStore.generateInviteCode(source: source)
-    }
-
-    private func resolvedInviteCodeForInvite() -> String {
-        let code = myInviteCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if !code.isEmpty { return code }
-        let source = sessionStore.accountUserID ?? resolvedExclusiveIDForInvite()
-        return SocialGraphStore.generateInviteCode(source: source)
-    }
-
-    private func buildFeedEvents(from friends: [FriendProfileSnapshot]) -> [FriendFeedEvent] {
-        var events: [FriendFeedEvent] = []
-
-        for friend in friends {
-            let visibleJourneys = friend.journeys
-                .filter { FriendFeedLogic.isJourneyEligible($0) }
-                .sorted {
-                    feedTimestamp(for: $0) > feedTimestamp(for: $1)
-                }
-
-            guard !visibleJourneys.isEmpty else { continue }
-
-            let firstJourneyByCity: [String: String] = {
-                var map: [String: String] = [:]
-                let ascending = visibleJourneys.sorted {
-                    feedTimestamp(for: $0) < feedTimestamp(for: $1)
-                }
-                for journey in ascending {
-                    let cityKey = resolvedFriendCityID(for: journey, cards: friend.unlockedCityCards)
-                    guard !cityKey.isEmpty, map[cityKey] == nil else { continue }
-                    map[cityKey] = journey.id
-                }
-                return map
-            }()
-
-            for journey in visibleJourneys.prefix(12) {
-                let eventDate = feedTimestamp(for: journey)
-                let cityKey = resolvedFriendCityID(for: journey, cards: friend.unlockedCityCards)
-                let cityName = resolvedFriendCityTitle(for: journey, cards: friend.unlockedCityCards)
-                let memoryCount = journey.memories.count
-                let photoCount = journey.memories.reduce(0) { $0 + $1.imageURLs.count }
-                let unlockedNewCity = !cityKey.isEmpty && firstJourneyByCity[cityKey] == journey.id
-
-                let kind: FriendFeedKind
-                if unlockedNewCity {
-                    kind = .city
-                } else if memoryCount > 0 {
-                    kind = .memory
-                } else {
-                    kind = .journey
-                }
-
-                let eventTitle = FriendFeedLogic.eventTitle(
-                    kind: kind,
-                    cityName: cityName,
-                    memoryCount: memoryCount,
-                    journeyTitle: journey.title
-                )
-                let metaText: String
-                switch kind {
-                case .city:
-                    metaText = ""
-                case .memory:
-                    metaText = String(format: L10n.t("friends_photos_count_format"), max(photoCount, memoryCount))
-                case .journey:
-                    metaText = "\(formatDistance(journey.distance))  \(formatDuration(start: journey.startTime, end: journey.endTime))"
-                }
-
-                events.append(
-                    FriendFeedEvent(
-                        id: "feed_\(friend.id)_\(journey.id)",
-                        kind: kind,
-                        friendID: friend.id,
-                        timestamp: eventDate,
-                        journeyID: journey.id,
-                        title: eventTitle,
-                        location: cityName,
-                        meta: metaText
-                    )
-                )
+        @ViewBuilder
+        private func destination(for route: FriendsRoute) -> some View {
+            switch route {
+            case .profile(let friendID):
+                FriendProfileScreen(friendID: friendID)
+            case .journeys(let friendID):
+                FriendJourneysScreen(friendID: friendID)
+            case .cities(let friendID):
+                FriendCitiesScreen(friendID: friendID)
+            case .equipment(let friendID):
+                FriendEquipmentScreen(friendID: friendID)
+            case .publicMemories(let friendID):
+                FriendPublicMemoriesScreen(friendID: friendID)
+            case .journey(let friendID, let journeyID):
+                FriendJourneyRouteScreen(friendID: friendID, journeyID: journeyID)
             }
         }
 
-        return events
-            .sorted { $0.timestamp > $1.timestamp }
-            .prefix(60)
-            .map { $0 }
-    }
-
-    private func feedTimestamp(for journey: FriendSharedJourney) -> Date {
-        let memoryDate = journey.memories.map(\.timestamp).max() ?? .distantPast
-        return max(memoryDate, journey.endTime ?? journey.startTime ?? .distantPast)
-    }
-
-    private func resolvedFriendCityID(for journey: FriendSharedJourney, cards: [FriendCityCard]) -> String {
-        FriendJourneyCityIdentity.resolveCityID(for: journey, cards: cards)
-    }
-
-    private func resolvedFriendCityTitle(for journey: FriendSharedJourney, cards: [FriendCityCard]) -> String {
-        let cityID = resolvedFriendCityID(for: journey, cards: cards)
-        let cityCard = cards.first(where: { $0.id == cityID })
-        return CityDisplayTitlePresentation.title(
-            cityKey: cityCard?.id ?? cityID,
-            iso2: cityCard?.countryISO2,
-            fallbackTitle: cityCard?.name ?? journey.title
-        )
-    }
-
-    private func formatDistance(_ meters: Double) -> String {
-        String(format: L10n.t("friends_distance_compact_format"), meters / 1000.0)
-    }
-
-    private func formatDuration(start: Date?, end: Date?) -> String {
-        guard let start, let end else { return "--" }
-        let sec = max(0, Int(end.timeIntervalSince(start)))
-        let h = sec / 3600
-        let m = (sec % 3600) / 60
-        return "\(h)h \(m)m"
-    }
-
-    private func feedLikeKey(friendID: String, journeyID: String) -> String {
-        "\(friendID)|\(journeyID)"
-    }
-
-    /// When tapping on own post in the feed, ensure the self-snapshot is available
-    /// in socialStore so that FriendProfileScreen / FriendJourneyRouteScreen can find it.
-    private func ensureSelfSnapshotInSocialStoreIfNeeded(friendID: String) {
-        let target = friendID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !target.isEmpty, target == currentUserID else { return }
-        if let snapshot = selfSnapshotForFeed {
-            socialStore.importFriendSnapshot(snapshot)
-        }
-    }
-
-    private func likeCountForEvent(_ event: FriendFeedEvent) -> Int {
-        guard let journeyID = event.journeyID else { return 0 }
-        return feedLikeStats[feedLikeKey(friendID: event.friendID, journeyID: journeyID)]?.likes ?? 0
-    }
-
-    private func likedByMeForEvent(_ event: FriendFeedEvent) -> Bool {
-        guard let journeyID = event.journeyID else { return false }
-        return feedLikeStats[feedLikeKey(friendID: event.friendID, journeyID: journeyID)]?.likedByMe ?? false
-    }
-
-    private func likeLoadingForEvent(_ event: FriendFeedEvent) -> Bool {
-        guard let journeyID = event.journeyID else { return false }
-        return feedLikeLoadingKeys.contains(feedLikeKey(friendID: event.friendID, journeyID: journeyID))
-    }
-
-    @MainActor
-    private func loadFeedLikeStatsIfNeeded() async {
-        guard BackendConfig.isEnabled,
-              let token = sessionStore.currentAccessToken,
-              !token.isEmpty else {
-            feedLikeStats = [:]
-            return
-        }
-
-        let pairs = feedEvents.compactMap { event -> (friendID: String, journeyID: String)? in
-            guard let journeyID = event.journeyID else { return nil }
-            guard event.friendID != currentUserID else { return nil }
-            return (event.friendID, journeyID)
-        }
-        guard !pairs.isEmpty else {
-            feedLikeStats = [:]
-            return
-        }
-
-        let grouped = Dictionary(grouping: pairs, by: \.friendID)
-        var next: [String: (likes: Int, likedByMe: Bool)] = [:]
-        do {
-            for (friendID, items) in grouped {
-                let ids = Array(Set(items.map(\.journeyID)))
-                let stats = try await BackendAPIClient.shared.fetchJourneyLikeStats(
-                    token: token,
-                    journeyIDs: ids,
-                    ownerUserID: friendID
-                )
-                for (journeyID, value) in stats {
-                    next[feedLikeKey(friendID: friendID, journeyID: journeyID)] = value
-                }
-            }
-            feedLikeStats = next
-        } catch {
-            // Keep feed available even if like stats request fails.
-        }
-    }
-
-    @MainActor
-    private func toggleFeedLike(friendID: String, journeyID: String) async {
-        guard BackendConfig.isEnabled else {
-            showFeedToast(L10n.t("friends_backend_not_configured"), duration: 2.0)
-            return
-        }
-        guard let token = sessionStore.currentAccessToken, !token.isEmpty else {
-            showFeedToast(L10n.t("please_sign_in_to_access_your_account"), duration: 2.0)
-            return
-        }
-
-        let key = feedLikeKey(friendID: friendID, journeyID: journeyID)
-        guard !feedLikeLoadingKeys.contains(key) else { return }
-
-        let current = feedLikeStats[key] ?? (likes: 0, likedByMe: false)
-        let liked = current.likedByMe
-
-        feedLikeStats[key] = (likes: liked ? max(0, current.likes - 1) : current.likes + 1, likedByMe: !liked)
-
-        feedLikeLoadingKeys.insert(key)
-        defer { feedLikeLoadingKeys.remove(key) }
-
-        do {
-            let resp: JourneyLikeActionResponse
-            if liked {
-                resp = try await BackendAPIClient.shared.unlikeJourney(token: token, ownerUserID: friendID, journeyID: journeyID)
-            } else {
-                resp = try await BackendAPIClient.shared.likeJourney(token: token, ownerUserID: friendID, journeyID: journeyID)
-            }
-            feedLikeStats[key] = (likes: max(0, resp.likes), likedByMe: resp.likedByMe)
-        } catch {
-            feedLikeStats[key] = current
-            showFeedToast(L10n.t("operation_failed"))
-        }
-    }
-
-    @MainActor
-    private func refreshRemoteFriends() async {
-        guard !loadingRemote else { return }
-        loadingRemote = true
-        defer { loadingRemote = false }
-
-        let previousFriends = socialStore.friends
-        await socialStore.reloadFromBackendIfPossible(accessToken: sessionStore.currentAccessToken)
-        socialStore.restoreFriendsIfEmpty(previousFriends)
-
-        await refreshSocialNotifications(showToastForLatestUnread: true)
-        await refreshFriendRequests()
-    }
-
-    @MainActor
-    private func refreshSocialNotifications(showToastForLatestUnread: Bool) async {
-        guard BackendConfig.isEnabled,
-              let token = sessionStore.currentAccessToken,
-              !token.isEmpty else {
-            socialNotifications = []
-            unreadSocialCount = 0
-            return
-        }
-        notificationsLoading = true
-        defer { notificationsLoading = false }
-
-        do {
-            let all = try await BackendAPIClient.shared.fetchNotifications(token: token, unreadOnly: false)
-            PostcardNotificationBridge.shared.surfaceUnreadPostcardNotifications(all)
-            let cutoff = Date().addingTimeInterval(-3 * 24 * 60 * 60)
-            let fetched = all
-                .filter({ SocialNotificationPolicy.supports(type: $0.type) })
-                .filter({ $0.createdAt >= cutoff })
-                .sorted(by: { $0.createdAt > $1.createdAt })
-            var mergedByID: [String: BackendNotificationItem] = [:]
-            for item in socialNotifications where item.createdAt >= cutoff {
-                mergedByID[item.id] = item
-            }
-            for item in fetched {
-                mergedByID[item.id] = item
-            }
-            let socialItems = mergedByID.values
-                .filter { $0.createdAt >= cutoff }
-                .sorted(by: { $0.createdAt > $1.createdAt })
-            socialNotifications = socialItems
-
-            let unread = socialItems.filter { !$0.read }
-            unreadSocialCount = unread.count
-
-            if showToastForLatestUnread,
-               let latest = unread.first,
-               latest.id != lastPromptNotificationID {
-                showFeedToast(SocialNotificationPresentation.message(for: latest), duration: 2.2)
-                lastPromptNotificationID = latest.id
-            }
-        } catch {
-            // Keep social feed resilient even if reminder endpoint fails.
-        }
-    }
-
-    @MainActor
-    private func refreshMyInviteIdentityIfNeeded() async {
-        guard BackendConfig.isEnabled,
-              let token = sessionStore.currentAccessToken,
-              !token.isEmpty else {
-            myRemoteProfile = nil
-            return
-        }
-        do {
-            let me = try await BackendAPIClient.shared.fetchMyProfile(token: token)
-            myRemoteProfile = me
-            if let id = me.resolvedExclusiveID?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !id.isEmpty {
-                myExclusiveID = id
-            }
-            if let code = me.inviteCode?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !code.isEmpty {
-                myInviteCode = code.uppercased()
-            } else {
-                myInviteCode = SocialGraphStore.generateInviteCode(source: me.id)
-            }
-        } catch {
-            myRemoteProfile = nil
-            // Keep invite entry available with local fallback.
-        }
-    }
-
-    @MainActor
-    private func refreshFriendRequests() async {
-        guard BackendConfig.isEnabled,
-              let token = sessionStore.currentAccessToken,
-              !token.isEmpty else {
-            incomingFriendRequests = []
-            outgoingFriendRequests = []
-            return
-        }
-
-        do {
-            let resp = try await BackendAPIClient.shared.fetchFriendRequests(token: token)
-            incomingFriendRequests = resp.incoming
-            outgoingFriendRequests = resp.outgoing
-        } catch {
-            // Keep friends page available even if request endpoint fails.
-        }
-    }
-
-    @MainActor
-    private func acceptFriendRequest(_ requestID: String) async {
-        guard BackendConfig.isEnabled,
-              let token = sessionStore.currentAccessToken,
-              !token.isEmpty else {
-            showFeedToast(L10n.t("please_sign_in_to_access_your_account"), duration: 2.0)
-            return
-        }
-        guard !requestActionLoadingIDs.contains(requestID) else { return }
-        requestActionLoadingIDs.insert(requestID)
-        defer { requestActionLoadingIDs.remove(requestID) }
-
-        do {
-            let resp = try await BackendAPIClient.shared.acceptFriendRequest(token: token, requestID: requestID)
-            await refreshRemoteFriends()
-            showFeedToast(resp.message ?? L10n.t("friends_request_accepted"))
-        } catch {
-            showFeedToast(String(format: L10n.t("friends_accept_failed_format"), error.localizedDescription))
-        }
-    }
-
-    @MainActor
-    private func rejectFriendRequest(_ requestID: String) async {
-        guard BackendConfig.isEnabled,
-              let token = sessionStore.currentAccessToken,
-              !token.isEmpty else {
-            showFeedToast(L10n.t("please_sign_in_to_access_your_account"), duration: 2.0)
-            return
-        }
-        guard !requestActionLoadingIDs.contains(requestID) else { return }
-        requestActionLoadingIDs.insert(requestID)
-        defer { requestActionLoadingIDs.remove(requestID) }
-
-        do {
-            let resp = try await BackendAPIClient.shared.rejectFriendRequest(token: token, requestID: requestID)
-            await refreshFriendRequests()
-            showFeedToast(resp.message ?? L10n.t("friends_request_rejected"))
-        } catch {
-            showFeedToast(String(format: L10n.t("friends_reject_failed_format"), error.localizedDescription))
-        }
-    }
-
-    @MainActor
-    private func markSocialNotificationsRead(ids: [String]) async {
-        guard BackendConfig.isEnabled,
-              let token = sessionStore.currentAccessToken,
-              !token.isEmpty else { return }
-        let targetIDs = Array(Set(ids))
-        guard !targetIDs.isEmpty else { return }
-
-        do {
-            try await BackendAPIClient.shared.markNotificationsRead(token: token, ids: targetIDs)
-            socialNotifications = socialNotifications.map { item in
-                guard targetIDs.contains(item.id) else { return item }
-                var copy = item
-                copy.read = true
-                return copy
-            }
-            unreadSocialCount = socialNotifications.filter { !$0.read }.count
-        } catch {
-            // Keep feed page responsive even if read-mark fails.
-        }
-    }
-
-    @MainActor
-    private func markSingleSocialNotificationRead(_ id: String) async {
-        guard let item = socialNotifications.first(where: { $0.id == id }), !item.read else { return }
-        await markSocialNotificationsRead(ids: [id])
-    }
-
-    @MainActor
-    private func markAllSocialNotificationsRead() async {
-        let unreadIDs = socialNotifications.filter { !$0.read }.map(\.id)
-        await markSocialNotificationsRead(ids: unreadIDs)
-    }
-
-    @ViewBuilder
-    private var socialNotificationsSheet: some View {
-        NavigationStack {
-            Group {
-                if notificationsLoading && socialNotifications.isEmpty {
-                    VStack(spacing: 12) {
-                        ProgressView()
-                        Text(L10n.t("profile_notifications_loading"))
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(FigmaTheme.subtext)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if socialNotifications.isEmpty {
-                    Text(L10n.t("profile_notifications_empty"))
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(FigmaTheme.subtext)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ScrollView(showsIndicators: false) {
-                        VStack(spacing: 10) {
-                            ForEach(socialNotifications) { item in
-                                socialNotificationRow(item)
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 12)
-                        .padding(.bottom, 28)
-                    }
-                }
-            }
-            .background(FigmaTheme.background.ignoresSafeArea())
-            .safeAreaInset(edge: .top, spacing: 0) {
-                UnifiedNavigationHeader(
-                    chrome: NavigationChrome(
-                        title: L10n.t("profile_notifications_title"),
-                        leadingAccessory: .back,
-                        titleLevel: .secondary
-                    ),
-                    horizontalPadding: 16,
-                    topPadding: 8,
-                    bottomPadding: 12,
-                    onLeadingTap: { showSocialNotificationsSheet = false }
-                ) {
+        private var header: some View {
+            UnifiedTabPageHeader(title: L10n.t("friends_title"), titleLevel: .primary, horizontalPadding: 16, topPadding: 14, bottomPadding: 12) {
+                Color.clear
+            } trailing: {
+                if !sessionStore.isLoggedIn {
                     Button {
-                        Task {
-                            await markAllSocialNotificationsRead()
-                        }
+                        showAuthEntry = true
                     } label: {
-                        Image(systemName: "checkmark.circle")
-                            .font(.system(size: 18, weight: .semibold))
+                        Text(L10n.t("friends_go_login"))
+                            .font(.system(size: 14, weight: .bold))
                             .foregroundColor(FigmaTheme.text)
-                            .frame(width: 42, height: 42)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(L10n.t("friends_mark_all_read"))
+                } else if tab == .allFriends {
+                    Button {
+                        showInviteFriendSheet = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundColor(FigmaTheme.text)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Button {
+                        showSocialNotificationsSheet = true
+                    } label: {
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: "bell.badge.fill")
+                                .font(.system(size: 22, weight: .bold))
+                                .foregroundColor(FigmaTheme.text)
+
+                            if unreadSocialCount > 0 {
+                                Text("\(min(unreadSocialCount, 99))")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 2)
+                                    .background(Color.red)
+                                    .clipShape(Capsule())
+                                    .offset(x: 10, y: -8)
+                            }
+                        }
+                        .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
-            .toolbar(.hidden, for: .navigationBar)
-            .task {
-                await refreshSocialNotifications(showToastForLatestUnread: false)
+        }
+
+        private var tabSwitcher: some View {
+            HStack {
+                Picker("Friends", selection: $tab) {
+                    ForEach(FriendsTopTab.allCases) { item in
+                        Text(item.title).tag(item)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 8)
+        }
+
+        private func friendRequestSectionTitle(_ text: String) -> some View {
+            Text(text)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(FigmaTheme.subtext)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 4)
+        }
+
+        private func friendRequestCard(request: BackendFriendRequestDTO, isIncoming: Bool) -> some View {
+            let profile = isIncoming ? request.fromUser : request.toUser
+            let loading = requestActionLoadingIDs.contains(request.id)
+
+            return VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    RobotRendererView(size: 36, face: .front, loadout: (profile.loadout ?? .defaultBoy).normalizedForCurrentAvatar())
+                        .frame(width: 56, height: 56)
+                        .background(Color(red: 227.0 / 255.0, green: 239.0 / 255.0, blue: 235.0 / 255.0))
+                        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        let handleText: String = {
+                            let raw = profile.handle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                            if raw.isEmpty { return L10n.t("unknown_id") }
+                            return "@\(raw)"
+                        }()
+                        Text(profile.displayName)
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(FigmaTheme.text)
+                        Text(String(format: L10n.t("friends_exclusive_id_format"), handleText))
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(FigmaTheme.subtext)
+                        Text(FriendListPresencePresentation.shortAgoText(from: request.createdAt, now: Date(), localize: L10n.t))
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(FigmaTheme.subtext.opacity(0.8))
+                    }
+                    Spacer(minLength: 8)
+                }
+
+                if isIncoming {
+                    HStack(spacing: 10) {
+                        Button(loading ? L10n.t("profile_sending") : L10n.t("friends_accept")) {
+                            Task { await acceptFriendRequest(request.id) }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(loading)
+
+                        Button(L10n.t("friends_ignore")) {
+                            Task { await rejectFriendRequest(request.id) }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(loading)
+                    }
+                } else {
+                    Text(L10n.t("friends_waiting_approval"))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(FigmaTheme.subtext)
+                }
+            }
+            .padding(16)
+            .figmaSurfaceCard(radius: 24)
+        }
+
+        private func emptyState(_ text: String) -> some View {
+            Text(text)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.top, 28)
+        }
+
+        private func resolvedDisplayNameForInvite() -> String {
+            let value = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return value.isEmpty ? L10n.t("explorer_fallback") : value
+        }
+
+        private func resolvedExclusiveIDForInvite() -> String {
+            let id = myExclusiveID.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !id.isEmpty { return id }
+            let source = sessionStore.accountUserID ?? sessionStore.currentUserID
+            return SocialGraphStore.generateInviteCode(source: source)
+        }
+
+        private func resolvedInviteCodeForInvite() -> String {
+            let code = myInviteCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            if !code.isEmpty { return code }
+            let source = sessionStore.accountUserID ?? resolvedExclusiveIDForInvite()
+            return SocialGraphStore.generateInviteCode(source: source)
+        }
+
+        private func buildFeedEvents(from friends: [FriendProfileSnapshot]) -> [FriendFeedEvent] {
+            var events: [FriendFeedEvent] = []
+
+            for friend in friends {
+                let visibleJourneys = friend.journeys
+                    .filter { FriendFeedLogic.isJourneyEligible($0) }
+                    .sorted {
+                        feedTimestamp(for: $0) > feedTimestamp(for: $1)
+                    }
+
+                guard !visibleJourneys.isEmpty else { continue }
+
+                let firstJourneyByCity: [String: String] = {
+                    var map: [String: String] = [:]
+                    let ascending = visibleJourneys.sorted {
+                        feedTimestamp(for: $0) < feedTimestamp(for: $1)
+                    }
+                    for journey in ascending {
+                        let cityKey = resolvedFriendCityID(for: journey, cards: friend.unlockedCityCards)
+                        guard !cityKey.isEmpty, map[cityKey] == nil else { continue }
+                        map[cityKey] = journey.id
+                    }
+                    return map
+                }()
+
+                for journey in visibleJourneys.prefix(12) {
+                    let eventDate = feedTimestamp(for: journey)
+                    let cityKey = resolvedFriendCityID(for: journey, cards: friend.unlockedCityCards)
+                    let cityName = resolvedFriendCityTitle(for: journey, cards: friend.unlockedCityCards)
+                    let memoryCount = journey.memories.count
+                    let photoCount = journey.memories.reduce(0) { $0 + $1.imageURLs.count }
+                    let unlockedNewCity = !cityKey.isEmpty && firstJourneyByCity[cityKey] == journey.id
+
+                    let kind: FriendFeedKind
+                    if unlockedNewCity {
+                        kind = .city
+                    } else if memoryCount > 0 {
+                        kind = .memory
+                    } else {
+                        kind = .journey
+                    }
+
+                    let eventTitle = FriendFeedLogic.eventTitle(
+                        kind: kind,
+                        cityName: cityName,
+                        memoryCount: memoryCount,
+                        journeyTitle: journey.title
+                    )
+                    let metaText: String
+                    switch kind {
+                    case .city:
+                        metaText = ""
+                    case .memory:
+                        metaText = String(format: L10n.t("friends_photos_count_format"), max(photoCount, memoryCount))
+                    case .journey:
+                        metaText = "\(formatDistance(journey.distance))  \(formatDuration(start: journey.startTime, end: journey.endTime))"
+                    }
+
+                    events.append(
+                        FriendFeedEvent(
+                            id: "feed_\(friend.id)_\(journey.id)",
+                            kind: kind,
+                            friendID: friend.id,
+                            timestamp: eventDate,
+                            journeyID: journey.id,
+                            title: eventTitle,
+                            location: cityName,
+                            meta: metaText
+                        )
+                    )
+                }
+            }
+
+            return events
+                .sorted { $0.timestamp > $1.timestamp }
+                .prefix(60)
+                .map { $0 }
+        }
+
+        private func feedTimestamp(for journey: FriendSharedJourney) -> Date {
+            let memoryDate = journey.memories.map(\.timestamp).max() ?? .distantPast
+            return max(memoryDate, journey.endTime ?? journey.startTime ?? .distantPast)
+        }
+
+        private func resolvedFriendCityID(for journey: FriendSharedJourney, cards: [FriendCityCard]) -> String {
+            FriendJourneyCityIdentity.resolveCityID(for: journey, cards: cards)
+        }
+
+        private func resolvedFriendCityTitle(for journey: FriendSharedJourney, cards: [FriendCityCard]) -> String {
+            let cityID = resolvedFriendCityID(for: journey, cards: cards)
+            let cityCard = cards.first(where: { $0.id == cityID })
+            return CityDisplayTitlePresentation.title(
+                cityKey: cityCard?.id ?? cityID,
+                iso2: cityCard?.countryISO2,
+                fallbackTitle: cityCard?.name ?? journey.title
+            )
+        }
+
+        private func formatDistance(_ meters: Double) -> String {
+            String(format: L10n.t("friends_distance_compact_format"), meters / 1000.0)
+        }
+
+        private func formatDuration(start: Date?, end: Date?) -> String {
+            guard let start, let end else { return "--" }
+            let sec = max(0, Int(end.timeIntervalSince(start)))
+            let h = sec / 3600
+            let m = (sec % 3600) / 60
+            return "\(h)h \(m)m"
+        }
+
+        private func feedLikeKey(friendID: String, journeyID: String) -> String {
+            "\(friendID)|\(journeyID)"
+        }
+
+        /// When tapping on own post in the feed, ensure the self-snapshot is available
+        /// in socialStore so that FriendProfileScreen / FriendJourneyRouteScreen can find it.
+        private func ensureSelfSnapshotInSocialStoreIfNeeded(friendID: String) {
+            let target = friendID.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !target.isEmpty, target == currentUserID else { return }
+            if let snapshot = selfSnapshotForFeed {
+                socialStore.importFriendSnapshot(snapshot)
             }
         }
-    }
 
-    private func socialNotificationRow(_ item: BackendNotificationItem) -> some View {
-        let isLike = item.type == "journey_like"
-        let isPostcard = item.type == "postcard_received"
-        let badgeTitle = SocialNotificationPresentation.badgeTitle(for: item)
-        let badgeColor = isPostcard
+        private func likeCountForEvent(_ event: FriendFeedEvent) -> Int {
+            guard let journeyID = event.journeyID else { return 0 }
+            return feedLikeStats[feedLikeKey(friendID: event.friendID, journeyID: journeyID)]?.likes ?? 0
+        }
+
+        private func likedByMeForEvent(_ event: FriendFeedEvent) -> Bool {
+            guard let journeyID = event.journeyID else { return false }
+            return feedLikeStats[feedLikeKey(friendID: event.friendID, journeyID: journeyID)]?.likedByMe ?? false
+        }
+
+        private func likeLoadingForEvent(_ event: FriendFeedEvent) -> Bool {
+            guard let journeyID = event.journeyID else { return false }
+            return feedLikeLoadingKeys.contains(feedLikeKey(friendID: event.friendID, journeyID: journeyID))
+        }
+
+        @MainActor
+        private func loadFeedLikeStatsIfNeeded() async {
+            guard BackendConfig.isEnabled,
+                  let token = sessionStore.currentAccessToken,
+                  !token.isEmpty else {
+                feedLikeStats = [:]
+                return
+            }
+
+            let pairs = feedEvents.compactMap { event -> (friendID: String, journeyID: String)? in
+                guard let journeyID = event.journeyID else { return nil }
+                guard event.friendID != currentUserID else { return nil }
+                return (event.friendID, journeyID)
+            }
+            guard !pairs.isEmpty else {
+                feedLikeStats = [:]
+                return
+            }
+
+            let grouped = Dictionary(grouping: pairs, by: \.friendID)
+            var next: [String: (likes: Int, likedByMe: Bool)] = [:]
+            do {
+                for (friendID, items) in grouped {
+                    let ids = Array(Set(items.map(\.journeyID)))
+                    let stats = try await BackendAPIClient.shared.fetchJourneyLikeStats(
+                        token: token,
+                        journeyIDs: ids,
+                        ownerUserID: friendID
+                    )
+                    for (journeyID, value) in stats {
+                        next[feedLikeKey(friendID: friendID, journeyID: journeyID)] = value
+                    }
+                }
+                feedLikeStats = next
+            } catch {
+                // Keep feed available even if like stats request fails.
+            }
+        }
+
+        @MainActor
+        private func toggleFeedLike(friendID: String, journeyID: String) async {
+            guard BackendConfig.isEnabled else {
+                showFeedToast(L10n.t("friends_backend_not_configured"), duration: 2.0)
+                return
+            }
+            guard let token = sessionStore.currentAccessToken, !token.isEmpty else {
+                showFeedToast(L10n.t("please_sign_in_to_access_your_account"), duration: 2.0)
+                return
+            }
+
+            let key = feedLikeKey(friendID: friendID, journeyID: journeyID)
+            guard !feedLikeLoadingKeys.contains(key) else { return }
+
+            let current = feedLikeStats[key] ?? (likes: 0, likedByMe: false)
+            let liked = current.likedByMe
+
+            feedLikeStats[key] = (likes: liked ? max(0, current.likes - 1) : current.likes + 1, likedByMe: !liked)
+
+            feedLikeLoadingKeys.insert(key)
+            defer { feedLikeLoadingKeys.remove(key) }
+
+            do {
+                let resp: JourneyLikeActionResponse
+                if liked {
+                    resp = try await BackendAPIClient.shared.unlikeJourney(token: token, ownerUserID: friendID, journeyID: journeyID)
+                } else {
+                    resp = try await BackendAPIClient.shared.likeJourney(token: token, ownerUserID: friendID, journeyID: journeyID)
+                }
+                feedLikeStats[key] = (likes: max(0, resp.likes), likedByMe: resp.likedByMe)
+            } catch {
+                feedLikeStats[key] = current
+                showFeedToast(L10n.t("operation_failed"))
+            }
+        }
+
+        @MainActor
+        private func refreshRemoteFriends() async {
+            guard !loadingRemote else { return }
+            loadingRemote = true
+            defer { loadingRemote = false }
+
+            let previousFriends = socialStore.friends
+            await socialStore.reloadFromBackendIfPossible(accessToken: sessionStore.currentAccessToken)
+            socialStore.restoreFriendsIfEmpty(previousFriends)
+
+            await refreshSocialNotifications(showToastForLatestUnread: true)
+            await refreshFriendRequests()
+        }
+
+        @MainActor
+        private func refreshSocialNotifications(showToastForLatestUnread: Bool) async {
+            guard BackendConfig.isEnabled,
+                  let token = sessionStore.currentAccessToken,
+                  !token.isEmpty else {
+                socialNotifications = []
+                unreadSocialCount = 0
+                return
+            }
+            notificationsLoading = true
+            defer { notificationsLoading = false }
+
+            do {
+                let all = try await BackendAPIClient.shared.fetchNotifications(token: token, unreadOnly: false)
+                PostcardNotificationBridge.shared.surfaceUnreadPostcardNotifications(all)
+                let cutoff = Date().addingTimeInterval(-3 * 24 * 60 * 60)
+                let fetched = all
+                    .filter({ SocialNotificationPolicy.supports(type: $0.type) })
+                    .filter({ $0.createdAt >= cutoff })
+                    .sorted(by: { $0.createdAt > $1.createdAt })
+                var mergedByID: [String: BackendNotificationItem] = [:]
+                for item in socialNotifications where item.createdAt >= cutoff {
+                    mergedByID[item.id] = item
+                }
+                for item in fetched {
+                    mergedByID[item.id] = item
+                }
+                let socialItems = mergedByID.values
+                    .filter { $0.createdAt >= cutoff }
+                    .sorted(by: { $0.createdAt > $1.createdAt })
+                socialNotifications = socialItems
+
+                let unread = socialItems.filter { !$0.read }
+                unreadSocialCount = unread.count
+
+                if showToastForLatestUnread,
+                   let latest = unread.first,
+                   latest.id != lastPromptNotificationID {
+                    showFeedToast(SocialNotificationPresentation.message(for: latest), duration: 2.2)
+                    lastPromptNotificationID = latest.id
+                }
+            } catch {
+                // Keep social feed resilient even if reminder endpoint fails.
+            }
+        }
+
+        @MainActor
+        private func refreshMyInviteIdentityIfNeeded() async {
+            guard BackendConfig.isEnabled,
+                  let token = sessionStore.currentAccessToken,
+                  !token.isEmpty else {
+                myRemoteProfile = nil
+                return
+            }
+            do {
+                let me = try await BackendAPIClient.shared.fetchMyProfile(token: token)
+                myRemoteProfile = me
+                if let id = me.resolvedExclusiveID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !id.isEmpty {
+                    myExclusiveID = id
+                }
+                if let code = me.inviteCode?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !code.isEmpty {
+                    myInviteCode = code.uppercased()
+                } else {
+                    myInviteCode = SocialGraphStore.generateInviteCode(source: me.id)
+                }
+            } catch {
+                myRemoteProfile = nil
+                // Keep invite entry available with local fallback.
+            }
+        }
+
+        @MainActor
+        private func refreshFriendRequests() async {
+            guard BackendConfig.isEnabled,
+                  let token = sessionStore.currentAccessToken,
+                  !token.isEmpty else {
+                incomingFriendRequests = []
+                outgoingFriendRequests = []
+                return
+            }
+
+            do {
+                let resp = try await BackendAPIClient.shared.fetchFriendRequests(token: token)
+                incomingFriendRequests = resp.incoming
+                outgoingFriendRequests = resp.outgoing
+            } catch {
+                // Keep friends page available even if request endpoint fails.
+            }
+        }
+
+        @MainActor
+        private func acceptFriendRequest(_ requestID: String) async {
+            guard BackendConfig.isEnabled,
+                  let token = sessionStore.currentAccessToken,
+                  !token.isEmpty else {
+                showFeedToast(L10n.t("please_sign_in_to_access_your_account"), duration: 2.0)
+                return
+            }
+            guard !requestActionLoadingIDs.contains(requestID) else { return }
+            requestActionLoadingIDs.insert(requestID)
+            defer { requestActionLoadingIDs.remove(requestID) }
+
+            do {
+                let resp = try await BackendAPIClient.shared.acceptFriendRequest(token: token, requestID: requestID)
+                await refreshRemoteFriends()
+                showFeedToast(resp.message ?? L10n.t("friends_request_accepted"))
+            } catch {
+                showFeedToast(String(format: L10n.t("friends_accept_failed_format"), error.localizedDescription))
+            }
+        }
+
+        @MainActor
+        private func rejectFriendRequest(_ requestID: String) async {
+            guard BackendConfig.isEnabled,
+                  let token = sessionStore.currentAccessToken,
+                  !token.isEmpty else {
+                showFeedToast(L10n.t("please_sign_in_to_access_your_account"), duration: 2.0)
+                return
+            }
+            guard !requestActionLoadingIDs.contains(requestID) else { return }
+            requestActionLoadingIDs.insert(requestID)
+            defer { requestActionLoadingIDs.remove(requestID) }
+
+            do {
+                let resp = try await BackendAPIClient.shared.rejectFriendRequest(token: token, requestID: requestID)
+                await refreshFriendRequests()
+                showFeedToast(resp.message ?? L10n.t("friends_request_rejected"))
+            } catch {
+                showFeedToast(String(format: L10n.t("friends_reject_failed_format"), error.localizedDescription))
+            }
+        }
+
+        @MainActor
+        private func markSocialNotificationsRead(ids: [String]) async {
+            guard BackendConfig.isEnabled,
+                  let token = sessionStore.currentAccessToken,
+                  !token.isEmpty else { return }
+            let targetIDs = Array(Set(ids))
+            guard !targetIDs.isEmpty else { return }
+
+            do {
+                try await BackendAPIClient.shared.markNotificationsRead(token: token, ids: targetIDs)
+                socialNotifications = socialNotifications.map { item in
+                    guard targetIDs.contains(item.id) else { return item }
+                    var copy = item
+                    copy.read = true
+                    return copy
+                }
+                unreadSocialCount = socialNotifications.filter { !$0.read }.count
+            } catch {
+                // Keep feed page responsive even if read-mark fails.
+            }
+        }
+
+        @MainActor
+        private func markSingleSocialNotificationRead(_ id: String) async {
+            guard let item = socialNotifications.first(where: { $0.id == id }), !item.read else { return }
+            await markSocialNotificationsRead(ids: [id])
+        }
+
+        @MainActor
+        private func markAllSocialNotificationsRead() async {
+            let unreadIDs = socialNotifications.filter { !$0.read }.map(\.id)
+            await markSocialNotificationsRead(ids: unreadIDs)
+        }
+
+        @ViewBuilder
+        private var socialNotificationsSheet: some View {
+            NavigationStack {
+                Group {
+                    if notificationsLoading && socialNotifications.isEmpty {
+                        VStack(spacing: 12) {
+                            ProgressView()
+                            Text(L10n.t("profile_notifications_loading"))
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(FigmaTheme.subtext)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if socialNotifications.isEmpty {
+                        Text(L10n.t("profile_notifications_empty"))
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(FigmaTheme.subtext)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        ScrollView(showsIndicators: false) {
+                            VStack(spacing: 10) {
+                                ForEach(socialNotifications) { item in
+                                    socialNotificationRow(item)
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.top, 12)
+                            .padding(.bottom, 28)
+                        }
+                    }
+                }
+                .background(FigmaTheme.background.ignoresSafeArea())
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    UnifiedNavigationHeader(
+                        chrome: NavigationChrome(
+                            title: L10n.t("profile_notifications_title"),
+                            leadingAccessory: .back,
+                            titleLevel: .secondary
+                        ),
+                        horizontalPadding: 16,
+                        topPadding: 8,
+                        bottomPadding: 12,
+                        onLeadingTap: { showSocialNotificationsSheet = false }
+                    ) {
+                        Button {
+                            Task {
+                                await markAllSocialNotificationsRead()
+                            }
+                        } label: {
+                            Image(systemName: "checkmark.circle")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(FigmaTheme.text)
+                                .frame(width: 42, height: 42)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(L10n.t("friends_mark_all_read"))
+                    }
+                }
+                .toolbar(.hidden, for: .navigationBar)
+                .task {
+                    await refreshSocialNotifications(showToastForLatestUnread: false)
+                }
+            }
+        }
+
+        private func socialNotificationRow(_ item: BackendNotificationItem) -> some View {
+            let isLike = item.type == "journey_like"
+            let isPostcard = item.type == "postcard_received"
+            let badgeTitle = SocialNotificationPresentation.badgeTitle(for: item)
+            let badgeColor = isPostcard
             ? Color(red: 0.35, green: 0.40, blue: 0.88)
             : (isLike ? Color.red : Color(red: 0.22, green: 0.45, blue: 0.89))
 
-        return HStack(alignment: .top, spacing: 10) {
-            Circle()
-                .fill(item.read ? Color.clear : Color(red: 0.22, green: 0.45, blue: 0.89))
-                .frame(width: 8, height: 8)
-                .padding(.top, 7)
+            return HStack(alignment: .top, spacing: 10) {
+                Circle()
+                    .fill(item.read ? Color.clear : Color(red: 0.22, green: 0.45, blue: 0.89))
+                    .frame(width: 8, height: 8)
+                    .padding(.top, 7)
 
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    Text(badgeTitle)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(
-                            item.read
-                            ? FigmaTheme.subtext
-                            : badgeColor
-                        )
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(item.read ? Color.black.opacity(0.03) : Color.black.opacity(0.06))
-                        .clipShape(Capsule())
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Text(badgeTitle)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(
+                                item.read
+                                ? FigmaTheme.subtext
+                                : badgeColor
+                            )
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(item.read ? Color.black.opacity(0.03) : Color.black.opacity(0.06))
+                            .clipShape(Capsule())
 
-                    Text(relativeTimeText(item.createdAt))
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(FigmaTheme.subtext)
-                }
+                        Text(relativeTimeText(item.createdAt))
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(FigmaTheme.subtext)
+                    }
 
-                Text(SocialNotificationPresentation.message(for: item))
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(item.read ? FigmaTheme.subtext : FigmaTheme.text)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(item.read ? Color(white: 0.97) : Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .shadow(color: Color.black.opacity(0.04), radius: 14, x: 0, y: 5)
-        .onTapGesture {
-            Task {
-                await markSingleSocialNotificationRead(item.id)
-                if item.type == "postcard_received" {
-                    postcardInboxIntent = PostcardInboxIntent(box: "received", messageID: item.postcardMessageID)
-                    showPostcardInboxSheet = true
-                } else if let fromUserID = item.fromUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
-                          !fromUserID.isEmpty {
-                    showSocialNotificationsSheet = false
-                    activeRoute = .profile(fromUserID)
+                    Text(SocialNotificationPresentation.message(for: item))
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(item.read ? FigmaTheme.subtext : FigmaTheme.text)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(item.read ? Color(white: 0.97) : Color.white)
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .shadow(color: Color.black.opacity(0.04), radius: 14, x: 0, y: 5)
+            .onTapGesture {
+                Task {
+                    await markSingleSocialNotificationRead(item.id)
+                    if item.type == "postcard_received" || item.type == "postcard_reaction" {
+                        showSocialNotificationsSheet = false
+                        let box = item.type == "postcard_received" ? "received" : "sent"
+                        postcardInboxIntent = PostcardInboxIntent(box: box, messageID: item.postcardMessageID)
+                        showPostcardInboxSheet = true
+                    } else if let fromUserID = item.fromUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                              !fromUserID.isEmpty {
+                        showSocialNotificationsSheet = false
+                        activeRoute = .profile(fromUserID)
+                    }
+                }
+            }
         }
-    }
 
-    private func relativeTimeText(_ date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return formatter.localizedString(for: date, relativeTo: Date())
-    }
-
-    @MainActor
-    private func showFeedToast(_ text: String, duration: Double = 2.2) {
-        let compact = text
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !compact.isEmpty else { return }
-        toastText = compact
-        withAnimation(.easeInOut(duration: 0.2)) {
-            showToast = true
+        private func relativeTimeText(_ date: Date) -> String {
+            let formatter = RelativeDateTimeFormatter()
+            formatter.unitsStyle = .short
+            return formatter.localizedString(for: date, relativeTo: Date())
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+
+        @MainActor
+        private func showFeedToast(_ text: String, duration: Double = 2.2) {
+            let compact = text
+                .replacingOccurrences(of: "\n", with: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !compact.isEmpty else { return }
+            toastText = compact
             withAnimation(.easeInOut(duration: 0.2)) {
-                showToast = false
+                showToast = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showToast = false
+                }
             }
         }
     }
-}
 
 private struct FriendActivityCard: View {
     let friend: FriendProfileSnapshot
@@ -1400,15 +1471,17 @@ private struct AddFriendSheet: View {
                 TextField(L10n.t("friends_add_note_optional"), text: $friendNote)
                     .textFieldStyle(.roundedBorder)
 
-                Button {
-                    showScannerSheet = true
-                } label: {
-                    Label(L10n.t("profile_scan_qr_code"), systemImage: "qrcode.viewfinder")
-                        .font(.system(size: 14, weight: .semibold))
+                if method == .qrToken {
+                    Button {
+                        showScannerSheet = true
+                    } label: {
+                        Label(L10n.t("profile_scan_qr_code"), systemImage: "qrcode.viewfinder")
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .buttonStyle(.bordered)
                 }
-                .buttonStyle(.bordered)
 
-                Button(submitting ? "发送中..." : "发送好友申请") {
+                Button(submitting ? L10n.t("friends_qr_sending") : L10n.t("friends_qr_send_request")) {
                     Task {
                         await submit()
                     }
@@ -1443,7 +1516,7 @@ private struct AddFriendSheet: View {
             .sheet(isPresented: $showScannerSheet) {
                 FriendInviteScannerSheet { text in
                     guard let parsed = AppDeepLinkStore.parseInvite(from: text), !parsed.isEmpty else {
-                        message = "二维码内容无法识别，请确认对方分享的是 StreetStamps 邀请码/链接。"
+                        message = L10n.t("friends_qr_invalid_content")
                         showMessage = true
                         return
                     }
@@ -1455,7 +1528,7 @@ private struct AddFriendSheet: View {
                         friendCode = handle
                     }
                     showMessage = true
-                    message = "已识别邀请信息，点击“发送好友申请”即可。"
+                    message = L10n.t("friends_qr_recognized")
                 }
             }
         }
@@ -1463,9 +1536,9 @@ private struct AddFriendSheet: View {
 
     private var inputPlaceholder: String {
         switch method {
-        case .inviteCode: return "输入邀请码（A1B2C3D4）"
-        case .exclusiveID: return "输入好友专属ID（示例：@alice）"
-        case .qrToken: return "粘贴二维码 token 或链接"
+        case .inviteCode: return L10n.t("friends_input_invite_code_hint")
+        case .exclusiveID: return L10n.t("friends_input_exclusive_id_hint")
+        case .qrToken: return L10n.t("friends_input_qr_token_hint")
         }
     }
 
@@ -1685,6 +1758,7 @@ private struct FriendProfileScreen: View {
             }
             .ignoresSafeArea(edges: .top)
         }
+        .background(SwipeBackEnabler())
         .navigationBarBackButtonHidden(true)
         .navigationBarHidden(true)
         .onAppear {
@@ -1871,13 +1945,45 @@ private struct FriendProfileScreen: View {
                     }
                 }
 
-                ProfileHeroStatsCard(
-                    items: [
-                        ProfileHeroStatItem(id: "trips", value: "\(friend.stats.totalJourneys)", title: L10n.t("friend_profile_stat_trips")),
-                        ProfileHeroStatItem(id: "memories", value: "\(friend.stats.totalMemories)", title: L10n.t("friend_profile_stat_memories")),
-                        ProfileHeroStatItem(id: "cities", value: "\(friend.stats.totalUnlockedCities)", title: L10n.t("friend_profile_stat_cities"))
-                    ]
-                )
+                NavigationLink {
+                    ActivityRecordView(
+                        displayName: friend.displayName,
+                        stats: friend.stats,
+                        levelProgress: levelProgress,
+                        loadout: friend.loadout
+                    )
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "chart.bar.doc.horizontal")
+                            .font(.system(size: 20))
+                            .foregroundColor(FigmaTheme.primary)
+                            .frame(width: 32, height: 32)
+                            .background(FigmaTheme.primary.opacity(0.1))
+                            .clipShape(Circle())
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(L10n.t("friends_activity_record_title"))
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(.black)
+
+                            Text(String(format: L10n.t("friend_stats_summary_format"), friend.stats.totalJourneys, friend.stats.totalMemories, friend.stats.totalUnlockedCities))
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                        }
+
+                        Spacer()
+
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.gray.opacity(0.5))
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+                }
+                .buttonStyle(.plain)
             }
             .padding(.horizontal, 24)
             .padding(.top, 18)
@@ -2061,7 +2167,7 @@ private struct FriendInviteScannerSheet: View {
                         .clipShape(Capsule())
 
                     PhotosPicker(selection: $pickedPhotoItem, matching: .images, photoLibrary: .shared()) {
-                        Label(isImportingFromAlbum ? "识别中..." : "从相册导入", systemImage: "photo.on.rectangle")
+                        Label(isImportingFromAlbum ? L10n.t("friends_qr_importing") : L10n.t("friends_qr_import_from_album"), systemImage: "photo.on.rectangle")
                             .font(.system(size: 13, weight: .semibold))
                             .padding(.horizontal, 14)
                             .padding(.vertical, 9)
@@ -2115,12 +2221,12 @@ private struct FriendInviteScannerSheet: View {
 
         guard let data = try? await item.loadTransferable(type: Data.self),
               let image = UIImage(data: data) else {
-            scannerError = "无法读取这张图片，请换一张再试。"
+            scannerError = L10n.t("friends_qr_read_failed")
             return
         }
 
         guard let code = QRCodeImageDecoder.decode(image: image) else {
-            scannerError = "未在该图片中识别到二维码。"
+            scannerError = L10n.t("friends_qr_not_detected")
             return
         }
 
@@ -2210,7 +2316,7 @@ private final class FriendInviteScannerViewController: UIViewController, AVCaptu
             view.layer.addSublayer(preview)
             previewLayer = preview
         } catch {
-            onFailure?("摄像头权限不可用，请在系统设置中允许访问。")
+            onFailure?(L10n.t("friends_camera_permission_unavailable"))
         }
     }
 
@@ -2320,7 +2426,7 @@ private final class FriendMirrorContext: ObservableObject {
         return components.joined(separator: "|")
     }
 
-    func apply(snapshot: FriendProfileSnapshot) {
+    func apply(snapshot: FriendProfileSnapshot) async {
         let sig = Self.signature(for: snapshot)
         guard sig != lastSignature else { return }
         lastSignature = sig
@@ -2328,16 +2434,21 @@ private final class FriendMirrorContext: ObservableObject {
         applyTask?.cancel()
         let snapshotCopy = snapshot
         let targetPaths = paths
-        applyTask = Task { [weak self] in
+        let task = Task { [weak self] in
             await Task.detached(priority: .userInitiated) {
                 FriendMirrorContext.mirrorSnapshot(snapshotCopy, to: targetPaths)
             }.value
             guard !Task.isCancelled, let self else { return }
-            self.journeyStore.rebind(paths: targetPaths)
-            self.cityCache.rebind(paths: targetPaths)
-            self.renderCacheStore.rebind(rootDir: targetPaths.thumbnailsDir)
-            self.journeyStore.load()
+            await MainActor.run {
+                self.journeyStore.rebind(paths: targetPaths)
+                self.cityCache.rebind(paths: targetPaths)
+                self.renderCacheStore.rebind(rootDir: targetPaths.thumbnailsDir)
+                self.journeyStore.load()
+            }
+            try? await Task.sleep(nanoseconds: 500_000_000)
         }
+        applyTask = task
+        await task.value
     }
 
     nonisolated private static func mirrorSnapshot(_ snapshot: FriendProfileSnapshot, to paths: StoragePath) {
@@ -2407,10 +2518,14 @@ private final class FriendMirrorContext: ObservableObject {
         let routeCoords = friendJourney.routeCoordinates
         let cityID = FriendJourneyCityIdentity.resolveCityID(for: friendJourney, cards: cards)
         let cityCard = cards.first(where: { $0.id == cityID })
+
+        let effectiveCityID = (cityID == "Unknown|" || cityID.isEmpty) ? nil : cityID
+        let effectiveFallbackTitle = cityCard?.name ?? friendJourney.title
+
         let cityName = CityDisplayTitlePresentation.title(
-            cityKey: cityCard?.id ?? cityID,
+            cityKey: effectiveCityID,
             iso2: cityCard?.countryISO2,
-            fallbackTitle: cityCard?.name ?? friendJourney.title
+            fallbackTitle: effectiveFallbackTitle
         )
 
         let fallbackCoordinate: CoordinateCodable = routeCoords.first ?? CoordinateCodable(lat: 0, lon: 0)
@@ -2435,7 +2550,7 @@ private final class FriendMirrorContext: ObservableObject {
                 imageData: nil,
                 imagePaths: [],
                 remoteImageURLs: memory.imageURLs,
-                cityKey: cityID,
+                cityKey: effectiveCityID ?? "",
                 cityName: cityName,
                 coordinate: (coord.lat, coord.lon),
                 type: .memory,
@@ -2452,7 +2567,7 @@ private final class FriendMirrorContext: ObservableObject {
             elevationGain: 0,
             elevationLoss: 0,
             isTooShort: false,
-            cityKey: cityID,
+            cityKey: effectiveCityID ?? "",
             canonicalCity: cityName,
             coordinates: routeCoords,
             memories: memories,
@@ -2460,8 +2575,8 @@ private final class FriendMirrorContext: ObservableObject {
             countryISO2: cityCard?.countryISO2,
             currentCity: cityName,
             cityName: cityName,
-            startCityKey: cityID,
-            endCityKey: cityID,
+            startCityKey: effectiveCityID ?? "",
+            endCityKey: effectiveCityID ?? "",
             exploreMode: .city,
             trackingMode: .daily,
             visibility: friendJourney.visibility,
@@ -2500,7 +2615,7 @@ private struct FriendJourneysScreen: View {
                     .environmentObject(mirror.journeyStore)
                     .environmentObject(sessionStore)
                     .task(id: FriendMirrorContext.signature(for: friend)) {
-                        mirror.apply(snapshot: friend)
+                        await mirror.apply(snapshot: friend)
                     }
             } else {
                 Text(L10n.t("content_unavailable"))
@@ -2555,7 +2670,7 @@ private struct FriendCitiesScreen: View {
                     .environmentObject(mirror.cityCache)
                     .environmentObject(mirror.renderCacheStore)
                     .task(id: FriendMirrorContext.signature(for: friend)) {
-                        mirror.apply(snapshot: friend)
+                        await mirror.apply(snapshot: friend)
                     }
             } else {
                 Text(L10n.t("content_unavailable"))
@@ -2700,7 +2815,7 @@ private struct FriendPublicMemoriesScreen: View {
                     .environmentObject(mirror.journeyStore)
                     .environmentObject(sessionStore)
                     .task(id: FriendMirrorContext.signature(for: friend)) {
-                        mirror.apply(snapshot: friend)
+                        await mirror.apply(snapshot: friend)
                     }
             } else {
                 Text(L10n.t("content_unavailable"))
@@ -2748,12 +2863,13 @@ private struct FriendJourneyRouteScreen: View {
                 JourneyRouteDetailView(
                     journeyID: journeyID,
                     isReadOnly: true,
-                    headerTitle: FriendSectionTitleFormatter.sectionTitle(for: .journeyDetail, friendName: friend.displayName, locale: locale)
+                    headerTitle: FriendSectionTitleFormatter.sectionTitle(for: .journeyDetail, friendName: friend.displayName, locale: locale),
+                    userID: "friend_preview_\(friendID)"
                 )
                     .environmentObject(mirror.journeyStore)
                     .environmentObject(sessionStore)
                     .task(id: FriendMirrorContext.signature(for: friend)) {
-                        mirror.apply(snapshot: friend)
+                        await mirror.apply(snapshot: friend)
                     }
             } else {
                 Text(L10n.t("content_unavailable"))

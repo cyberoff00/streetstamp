@@ -447,7 +447,7 @@
 "postcard_go_to_sent_box" = "View in Sent Box";
 "postcard_greetings_from" = "GREETINGS FROM";
 "postcard_message" = "Message";
-"postcard_nav_title" = "Postcards";
+"postcard_nav_title" = "POSTCARD";
 "postcard_new_title" = "NEW POSTCARD";
 "postcard_notification_badge" = "Postcard";
 "postcard_photo_limit" = "Photo (1)";
@@ -485,7 +485,7 @@
 "profile_friend_request_input_required" = "Enter an invite code, @exclusive ID, or invite link first.";
 "profile_friend_request_sent" = "Friend request sent.";
 "profile_invite_code_copied" = "Invite code copied";
-"profile_invite_friends" = "Invite Friends";
+"profile_invite_friends" = "INVITE FRIEND";
 "profile_journeys" = "JOURNEYS";
 "profile_my_items" = "MY ITEMS";
 "profile_my_statistics" = "MY STATISTICS";

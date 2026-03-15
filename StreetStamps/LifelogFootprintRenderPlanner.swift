@@ -148,7 +148,7 @@ enum LifelogFootprintRenderPlanner {
         case 3:
             return Settings(
                 maxMarkers: 140,
-                minSeparationMeters: 12,
+                minSeparationMeters: 24,
                 gridCellRatio: 0.020,
                 exclusionMeters: 26,
                 viewportBufferRatio: 0.12
@@ -156,7 +156,7 @@ enum LifelogFootprintRenderPlanner {
         case 2:
             return Settings(
                 maxMarkers: 92,
-                minSeparationMeters: 20,
+                minSeparationMeters: 36,
                 gridCellRatio: 0.036,
                 exclusionMeters: 34,
                 viewportBufferRatio: 0.14
@@ -164,7 +164,7 @@ enum LifelogFootprintRenderPlanner {
         case 1:
             return Settings(
                 maxMarkers: 56,
-                minSeparationMeters: 32,
+                minSeparationMeters: 52,
                 gridCellRatio: 0.056,
                 exclusionMeters: 44,
                 viewportBufferRatio: 0.16

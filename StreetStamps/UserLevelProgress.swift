@@ -10,7 +10,7 @@ struct UserLevelProgress: Equatable {
     let progress: Double
 
     static func from(journeys: [JourneyRoute]) -> UserLevelProgress {
-        from(completedJourneyCount: journeys.filter(\.isCompleted).count)
+        from(completedJourneyCount: journeys.filter { $0.isCompleted && $0.distance >= 1000 }.count)
     }
 
     static func from(completedJourneyCount: Int) -> UserLevelProgress {

@@ -33,11 +33,12 @@ struct CollectionTabView: View {
                 onboardingGuide.advance(.openMemory)
             }
         }
+        .background(SwipeBackEnabler())
         .navigationBarBackButtonHidden(true)
     }
 
     private var header: some View {
-        UnifiedTabPageHeader(title: "城市记忆", titleLevel: .primary, horizontalPadding: 18, topPadding: 14, bottomPadding: 12) {
+        UnifiedTabPageHeader(title: L10n.t("collection_page_title"), titleLevel: .primary, horizontalPadding: 18, topPadding: 14, bottomPadding: 12) {
             Color.clear
         } trailing: {
             Color.clear

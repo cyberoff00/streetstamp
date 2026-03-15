@@ -37,7 +37,10 @@ struct PostcardComposerView: View {
         }) else {
             return 1
         }
-        return max(1, city.journeyIds.count)
+        let validJourneys = city.journeyIds.compactMap { journeyID in
+            journeyStore.journeys.first(where: { $0.id == journeyID })
+        }.filter { $0.distance >= 1000 }
+        return max(1, validJourneys.count)
     }
 
     private var currentCityCandidates: [JourneyRoute] {

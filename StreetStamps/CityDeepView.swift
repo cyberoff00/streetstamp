@@ -36,6 +36,7 @@ struct CityDeepView: View {
     private let boundaryTrustMaxSpanDegrees: CLLocationDegrees = 3.0
     let city: City
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.locale) private var locale
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var cache: CityCache
@@ -309,11 +310,18 @@ struct CityDeepView: View {
     }
 
     private var statsBadge: some View {
+        let isDataLoading = !store.hasLoaded || store.isLoading
         let journeyCount = currentJourneys.count
         let memoryCount = currentJourneys.reduce(0) { $0 + $1.memories.count }
         return HStack(spacing: 10) {
-            Text(String(format: L10n.t("city_deep_journeys_count"), journeyCount))
-            Text(String(format: L10n.t("city_deep_memories_count"), memoryCount))
+            if isDataLoading {
+                ProgressView()
+                    .scaleEffect(0.8)
+                Text(L10n.t("loading"))
+            } else {
+                Text(String(format: L10n.t("city_deep_journeys_count"), journeyCount))
+                Text(String(format: L10n.t("city_deep_memories_count"), memoryCount))
+            }
         }
         .font(.system(size: 12, weight: .semibold))
         .foregroundColor(UITheme.softBlack)
@@ -329,10 +337,11 @@ struct CityDeepView: View {
     }
 
     var body: some View {
+        let isDataLoading = !store.hasLoaded || store.isLoading
         ZStack(alignment: .top) {
             CityDeepMKMap(
                 segments: styledSegments(),
-                memoryGroups: showMemoriesOnMap ? groupedMemories : [],
+                memoryGroups: showMemoriesOnMap && !isDataLoading ? groupedMemories : [],
                 initialRegion: fittedRegion,
                 onTapMemoryGroup: { group in
                     guard let latest = group.items.sorted(by: { $0.timestamp > $1.timestamp }).first else { return }
@@ -436,6 +445,9 @@ struct CityDeepView: View {
             initializeReservedLevelProfileIfNeeded(showPickerWhenReady: false)
             refreshDisplayTitleFromCardKey()
         }
+        .onChange(of: locale) { _ in
+            refreshDisplayTitleFromCardKey()
+        }
         .onChange(of: currentJourneys.count) { _ in
             refreshRegionAndBoundary()
         }
@@ -448,6 +460,7 @@ struct CityDeepView: View {
         .onChange(of: cityLevelLabelsSignature) { _, _ in
             Task { await ensureActiveCityKeyMatchesCurrentSelection() }
         }
+        .background(SwipeBackEnabler())
         .navigationBarBackButtonHidden(true)
         .confirmationDialog(
             levelDialogTitle(),

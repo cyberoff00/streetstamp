@@ -29,15 +29,14 @@ struct AddMemoryIntent: AppIntent {
 struct OpenCaptureIntent: AppIntent {
     static var title: LocalizedStringResource = "Open Capture"
     static var description = IntentDescription("Open the current journey capture flow")
-
     static var openAppWhenRun: Bool = true
+    static var isDiscoverable: Bool = false
 
-    func perform() async throws -> some IntentResult {
+    func perform() async throws -> some IntentResult & OpensIntent {
         if let defaults = UserDefaults(suiteName: "group.com.streetstamps.shared") {
             defaults.set(true, forKey: "pendingOpenCapture")
             defaults.set(Date(), forKey: "pendingOpenCaptureTimestamp")
         }
-
         return .result()
     }
 }

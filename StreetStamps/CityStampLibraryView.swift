@@ -18,7 +18,6 @@ enum FriendSharedEmptyStateStyle {
 struct CityStampLibraryView: View {
     private struct CityDigest: Equatable {
         let id: String
-        let name: String
         let countryISO2: String?
         let journeyIDs: [String]
         let explorations: Int
@@ -30,7 +29,6 @@ struct CityStampLibraryView: View {
 
         init(_ city: CachedCity) {
             id = city.id
-            name = city.name
             countryISO2 = city.countryISO2
             journeyIDs = city.journeyIds
             explorations = city.explorations
@@ -116,6 +114,7 @@ struct CityStampLibraryView: View {
                 }
             }
         }
+        .background(SwipeBackEnabler())
         .navigationBarBackButtonHidden(true)
         .onAppear {
             if store.hasLoaded {
@@ -230,7 +229,7 @@ struct CityStampLibraryView: View {
                 ],
                 spacing: rowGap
             ) {
-                ForEach(displayCities) { city in
+                ForEach(displayCities, id: \.id) { city in
                     if allowCityDetailNavigation {
                         NavigationLink(destination: CityDeepView(city: city)) {
                             CityStampCard(city: city, cardWidth: cardW)
@@ -268,6 +267,10 @@ struct CityStampLibraryView: View {
 
     private func emptyState(title: LocalizedStringKey, subtitle: LocalizedStringKey) -> some View {
         VStack(spacing: FriendSharedEmptyStateStyle.verticalSpacing) {
+            Image(systemName: "map")
+                .font(.system(size: 48))
+                .foregroundColor(.gray.opacity(0.4))
+
             Text(title)
                 .font(.system(size: FriendSharedEmptyStateStyle.titleFontSize, weight: .semibold))
                 .foregroundColor(UITheme.softBlack)

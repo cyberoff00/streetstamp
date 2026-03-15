@@ -139,8 +139,6 @@ struct MainTabView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .openCaptureFromWidget)) { _ in
             selectedTab = .start
-            flow.requestSelectTab(.start)
-            flow.requestResumeOngoing()
             flow.requestWidgetCapture()
         }
         .alert(L10n.t("resume_prompt_title"), isPresented: Binding(
@@ -184,7 +182,7 @@ struct MainTabView: View {
             .tag(NavigationTab.cities)
             .tabItem {
                 MainTabLayout.image(for: .cities)
-                Text("记忆")
+                Text(L10n.t("tab_memory"))
             }
 
             Group {
@@ -197,7 +195,7 @@ struct MainTabView: View {
                 .tag(NavigationTab.lifelog)
                 .tabItem {
                     MainTabLayout.image(for: .lifelog)
-                    Text("Worldo")
+                    Text(L10n.upper("tab_worldo"))
                 }
 
             NavigationStack {

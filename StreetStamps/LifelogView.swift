@@ -16,7 +16,7 @@ enum LifelogStepMilestonePresentation {
 enum LifelogRenderModeSelector {
     static let nearModeLatitudeDeltaThreshold: CLLocationDegrees = 0.05
     static let nearModeLongitudeDeltaThreshold: CLLocationDegrees = 0.05
-    static let footprintStepMeters: CLLocationDistance = 50
+    static let footprintStepMeters: CLLocationDistance = 80
 
     static func isNearMode(_ region: MKCoordinateRegion?) -> Bool {
         guard let region else { return false }
@@ -409,6 +409,8 @@ struct LifelogView: View {
     @State private var showEnableHint = false
     @State private var showDisableConfirm = false
     @State private var showPermissionSettingsPrompt = false
+    @State private var showAlwaysLocationGuide = false
+    @AppStorage("streetstamps.lifelog.alwaysLocationGuideShown") private var alwaysLocationGuideShown = false
     @State private var shareItem: LifelogShareImageItem? = nil
     @State private var didCenterOnEnter = false
     @State private var selectedDay: Date? = nil
@@ -581,6 +583,12 @@ struct LifelogView: View {
         .sheet(item: $shareItem) { item in
             ShareSheet(activityItems: [item.image])
         }
+        .sheet(isPresented: $showAlwaysLocationGuide) {
+            AlwaysLocationGuideView(isPresented: $showAlwaysLocationGuide, onEnable: {
+                alwaysLocationGuideShown = true
+                locationHub.requestAlwaysPermissionIfNeeded()
+            })
+        }
         .alert(L10n.t("lifelog_disable_title"), isPresented: $showDisableConfirm) {
             Button(L10n.t("lifelog_continue_recording"), role: .cancel) {}
             Button(L10n.t("lifelog_confirm_disable"), role: .destructive) {
@@ -603,7 +611,11 @@ struct LifelogView: View {
             migrateLegacyStepSnapshotIfNeeded()
             visibleMonthAnchor = monthStart(for: selectedDay ?? Date())
             if locationHub.authorizationStatus != .authorizedAlways {
-                showEnableHint = true
+                if !alwaysLocationGuideShown {
+                    showAlwaysLocationGuide = true
+                } else {
+                    showEnableHint = true
+                }
             }
             centerOnCurrent(force: true)
             scheduleRenderSnapshotRefresh()
@@ -1648,7 +1660,7 @@ struct LifelogView: View {
                     }
                 }
 
-            VStack(alignment: .center, spacing: 14) {
+            VStack(alignment: .center, spacing: 16) {
                 HStack {
                     Spacer()
                     if LifelogStepMilestonePresentation.closeButtonPlacement == .topTrailing {
@@ -1668,27 +1680,47 @@ struct LifelogView: View {
                 .frame(maxWidth: .infinity)
 
                 ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [FigmaTheme.primary.opacity(0.2), FigmaTheme.primary.opacity(0.08)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 72, height: 72)
+
                     Image(systemName: "shoeprints.fill")
-                        .font(.system(size: 16, weight: .bold))
+                        .font(.system(size: 28, weight: .bold))
                         .foregroundColor(FigmaTheme.primary)
-                        .padding(8)
-                        .background(FigmaTheme.primary.opacity(0.12))
-                        .clipShape(Circle())
                 }
                 .frame(maxWidth: .infinity)
 
-                Text(L10n.t("lifelog_steps_modal_title"))
-                    .font(.system(size: 22, weight: .black, design: .rounded))
-                    .foregroundColor(FigmaTheme.text)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .multilineTextAlignment(.center)
+                VStack(spacing: 8) {
+                    Text("🎉 太棒了！")
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundColor(FigmaTheme.primary)
+
+                    Text(L10n.t("lifelog_steps_modal_title"))
+                        .font(.system(size: 20, weight: .black, design: .rounded))
+                        .foregroundColor(FigmaTheme.text)
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .multilineTextAlignment(.center)
 
                 Text(formattedStepCount(stepModalStepCount))
-                    .font(.system(size: 40, weight: .black, design: .rounded))
-                    .foregroundColor(FigmaTheme.text)
+                    .font(.system(size: 48, weight: .black, design: .rounded))
+                    .foregroundColor(FigmaTheme.primary)
                     .contentTransition(.numericText())
                     .frame(maxWidth: .infinity, alignment: .center)
                     .multilineTextAlignment(.center)
+
+                Text("今天你在地球上又留下了 \(formattedStepCount(stepModalStepCount)) 步足迹")
+                    .font(.system(size: 15, weight: .medium, design: .rounded))
+                    .foregroundColor(FigmaTheme.subtext)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 8)
 
                 if LifelogStepMilestonePresentation.showsFooterCloseButton {
                     Button(L10n.t("lifelog_steps_modal_close")) {
@@ -1994,14 +2026,15 @@ private struct FootstepGlyph: View {
     let isDark: Bool
 
     var body: some View {
-        Image(systemName: "shoeprints.fill")
-            .font(.system(size: 13, weight: .semibold))
-            .symbolRenderingMode(.monochrome)
+        Image("foot")
+            .resizable()
+            .renderingMode(.template)
+            .aspectRatio(contentMode: .fit)
             .foregroundStyle(markerColor)
-            .frame(width: 22, height: 28)
+            .frame(width: 16)
             .shadow(color: markerColor.opacity(isDark ? 0.30 : 0.20), radius: isDark ? 3.2 : 1.6, x: 0, y: 0)
             .opacity(0.80)
-            .scaleEffect(0.90)
+            .scaleEffect(0.70)
             .shadow(color: .black.opacity(isDark ? 0.18 : 0.12), radius: 0.9, y: 0.5)
     }
 
@@ -2012,5 +2045,65 @@ private struct FootstepGlyph: View {
         }
         // Day mode: orange footprints.
         return Color(red: 230.0 / 255.0, green: 125.0 / 255.0, blue: 49.0 / 255.0)
+    }
+}
+
+// MARK: - Always Location Guide View
+
+private struct AlwaysLocationGuideView: View {
+    @Binding var isPresented: Bool
+    let onEnable: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.85).ignoresSafeArea()
+
+            VStack(spacing: 24) {
+                Spacer()
+
+                Image(systemName: "location.circle.fill")
+                    .font(.system(size: 72))
+                    .foregroundColor(.white)
+
+                VStack(spacing: 12) {
+                    Text(L10n.t("lifelog_always_guide_title"))
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundColor(.white)
+
+                    Text(L10n.t("lifelog_always_guide_message"))
+                        .font(.system(size: 16))
+                        .foregroundColor(.white.opacity(0.85))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                }
+
+                Spacer()
+
+                VStack(spacing: 12) {
+                    Button {
+                        isPresented = false
+                        onEnable()
+                    } label: {
+                        Text(L10n.t("lifelog_always_guide_enable"))
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundColor(.black)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
+
+                    Button {
+                        isPresented = false
+                    } label: {
+                        Text(L10n.t("lifelog_always_guide_skip"))
+                            .font(.system(size: 15))
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                }
+                .padding(.horizontal, 32)
+                .padding(.bottom, 48)
+            }
+        }
     }
 }

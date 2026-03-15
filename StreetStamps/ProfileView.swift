@@ -83,7 +83,7 @@ struct ProfileView: View {
                         .frame(maxWidth: 430)
                         .frame(maxWidth: .infinity)
                         .padding(.horizontal, 24)
-                        .padding(.top, 24)
+                        .padding(.top, 12)
                         .padding(.bottom, 56)
                     }
                 }
@@ -356,17 +356,7 @@ struct ProfileView: View {
             }
             .padding(.horizontal, 22)
             .padding(.top, 10)
-
-            ProfileHeroStatsCard(
-                items: [
-                    ProfileHeroStatItem(id: "trips", value: "\(totalJourneys)", title: L10n.t("friend_profile_stat_trips")),
-                    ProfileHeroStatItem(id: "memories", value: "\(totalMemories)", title: L10n.t("friend_profile_stat_memories")),
-                    ProfileHeroStatItem(id: "cities", value: "\(citiesVisited)", title: L10n.t("friend_profile_stat_cities"))
-                ]
-            )
-            .padding(.horizontal, 18)
-            .padding(.top, 18)
-            .padding(.bottom, 18)
+            .padding(.bottom, 14)
         }
         .frame(maxWidth: .infinity)
         .background(Color.white)
@@ -376,6 +366,23 @@ struct ProfileView: View {
 
     private var topActionRow: some View {
         VStack(spacing: 14) {
+            NavigationLink {
+                ActivityRecordView(
+                    displayName: displayName,
+                    stats: ProfileStatsSnapshot(
+                        totalJourneys: totalJourneys,
+                        totalDistance: store.journeys.reduce(0) { $0 + $1.distance },
+                        totalMemories: totalMemories,
+                        totalUnlockedCities: citiesVisited
+                    ),
+                    levelProgress: levelProgress,
+                    loadout: loadout
+                )
+            } label: {
+                activityRecordTile
+            }
+            .buttonStyle(.plain)
+
             Button {
                 showInviteFriendSheet = true
             } label: {
@@ -390,6 +397,38 @@ struct ProfileView: View {
             }
             .buttonStyle(.plain)
         }
+    }
+
+    private var activityRecordTile: some View {
+        HStack(spacing: 14) {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(FigmaTheme.primary.opacity(0.1))
+                .frame(width: 56, height: 56)
+                .overlay {
+                    Image(systemName: "chart.bar.doc.horizontal")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundColor(FigmaTheme.primary)
+                }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(L10n.t("profile_activity_record"))
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(FigmaTheme.text)
+                Text(String(format: L10n.t("profile_stats_format"), totalJourneys, totalMemories, citiesVisited))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(FigmaTheme.subtext)
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(FigmaTheme.subtext)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity)
+        .profileFeatureCardStyle()
     }
 
     private func profileMenuTile(icon: String, iconColor: Color, iconBg: Color, title: String) -> some View {
@@ -616,8 +655,9 @@ struct ProfileView: View {
         .onTapGesture {
             Task {
                 await markSingleSocialNotificationRead(item.id)
-                if item.type == "postcard_received" {
-                    postcardInboxIntent = PostcardInboxIntent(box: "received", messageID: item.postcardMessageID)
+                if item.type == "postcard_received" || item.type == "postcard_reaction" {
+                    let box = item.type == "postcard_received" ? "received" : "sent"
+                    postcardInboxIntent = PostcardInboxIntent(box: box, messageID: item.postcardMessageID)
                     showNotificationsSheet = false
                     showPostcardInboxFromNotification = true
                 }

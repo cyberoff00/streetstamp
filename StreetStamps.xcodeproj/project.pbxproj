@@ -275,6 +275,7 @@
 				C1A100012F30000100AA0004 /* Embed Watch Content */,
 				B53E1F8C2F24FA2D00055ED1 /* Embed Foundation Extensions */,
 				B53E1FA52F2505A200055ED1 /* Embed App Extensions */,
+				B5F75E202F0D641D00FEF837 /* Copy Localization Resources */,
 			);
 			buildRules = (
 			);
@@ -408,6 +409,27 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		B5F75E202F0D641D00FEF837 /* Copy Localization Resources */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Copy Localization Resources";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -eu\nSRC_DIR=\"${SRCROOT}/StreetStamps\"\nDST_DIR=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\nfor lproj in \"${SRC_DIR}\"/*.lproj; do\n  [ -d \"${lproj}\" ] || continue\n  lang=\"$(basename \"${lproj}\")\"\n  mkdir -p \"${DST_DIR}/${lang}\"\n  if [ -f \"${lproj}/Localizable.strings\" ]; then\n    cp \"${lproj}/Localizable.strings\" \"${DST_DIR}/${lang}/Localizable.strings\"\n  fi\n  if [ -f \"${lproj}/InfoPlist.strings\" ]; then\n    cp \"${lproj}/InfoPlist.strings\" \"${DST_DIR}/${lang}/InfoPlist.strings\"\n  fi\ndone\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		A7A100152F70000100AA0001 /* Sources */ = {
@@ -710,7 +732,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
-				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = NO;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -768,7 +790,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
-				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = NO;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;

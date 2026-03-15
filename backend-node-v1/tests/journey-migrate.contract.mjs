@@ -100,7 +100,18 @@ function makeJourney(id, visibility = 'friendsOnly') {
       { lat: 48.8566, lon: 2.3522 },
       { lat: 48.857, lon: 2.353 }
     ],
-    memories: []
+    memories: [
+      {
+        id: 'mem_test_1',
+        title: 'Eiffel Tower',
+        notes: 'Beautiful view',
+        timestamp: '2026-03-07T10:30:00.000Z',
+        imageURLs: [],
+        latitude: 48.8571,
+        longitude: 2.3529,
+        locationStatus: 'resolved'
+      }
+    ]
   };
 }
 
@@ -145,6 +156,12 @@ async function run() {
       initialProfile.unlockedCityCards.map((x) => x.id).sort(),
       ['paris']
     );
+
+    const firstMemory = initialProfile.journeys[0].memories[0];
+    assert.ok(firstMemory, 'Memory should exist');
+    assert.equal(firstMemory.latitude, 48.8571);
+    assert.equal(firstMemory.longitude, 2.3529);
+    assert.equal(firstMemory.locationStatus, 'resolved');
 
     await migrateJourneys(port, u1.accessToken, {
       journeys: [makeJourney('j_b')],

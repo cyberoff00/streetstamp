@@ -18,6 +18,8 @@
 "tab_start" = "Start";
 "tab_cities" = "Cities";
 "tab_memory" = "Memory";
+"tab_worldo" = "WORLDO";
+"collection_page_title" = "CITY MEMORY";
 "tab_lifelog" = "LIFELOG";
 "globe_view"="Globe View";
 "profile"="Profile";
@@ -47,6 +49,8 @@
 "memory_note_cn" = "Note";
 "pop_camera_title" = "Camera";
 "tap_to_take_photo" = "Tap to take a photo";
+
+"voice_broadcast_milestone" = "%d kilometers completed. Elapsed %d minutes. Average pace %@ minutes per kilometer.";
 "pop_note_title" = "Note";
 "add_memory_placeholder" = "Add a memory";
 
@@ -373,6 +377,10 @@
 "lifelog_permission_settings_action" = "Open Settings";
 "lifelog_permission_settings_message" = "Enable Always Allow to record routes offline. All route data stays on this device, so your privacy is protected.";
 "lifelog_permission_settings_title" = "Always Allow Required";
+"lifelog_always_guide_title" = "Enable Lifelong Tracking";
+"lifelog_always_guide_message" = "Set location to Always Allow, so we can record your lifelong tracks with low power even when you forget to log journeys";
+"lifelog_always_guide_enable" = "Enable";
+"lifelog_always_guide_skip" = "Maybe Later";
 "lifelog_title" = "LIFELOG";
 "memories_title" = "MEMORIES";
 "my_journey_title_upper" = "MY JOURNEY";
@@ -386,6 +394,11 @@
 "processing" = "PROCESSING...";
 "profile_display_name_placeholder" = "MYDEARFRIENDK";
 "profile_title" = "PROFILE";
+"activity_record_title" = "ACTIVITY RECORD";
+"activity_stat_journeys" = "JOURNEYS";
+"activity_stat_memories" = "MEMORIES";
+"activity_stat_cards" = "CARDS";
+"activity_stat_distance_km" = "DISTANCE (KM)";
 "prompt" = "Prompt";
 "recent_journeys_title" = "RECENT JOURNEYS";
 "save_failed" = "Failed to Save";
@@ -478,7 +491,7 @@
 "lifelog_steps_modal_title" = "Today's Steps";
 "lifelog_steps_modal_subtitle" = "Keep moving. We'll remind you again after 1,000 more steps today.";
 "lifelog_steps_modal_close" = "Close";
-"postcard_profile_title" = "Postcards";
+"postcard_profile_title" = "POSTCARD";
 "postcard_profile_subtitle" = "Sent · Received";
 "postcard_nav_title" = "Postcards";
 "postcard_greetings_from" = "GREETINGS FROM";
@@ -614,7 +627,7 @@
 "account_section_actions" = "ACCOUNT ACTIONS";
 "account_section_developer" = "DEVELOPER";
 "account_id_format" = "ID: %@";
-"profile_invite_friends" = "Invite Friends";
+"profile_invite_friends" = "INVITE FRIEND";
 "profile_notifications_loading" = "Loading notifications...";
 "profile_notifications_empty" = "No activity yet";
 "profile_notifications_title" = "Activity";
@@ -736,6 +749,13 @@
 "postcard_received_title_format" = "%@ sent you a postcard";
 "postcard_received_title_fallback" = "You received a postcard";
 "postcard_received_body_format" = "From %@";
+"postcard_viewed" = "Viewed";
+"postcard_reacted" = "reacted";
+"postcard_add_reaction" = "Add Reaction";
+"postcard_select_reaction" = "Select a reaction";
+"postcard_or_comment" = "Or leave a comment";
+"postcard_add_comment" = "Add Comment";
+"postcard_comment_placeholder" = "Write a comment...";
 "notification_journey_like_format" = "%@ liked your journey \"%@\"";
 "notification_profile_stomp_format" = "%@ sat on your sofa";
 "notification_friend_request_format" = "%@ sent you a friend request";
@@ -813,6 +833,9 @@
 "lifelog_mood_option_notbad" = "Okay";
 "lifelog_mood_option_happy" = "Happy";
 "profile_summary_stats_format" = "%d Cities  %d Memories";
+"profile_activity_record" = "ACTIVITY RECORD";
+"profile_stats_format" = "%d journeys · %d memories · %d cards";
+"activity_ring_help" = "Outer: Level Progress (journeys ≥1km count)\nMiddle: Memory Collection (50 memories per ring)\nInner: City Unlock Progress (10 cities per ring)";
 "settings_icloud_sync_title" = "iCloud Sync";
 "settings_icloud_sync_desc" = "Automatically sync and restore your journeys, lifelog, and key settings via iCloud.";
 "settings_icloud_sync_unavailable_desc" = "iCloud is unavailable. Sign in to iCloud in system settings to enable cloud sync.";

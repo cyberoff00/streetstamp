@@ -69,7 +69,7 @@ final class VoiceBroadcastService {
             paceText = "--"
         }
 
-        let message = "\(milestoneKM) kilometers completed. Elapsed \(elapsedMinutes) minutes. Average pace \(paceText) minutes per kilometer."
+        let message = String(format: L10n.t("voice_broadcast_milestone"), milestoneKM, elapsedMinutes, paceText)
         speak(message)
     }
 

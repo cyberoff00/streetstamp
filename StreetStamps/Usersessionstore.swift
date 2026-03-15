@@ -536,7 +536,6 @@ final class UserSessionStore: ObservableObject {
             rawCandidates.append(contentsOf: ids)
         }
 
-        rawCandidates.append(UserScope.currentUserID)
         if let idfv = currentDeviceID(), !idfv.isEmpty {
             rawCandidates.append(idfv)
         }

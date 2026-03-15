@@ -50,6 +50,7 @@ struct AccountCenterView: View {
             }
         }
         .background(FigmaTheme.background.ignoresSafeArea())
+        .background(SwipeBackEnabler())
         .navigationBarBackButtonHidden(true)
         .navigationBarHidden(true)
         .task {
@@ -258,7 +259,7 @@ struct AccountCenterView: View {
                     Text(L10n.t("settings_profile_visibility_friends"))
                         .font(.system(size: 16, weight: .bold))
                         .foregroundColor(FigmaTheme.text)
-                    Text(profileVisibility == .private ? "当前：仅自己可见" : "当前：好友可见")
+                    Text(profileVisibility == .private ? L10n.t("settings_profile_visibility_private") : L10n.t("settings_profile_visibility_friends"))
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(FigmaTheme.subtext)
                 }

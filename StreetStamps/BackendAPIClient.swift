@@ -995,6 +995,16 @@ final class BackendAPIClient {
         let (data, _) = try await request(path: "/v1/postcards", method: "GET", token: token, queryItems: queryItems)
         return try decoder.decode(BackendPostcardsResponse.self, from: data)
     }
+
+    func markPostcardViewed(token: String, messageID: String) async throws {
+        _ = try await request(path: "/v1/postcards/\(messageID)/view", method: "POST", token: token)
+    }
+
+    func reactToPostcard(token: String, messageID: String, req: PostcardReactionRequest) async throws -> PostcardReactionResponse {
+        let body = try encoder.encode(req)
+        let (data, _) = try await request(path: "/v1/postcards/\(messageID)/react", method: "POST", token: token, jsonBody: body)
+        return try decoder.decode(PostcardReactionResponse.self, from: data)
+    }
 }
 
 private extension ISO8601DateFormatter {
