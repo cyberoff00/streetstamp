@@ -92,6 +92,10 @@
 "journey_memory" = "Journey Memory";
 "journey_memories" = "Journey Memory";
 "friend_city_cards_title" = "City Cards";
+"friend_city_cards" = "City Cards";
+"friend_journey_memories" = "Journey Memories";
+"friend_postcards" = "Postcards";
+"friend_activity_record_entry" = "Activity Record";
 "friend_profile_stat_trips" = "TRIPS";
 "friend_profile_stat_memories" = "MEMORIES";
 "friend_profile_stat_cities" = "CITIES";
@@ -240,6 +244,7 @@
 "equipment_suit" = "Suit";
 "equipment_upper" = "Upper";
 "equipment_under" = "Under";
+"equipment_shoes" = "Shoes";
 "equipment_hat" = "Hat";
 "equipment_glass" = "Glasses";
 "equipment_outfit" = "Outfit";
@@ -528,11 +533,11 @@
 
 "tab_home" = "Start";
 "tab_friends" = "Friends";
-"tab_collection" = "Worldo";
+"tab_collection" = "WORLDO";
 "tab_memory" = "Memory";
 "main_resume_onboarding" = "Resume Onboarding";
 "open_sidebar" = "Open sidebar";
-"collection_title" = "My Worldo";
+"collection_title" = "WORLDO";
 "collection_segment_cities" = "Cities";
 "collection_segment_journeys" = "Journeys";
 "verify_your_email" = "Verify Your Email";

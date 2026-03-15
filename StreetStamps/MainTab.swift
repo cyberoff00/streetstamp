@@ -72,10 +72,24 @@ enum MainSidebarDestination: String, Identifiable, CaseIterable {
     }
 }
 
+struct MainSidebarPresentationState {
+    var activeDestination: MainSidebarDestination?
+
+    mutating func handleOpenDestinationSignal(pendingDestination: MainSidebarDestination?) {
+        guard let pendingDestination else { return }
+        activeDestination = pendingDestination
+    }
+
+    mutating func dismiss() {
+        activeDestination = nil
+    }
+}
+
 @MainActor
 struct MainTabView: View {
     @State private var selectedTab: NavigationTab = .start
     @State private var loadedTabs: Set<NavigationTab> = [.start]
+    @State private var sidebarPresentation = MainSidebarPresentationState()
 
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var flow: AppFlowCoordinator
@@ -140,6 +154,17 @@ struct MainTabView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openCaptureFromWidget)) { _ in
             selectedTab = .start
             flow.requestWidgetCapture()
+        }
+        .onReceive(flow.$openSidebarDestinationSignal) { _ in
+            sidebarPresentation.handleOpenDestinationSignal(
+                pendingDestination: flow.pendingSidebarDestination
+            )
+            flow.consumePendingSidebarDestination()
+        }
+        .fullScreenCover(item: $sidebarPresentation.activeDestination, onDismiss: {
+            sidebarPresentation.dismiss()
+        }) { destination in
+            sidebarDestinationView(for: destination)
         }
         .alert(L10n.t("resume_prompt_title"), isPresented: Binding(
             get: { pendingResumeJourney != nil },
@@ -236,6 +261,24 @@ struct MainTabView: View {
             selectedTab: selectedTab,
             loadedTabs: loadedTabs
         )
+    }
+
+    @ViewBuilder
+    private func sidebarDestinationView(for destination: MainSidebarDestination) -> some View {
+        NavigationStack {
+            switch destination {
+            case .profile:
+                ProfileView()
+            case .settings:
+                SettingsView()
+            case .equipment:
+                SidebarEquipmentEntryView()
+            case .postcards:
+                SidebarPostcardsEntryView(initialBox: .received, focusMessageID: nil)
+            case .inviteFriend:
+                SidebarInviteFriendEntryView()
+            }
+        }
     }
 
     private var globalGuideStep: OnboardingGuideStore.Step? {

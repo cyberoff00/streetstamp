@@ -55,6 +55,7 @@ struct RobotLoadout: Codable, Equatable, Hashable {
     var underId: String = "under_0001"
     var savedUpperIdForSuit: String = "upper_0001"
     var savedUnderIdForSuit: String = "under_0001"
+    var shoesId: String? = nil
     var hatId: String? = nil
     var glassId: String? = nil
     var accessoryIds: [String] = []
@@ -75,6 +76,7 @@ struct RobotLoadout: Codable, Equatable, Hashable {
         case underId
         case savedUpperIdForSuit
         case savedUnderIdForSuit
+        case shoesId
         case hatId
         case glassId
         case accessoryIds
@@ -93,6 +95,7 @@ struct RobotLoadout: Codable, Equatable, Hashable {
         underId: String = "under_0001",
         savedUpperIdForSuit: String = "upper_0001",
         savedUnderIdForSuit: String = "under_0001",
+        shoesId: String? = nil,
         hatId: String? = nil,
         glassId: String? = nil,
         accessoryIds: [String] = [],
@@ -108,6 +111,7 @@ struct RobotLoadout: Codable, Equatable, Hashable {
         self.underId = underId
         self.savedUpperIdForSuit = savedUpperIdForSuit
         self.savedUnderIdForSuit = savedUnderIdForSuit
+        self.shoesId = shoesId
         self.hatId = hatId
         self.glassId = glassId
         self.accessoryIds = accessoryIds
@@ -126,6 +130,7 @@ struct RobotLoadout: Codable, Equatable, Hashable {
         underId = try c.decodeIfPresent(String.self, forKey: .underId) ?? "under_0001"
         savedUpperIdForSuit = try c.decodeIfPresent(String.self, forKey: .savedUpperIdForSuit) ?? upperId
         savedUnderIdForSuit = try c.decodeIfPresent(String.self, forKey: .savedUnderIdForSuit) ?? underId
+        shoesId = try c.decodeIfPresent(String.self, forKey: .shoesId)
         hatId = try c.decodeIfPresent(String.self, forKey: .hatId)
         glassId = try c.decodeIfPresent(String.self, forKey: .glassId)
         let decodedAccessoryIds = try c.decodeIfPresent([String].self, forKey: .accessoryIds)
@@ -153,6 +158,7 @@ struct RobotLoadout: Codable, Equatable, Hashable {
         try c.encode(underId, forKey: .underId)
         try c.encode(savedUpperIdForSuit, forKey: .savedUpperIdForSuit)
         try c.encode(savedUnderIdForSuit, forKey: .savedUnderIdForSuit)
+        try c.encode(shoesId, forKey: .shoesId)
         try c.encode(hatId, forKey: .hatId)
         try c.encode(glassId, forKey: .glassId)
         try c.encode(accessoryIds, forKey: .accessoryIds)
@@ -172,6 +178,7 @@ struct RobotLoadout: Codable, Equatable, Hashable {
             underId: "under_0001",
             savedUpperIdForSuit: "upper_0001",
             savedUnderIdForSuit: "under_0001",
+            shoesId: nil,
             hatId: nil,
             glassId: nil,
             accessoryIds: [],
@@ -320,6 +327,12 @@ struct RobotRendererView: View {
         return nil
     }
 
+    private func shoesAsset(face: RobotFace) -> String? {
+        guard let shoesId = loadout.shoesId,
+              let item = catalogStore.item(categoryId: "shoes", itemId: shoesId) else { return nil }
+        return catalogStore.imageName(item.images, face: face)
+    }
+
     private func hatAsset(face: RobotFace) -> String? {
         guard let hatId = loadout.hatId,
               let item = catalogStore.item(categoryId: "hat", itemId: hatId) else { return nil }
@@ -464,6 +477,16 @@ private var expressionLayer: some View {
     }
 
     @ViewBuilder
+    private var shoesLayer: some View {
+        clothingLayer(
+            for: shoesAsset(face: .front),
+            right: shoesAsset(face: .right),
+            left: shoesAsset(face: .left),
+            back: shoesAsset(face: .back)
+        )
+    }
+
+    @ViewBuilder
     private var suitLayer: some View {
         clothingLayer(
             for: suitAsset(face: .front),
@@ -600,6 +623,7 @@ var body: some View {
             headLayer
             expressionLayer
             hairLayer
+            shoesLayer
             underLayer
             upperLayer
             suitLayer

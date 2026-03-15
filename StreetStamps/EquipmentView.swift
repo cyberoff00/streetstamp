@@ -32,6 +32,8 @@ enum EquipmentCategoryIconAssetResolver {
             return "equipment_icon_accessory 1"
         case "pat":
             return "equipment_icon_pat"
+        case "shoes":
+            return nil
         default:
             return nil
         }
@@ -341,7 +343,7 @@ struct EquipmentView: View {
 
     private var orderedCategories: [GearCategory] {
         let map = Dictionary(uniqueKeysWithValues: store.catalog.categories.map { ($0.id, $0) })
-        let preferred = ["expression", "hair", "suit", "upper", "under", "hat", "glass", "accessory", "pat"]
+        let preferred = ["expression", "hair", "suit", "upper", "under", "hat", "glass", "accessory", "pat", "shoes"]
         let preferredItems = preferred.compactMap { map[$0] }
         let rest = store.catalog.categories.filter { !preferred.contains($0.id) }
         return preferredItems + rest
@@ -448,6 +450,8 @@ struct EquipmentView: View {
             return "fanblades.fill"
         case "pat":
             return "sparkles.rectangle.stack"
+        case "shoes":
+            return "shoeprints.fill"
         default:
             return "circle.grid.2x2"
         }
@@ -551,6 +555,8 @@ struct EquipmentView: View {
                     target.hatId = nil
                 case "glassId":
                     target.glassId = nil
+                case "shoesId":
+                    target.shoesId = nil
                 case "accessoryId":
                     if let idx = target.accessoryIds.firstIndex(of: item.id) {
                         target.accessoryIds.remove(at: idx)
@@ -764,6 +770,9 @@ struct EquipmentView: View {
         case "glassId":
             if item.id == "none" { return current.glassId == nil }
             return current.glassId == item.id
+        case "shoesId":
+            if item.id == "none" { return current.shoesId == nil }
+            return current.shoesId == item.id
         case "accessoryId":
             if item.id == "none" { return current.accessoryIds.isEmpty }
             return current.accessoryIds.contains(item.id)
@@ -826,6 +835,8 @@ struct EquipmentView: View {
                 target.hatId = (item.id == "none") ? nil : item.id
             case "glassId":
                 target.glassId = (item.id == "none") ? nil : item.id
+            case "shoesId":
+                target.shoesId = (item.id == "none") ? nil : item.id
             case "accessoryId":
                 if item.id == "none" {
                     if category.id == "pat" {
@@ -884,6 +895,7 @@ struct EquipmentView: View {
         appendIfMissing(categoryId: "suit", itemId: loadout.suitId)
         appendIfMissing(categoryId: "upper", itemId: loadout.upperId)
         appendIfMissing(categoryId: "under", itemId: loadout.underId)
+        appendIfMissing(categoryId: "shoes", itemId: loadout.shoesId)
         appendIfMissing(categoryId: "hat", itemId: loadout.hatId)
         appendIfMissing(categoryId: "glass", itemId: loadout.glassId)
         for accessoryId in loadout.accessoryIds {
@@ -1106,11 +1118,15 @@ private struct EquipmentEconomy: Codable, Equatable {
         markOwned(categoryId: "suit", itemId: "none")
         markOwned(categoryId: "upper", itemId: "none")
         markOwned(categoryId: "under", itemId: "none")
+        markOwned(categoryId: "shoes", itemId: "none")
         if let suitId = loadout.suitId {
             markOwned(categoryId: "suit", itemId: suitId)
         }
         markOwned(categoryId: "upper", itemId: loadout.upperId)
         markOwned(categoryId: "under", itemId: loadout.underId)
+        if let shoesId = loadout.shoesId {
+            markOwned(categoryId: "shoes", itemId: shoesId)
+        }
         markOwned(categoryId: "expression", itemId: loadout.expressionId)
         markOwned(categoryId: "hat", itemId: "none")
         markOwned(categoryId: "glass", itemId: "none")
@@ -1152,6 +1168,8 @@ private struct EquipmentEconomy: Codable, Equatable {
             return loadout.hatId
         case "glassId":
             return loadout.glassId
+        case "shoesId":
+            return loadout.shoesId
         case "accessoryId":
             return loadout.accessoryIds.first
         case "expressionId":

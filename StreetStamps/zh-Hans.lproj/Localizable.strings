@@ -243,6 +243,7 @@
 "equipment_suit" = "连体衣";
 "equipment_upper" = "上身";
 "equipment_under" = "下身";
+"equipment_shoes" = "鞋子";
 "equipment_hat" = "帽子";
 "equipment_glass" = "眼镜";
 "equipment_outfit" = "衣服";
@@ -476,7 +477,7 @@
 "gpx_import_progress_done" = "转换完成，可选择城市";
 "gpx_import_choose_detected_city" = "请选择一个识别出的城市：";
 "gpx_import_no_detected_city" = "未从该 GPX 轨迹识别到城市。";
-"app_name" = "Worldo";
+"app_name" = "WORLDO";
 "splash_tagline" = "绘制你的世界记忆";
 "visibility_private" = "私密";
 "visibility_friends_only" = "好友可见";
@@ -873,3 +874,7 @@
 "friends_qr_not_detected" = "未在该图片中识别到二维码。";
 "friends_camera_permission_unavailable" = "摄像头权限不可用，请在系统设置中允许访问。";
 "friend_stats_summary_format" = "%d 旅程 · %d 记忆 · %d 卡片";
+"friend_city_cards" = "城市卡";
+"friend_journey_memories" = "旅程记忆";
+"friend_postcards" = "明信片";
+"friend_activity_record_entry" = "活动记录";

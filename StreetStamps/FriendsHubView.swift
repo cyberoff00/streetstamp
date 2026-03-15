@@ -114,7 +114,6 @@ struct FriendsHubView: View {
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
 
     @State private var tab: FriendsTopTab = .activity
-    @State private var dragOffset: CGFloat = 0
     @State private var showAddFriendSheet = false
     @State private var loadingRemote = false
     @State private var activeRoute: FriendsRoute?
@@ -207,54 +206,14 @@ struct FriendsHubView: View {
 
                 Divider().overlay(Color.black.opacity(0.06))
 
-                GeometryReader { geo in
-                    HStack(spacing: 0) {
-                        activityContent
-                            .frame(width: geo.size.width)
+                TabView(selection: $tab) {
+                    activityContent
+                        .tag(FriendsTopTab.activity)
 
-                        allFriendsContent
-                            .frame(width: geo.size.width)
-                    }
-                    .offset(x: tab == .activity ? dragOffset : -geo.size.width + dragOffset)
-                    .simultaneousGesture(
-                        DragGesture(minimumDistance: 20)
-                            .onChanged { value in
-                                let horizontal = abs(value.translation.width)
-                                let vertical = abs(value.translation.height)
-                                guard horizontal > vertical else { return }
-
-                                let startX = value.startLocation.x
-                                let edgeThreshold: CGFloat = 30
-                                if tab == .allFriends || startX > edgeThreshold {
-                                    dragOffset = value.translation.width
-                                }
-                            }
-                            .onEnded { value in
-                                let horizontal = abs(value.translation.width)
-                                let vertical = abs(value.translation.height)
-                                guard horizontal > vertical else {
-                                    dragOffset = 0
-                                    return
-                                }
-
-                                let startX = value.startLocation.x
-                                let edgeThreshold: CGFloat = 30
-                                guard tab == .allFriends || startX > edgeThreshold else {
-                                    dragOffset = 0
-                                    return
-                                }
-                                let threshold: CGFloat = 80
-                                withAnimation(.easeOut(duration: 0.25)) {
-                                    if value.translation.width < -threshold && tab == .activity {
-                                        tab = .allFriends
-                                    } else if value.translation.width > threshold && tab == .allFriends {
-                                        tab = .activity
-                                    }
-                                    dragOffset = 0
-                                }
-                            }
-                    )
+                    allFriendsContent
+                        .tag(FriendsTopTab.allFriends)
                 }
+                .tabViewStyle(.page(indexDisplayMode: .never))
             } else {
                 loggedOutState
             }
@@ -564,13 +523,34 @@ struct FriendsHubView: View {
 
         private var tabSwitcher: some View {
             HStack {
-                Picker("Friends", selection: $tab) {
-                    ForEach(FriendsTopTab.allCases) { item in
-                        Text(item.title).tag(item)
+                ForEach(FriendsTopTab.allCases) { item in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.22)) {
+                            tab = item
+                        }
+                    } label: {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 17, style: .continuous)
+                                .fill(tab == item ? FigmaTheme.primary : Color.clear)
+
+                            Text(item.title)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(tab == item ? .white : .black.opacity(0.65))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 34)
+                        .contentShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
                     }
+                    .buttonStyle(.plain)
                 }
-                .pickerStyle(.segmented)
             }
+            .padding(4)
+            .background(Color.white)
+            .clipShape(RoundedRectangle(cornerRadius: 21, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 21, style: .continuous)
+                    .stroke(FigmaTheme.border, lineWidth: 1)
+            )
             .padding(.horizontal, 16)
             .padding(.top, 10)
             .padding(.bottom, 8)
@@ -1663,6 +1643,7 @@ private struct FriendProfileScreen: View {
     @State private var deleteFriendErrorText = ""
     @State private var isDeletingFriend = false
     @State private var showPostcardComposer = false
+    @State private var activeRoute: FriendsRoute?
 
     private var viewerUserID: String {
         let current = sessionStore.accountUserID ?? sessionStore.currentUserID
@@ -1711,7 +1692,7 @@ private struct FriendProfileScreen: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 14) {
-                    friendHeroSection(friend: f, sceneState: sceneState)
+                    friendHeroSection(friend: f, sceneState: sceneState, activeRoute: $activeRoute)
 
                     VStack(spacing: 14) {
                         if let displayBio = resolvedBioText(for: f) {
@@ -1720,35 +1701,6 @@ private struct FriendProfileScreen: View {
                                 .foregroundColor(FigmaTheme.text.opacity(0.68))
                                 .multilineTextAlignment(.center)
                                 .padding(.horizontal, 10)
-                        }
-
-                        VStack(spacing: 14) {
-                            HStack(spacing: 14) {
-                                NavigationLink {
-                                    FriendCitiesScreen(friendID: friendID)
-                                } label: {
-                                    friendProfileMenuTile(
-                                        icon: "books.vertical",
-                                        iconColor: FigmaTheme.primary,
-                                        iconBg: FigmaTheme.primary.opacity(0.14),
-                                        title: L10n.t("friend_city_cards_title")
-                                    )
-                                }
-                                .buttonStyle(.plain)
-
-                                NavigationLink {
-                                    FriendPublicMemoriesScreen(friendID: friendID)
-                                } label: {
-                                    friendProfileMenuTile(
-                                        icon: "book.pages",
-                                        iconColor: Color(red: 184 / 255, green: 148 / 255, blue: 125 / 255),
-                                        iconBg: Color(red: 184 / 255, green: 148 / 255, blue: 125 / 255).opacity(0.14),
-                                        title: L10n.t("journey_memory")
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                            }
-
                         }
                     }
                     .frame(maxWidth: 430)
@@ -1861,7 +1813,7 @@ private struct FriendProfileScreen: View {
         .frame(height: 96)
     }
 
-    private func friendHeroSection(friend: FriendProfileSnapshot, sceneState: ProfileSceneInteractionState) -> some View {
+    private func friendHeroSection(friend: FriendProfileSnapshot, sceneState: ProfileSceneInteractionState, activeRoute: Binding<FriendsRoute?>) -> some View {
         VStack(spacing: 0) {
             ProfileHeroTopBackdrop {
                 GeometryReader { _ in
@@ -1945,45 +1897,64 @@ private struct FriendProfileScreen: View {
                     }
                 }
 
-                NavigationLink {
-                    ActivityRecordView(
-                        displayName: friend.displayName,
-                        stats: friend.stats,
-                        levelProgress: levelProgress,
-                        loadout: friend.loadout
-                    )
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "chart.bar.doc.horizontal")
-                            .font(.system(size: 20))
-                            .foregroundColor(FigmaTheme.primary)
-                            .frame(width: 32, height: 32)
-                            .background(FigmaTheme.primary.opacity(0.1))
-                            .clipShape(Circle())
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(L10n.t("friends_activity_record_title"))
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundColor(.black)
-
-                            Text(String(format: L10n.t("friend_stats_summary_format"), friend.stats.totalJourneys, friend.stats.totalMemories, friend.stats.totalUnlockedCities))
-                                .font(.system(size: 12))
-                                .foregroundColor(.gray)
-                        }
-
-                        Spacer()
-
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.gray.opacity(0.5))
+                VStack(alignment: .leading, spacing: 12) {
+                    NavigationLink {
+                        ActivityRecordView(
+                            displayName: friend.displayName,
+                            stats: friend.stats,
+                            levelProgress: levelProgress,
+                            loadout: friend.loadout
+                        )
+                    } label: {
+                        friendActivityTile(
+                            icon: "chart.bar.doc.horizontal",
+                            iconColor: FigmaTheme.primary,
+                            iconBg: FigmaTheme.primary.opacity(0.1),
+                            title: L10n.t("friend_activity_record_entry"),
+                            subtitle: String(format: L10n.t("friend_stats_summary_format"), friend.stats.totalJourneys, friend.stats.totalMemories, friend.stats.totalUnlockedCities)
+                        )
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 14)
-                    .background(Color.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+                    .buttonStyle(.plain)
+
+                    Button {
+                        showPostcardComposer = true
+                    } label: {
+                        friendActivityTile(
+                            icon: "envelope.fill",
+                            iconColor: Color(red: 0.39, green: 0.29, blue: 0.74),
+                            iconBg: Color(red: 0.96, green: 0.94, blue: 1.0),
+                            title: L10n.t("friend_postcards"),
+                            subtitle: nil
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        activeRoute.wrappedValue = .cities(friendID)
+                    } label: {
+                        friendActivityTile(
+                            icon: "map.fill",
+                            iconColor: Color(red: 0.24, green: 0.56, blue: 0.21),
+                            iconBg: Color(red: 0.95, green: 0.98, blue: 0.92),
+                            title: L10n.t("friend_city_cards"),
+                            subtitle: nil
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        activeRoute.wrappedValue = .publicMemories(friendID)
+                    } label: {
+                        friendActivityTile(
+                            icon: "photo.fill",
+                            iconColor: Color(red: 0.85, green: 0.45, blue: 0.20),
+                            iconBg: Color(red: 1.0, green: 0.95, blue: 0.90),
+                            title: L10n.t("friend_journey_memories"),
+                            subtitle: nil
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
             .padding(.horizontal, 24)
             .padding(.top, 18)
@@ -2027,6 +1998,43 @@ private struct FriendProfileScreen: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
             .replacingOccurrences(of: " ", with: "")
+    }
+
+    private func friendActivityTile(icon: String, iconColor: Color, iconBg: Color, title: String, subtitle: String?) -> some View {
+        HStack(spacing: 14) {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(iconBg)
+                .frame(width: 56, height: 56)
+                .overlay {
+                    Image(systemName: icon)
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundColor(iconColor)
+                }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(FigmaTheme.text)
+                    .lineLimit(1)
+                if let subtitle = subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(FigmaTheme.subtext)
+                }
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(FigmaTheme.subtext)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity)
+        .background(Color.white)
+        .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+        .shadow(color: Color.black.opacity(0.04), radius: 20, x: 0, y: 8)
     }
 
     private func friendProfileMenuTile(icon: String, iconColor: Color, iconBg: Color, title: String) -> some View {
@@ -2142,6 +2150,7 @@ private struct FriendInviteScannerSheet: View {
     @State private var isImportingFromAlbum = false
     @State private var didResolveCode = false
     @State private var scannerError: String?
+    @State private var showPhotoPicker = false
 
     var body: some View {
         NavigationStack {
@@ -2157,27 +2166,14 @@ private struct FriendInviteScannerSheet: View {
                 )
                 .ignoresSafeArea()
 
-                VStack(spacing: 10) {
-                    Text(L10n.t("profile_place_qr_in_frame"))
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color.black.opacity(0.55))
-                        .clipShape(Capsule())
-
-                    PhotosPicker(selection: $pickedPhotoItem, matching: .images, photoLibrary: .shared()) {
-                        Label(isImportingFromAlbum ? L10n.t("friends_qr_importing") : L10n.t("friends_qr_import_from_album"), systemImage: "photo.on.rectangle")
-                            .font(.system(size: 13, weight: .semibold))
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 9)
-                            .background(Color.white.opacity(0.9))
-                            .foregroundColor(.black)
-                            .clipShape(Capsule())
-                    }
-                    .disabled(isImportingFromAlbum || didResolveCode)
-                }
-                .padding(.bottom, 24)
+                Text(L10n.t("profile_place_qr_in_frame"))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.black.opacity(0.55))
+                    .clipShape(Capsule())
+                    .padding(.bottom, 24)
             }
             .safeAreaInset(edge: .top, spacing: 0) {
                 UnifiedNavigationHeader(
@@ -2191,7 +2187,22 @@ private struct FriendInviteScannerSheet: View {
                     bottomPadding: 12,
                     onLeadingTap: { dismiss() }
                 ) {
-                    Color.clear
+                    Button {
+                        guard !isImportingFromAlbum && !didResolveCode else { return }
+                        showPhotoPicker = true
+                    } label: {
+                        Image(systemName: isImportingFromAlbum ? "hourglass" : "photo")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(FigmaTheme.text)
+                            .frame(width: 42, height: 42)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isImportingFromAlbum || didResolveCode)
+                    .accessibilityLabel(
+                        isImportingFromAlbum
+                            ? L10n.t("friends_qr_importing")
+                            : L10n.t("friends_qr_import_from_album")
+                    )
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
@@ -2207,6 +2218,7 @@ private struct FriendInviteScannerSheet: View {
                 guard let item else { return }
                 Task { await importQRCodeFromPhoto(item) }
             }
+            .photosPicker(isPresented: $showPhotoPicker, selection: $pickedPhotoItem, matching: .images)
         }
     }
 

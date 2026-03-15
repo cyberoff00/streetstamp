@@ -768,7 +768,7 @@ struct LifelogView: View {
                         .shadow(color: .black.opacity(0.24), radius: 8, y: 2)
                         .contentShape(Rectangle())
                         .onTapGesture(count: 2) {
-                            flow.requestOpenSidebarDestination(.equipment)
+                            openEquipmentView()
                         }
                     }
                     .animation(.spring(response: 0.28, dampingFraction: 0.82), value: shouldShowMoodQuestionMark)
@@ -814,7 +814,7 @@ struct LifelogView: View {
                 .buttonStyle(.plain)
             }
 
-            Text("Worldo")
+            Text("WORLDO")
                 .navigationTitleStyle(level: .primary)
         }
         .padding(.horizontal, 18)
@@ -885,7 +885,7 @@ struct LifelogView: View {
 
         return HStack(spacing: 14) {
             Button {
-                flow.requestOpenSidebarDestination(.equipment)
+                openEquipmentView()
             } label: {
                 ZStack {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -985,6 +985,10 @@ struct LifelogView: View {
         @unknown default:
             locationHub.requestAlwaysPermissionIfNeeded()
         }
+    }
+
+    private func openEquipmentView() {
+        flow.requestOpenSidebarDestination(.equipment)
     }
 
     private var hasAlwaysPermission: Bool {

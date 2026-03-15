@@ -797,6 +797,7 @@ struct JourneyMemoryDetailView: View {
     
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var sessionStore: UserSessionStore
+    @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var flow: AppFlowCoordinator
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
@@ -819,12 +820,25 @@ struct JourneyMemoryDetailView: View {
     @State private var shareItem: ShareImageItem? = nil
 
     @State private var showDeleteAllConfirm = false
+    @State private var showDeleteJourneyConfirm = false
     // Photo / Camera (edit mode)
     @State private var showCamera: Bool = false
     @State private var showPhotoLibrary: Bool = false
     @State private var activeMemoryIndex: Int? = nil
     @State private var mirrorSelfie: Bool = false
     @State private var sidebarHideToken = UUID().uuidString
+
+    // Visibility
+    @State private var activeJourneySheet: JourneyDetailSheetRoutePresentation? = nil
+    @State private var pendingVisibility: JourneyVisibility = .private
+    @State private var isSubmittingVisibility = false
+    @State private var likesCount: Int = 0
+    @State private var likedByMe: Bool = false
+    @State private var journeyLikers: [JourneyLiker] = []
+    @State private var likersLoading = false
+    @State private var likersErrorMessage: String? = nil
+    @State private var showMessage = false
+    @State private var messageText = ""
 
     init(
         journey: JourneyRoute,
@@ -844,6 +858,15 @@ struct JourneyMemoryDetailView: View {
     
     private var sortedMemories: [JourneyMemory] {
         memories.sorted(by: { $0.timestamp < $1.timestamp })
+    }
+
+    private var currentJourney: JourneyRoute {
+        store.journeys.first(where: { $0.id == journey.id }) ?? journey
+    }
+
+    private var likesSheetDetents: Set<PresentationDetent> {
+        let compactHeight = min(520, max(276, 194 + CGFloat(max(journeyLikers.count, 1)) * 56))
+        return [.height(compactHeight), .large]
     }
     
     private var journeyDate: String {
@@ -951,6 +974,7 @@ struct JourneyMemoryDetailView: View {
         .onAppear {
             flow.pushSidebarButtonHidden(token: sidebarHideToken)
             let uid = sessionStore.currentUserID
+            loadLikesCount()
             if readOnly {
                 draftMemories = sortedMemories
                 snapshotBeforeEdit = sortedMemories
@@ -993,15 +1017,63 @@ struct JourneyMemoryDetailView: View {
         }
         .alert(L10n.t("delete_all_notes_title"), isPresented: $showDeleteAllConfirm) {
             Button(L10n.t("cancel"), role: .cancel) { }
-            
+
             Button(L10n.t("delete"), role: .destructive) {
                 deleteAllMemoriesForThisJourney()
             }
         } message: {
             Text(L10n.key("delete_all_notes_message"))
         }
+        .alert(L10n.t("delete_journey_confirm_title"), isPresented: $showDeleteJourneyConfirm) {
+            Button(L10n.t("cancel"), role: .cancel) { }
+
+            Button(L10n.t("delete"), role: .destructive) {
+                deleteJourney()
+            }
+        } message: {
+            Text(L10n.key("delete_memory_confirm_message"))
+        }
+        .alert(L10n.t("prompt"), isPresented: $showMessage) {
+            Button(L10n.t("ok"), role: .cancel) { }
+        } message: {
+            Text(messageText)
+        }
         .sheet(item: $shareItem) { item in
             ActivityView(activityItems: [item.image])
+        }
+        .sheet(item: $activeJourneySheet) { route in
+            switch route {
+            case .visibility:
+                JourneyVisibilitySheet(
+                    journey: currentJourney,
+                    pendingVisibility: $pendingVisibility,
+                    isSubmitting: isSubmittingVisibility,
+                    onApply: applyVisibilityChange
+                )
+                .presentationBackground(FigmaTheme.background)
+                .presentationCornerRadius(28)
+                .presentationDetents([.height(352)])
+                .presentationDragIndicator(.visible)
+            case .likes:
+                JourneyLikesSheet(
+                    journey: currentJourney,
+                    displayCityName: cityName,
+                    likers: journeyLikers,
+                    isLoading: likersLoading,
+                    errorMessage: likersErrorMessage,
+                    onRetry: loadJourneyLikers,
+                    onEditVisibility: {
+                        activeJourneySheet = nil
+                        DispatchQueue.main.async {
+                            presentVisibilitySheet()
+                        }
+                    }
+                )
+                .presentationBackground(FigmaTheme.background)
+                .presentationCornerRadius(28)
+                .presentationDetents(likesSheetDetents)
+                .presentationDragIndicator(.visible)
+            }
         }
 
         .fullScreenCover(isPresented: $showCamera) {
@@ -1074,6 +1146,10 @@ struct JourneyMemoryDetailView: View {
                         .font(.system(size: 12, weight: .medium))
                         .tracking(1.2)
                         .foregroundColor(Color(red: 0.42, green: 0.45, blue: 0.51))
+
+                    if !readOnly {
+                        visibilityStatusButton
+                    }
                 }
                 
                 Spacer()
@@ -1130,6 +1206,12 @@ struct JourneyMemoryDetailView: View {
                                     showDeleteAllConfirm = true
                                 } label: {
                                     Label(L10n.t("delete_all_notes"), systemImage: "trash")
+                                }
+
+                                Button(role: .destructive) {
+                                    showDeleteJourneyConfirm = true
+                                } label: {
+                                    Label(L10n.t("delete_journey_confirm_title"), systemImage: "trash.fill")
                                 }
                             } label: {
                                 Image(systemName: "ellipsis")
@@ -1422,7 +1504,183 @@ struct JourneyMemoryDetailView: View {
 
     }
 
-    
+    private var visibilityStatusButton: some View {
+        Button {
+            presentPrimaryJourneySheet()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: currentJourney.visibility == .friendsOnly ? "person.2.fill" : "lock.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                Text(currentJourney.visibility.localizedTitle)
+                    .font(.system(size: 12, weight: .medium))
+                if likesCount > 0 {
+                    Text("•")
+                    Image(systemName: "heart.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text("\(likesCount)")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+            }
+            .foregroundColor(currentJourney.visibility == .friendsOnly ? UITheme.accent : FigmaTheme.subtext)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(currentJourney.visibility == .friendsOnly ? UITheme.accent.opacity(0.12) : Color.black.opacity(0.05))
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 4)
+    }
+
+    private func applyVisibilityChange() {
+        guard !isSubmittingVisibility else { return }
+        let target = pendingVisibility
+        let journey = currentJourney
+        guard target != journey.visibility else {
+            activeJourneySheet = nil
+            return
+        }
+        let decision = JourneyVisibilityPolicy.evaluateChange(
+            current: journey.visibility,
+            target: target,
+            isLoggedIn: sessionStore.isLoggedIn,
+            journeyDistance: journey.distance,
+            memoryCount: journey.memories.count
+        )
+        guard decision.isAllowed else {
+            activeJourneySheet = nil
+            showVisibilityDeniedMessage(reason: decision.reason)
+            return
+        }
+        var updated = journey
+        updated.visibility = target
+        isSubmittingVisibility = true
+        store.applyBulkCompletedUpdates([updated])
+        activeJourneySheet = nil
+
+        Task {
+            defer {
+                Task { @MainActor in
+                    isSubmittingVisibility = false
+                }
+            }
+
+            guard BackendConfig.isEnabled, let token = sessionStore.currentAccessToken, !token.isEmpty else { return }
+            do {
+                try await JourneyCloudMigrationService.syncJourneyVisibilityChange(
+                    journey: updated,
+                    sessionStore: sessionStore,
+                    cityCache: cityCache
+                )
+            } catch {}
+        }
+    }
+
+    private func loadLikesCount() {
+        guard sessionStore.isLoggedIn, let token = sessionStore.currentAccessToken, !token.isEmpty else { return }
+        Task {
+            do {
+                let stats = try await BackendAPIClient.shared.fetchJourneyLikeStats(
+                    token: token,
+                    journeyIDs: [journey.id],
+                    ownerUserID: sessionStore.accountUserID
+                )
+                await MainActor.run {
+                    if let stat = stats[journey.id] {
+                        likesCount = stat.likes
+                        likedByMe = stat.likedByMe
+                    }
+                }
+            } catch {}
+        }
+    }
+
+    private func presentPrimaryJourneySheet() {
+        switch JourneyDetailSheetRoutePresentation.primaryRoute(forLikesCount: likesCount) {
+        case .visibility:
+            presentVisibilitySheet()
+        case .likes:
+            pendingVisibility = currentJourney.visibility
+            activeJourneySheet = .likes
+            loadJourneyLikers()
+        }
+    }
+
+    private func presentVisibilitySheet() {
+        let journey = currentJourney
+        guard JourneyVisibilityPolicy.canEditVisibility(
+            current: journey.visibility,
+            target: journey.visibility,
+            isLoggedIn: sessionStore.isLoggedIn
+        ) else {
+            showVisibilityDeniedMessage(reason: .loginRequired)
+            return
+        }
+
+        pendingVisibility = journey.visibility
+        activeJourneySheet = .visibility
+    }
+
+    private func loadJourneyLikers() {
+        guard BackendConfig.isEnabled,
+              let token = sessionStore.currentAccessToken,
+              !token.isEmpty else {
+            journeyLikers = []
+            likersErrorMessage = nil
+            return
+        }
+
+        likersLoading = true
+        likersErrorMessage = nil
+        let journeyID = currentJourney.id
+
+        Task {
+            do {
+                let all = try await BackendAPIClient.shared.fetchNotifications(token: token, unreadOnly: false)
+                let journeyLikes = all
+                    .filter { $0.type == "journey_like" && $0.journeyID == journeyID }
+                    .sorted { $0.createdAt > $1.createdAt }
+
+                var seen = Set<String>()
+                var out: [JourneyLiker] = []
+                for item in journeyLikes {
+                    let key = item.fromUserID ?? item.fromDisplayName ?? item.id
+                    if seen.contains(key) { continue }
+                    seen.insert(key)
+                    let name = (item.fromDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+                        ? (item.fromDisplayName ?? "")
+                        : (item.fromUserID ?? L10n.t("unknown"))
+                    out.append(JourneyLiker(id: key, name: name, likedAt: item.createdAt))
+                }
+
+                await MainActor.run {
+                    journeyLikers = out
+                    likersErrorMessage = nil
+                    likersLoading = false
+                }
+            } catch {
+                await MainActor.run {
+                    journeyLikers = []
+                    likersErrorMessage = error.localizedDescription
+                    likersLoading = false
+                }
+            }
+        }
+    }
+
+    private func showVisibilityDeniedMessage(reason: JourneyVisibilityPolicy.DenialReason?) {
+        if let reason {
+            messageText = L10n.t(reason.localizationKey)
+        } else {
+            messageText = "无法修改 Journey 权限"
+        }
+        showMessage = true
+    }
+
+    private func deleteJourney() {
+        store.deleteJourney(id: journey.id)
+        dismiss()
+    }
+
 }
 
 

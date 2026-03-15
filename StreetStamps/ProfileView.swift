@@ -188,7 +188,7 @@ struct ProfileView: View {
             Spacer()
 
             Text(L10n.t("profile_title"))
-                .navigationTitleStyle(level: .secondary)
+                .navigationTitleStyle(level: .primary)
                 .tracking(0.2)
                 .lineLimit(1)
                 .minimumScaleFactor(0.65)
