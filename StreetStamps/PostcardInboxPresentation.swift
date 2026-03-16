@@ -56,6 +56,13 @@ enum PostcardInboxPresentation {
         return RobotLoadout.defaultBoy.normalizedForCurrentAvatar()
     }
 
+    static func cardReaction(
+        for message: BackendPostcardMessageDTO,
+        box _: PostcardInboxView.Box
+    ) -> PostcardReaction? {
+        message.reaction
+    }
+
     private static func resolvedLabel(
         primaryDisplayName: String?,
         fallbackDisplayName: String?,

@@ -15,6 +15,23 @@ struct JourneyIncrementalSyncPlan {
 }
 
 enum JourneyCloudMigrationService {
+    typealias MediaUploader = @Sendable (_ token: String, _ data: Data, _ fileName: String, _ mimeType: String) async throws -> BackendMediaUploadResponse
+    typealias MigrationSender = @Sendable (_ token: String, _ payload: BackendMigrationRequest) async throws -> Void
+    typealias PayloadBuildObserver = @Sendable () -> Void
+
+    private static let liveMediaUploader: MediaUploader = { token, data, fileName, mimeType in
+        try await BackendAPIClient.shared.uploadMedia(
+            token: token,
+            data: data,
+            fileName: fileName,
+            mimeType: mimeType
+        )
+    }
+
+    private static let liveMigrationSender: MigrationSender = { token, payload in
+        try await BackendAPIClient.shared.migrateJourneys(token: token, payload: payload)
+    }
+
     static func shouldMergeDownloadedProfile(expectedAccountUserID: String?, remoteProfileID: String) -> Bool {
         let expected = expectedAccountUserID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let remote = remoteProfileID.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -87,12 +104,14 @@ enum JourneyCloudMigrationService {
         journey: JourneyRoute,
         cachedCities: [CachedCity],
         userID: String,
-        token: String
+        token: String,
+        mediaUploader: MediaUploader = liveMediaUploader
     ) async throws -> JourneyIncrementalSyncPlan {
         let payloadResult = try await buildJourneyPayloads(
             journeys: [journey],
             userID: userID,
-            token: token
+            token: token,
+            mediaUploader: mediaUploader
         )
         let cards = cachedCities
             .filter { !($0.isTemporary ?? false) }
@@ -126,25 +145,41 @@ enum JourneyCloudMigrationService {
     static func syncJourneyVisibilityChange(
         journey: JourneyRoute,
         sessionStore: UserSessionStore,
-        cityCache: CityCache
+        cityCache: CityCache,
+        migrationSender: @escaping MigrationSender = liveMigrationSender,
+        mediaUploader: @escaping MediaUploader = liveMediaUploader,
+        payloadBuildObserver: PayloadBuildObserver? = nil
     ) async throws {
         guard BackendConfig.isEnabled else { return }
-        guard let token = sessionStore.currentAccessToken, !token.isEmpty else {
+
+        let snapshot = await MainActor.run {
+            (
+                token: sessionStore.currentAccessToken,
+                userID: sessionStore.currentUserID,
+                cards: cityCache.cachedCities
+            )
+        }
+
+        guard let token = snapshot.token, !token.isEmpty else {
             throw BackendAPIError.unauthorized
         }
 
-        let cards = cityCache.cachedCities
+        let cards = snapshot.cards
             .filter { !($0.isTemporary ?? false) }
             .map { FriendCityCard(id: $0.id, name: $0.name, countryISO2: $0.countryISO2) }
 
         let payload: BackendMigrationRequest
         if journey.visibility == .public || journey.visibility == .friendsOnly {
-            let plan = try await makeSingleJourneySyncPlan(
-                journey: journey,
-                cachedCities: cityCache.cachedCities,
-                userID: sessionStore.currentUserID,
-                token: token
-            )
+            let plan = try await Task.detached(priority: .userInitiated) {
+                payloadBuildObserver?()
+                return try await makeSingleJourneySyncPlan(
+                    journey: journey,
+                    cachedCities: snapshot.cards,
+                    userID: snapshot.userID,
+                    token: token,
+                    mediaUploader: mediaUploader
+                )
+            }.value
             payload = plan.payload
         } else {
             payload = makeJourneyRemovalPayload(
@@ -153,7 +188,7 @@ enum JourneyCloudMigrationService {
             )
         }
 
-        try await BackendAPIClient.shared.migrateJourneys(token: token, payload: payload)
+        try await migrationSender(token, payload)
     }
 
     private static func removedRemoteJourneyIDsIfNeeded(
@@ -180,7 +215,8 @@ enum JourneyCloudMigrationService {
     private static func buildJourneyPayloads(
         journeys: [JourneyRoute],
         userID: String,
-        token: String
+        token: String,
+        mediaUploader: MediaUploader = liveMediaUploader
     ) async throws -> (journeys: [BackendJourneyUploadDTO], memoriesCount: Int, uploadedMediaCount: Int) {
         var out: [BackendJourneyUploadDTO] = []
         var memoriesCount = 0
@@ -196,7 +232,8 @@ enum JourneyCloudMigrationService {
                 let uploadedURLs = try await uploadMemoryImagesIfNeeded(
                     imagePaths: memory.imagePaths,
                     userID: userID,
-                    token: token
+                    token: token,
+                    mediaUploader: mediaUploader
                 )
                 memories.append(
                     BackendMemoryUploadDTO(
@@ -225,6 +262,7 @@ enum JourneyCloudMigrationService {
                     startTime: route.startTime,
                     endTime: route.endTime,
                     visibility: route.visibility,
+                    sharedAt: route.sharedAt,
                     routeCoordinates: routeCoordinates,
                     memories: memories
                 )
@@ -237,7 +275,8 @@ enum JourneyCloudMigrationService {
     private static func uploadMemoryImagesIfNeeded(
         imagePaths: [String],
         userID: String,
-        token: String
+        token: String,
+        mediaUploader: MediaUploader = liveMediaUploader
     ) async throws -> [String] {
         guard !imagePaths.isEmpty else { return [] }
 
@@ -250,12 +289,7 @@ enum JourneyCloudMigrationService {
 
             let data = try Data(contentsOf: fileURL)
             let mime = mimeType(for: fileURL.pathExtension)
-            let result = try await BackendAPIClient.shared.uploadMedia(
-                token: token,
-                data: data,
-                fileName: fileURL.lastPathComponent,
-                mimeType: mime
-            )
+            let result = try await mediaUploader(token, data, fileURL.lastPathComponent, mime)
             uploaded.append(result.url)
         }
 
@@ -372,6 +406,7 @@ enum JourneyCloudMigrationService {
             exploreMode: .city,
             trackingMode: .daily,
             visibility: journey.visibility,
+            sharedAt: journey.sharedAt,
             customTitle: journey.title,
             activityTag: journey.activityTag,
             overallMemory: journey.overallMemory

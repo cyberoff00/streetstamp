@@ -2,7 +2,6 @@ import Foundation
 
 enum FriendSectionTitleFormatter {
     enum Section {
-        case journeys
         case cityCards
         case journeyMemories
         case journeyDetail
@@ -11,8 +10,6 @@ enum FriendSectionTitleFormatter {
     static func sectionTitle(for section: Section, friendName: String, locale: Locale = .current) -> String {
         let labelKey: String
         switch section {
-        case .journeys:
-            labelKey = "journeys_title"
         case .cityCards:
             labelKey = "friend_city_cards_title"
         case .journeyMemories:

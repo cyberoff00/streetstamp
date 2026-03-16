@@ -253,9 +253,12 @@
 "friends_distance_compact_format" = "%.1f公里";
 "friends_empty_activity" = "还没有好友動態";
 "friends_empty_all" = "还没有好友，点击 + 添加";
+"friends_event_added_memory" = "添加了記憶";
 "friends_event_added_memories" = "新增 %d 条記憶";
 "friends_event_completed" = "完成了 %@";
 "friends_event_completed_journey" = "完成了一段旅程";
+"friends_event_published_journey" = "發布了旅程「%@」";
+"friends_event_visited_city" = "到訪了一座城市";
 "friends_event_visited" = "到访了 %@";
 "friends_exclusive_id_format" = "专属ID：%@";
 "friends_go_login" = "去登入";

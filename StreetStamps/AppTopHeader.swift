@@ -129,7 +129,7 @@ struct UnifiedNavigationHeader<Trailing: View>: View {
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundColor(FigmaTheme.text)
                     .frame(width: 42, height: 42)
-                    .contentShape(Circle())
+                    .appFullSurfaceTapTarget(.circle)
             }
             .buttonStyle(SidebarHamburgerPressStyle())
             .disabled(onLeadingTap == nil)
@@ -139,7 +139,7 @@ struct UnifiedNavigationHeader<Trailing: View>: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(FigmaTheme.text)
                     .frame(width: 42, height: 42)
-                    .contentShape(Circle())
+                    .appFullSurfaceTapTarget(.circle)
             }
             .buttonStyle(SidebarHamburgerPressStyle())
             .disabled(onLeadingTap == nil)
@@ -242,7 +242,7 @@ struct SidebarHamburgerButton: View {
                 .font(.system(size: iconSize, weight: iconWeight))
                 .foregroundColor(foreground)
                 .frame(width: size, height: size)
-                .contentShape(Circle())
+                .appFullSurfaceTapTarget(.circle)
         }
         .buttonStyle(SidebarHamburgerPressStyle())
     }

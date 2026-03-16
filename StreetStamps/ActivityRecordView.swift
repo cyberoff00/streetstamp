@@ -43,7 +43,7 @@ struct ActivityRecordView: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(FigmaTheme.text)
                     .frame(width: 42, height: 42)
-                    .contentShape(Circle())
+                    .appFullSurfaceTapTarget(.circle)
             }
             .buttonStyle(.plain)
 

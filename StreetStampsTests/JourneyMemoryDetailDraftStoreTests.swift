@@ -6,6 +6,7 @@ final class JourneyMemoryDetailDraftStoreTests: XCTestCase {
         let draft = JourneyMemoryDetailDraft(
             memories: [],
             focusedMemoryID: "memory-1",
+            journeyTitle: "  Sunset Loop  ",
             overallMemory: "  River breeze  ",
             overallMemoryImagePaths: ["overall-1.jpg", "overall-2.jpg"]
         )
@@ -14,6 +15,7 @@ final class JourneyMemoryDetailDraftStoreTests: XCTestCase {
         let decoded = try JSONDecoder().decode(JourneyMemoryDetailDraft.self, from: data)
 
         XCTAssertEqual(decoded.focusedMemoryID, "memory-1")
+        XCTAssertEqual(decoded.journeyTitle, "  Sunset Loop  ")
         XCTAssertEqual(decoded.overallMemory, "  River breeze  ")
         XCTAssertEqual(decoded.overallMemoryImagePaths, ["overall-1.jpg", "overall-2.jpg"])
     }

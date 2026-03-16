@@ -343,9 +343,12 @@
 "friends_badge_memory" = "记忆";
 "friends_empty_activity" = "还没有好友动态";
 "friends_empty_all" = "还没有好友，点击 + 添加";
+"friends_event_added_memory" = "添加了记忆";
 "friends_event_added_memories" = "新增 %d 条记忆";
 "friends_event_completed" = "完成了 %@";
 "friends_event_completed_journey" = "完成了一段旅程";
+"friends_event_published_journey" = "发布了旅程「%@」";
+"friends_event_visited_city" = "到访了一座城市";
 "friends_event_visited" = "到访了 %@";
 "friends_tab_activity" = "动态";
 "friends_tab_all" = "好友";

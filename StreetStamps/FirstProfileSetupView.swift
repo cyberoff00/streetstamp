@@ -218,7 +218,7 @@ struct FirstProfileSetupView: View {
                     .padding(.vertical, 10)
                     .background(Color.white.opacity(0.92))
                     .clipShape(Capsule())
-                    .contentShape(Capsule())
+                    .appFullSurfaceTapTarget(.capsule)
             }
             .disabled(submitting)
         }
@@ -290,7 +290,7 @@ struct FirstProfileSetupView: View {
                         RoundedRectangle(cornerRadius: 26, style: .continuous)
                             .stroke(warm.opacity(0.35), lineWidth: 2)
                     )
-                    .contentShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                    .appFullSurfaceTapTarget(.roundedRect(26))
                     .font(.system(size: 15, weight: .bold))
                     .foregroundColor(warm)
             }
@@ -382,7 +382,7 @@ struct FirstProfileSetupView: View {
                 .foregroundColor(.white)
                 .font(.system(size: 17, weight: .semibold))
                 .clipShape(RoundedRectangle(cornerRadius: 29, style: .continuous))
-                .contentShape(RoundedRectangle(cornerRadius: 29, style: .continuous))
+                .appFullSurfaceTapTarget(.roundedRect(29))
         }
         .disabled(submitting)
         .shadow(color: accent.opacity(0.28), radius: 20, x: 0, y: 12)

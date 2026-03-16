@@ -1114,6 +1114,7 @@ function normalizeJourneyPayload(raw, ownerUserID) {
     startTime: normalizeISOTime(raw?.startTime),
     endTime: normalizeISOTime(raw?.endTime),
     visibility: normalizeVisibility(raw?.visibility),
+    sharedAt: normalizeISOTime(raw?.sharedAt),
     routeCoordinates: normalizeRouteCoordinates(raw?.routeCoordinates || raw?.coordinates),
     memories: normalizeJourneyMemories(raw?.memories),
     ownerUserID: ownerUserID || undefined

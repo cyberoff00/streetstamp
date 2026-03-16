@@ -63,7 +63,7 @@ struct CollectionTabView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .frame(height: 34)
-                    .contentShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
+                    .appFullSurfaceTapTarget(.roundedRect(17))
                 }
                 .buttonStyle(.plain)
             }

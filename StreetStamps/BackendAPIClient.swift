@@ -76,6 +76,7 @@ struct BackendJourneyUploadDTO: Codable {
     var startTime: Date?
     var endTime: Date?
     var visibility: JourneyVisibility
+    var sharedAt: Date?
     var routeCoordinates: [CoordinateCodable]
     var memories: [BackendMemoryUploadDTO]
 }

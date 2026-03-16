@@ -298,6 +298,7 @@ struct JourneyRoute: Codable {
     var exploreMode: ExploreMode = .city
     var trackingMode: TrackingMode = .daily
     var visibility: JourneyVisibility = .private
+    var sharedAt: Date? = nil
     var customTitle: String? = nil
     var activityTag: String? = nil
     var overallMemory: String? = nil
@@ -330,6 +331,7 @@ struct JourneyRoute: Codable {
         exploreMode: ExploreMode = .city,
         trackingMode: TrackingMode = .daily,
         visibility: JourneyVisibility = .private,
+        sharedAt: Date? = nil,
         customTitle: String? = nil,
         activityTag: String? = nil,
         overallMemory: String? = nil,
@@ -360,6 +362,7 @@ struct JourneyRoute: Codable {
         self.exploreMode = exploreMode
         self.trackingMode = trackingMode
         self.visibility = visibility
+        self.sharedAt = sharedAt
         self.customTitle = customTitle
         self.activityTag = activityTag
         self.overallMemory = overallMemory
@@ -517,6 +520,8 @@ struct JourneyRoute: Codable {
     }
 }
 
+extension JourneyRoute: @unchecked Sendable {}
+
 
 //
 extension JourneyRoute {
@@ -589,6 +594,65 @@ extension JourneyRoute {
 
 enum TravelMode: String, Codable {
     case walk, run, transit, drive, bike, motorcycle, flight, unknown
+}
+
+struct MapViewRouteRenderStyle {
+    struct LayerWidths {
+        let halo: CGFloat
+        let frequency: CGFloat
+        let core: CGFloat
+    }
+
+    static func altitudeBucket(for altitude: CLLocationDistance) -> Int {
+        switch max(0, altitude) {
+        case ..<900: return 0
+        case ..<1_500: return 1
+        case ..<2_400: return 2
+        case ..<3_600: return 3
+        case ..<5_500: return 4
+        case ..<8_000: return 5
+        default: return 6
+        }
+    }
+
+    static func coreWidth(forAltitude altitude: CLLocationDistance, mode: TravelMode) -> CGFloat {
+        let d = max(500.0, altitude)
+        let t = max(0.60, min(1.30, 1_150.0 / d))
+        var core = 4.9 * t
+
+        switch mode {
+        case .walk, .run: core *= 1.05
+        case .transit: core *= 0.82
+        case .bike: core *= 1.00
+        case .motorcycle: core *= 1.04
+        case .drive: core *= 1.09
+        case .flight: core *= 0.96
+        case .unknown: core *= 1.00
+        }
+
+        return core
+    }
+
+    static func layerWidths(
+        forAltitude altitude: CLLocationDistance,
+        mode: TravelMode,
+        repeatWeight: CGFloat,
+        isGap: Bool
+    ) -> LayerWidths {
+        let base = coreWidth(forAltitude: altitude, mode: mode)
+        let weight = max(0, min(1, repeatWeight))
+
+        if isGap {
+            let core = max(1.2, base * 0.64)
+            let halo = max(1.0, core * 1.24)
+            return LayerWidths(halo: halo, frequency: 0, core: core)
+        }
+
+        let core = base * 1.02 + weight * 0.10
+        let frequency = min(core * 0.58, base * 0.45 + weight * 0.05)
+        let halo = min(core * 1.32, base * 1.25 + weight * 0.06)
+        return LayerWidths(halo: halo, frequency: frequency, core: core)
+    }
 }
 
 // =======================================================
@@ -797,23 +861,6 @@ struct MapView: View {
 
     private var displaySegments: [RenderRouteSegment] { tracking.renderUnifiedSegmentsForMap }
     private var liveTail: [CLLocationCoordinate2D] { tracking.renderLiveTailForMap }
-    private func lineWidths(for distance: CLLocationDistance, mode: TravelMode) -> (glow: CGFloat, core: CGFloat) {
-        let t = max(0.9, min(2.4, distance / 700.0))
-        var core = 6 * t
-        var glow = 16 * t
-
-        switch mode {
-        case .walk, .run: core *= 1.10; glow *= 1.10
-        case .transit: core *= 0.82; glow *= 0.90
-        case .bike: core *= 1.05; glow *= 1.10
-        case .motorcycle: core *= 1.10; glow *= 1.15
-        case .drive: core *= 1.18; glow *= 1.25
-        case .flight: core *= 1.05; glow *= 1.05
-        case .unknown: core *= 1.00; glow *= 1.00
-        }
-        return (glow: glow, core: core)
-    }
-
     private enum PersistReason { case coordsTick, memoryAdded, exitToHome, finish, sharingContinue, sharingComplete }
 
     private func persistSnapshot(_ reason: PersistReason) {
@@ -3289,6 +3336,7 @@ private struct JourneyMKMapView: UIViewRepresentable {
 
         private var lastSegmentsSignature: String = ""
         private var lastTailSignature: String = ""
+        private var lastAltitudeBucket: Int?
         private var isProgrammaticRegionChange = false
         private var renderedSegments: [RenderRouteSegment] = []
         private var routeOverlays: [WeightedRoutePolyline] = []
@@ -3484,6 +3532,7 @@ private struct JourneyMKMapView: UIViewRepresentable {
         }
 
         func syncOverlays(on map: MKMapView, segments: [RenderRouteSegment], liveTail: [CLLocationCoordinate2D]) {
+            lastAltitudeBucket = MapViewRouteRenderStyle.altitudeBucket(for: map.camera.altitude)
             let (segSig, tailSig) = signature(for: segments, tail: liveTail)
             let needsSegUpdate = (segSig != lastSegmentsSignature)
             let needsTailUpdate = (tailSig != lastTailSignature)
@@ -3553,6 +3602,13 @@ private struct JourneyMKMapView: UIViewRepresentable {
             lastTailSignature = tailSig
         }
 
+        private func refreshOverlayStyles(on map: MKMapView) {
+            lastSegmentsSignature = ""
+            lastTailSignature = ""
+            renderedSegments = []
+            syncOverlays(on: map, segments: parent.segments, liveTail: parent.liveTail)
+        }
+
         private func sharedPrefixCount(lhs: [RenderRouteSegment], rhs: [RenderRouteSegment]) -> Int {
             let limit = min(lhs.count, rhs.count)
             var index = 0
@@ -3567,43 +3623,25 @@ private struct JourneyMKMapView: UIViewRepresentable {
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             guard let poly = overlay as? MKPolyline else { return MKOverlayRenderer(overlay: overlay) }
-
-            // widths comparable to SwiftUI version
-            func widths(for distance: CLLocationDistance, mode: TravelMode) -> CGFloat {
-                // MapKit camera altitude grows as you zoom OUT.
-                // We want strokes to become THINNER when zooming out (and never explode in width).
-                let d = max(500.0, distance)
-                let t = max(0.55, min(1.90, 1200.0 / d))
-                var core = 6 * t
-                switch mode {
-                case .walk, .run: core *= 1.10
-                case .transit: core *= 0.82
-                case .bike: core *= 1.05
-                case .motorcycle: core *= 1.10
-                case .drive: core *= 1.18
-                case .flight: core *= 1.05
-                case .unknown: core *= 1.00
-                }
-                return core
-            }
+            let altitude = mapView.camera.altitude
 
             if poly.title == "tail" {
                 let renderer = MKPolylineRenderer(polyline: poly)
-                renderer.strokeColor = MapAppearanceSettings.routeBaseColor.withAlphaComponent(0.84)
-                renderer.lineWidth = 3.1
+                renderer.strokeColor = MapAppearanceSettings.routeBaseColor.withAlphaComponent(0.86)
+                renderer.lineWidth = max(2.0, min(3.1, MapViewRouteRenderStyle.coreWidth(forAltitude: altitude, mode: parent.travelMode) * 0.82))
                 renderer.lineCap = .round
                 renderer.lineJoin = .round
                 return renderer
             }
 
             let base = MapAppearanceSettings.routeBaseColor
-            let coreWidth = widths(for: mapView.camera.altitude, mode: parent.travelMode)
+            let coreWidth = MapViewRouteRenderStyle.coreWidth(forAltitude: altitude, mode: parent.travelMode)
             guard let styled = poly as? WeightedRoutePolyline else {
                 let renderer = MKPolylineRenderer(polyline: poly)
-                renderer.lineWidth = coreWidth * 0.90
+                renderer.lineWidth = coreWidth * 0.98
                 renderer.lineCap = .round
                 renderer.lineJoin = .round
-                renderer.strokeColor = base.withAlphaComponent(0.88)
+                renderer.strokeColor = base.withAlphaComponent(0.94)
                 if poly.title == "route_dashed" {
                     renderer.lineDashPattern = RouteRenderStyleTokens.dashLengths.map { NSNumber(value: Double($0)) }
                 }
@@ -3612,27 +3650,33 @@ private struct JourneyMKMapView: UIViewRepresentable {
 
             let isGap = styled.isGap
             let weight = CGFloat(max(0, min(1, styled.repeatWeight)))
+            let widths = MapViewRouteRenderStyle.layerWidths(
+                forAltitude: altitude,
+                mode: parent.travelMode,
+                repeatWeight: weight,
+                isGap: isGap
+            )
 
             let halo = MKPolylineRenderer(polyline: styled)
-            halo.lineWidth = isGap ? max(0.9, coreWidth * 0.34) : (coreWidth * 0.72 + weight * 0.22)
+            halo.lineWidth = widths.halo
             halo.lineCap = CGLineCap.round
             halo.lineJoin = CGLineJoin.round
-            halo.strokeColor = base.withAlphaComponent(isGap ? 0.04 : 0.05)
+            halo.strokeColor = base.withAlphaComponent(isGap ? 0.06 : 0.09)
             if isGap {
                 halo.lineDashPattern = RouteRenderStyleTokens.dashLengths.map { NSNumber(value: Double($0)) }
             }
 
             let freq = MKPolylineRenderer(polyline: styled)
-            freq.lineWidth = isGap ? 0 : (coreWidth * 0.64 + weight * 0.14)
+            freq.lineWidth = widths.frequency
             freq.lineCap = CGLineCap.round
             freq.lineJoin = CGLineJoin.round
-            freq.strokeColor = base.withAlphaComponent(isGap ? 0 : (0.03 + 0.05 * weight))
+            freq.strokeColor = base.withAlphaComponent(isGap ? 0 : (0.014 + 0.016 * weight))
 
             let core = MKPolylineRenderer(polyline: styled)
-            core.lineWidth = isGap ? max(1.0, coreWidth * 0.56) : (coreWidth * 0.78 + weight * 0.12)
+            core.lineWidth = widths.core
             core.lineCap = CGLineCap.round
             core.lineJoin = CGLineJoin.round
-            core.strokeColor = base.withAlphaComponent(isGap ? 0.54 : 0.99)
+            core.strokeColor = base.withAlphaComponent(isGap ? 0.56 : 0.97)
             if isGap {
                 core.lineDashPattern = RouteRenderStyleTokens.dashLengths.map { NSNumber(value: Double($0)) }
             }
@@ -3723,6 +3767,11 @@ private final class MultiPolylineRenderer: MKOverlayRenderer {
 
         func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
             if isProgrammaticRegionChange { isProgrammaticRegionChange = false }
+            let currentBucket = MapViewRouteRenderStyle.altitudeBucket(for: mapView.camera.altitude)
+            if lastAltitudeBucket != currentBucket {
+                refreshOverlayStyles(on: mapView)
+                lastAltitudeBucket = currentBucket
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
                 self.parent.isUserInteracting = false
             }

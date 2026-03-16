@@ -2,6 +2,17 @@ import XCTest
 @testable import StreetStamps
 
 final class JourneyMemoryDetailExportPresentationTests: XCTestCase {
+    func test_normalizedCustomTitle_trimsMeaningfulTitle() {
+        XCTAssertEqual(
+            JourneyMemoryDetailTitlePresentation.normalizedCustomTitle(from: "  Sunset Run  "),
+            "Sunset Run"
+        )
+    }
+
+    func test_normalizedCustomTitle_returnsNilForWhitespaceOnlyInput() {
+        XCTAssertNil(JourneyMemoryDetailTitlePresentation.normalizedCustomTitle(from: " \n "))
+    }
+
     func test_shouldShowOverallMemory_isFalseForNilOrWhitespace() {
         XCTAssertFalse(JourneyMemoryDetailExportPresentation(overallMemory: nil, overallMemoryImagePaths: []).shouldShowOverallMemory)
         XCTAssertFalse(JourneyMemoryDetailExportPresentation(overallMemory: "", overallMemoryImagePaths: []).shouldShowOverallMemory)

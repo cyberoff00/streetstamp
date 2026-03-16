@@ -175,6 +175,9 @@ struct ProfileView: View {
                 scheduleLoadoutSync(pendingLocalLoadout)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .socialNotificationsDidMarkRead)) { notification in
+            applySocialNotificationReadSync(notification)
+        }
     }
     
     // MARK: - Header View
@@ -892,6 +895,7 @@ struct ProfileView: View {
                 return copy
             }
             unreadSocialCount = 0
+            SocialNotificationReadSync.post(ids: unreadIDs, markAll: true)
         } catch {
             // Keep sheet usable even if mark-read fails.
         }
@@ -913,9 +917,16 @@ struct ProfileView: View {
                 return copy
             }
             unreadSocialCount = socialNotifications.filter { !$0.read }.count
+            SocialNotificationReadSync.post(ids: [id], markAll: false)
         } catch {
             // Keep sheet usable even if mark-read fails.
         }
+    }
+
+    private func applySocialNotificationReadSync(_ notification: Notification) {
+        guard let payload = SocialNotificationReadSync.payload(from: notification) else { return }
+        socialNotifications = SocialNotificationReadSync.applying(payload, to: socialNotifications)
+        unreadSocialCount = socialNotifications.filter { !$0.read }.count
     }
 
     private func relativeTimeText(_ date: Date) -> String {

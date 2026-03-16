@@ -253,9 +253,12 @@
 "friends_distance_compact_format" = "%.1fkm";
 "friends_empty_activity" = "No friend activity yet";
 "friends_empty_all" = "No friends yet, tap + to add";
+"friends_event_added_memory" = "Added memory";
 "friends_event_added_memories" = "Added %d new memories";
 "friends_event_completed" = "Completed %@";
 "friends_event_completed_journey" = "Completed a journey";
+"friends_event_published_journey" = "Published journey \"%@\"";
+"friends_event_visited_city" = "Visited a city";
 "friends_event_visited" = "Visited %@";
 "friends_exclusive_id_format" = "ID exclusif : %@";
 "friends_go_login" = "Sign In";

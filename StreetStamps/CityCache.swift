@@ -152,6 +152,8 @@ struct CachedCity: Identifiable, Codable {
     var isTemporary: Bool? = false
 }
 
+extension CachedCity: @unchecked Sendable {}
+
 
 // =======================================================
 // MARK: - Snapshot rendering (FAST + in-flight de-dupe)

@@ -214,6 +214,8 @@ struct JourneyMemoryMainView: View {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(.black)
+                        .frame(width: 42, height: 42)
+                        .appFullSurfaceTapTarget(.circle)
                 }
                 .buttonStyle(.plain)
             }
@@ -808,6 +810,8 @@ struct JourneyMemoryDetailView: View {
     // 编辑草稿 + 用于取消的快照
     @State private var draftMemories: [JourneyMemory] = []
     @State private var snapshotBeforeEdit: [JourneyMemory] = []
+    @State private var draftJourneyTitle: String = ""
+    @State private var snapshotJourneyTitleBeforeEdit: String = ""
     @State private var draftOverallMemory: String = ""
     @State private var snapshotOverallMemoryBeforeEdit: String = ""
     @State private var draftOverallMemoryImagePaths: [String] = []
@@ -900,8 +904,9 @@ struct JourneyMemoryDetailView: View {
     }
 
     private var journeyDisplayTitle: String {
-        let t = (journey.customTitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !t.isEmpty { return t }
+        if let t = JourneyMemoryDetailTitlePresentation.normalizedCustomTitle(from: journey.customTitle) {
+            return t
+        }
         return cityName
     }
 
@@ -985,6 +990,8 @@ struct JourneyMemoryDetailView: View {
             if readOnly {
                 draftMemories = sortedMemories
                 snapshotBeforeEdit = sortedMemories
+                draftJourneyTitle = journey.customTitle ?? ""
+                snapshotJourneyTitleBeforeEdit = draftJourneyTitle
                 draftOverallMemory = journey.overallMemory ?? ""
                 snapshotOverallMemoryBeforeEdit = draftOverallMemory
                 draftOverallMemoryImagePaths = journey.overallMemoryImagePaths
@@ -998,6 +1005,8 @@ struct JourneyMemoryDetailView: View {
                let saved = JourneyMemoryDetailDraftStore.load(userID: uid, journeyID: journey.id) {
                 draftMemories = saved.memories
                 snapshotBeforeEdit = saved.memories
+                draftJourneyTitle = saved.journeyTitle
+                snapshotJourneyTitleBeforeEdit = draftJourneyTitle
                 draftOverallMemory = saved.overallMemory
                 snapshotOverallMemoryBeforeEdit = draftOverallMemory
                 draftOverallMemoryImagePaths = saved.overallMemoryImagePaths
@@ -1009,6 +1018,8 @@ struct JourneyMemoryDetailView: View {
                 // 2) Default read-only initialization
                 draftMemories = sortedMemories
                 snapshotBeforeEdit = sortedMemories
+                draftJourneyTitle = journey.customTitle ?? ""
+                snapshotJourneyTitleBeforeEdit = draftJourneyTitle
                 draftOverallMemory = journey.overallMemory ?? ""
                 snapshotOverallMemoryBeforeEdit = draftOverallMemory
                 draftOverallMemoryImagePaths = journey.overallMemoryImagePaths
@@ -1137,11 +1148,26 @@ struct JourneyMemoryDetailView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
-                        Text(journeyDisplayTitle.uppercased())
+                        if isEditing {
+                            TextField(
+                                cityName,
+                                text: $draftJourneyTitle,
+                                prompt: Text(cityName)
+                                    .foregroundColor(Color(red: 0.42, green: 0.45, blue: 0.51).opacity(0.72))
+                            )
+                            .textFieldStyle(.plain)
                             .font(.system(size: 30, weight: .bold))
+                            .textInputAutocapitalization(.words)
+                            .disableAutocorrection(true)
                             .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.75)
+                            .submitLabel(.done)
+                        } else {
+                            Text(journeyDisplayTitle.uppercased())
+                                .font(.system(size: 30, weight: .bold))
+                                .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
+                        }
 
                         if !journeyActivityTag.isEmpty {
                             Text(journeyActivityTag.uppercased())
@@ -1435,6 +1461,7 @@ struct JourneyMemoryDetailView: View {
 
     private func beginEditing() {
         snapshotBeforeEdit = draftMemories
+        snapshotJourneyTitleBeforeEdit = draftJourneyTitle
         snapshotOverallMemoryBeforeEdit = draftOverallMemory
         snapshotOverallMemoryImagePathsBeforeEdit = draftOverallMemoryImagePaths
         isEditing = true
@@ -1444,6 +1471,7 @@ struct JourneyMemoryDetailView: View {
 
     private func cancelEditing() {
         draftMemories = snapshotBeforeEdit
+        draftJourneyTitle = snapshotJourneyTitleBeforeEdit
         draftOverallMemory = snapshotOverallMemoryBeforeEdit
         draftOverallMemoryImagePaths = snapshotOverallMemoryImagePathsBeforeEdit
         isEditing = false
@@ -1463,6 +1491,7 @@ struct JourneyMemoryDetailView: View {
         }
 
         j.memories = draftMemories
+        j.customTitle = JourneyMemoryDetailTitlePresentation.normalizedCustomTitle(from: draftJourneyTitle)
         let trimmedOverall = draftOverallMemory.trimmingCharacters(in: .whitespacesAndNewlines)
         j.overallMemory = trimmedOverall.isEmpty ? nil : trimmedOverall
         j.overallMemoryImagePaths = draftOverallMemoryImagePaths
@@ -1470,6 +1499,8 @@ struct JourneyMemoryDetailView: View {
         store.flushPersist(journey: j)
 
         snapshotBeforeEdit = draftMemories
+        draftJourneyTitle = j.customTitle ?? ""
+        snapshotJourneyTitleBeforeEdit = draftJourneyTitle
         snapshotOverallMemoryBeforeEdit = draftOverallMemory
         snapshotOverallMemoryImagePathsBeforeEdit = draftOverallMemoryImagePaths
         isEditing = false
@@ -1487,6 +1518,7 @@ struct JourneyMemoryDetailView: View {
         let draft = JourneyMemoryDetailDraft(
             memories: draftMemories,
             focusedMemoryID: focusedMemoryID,
+            journeyTitle: draftJourneyTitle,
             overallMemory: draftOverallMemory,
             overallMemoryImagePaths: draftOverallMemoryImagePaths
         )
@@ -1666,6 +1698,9 @@ struct JourneyMemoryDetailView: View {
             return
         }
         var updated = journey
+        if journey.visibility == .private, target != .private {
+            updated.sharedAt = Date()
+        }
         updated.visibility = target
         isSubmittingVisibility = true
         store.applyBulkCompletedUpdates([updated])
@@ -2103,6 +2138,16 @@ struct JourneyMemoryDetailExportPresentation {
 
     var shouldShowOverallMemory: Bool {
         !overallMemoryText.isEmpty || !overallMemoryImagePaths.isEmpty
+    }
+}
+
+enum JourneyMemoryDetailTitlePresentation {
+    static func normalizedCustomTitle(from rawTitle: String?) -> String? {
+        guard let trimmed = rawTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed
     }
 }
 

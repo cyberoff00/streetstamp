@@ -104,6 +104,7 @@ struct SofaProfileSceneView: View {
         if let onPostcardPromptTap {
             Button(action: onPostcardPromptTap) {
                 promptBubble(text: text, bold: false, tailSide: .trailing)
+                    .appFullSurfaceTapTarget(.roundedRect(promptBubbleStyle == .chat ? 14 : 10))
             }
             .buttonStyle(.plain)
         } else {

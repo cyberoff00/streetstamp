@@ -100,11 +100,12 @@ struct FriendSharedJourney: Identifiable, Codable, Hashable {
     var startTime: Date?
     var endTime: Date?
     var visibility: JourneyVisibility
+    var sharedAt: Date?
     var routeCoordinates: [CoordinateCodable]
     var memories: [FriendSharedMemory]
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, cityID, cityId, activityTag, overallMemory, distance, startTime, endTime, visibility, routeCoordinates, coordinates, memories
+        case id, title, cityID, cityId, activityTag, overallMemory, distance, startTime, endTime, visibility, sharedAt, routeCoordinates, coordinates, memories
     }
 
     init(
@@ -117,6 +118,7 @@ struct FriendSharedJourney: Identifiable, Codable, Hashable {
         startTime: Date?,
         endTime: Date?,
         visibility: JourneyVisibility,
+        sharedAt: Date? = nil,
         routeCoordinates: [CoordinateCodable],
         memories: [FriendSharedMemory]
     ) {
@@ -129,6 +131,7 @@ struct FriendSharedJourney: Identifiable, Codable, Hashable {
         self.startTime = startTime
         self.endTime = endTime
         self.visibility = visibility
+        self.sharedAt = sharedAt
         self.routeCoordinates = routeCoordinates
         self.memories = memories
     }
@@ -146,6 +149,7 @@ struct FriendSharedJourney: Identifiable, Codable, Hashable {
         startTime = try? c.decode(Date.self, forKey: .startTime)
         endTime = try? c.decode(Date.self, forKey: .endTime)
         visibility = (try? c.decode(JourneyVisibility.self, forKey: .visibility)) ?? .private
+        sharedAt = try? c.decode(Date.self, forKey: .sharedAt)
         routeCoordinates =
             (try? c.decode([CoordinateCodable].self, forKey: .routeCoordinates))
             ?? (try? c.decode([CoordinateCodable].self, forKey: .coordinates))
@@ -164,6 +168,7 @@ struct FriendSharedJourney: Identifiable, Codable, Hashable {
         try c.encodeIfPresent(startTime, forKey: .startTime)
         try c.encodeIfPresent(endTime, forKey: .endTime)
         try c.encode(visibility, forKey: .visibility)
+        try c.encodeIfPresent(sharedAt, forKey: .sharedAt)
         try c.encode(routeCoordinates, forKey: .routeCoordinates)
         try c.encode(memories, forKey: .memories)
     }
@@ -263,6 +268,7 @@ extension FriendSharedJourney {
             startTime: route.startTime,
             endTime: route.endTime,
             visibility: route.visibility,
+            sharedAt: route.sharedAt,
             routeCoordinates: route.coordinates,
             memories: route.memories.map {
                 FriendSharedMemory(

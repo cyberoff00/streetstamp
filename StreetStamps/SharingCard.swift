@@ -221,18 +221,19 @@ struct PopSharingCard: View {
                 .foregroundColor(.black)
 
             HStack {
+                Color.clear
+                    .frame(width: 36, height: 36)
+
                 Spacer()
-                Menu {
-                    Button(role: .destructive) {
-                        showDiscardConfirm = true
-                    } label: {
-                        Label(L10n.t("discard_journey"), systemImage: "trash")
-                    }
+
+                Button(role: .destructive) {
+                    showDiscardConfirm = true
                 } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 18, weight: .medium))
+                    Image(systemName: "trash")
+                        .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(.black)
                         .frame(width: 36, height: 36)
+                        .appFullSurfaceTapTarget(.circle)
                 }
                 .buttonStyle(.plain)
             }

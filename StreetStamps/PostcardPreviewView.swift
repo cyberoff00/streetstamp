@@ -45,7 +45,6 @@ struct PostcardPreviewView: View {
             }
 
             if sentSuccessfully {
-                // Inline success state – replaces the send button
                 VStack(spacing: 12) {
                     HStack(spacing: 6) {
                         Image(systemName: "checkmark.circle.fill")
@@ -56,11 +55,10 @@ struct PostcardPreviewView: View {
                     }
 
                     Button {
-                        dismiss()
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                            onSent?()
-                            NotificationCenter.default.post(name: .postcardSentGoToInbox, object: nil)
-                        }
+                        PostcardSendCompletionPresentation.performOpenSentBox(
+                            onSent: onSent,
+                            dismiss: { dismiss() }
+                        )
                     } label: {
                         Text(L10n.t("postcard_go_to_sent_box"))
                             .font(.system(size: 15, weight: .bold))
@@ -74,7 +72,7 @@ struct PostcardPreviewView: View {
 
                     Button {
                         dismiss()
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + PostcardSendCompletionPresentation.sentBoxOpenDelay) {
                             onSent?()
                         }
                     } label: {
@@ -186,7 +184,7 @@ struct PostcardPreviewView: View {
             cityJourneyCount: selectedCityJourneyCount
         )
         isSending = false
-        dismiss()
+        sentSuccessfully = true
     }
 
     /// Save the downsampled raw photo to a temp file for upload.

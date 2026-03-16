@@ -153,7 +153,7 @@ struct PostcardInboxView: View {
                     ),
                     sentDate: item.sentAt,
                     metaLabel: "\(L10n.t("postcard_to_prefix"))\(recipientLabel)",
-                    reaction: item.reaction
+                    reaction: PostcardInboxPresentation.cardReaction(for: item, box: .sent)
                 )
             }
 
@@ -207,7 +207,8 @@ struct PostcardInboxView: View {
                     sentDate: item.sentAt,
                     metaLabel: "\(L10n.t("postcard_from_prefix"))\(senderLabel)",
                     messageID: item.messageID,
-                    token: sessionStore.currentAccessToken
+                    token: sessionStore.currentAccessToken,
+                    reaction: PostcardInboxPresentation.cardReaction(for: item, box: .received)
                 )
                 .onAppear {
                     Task {

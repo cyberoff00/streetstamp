@@ -196,6 +196,7 @@ struct CityStampLibraryView: View {
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundColor(.black)
                             .frame(width: 42, height: 42)
+                            .appFullSurfaceTapTarget(.circle)
                     }
                     .buttonStyle(.plain)
 

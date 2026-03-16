@@ -99,6 +99,7 @@ struct AccountCenterView: View {
                         .font(.system(size: 14, weight: .semibold))
                 }
                 .foregroundColor(FigmaTheme.text)
+                .appFullSurfaceTapTarget(.rectangle)
             }
             .buttonStyle(.plain)
 
@@ -116,6 +117,7 @@ struct AccountCenterView: View {
                 Text(L10n.t("done"))
                     .font(.system(size: 15, weight: .bold))
                     .foregroundColor(FigmaTheme.primary)
+                    .appFullSurfaceTapTarget(.rectangle)
             }
             .buttonStyle(.plain)
         }
@@ -317,6 +319,7 @@ struct AccountCenterView: View {
             }
             .padding(.vertical, 14)
             .padding(.horizontal, 8)
+            .appFullSurfaceTapTarget(.rectangle)
         }
         .buttonStyle(.plain)
     }
@@ -336,6 +339,7 @@ struct AccountCenterView: View {
                     RoundedRectangle(cornerRadius: 24, style: .continuous)
                         .stroke(Color.black.opacity(filled ? 0 : 0.12), lineWidth: filled ? 0 : 2)
                 )
+                .appFullSurfaceTapTarget(.roundedRect(24))
         }
         .buttonStyle(.plain)
     }

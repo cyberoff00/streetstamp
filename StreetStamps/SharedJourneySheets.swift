@@ -96,6 +96,7 @@ struct JourneyVisibilitySheet: View {
                 .frame(height: 50)
                 .background(canApply ? UITheme.softBlack : Color.black.opacity(0.28))
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .appFullSurfaceTapTarget(.roundedRect(16))
             }
             .disabled(!canApply)
             .buttonStyle(.plain)
@@ -219,6 +220,7 @@ struct JourneyLikesSheet: View {
                         .stroke(Color.black.opacity(0.05), lineWidth: 1)
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .appFullSurfaceTapTarget(.roundedRect(16))
             }
             .buttonStyle(.plain)
 
@@ -233,6 +235,7 @@ struct JourneyLikesSheet: View {
                         .font(.system(size: 13, weight: .semibold))
                         .buttonStyle(.plain)
                         .foregroundColor(UITheme.softBlack)
+                        .appFullSurfaceTapTarget(.rectangle)
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)

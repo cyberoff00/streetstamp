@@ -347,9 +347,12 @@
 "friends_delete_friend" = "Delete Friend";
 "friends_empty_activity" = "No friend activity yet";
 "friends_empty_all" = "No friends yet, tap + to add";
+"friends_event_added_memory" = "Added memory";
 "friends_event_added_memories" = "Added %d new memories";
 "friends_event_completed" = "Completed %@";
 "friends_event_completed_journey" = "Completed a journey";
+"friends_event_published_journey" = "Published journey \"%@\"";
+"friends_event_visited_city" = "Visited a city";
 "friends_event_visited" = "Visited %@";
 "friends_tab_activity" = "ACTIVITY FEED";
 "friends_tab_all" = "ALL FRIENDS";

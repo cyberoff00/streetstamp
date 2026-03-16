@@ -514,6 +514,7 @@ struct CityDeepView: View {
                     .font(.system(size: 20, weight: .medium))
                     .foregroundColor(.black)
                     .frame(width: 44, height: 44)
+                    .appFullSurfaceTapTarget(.circle)
             }
             .buttonStyle(CardPressButtonStyle(pressedScale: 0.94, pressedOpacity: 0.88))
             .hoverEffect(.lift)

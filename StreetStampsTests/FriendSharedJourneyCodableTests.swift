@@ -7,6 +7,7 @@ final class FriendSharedJourneyCodableTests: XCTestCase {
             id: "journey-1",
             cityKey: "paris_fr",
             canonicalCity: "Paris",
+            sharedAt: Date(timeIntervalSince1970: 1_715_000_000),
             coordinates: [CoordinateCodable(lat: 48.8566, lon: 2.3522)],
             memories: [
                 JourneyMemory(
@@ -31,6 +32,7 @@ final class FriendSharedJourneyCodableTests: XCTestCase {
         XCTAssertEqual(shared.memories.first?.latitude, 48.857, accuracy: 0.0001)
         XCTAssertEqual(shared.memories.first?.longitude, 2.353, accuracy: 0.0001)
         XCTAssertEqual(shared.memories.first?.locationStatus, JourneyMemoryLocationStatus.resolved.rawValue)
+        XCTAssertEqual(shared.sharedAt, Date(timeIntervalSince1970: 1_715_000_000))
     }
 
     func test_friendSharedJourney_decodesLegacyMemoryWithoutCoordinateFields() throws {
@@ -61,5 +63,25 @@ final class FriendSharedJourneyCodableTests: XCTestCase {
         XCTAssertNil(decoded.memories.first?.longitude)
         XCTAssertNil(decoded.memories.first?.locationStatus)
         XCTAssertEqual(decoded.memories.first?.imageURLs, ["https://example.com/1.jpg"])
+    }
+
+    func test_friendSharedJourney_decodesSharedAtWhenPresent() throws {
+        let payload = """
+        {
+          "id": "journey-1",
+          "title": "Paris",
+          "distance": 1000,
+          "visibility": "friendsOnly",
+          "sharedAt": 1715000000,
+          "routeCoordinates": [],
+          "memories": []
+        }
+        """
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        let decoded = try decoder.decode(FriendSharedJourney.self, from: Data(payload.utf8))
+
+        XCTAssertEqual(decoded.sharedAt, Date(timeIntervalSince1970: 1_715_000_000))
     }
 }

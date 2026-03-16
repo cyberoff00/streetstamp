@@ -36,7 +36,6 @@ private enum AddFriendMethod: String, CaseIterable, Identifiable {
 
 private enum FriendsRoute: Hashable, Identifiable {
     case profile(String)
-    case journeys(String)
     case cities(String)
     case publicMemories(String)
     case journey(friendID: String, snapshot: FriendProfileSnapshot?, journeyID: String)
@@ -45,8 +44,6 @@ private enum FriendsRoute: Hashable, Identifiable {
         switch self {
         case .profile(let friendID):
             return "profile_\(friendID)"
-        case .journeys(let friendID):
-            return "journeys_\(friendID)"
         case .cities(let friendID):
             return "cities_\(friendID)"
         case .publicMemories(let friendID):
@@ -72,6 +69,14 @@ enum FriendFeedLogic {
         return journey.distance >= minDistanceMeters || !journey.memories.isEmpty
     }
 
+    static func feedTimestamp(for journey: FriendSharedJourney) -> Date {
+        if let sharedAt = journey.sharedAt {
+            return sharedAt
+        }
+        let memoryDate = journey.memories.map(\.timestamp).max() ?? .distantPast
+        return max(memoryDate, journey.endTime ?? journey.startTime ?? .distantPast)
+    }
+
     static func eventTitle(
         kind: FriendFeedKind,
         cityName: String,
@@ -79,14 +84,54 @@ enum FriendFeedLogic {
         journeyTitle: String,
         localize: (String) -> String = { L10n.t($0) }
     ) -> String {
+        if kind != .city, let customTitle = customJourneyTitle(journeyTitle: journeyTitle, cityName: cityName) {
+            return String(format: localize("friends_event_published_journey"), customTitle)
+        }
+
         switch kind {
         case .city:
-            return String(format: localize("friends_event_visited"), cityName.isEmpty ? localize("unknown_city") : cityName)
+            return localize("friends_event_visited_city")
         case .memory:
-            return String(format: localize("friends_event_added_memories"), memoryCount)
+            return localize("friends_event_added_memory")
         case .journey:
             return localize("friends_event_completed_journey")
         }
+    }
+
+    static func locationTitle(
+        cityName: String,
+        unknownCityLabel: String = L10n.t("unknown_city"),
+        unknownLabel: String = L10n.t("unknown")
+    ) -> String {
+        let trimmed = cityName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        let normalized = normalizedFeedText(trimmed)
+        let hiddenLabels = [
+            normalizedFeedText(unknownCityLabel),
+            normalizedFeedText(unknownLabel)
+        ]
+        if hiddenLabels.contains(normalized) {
+            return ""
+        }
+        return trimmed
+    }
+
+    private static func customJourneyTitle(journeyTitle: String, cityName: String) -> String? {
+        let trimmedTitle = journeyTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedTitle = normalizedFeedText(trimmedTitle)
+        guard !normalizedTitle.isEmpty else { return nil }
+
+        let normalizedCity = normalizedFeedText(cityName)
+        guard !normalizedCity.isEmpty else { return nil }
+        guard normalizedTitle != normalizedCity else { return nil }
+        return trimmedTitle
+    }
+
+    private static func normalizedFeedText(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
     }
 }
 
@@ -317,6 +362,9 @@ struct FriendsHubView: View {
             postcardInboxIntent = PostcardInboxIntent(box: "sent", messageID: nil)
             showPostcardInboxSheet = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: .socialNotificationsDidMarkRead)) { notification in
+            applySocialNotificationReadSync(notification)
+        }
         .onAppear {
             Task {
                 await refreshRemoteFriends()
@@ -456,14 +504,12 @@ struct FriendsHubView: View {
             switch route {
             case .profile(let friendID):
                 FriendProfileScreen(friendID: friendID)
-            case .journeys(let friendID):
-                FriendJourneysScreen(friendID: friendID)
             case .cities(let friendID):
                 FriendCitiesScreen(friendID: friendID)
             case .publicMemories(let friendID):
                 FriendPublicMemoriesScreen(friendID: friendID)
             case .journey(let friendID, let snapshot, let journeyID):
-                FriendJourneyRouteScreen(friendID: friendID, fallbackSnapshot: snapshot, journeyID: journeyID)
+                FriendJourneyDetailScreen(friendID: friendID, fallbackSnapshot: snapshot, journeyID: journeyID)
             }
         }
 
@@ -647,7 +693,7 @@ struct FriendsHubView: View {
                 let visibleJourneys = friend.journeys
                     .filter { FriendFeedLogic.isJourneyEligible($0) }
                     .sorted {
-                        feedTimestamp(for: $0) > feedTimestamp(for: $1)
+                        FriendFeedLogic.feedTimestamp(for: $0) > FriendFeedLogic.feedTimestamp(for: $1)
                     }
 
                 guard !visibleJourneys.isEmpty else { continue }
@@ -655,7 +701,7 @@ struct FriendsHubView: View {
                 let firstJourneyByCity: [String: String] = {
                     var map: [String: String] = [:]
                     let ascending = visibleJourneys.sorted {
-                        feedTimestamp(for: $0) < feedTimestamp(for: $1)
+                        FriendFeedLogic.feedTimestamp(for: $0) < FriendFeedLogic.feedTimestamp(for: $1)
                     }
                     for journey in ascending {
                         let cityKey = resolvedFriendCityID(for: journey, cards: friend.unlockedCityCards)
@@ -666,7 +712,7 @@ struct FriendsHubView: View {
                 }()
 
                 for journey in visibleJourneys.prefix(12) {
-                    let eventDate = feedTimestamp(for: journey)
+                    let eventDate = FriendFeedLogic.feedTimestamp(for: journey)
                     let cityKey = resolvedFriendCityID(for: journey, cards: friend.unlockedCityCards)
                     let cityName = resolvedFriendCityTitle(for: journey, cards: friend.unlockedCityCards)
                     let memoryCount = journey.memories.count
@@ -706,7 +752,7 @@ struct FriendsHubView: View {
                             timestamp: eventDate,
                             journeyID: journey.id,
                             title: eventTitle,
-                            location: cityName,
+                            location: FriendFeedLogic.locationTitle(cityName: cityName),
                             meta: metaText
                         )
                     )
@@ -719,11 +765,6 @@ struct FriendsHubView: View {
                 .map { $0 }
         }
 
-        private func feedTimestamp(for journey: FriendSharedJourney) -> Date {
-            let memoryDate = journey.memories.map(\.timestamp).max() ?? .distantPast
-            return max(memoryDate, journey.endTime ?? journey.startTime ?? .distantPast)
-        }
-
         private func resolvedFriendCityID(for journey: FriendSharedJourney, cards: [FriendCityCard]) -> String {
             FriendJourneyCityIdentity.resolveCityID(for: journey, cards: cards)
         }
@@ -734,7 +775,7 @@ struct FriendsHubView: View {
             return CityDisplayTitlePresentation.title(
                 cityKey: cityCard?.id ?? cityID,
                 iso2: cityCard?.countryISO2,
-                fallbackTitle: cityCard?.name ?? journey.title
+                fallbackTitle: cityCard?.name
             )
         }
 
@@ -755,7 +796,7 @@ struct FriendsHubView: View {
         }
 
         /// When tapping on own post in the feed, ensure the self-snapshot is available
-        /// in socialStore so that FriendProfileScreen / FriendJourneyRouteScreen can find it.
+        /// in socialStore so that FriendProfileScreen / FriendJourneyDetailScreen can find it.
         private func ensureSelfSnapshotInSocialStoreIfNeeded(friendID: String) {
             let target = friendID.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !target.isEmpty, target == currentUserID else { return }
@@ -1003,7 +1044,7 @@ struct FriendsHubView: View {
         }
 
         @MainActor
-        private func markSocialNotificationsRead(ids: [String]) async {
+        private func markSocialNotificationsRead(ids: [String], markAll: Bool = false) async {
             guard BackendConfig.isEnabled,
                   let token = sessionStore.currentAccessToken,
                   !token.isEmpty else { return }
@@ -1019,6 +1060,7 @@ struct FriendsHubView: View {
                     return copy
                 }
                 unreadSocialCount = socialNotifications.filter { !$0.read }.count
+                SocialNotificationReadSync.post(ids: targetIDs, markAll: markAll)
             } catch {
                 // Keep feed page responsive even if read-mark fails.
             }
@@ -1033,7 +1075,13 @@ struct FriendsHubView: View {
         @MainActor
         private func markAllSocialNotificationsRead() async {
             let unreadIDs = socialNotifications.filter { !$0.read }.map(\.id)
-            await markSocialNotificationsRead(ids: unreadIDs)
+            await markSocialNotificationsRead(ids: unreadIDs, markAll: true)
+        }
+
+        private func applySocialNotificationReadSync(_ notification: Notification) {
+            guard let payload = SocialNotificationReadSync.payload(from: notification) else { return }
+            socialNotifications = SocialNotificationReadSync.applying(payload, to: socialNotifications)
+            unreadSocialCount = socialNotifications.filter { !$0.read }.count
         }
 
         @ViewBuilder
@@ -1767,14 +1815,12 @@ private struct FriendProfileScreen: View {
             switch route {
             case .profile(let friendID):
                 FriendProfileScreen(friendID: friendID)
-            case .journeys(let friendID):
-                FriendJourneysScreen(friendID: friendID)
             case .cities(let friendID):
                 FriendCitiesScreen(friendID: friendID)
             case .publicMemories(let friendID):
                 FriendPublicMemoriesScreen(friendID: friendID)
             case .journey(let friendID, let snapshot, let journeyID):
-                FriendJourneyRouteScreen(friendID: friendID, fallbackSnapshot: snapshot, journeyID: journeyID)
+                FriendJourneyDetailScreen(friendID: friendID, fallbackSnapshot: snapshot, journeyID: journeyID)
             }
         }
     }
@@ -2590,63 +2636,13 @@ private final class FriendMirrorContext: ObservableObject {
             exploreMode: .city,
             trackingMode: .daily,
             visibility: friendJourney.visibility,
+            sharedAt: friendJourney.sharedAt,
             customTitle: friendJourney.title,
             activityTag: friendJourney.activityTag,
             overallMemory: friendJourney.overallMemory
         )
     }
 
-}
-
-private struct FriendJourneysScreen: View {
-    @EnvironmentObject private var socialStore: SocialGraphStore
-    @EnvironmentObject private var sessionStore: UserSessionStore
-    @EnvironmentObject private var flow: AppFlowCoordinator
-    @Environment(\.locale) private var locale
-
-    let friendID: String
-
-    @StateObject private var mirror: FriendMirrorContext
-    @State private var sidebarHideToken = UUID().uuidString
-
-    init(friendID: String) {
-        self.friendID = friendID
-        _mirror = StateObject(wrappedValue: FriendMirrorContext(friendID: friendID))
-    }
-
-    var body: some View {
-        Group {
-            if let friend = socialStore.friends.first(where: { $0.id == friendID }) {
-                MyJourneysView(
-                    routeDetailReadOnly: true,
-                    routeDetailHeaderTitle: FriendSectionTitleFormatter.sectionTitle(for: .journeyDetail, friendName: friend.displayName, locale: locale),
-                    headerTitle: FriendSectionTitleFormatter.sectionTitle(for: .journeys, friendName: friend.displayName, locale: locale)
-                )
-                    .environmentObject(mirror.journeyStore)
-                    .environmentObject(sessionStore)
-                    .task(id: FriendMirrorContext.signature(for: friend)) {
-                        await mirror.apply(snapshot: friend)
-                    }
-            } else {
-                Text(L10n.t("content_unavailable"))
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.secondary)
-            }
-        }
-        .onAppear {
-            flow.pushSidebarButtonHidden(token: sidebarHideToken)
-        }
-        .onDisappear {
-            flow.popSidebarButtonHidden(token: sidebarHideToken)
-        }
-        .task {
-            await socialStore.refreshFriendProfileIfPossible(
-                friendID: friendID,
-                accessToken: sessionStore.currentAccessToken
-            )
-        }
-        .navigationBarHidden(true)
-    }
 }
 
 private struct FriendCitiesScreen: View {
@@ -2731,6 +2727,7 @@ private struct FriendPublicMemoriesScreen: View {
                     emptySubtitleKey: "friend_memories_empty_subtitle"
                 )
                     .environmentObject(mirror.journeyStore)
+                    .environmentObject(mirror.cityCache)
                     .environmentObject(sessionStore)
                     .task(id: FriendMirrorContext.signature(for: friend)) {
                         await mirror.apply(snapshot: friend)
@@ -2757,11 +2754,10 @@ private struct FriendPublicMemoriesScreen: View {
     }
 }
 
-private struct FriendJourneyRouteScreen: View {
+private struct FriendJourneyDetailScreen: View {
     @EnvironmentObject private var socialStore: SocialGraphStore
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var flow: AppFlowCoordinator
-    @Environment(\.locale) private var locale
 
     let friendID: String
     private let fallbackSnapshot: FriendProfileSnapshot?
@@ -2780,17 +2776,7 @@ private struct FriendJourneyRouteScreen: View {
     var body: some View {
         Group {
             if let friend = socialStore.friends.first(where: { $0.id == friendID }) ?? fallbackSnapshot {
-                JourneyRouteDetailView(
-                    journeyID: journeyID,
-                    isReadOnly: true,
-                    headerTitle: FriendSectionTitleFormatter.sectionTitle(for: .journeyDetail, friendName: friend.displayName, locale: locale),
-                    userID: "friend_preview_\(friendID)"
-                )
-                    .environmentObject(mirror.journeyStore)
-                    .environmentObject(sessionStore)
-                    .task(id: FriendMirrorContext.signature(for: friend)) {
-                        await mirror.apply(snapshot: friend)
-                    }
+                friendJourneyContent(for: friend)
             } else {
                 Text(L10n.t("content_unavailable"))
                     .font(.system(size: 14, weight: .semibold))
@@ -2810,5 +2796,45 @@ private struct FriendJourneyRouteScreen: View {
             )
         }
         .navigationBarHidden(true)
+    }
+
+    @ViewBuilder
+    private func friendJourneyContent(for friend: FriendProfileSnapshot) -> some View {
+        let mirroredJourney = mirror.journeyStore.journeys.first(where: { $0.id == journeyID })
+        if let mirroredJourney {
+            JourneyMemoryDetailView(
+                journey: mirroredJourney,
+                memories: mirroredJourney.memories.sorted(by: { $0.timestamp < $1.timestamp }),
+                cityName: resolvedCityName(for: mirroredJourney),
+                countryName: resolvedCountryName(for: mirroredJourney),
+                readOnly: true
+            )
+            .environmentObject(mirror.journeyStore)
+            .environmentObject(mirror.cityCache)
+            .environmentObject(sessionStore)
+            .task(id: FriendMirrorContext.signature(for: friend)) {
+                await mirror.apply(snapshot: friend)
+            }
+        } else {
+            ProgressView()
+                .task(id: FriendMirrorContext.signature(for: friend)) {
+                    await mirror.apply(snapshot: friend)
+                }
+        }
+    }
+
+    private func resolvedCityName(for journey: JourneyRoute) -> String {
+        let title = journey.cityName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !title.isEmpty {
+            return title
+        }
+        let fallback = journey.currentCity.trimmingCharacters(in: .whitespacesAndNewlines)
+        return fallback.isEmpty ? L10n.t("unknown") : fallback
+    }
+
+    private func resolvedCountryName(for journey: JourneyRoute) -> String {
+        let iso = (journey.countryISO2 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard iso.count == 2 else { return L10n.t("unknown_country") }
+        return Locale.current.localizedString(forRegionCode: iso) ?? iso
     }
 }

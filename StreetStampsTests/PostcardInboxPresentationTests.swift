@@ -102,7 +102,29 @@ final class PostcardInboxPresentationTests: XCTestCase {
         XCTAssertEqual(resolved, myLoadout.normalizedForCurrentAvatar())
     }
 
-    private func makeMessage(fromUserID: String, toUserID: String) -> BackendPostcardMessageDTO {
+    func test_cardReaction_receivedReturnsReactionForDisplay() {
+        let reaction = PostcardReaction(
+            id: "pr_1",
+            postcardMessageID: "pm_1",
+            fromUserID: "me_1",
+            viewedAt: Date(timeIntervalSince1970: 1_700_000_100),
+            reactionEmoji: "❤️",
+            comment: "So nice",
+            reactedAt: Date(timeIntervalSince1970: 1_700_000_200)
+        )
+        let message = makeMessage(fromUserID: "friend_1", toUserID: "me_1", reaction: reaction)
+
+        XCTAssertEqual(
+            PostcardInboxPresentation.cardReaction(for: message, box: .received),
+            reaction
+        )
+    }
+
+    private func makeMessage(
+        fromUserID: String,
+        toUserID: String,
+        reaction: PostcardReaction? = nil
+    ) -> BackendPostcardMessageDTO {
         BackendPostcardMessageDTO(
             messageID: "pm_1",
             type: "postcard",
@@ -116,7 +138,8 @@ final class PostcardInboxPresentationTests: XCTestCase {
             messageText: "hello",
             sentAt: Date(timeIntervalSince1970: 1_700_000_000),
             clientDraftID: "draft_1",
-            status: nil
+            status: nil,
+            reaction: reaction
         )
     }
 }
