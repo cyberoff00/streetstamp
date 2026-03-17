@@ -21,6 +21,7 @@ final class MockLocationSource: LocationSource {
     private let player = MockRoutePlayer()
 
     func requestPermissionIfNeeded() {}
+    func requestSingleLocation() {}
 
     func start() {
         // mock 不需要 start 系统定位
@@ -45,10 +46,7 @@ final class MockLocationSource: LocationSource {
         player.load(points: points)
         player.start { [weak self] loc in
             self?.subject.send(loc)
-            if loc.course >= 0 {
-                let h = loc.course.truncatingRemainder(dividingBy: 360)
-                self?.headingSubject.send(h >= 0 ? h : (h + 360))
-            }
+            self?.headingSubject.send(0)
         }
     }
 }

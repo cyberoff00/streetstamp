@@ -27,6 +27,7 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
     private var passiveState: PassiveState = .none
     private var passiveAnchorLocation: CLLocation?
     private var passiveAnchorTimestamp: Date = .distantPast
+    private var pendingSingleLocationRequest = false
     
     var locationPublisher: AnyPublisher<CLLocation, Never> { subject.eraseToAnyPublisher() }
     var headingPublisher: AnyPublisher<Double, Never> { headingSubject.eraseToAnyPublisher() }
@@ -54,6 +55,25 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
             manager.requestWhenInUseAuthorization()
         default:
             break
+        }
+    }
+
+    func requestSingleLocation() {
+        pendingSingleLocationRequest = true
+        stop()
+
+        manager.allowsBackgroundLocationUpdates = false
+        manager.pausesLocationUpdatesAutomatically = true
+        manager.showsBackgroundLocationIndicator = false
+
+        let status = manager.authorizationStatus
+        switch status {
+        case .authorizedWhenInUse, .authorizedAlways:
+            manager.requestLocation()
+        case .notDetermined:
+            manager.requestWhenInUseAuthorization()
+        default:
+            pendingSingleLocationRequest = false
         }
     }
     
@@ -116,8 +136,8 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         manager.pausesLocationUpdatesAutomatically = false
         manager.showsBackgroundLocationIndicator = true
         
-        manager.desiredAccuracy = kCLLocationAccuracyBest  // 比Navigation稍低
-        manager.distanceFilter = 5  // 5米才更新
+        manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+        manager.distanceFilter = 15
         
         manager.startUpdatingLocation()
         startHeadingUpdatesIfPossible()
@@ -143,7 +163,7 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
     
     /// Idle低功耗模式
     func startLowPower() {
-        startPassiveLowPrecision()
+        stop()
     }
 
     /// Passive high precision mode for Lifelog when app has no active journey.
@@ -154,19 +174,16 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         manager.allowsBackgroundLocationUpdates = true
         manager.pausesLocationUpdatesAutomatically = false
         manager.showsBackgroundLocationIndicator = false
-        manager.activityType = .fitness
+        let profile = PassiveLocationProfile.profile(for: .highPrecision)
+        manager.activityType = profile.activityType
 
         passiveState = .highPrecisionCalmed
         passiveAnchorLocation = nil
         passiveAnchorTimestamp = .distantPast
 
-        manager.desiredAccuracy = kCLLocationAccuracyBest
-        manager.distanceFilter = 18
+        manager.desiredAccuracy = profile.desiredAccuracy
+        manager.distanceFilter = profile.distanceFilter
         manager.startUpdatingLocation()
-        if CLLocationManager.significantLocationChangeMonitoringAvailable() {
-            manager.startMonitoringSignificantLocationChanges()
-        }
-        manager.startMonitoringVisits()
         requestImmediateLocationRefresh()
     }
 
@@ -177,19 +194,16 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         manager.allowsBackgroundLocationUpdates = true
         manager.pausesLocationUpdatesAutomatically = false
         manager.showsBackgroundLocationIndicator = false
-        manager.activityType = .otherNavigation
+        let profile = PassiveLocationProfile.profile(for: .lowPrecision)
+        manager.activityType = profile.activityType
 
         passiveState = .lowPrecisionCalmed
         passiveAnchorLocation = nil
         passiveAnchorTimestamp = .distantPast
 
-        manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
-        manager.distanceFilter = 35
+        manager.desiredAccuracy = profile.desiredAccuracy
+        manager.distanceFilter = profile.distanceFilter
         manager.startUpdatingLocation()
-        if CLLocationManager.significantLocationChangeMonitoringAvailable() {
-            manager.startMonitoringSignificantLocationChanges()
-        }
-        manager.startMonitoringVisits()
         requestImmediateLocationRefresh()
     }
     
@@ -267,11 +281,10 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
 
         switch passiveState {
         case .highPrecisionCalmed:
-            // Moving burst: temporarily increase density (10m filter).
             if moved >= 30 || speed >= 1.2 {
                 passiveState = .highPrecisionActive
-                manager.desiredAccuracy = kCLLocationAccuracyBest
-                manager.distanceFilter = 10
+                manager.desiredAccuracy = PassiveLocationProfile.profile(for: .highPrecision).desiredAccuracy
+                manager.distanceFilter = PassiveLocationProfile.profile(for: .highPrecision).distanceFilter
                 passiveAnchorLocation = loc
                 passiveAnchorTimestamp = loc.timestamp
             } else if dt >= 10 * 60 {
@@ -279,11 +292,10 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
                 passiveAnchorTimestamp = loc.timestamp
             }
         case .highPrecisionActive:
-            // Back to efficient steady mode after movement settles.
             if dt >= 2 * 60, moved < 25, speed < 0.8 {
                 passiveState = .highPrecisionCalmed
-                manager.desiredAccuracy = kCLLocationAccuracyBest
-                manager.distanceFilter = 18
+                manager.desiredAccuracy = PassiveLocationProfile.profile(for: .highPrecision).desiredAccuracy
+                manager.distanceFilter = PassiveLocationProfile.profile(for: .highPrecision).distanceFilter
                 passiveAnchorLocation = loc
                 passiveAnchorTimestamp = loc.timestamp
             } else if dt >= 6 * 60 {
@@ -291,11 +303,10 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
                 passiveAnchorTimestamp = loc.timestamp
             }
         case .lowPrecisionCalmed:
-            // Low-power mode: keep a coarse baseline, tighten briefly when motion clearly rises.
             if moved >= 60 || speed >= 1.6 {
                 passiveState = .lowPrecisionActive
-                manager.desiredAccuracy = kCLLocationAccuracyBest
-                manager.distanceFilter = 15
+                manager.desiredAccuracy = PassiveLocationProfile.profile(for: .lowPrecision).desiredAccuracy
+                manager.distanceFilter = PassiveLocationProfile.profile(for: .lowPrecision).distanceFilter
                 passiveAnchorLocation = loc
                 passiveAnchorTimestamp = loc.timestamp
             } else if dt >= 12 * 60 {
@@ -305,8 +316,8 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         case .lowPrecisionActive:
             if dt >= 3 * 60, moved < 35, speed < 0.8 {
                 passiveState = .lowPrecisionCalmed
-                manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
-                manager.distanceFilter = 35
+                manager.desiredAccuracy = PassiveLocationProfile.profile(for: .lowPrecision).desiredAccuracy
+                manager.distanceFilter = PassiveLocationProfile.profile(for: .lowPrecision).distanceFilter
                 passiveAnchorLocation = loc
                 passiveAnchorTimestamp = loc.timestamp
             } else if dt >= 8 * 60 {
@@ -356,6 +367,17 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
     
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         authSubject.send(manager.authorizationStatus)
+        if pendingSingleLocationRequest {
+            switch manager.authorizationStatus {
+            case .authorizedWhenInUse, .authorizedAlways:
+                pendingSingleLocationRequest = false
+                self.manager.requestLocation()
+            case .denied, .restricted:
+                pendingSingleLocationRequest = false
+            default:
+                break
+            }
+        }
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {

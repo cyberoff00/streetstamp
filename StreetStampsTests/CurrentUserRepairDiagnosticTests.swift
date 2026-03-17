@@ -22,15 +22,47 @@ final class CurrentUserRepairDiagnosticTests: XCTestCase {
         XCTAssertEqual(report.missingFromIndexJourneyIDs, ["foreign"])
         XCTAssertEqual(report.orphanedIndexedJourneyIDs, [])
     }
+
+    func test_buildReport_quarantines_sourceLessLegacyJourney_forSignedInAccount() throws {
+        let fixture = try CurrentUserRepairFixture.make()
+        try fixture.writeJourney(id: "legacy-local", indexed: true)
+
+        let report = try CurrentUserRepairDiagnostic.buildReport(
+            activeLocalProfileID: fixture.activeLocalProfileID,
+            currentGuestScopedUserID: fixture.currentGuestScopedUserID,
+            currentAccountUserID: fixture.currentAccountUserID
+        )
+
+        XCTAssertEqual(report.allowedJourneyIDs, [])
+        XCTAssertEqual(report.quarantinedJourneyIDs, ["legacy-local"])
+        XCTAssertEqual(report.missingFromIndexJourneyIDs, [])
+        XCTAssertEqual(report.orphanedIndexedJourneyIDs, [])
+    }
+
+    func test_buildReport_keeps_sourceLessLegacyJourney_inGuestMode() throws {
+        let fixture = try CurrentUserRepairFixture.make(currentAccountUserID: nil)
+        try fixture.writeJourney(id: "legacy-local", indexed: true)
+
+        let report = try CurrentUserRepairDiagnostic.buildReport(
+            activeLocalProfileID: fixture.activeLocalProfileID,
+            currentGuestScopedUserID: fixture.currentGuestScopedUserID,
+            currentAccountUserID: fixture.currentAccountUserID
+        )
+
+        XCTAssertEqual(report.allowedJourneyIDs, ["legacy-local"])
+        XCTAssertEqual(report.quarantinedJourneyIDs, [])
+        XCTAssertEqual(report.missingFromIndexJourneyIDs, [])
+        XCTAssertEqual(report.orphanedIndexedJourneyIDs, [])
+    }
 }
 
 private struct CurrentUserRepairFixture {
     let activeLocalProfileID: String
     let currentGuestScopedUserID: String
-    let currentAccountUserID: String
+    let currentAccountUserID: String?
     let paths: StoragePath
 
-    static func make() throws -> CurrentUserRepairFixture {
+    static func make(currentAccountUserID: String? = "abc") throws -> CurrentUserRepairFixture {
         let activeLocalProfileID = "local_guest123_\(UUID().uuidString)"
         let paths = StoragePath(userID: activeLocalProfileID)
         try? FileManager.default.removeItem(at: paths.userRoot)
@@ -38,7 +70,7 @@ private struct CurrentUserRepairFixture {
         return CurrentUserRepairFixture(
             activeLocalProfileID: activeLocalProfileID,
             currentGuestScopedUserID: "guest_guest123",
-            currentAccountUserID: "abc",
+            currentAccountUserID: currentAccountUserID,
             paths: paths
         )
     }

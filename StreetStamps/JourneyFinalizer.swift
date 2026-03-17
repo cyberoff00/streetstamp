@@ -14,6 +14,11 @@ enum JourneyFinalizeSource {
 }
 
 enum JourneyFinalizer {
+    private static let driftMinimumDisplacementMeters: CLLocationDistance = 80
+    private static let driftLowCoverageDistanceMeters: CLLocationDistance = 220
+    private static let driftLongDurationThreshold: TimeInterval = 30 * 60
+    private static let driftDetourRatioThreshold: Double = 3.5
+
     static func resolveCompletedRouteCityFields(
         route: JourneyRoute,
         startCanonical: ReverseGeocodeService.CanonicalResult?,
@@ -29,7 +34,7 @@ enum JourneyFinalizer {
             && existingDisplayName != unknownLocalized
 
         if let startCanonical {
-            let stableStartKey = CityPlacemarkResolver.preferredStableCityKey(canonicalResult: startCanonical)
+            let stableStartKey = startCanonical.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
             let stableStartName = CityPlacemarkResolver.stableCityName(
                 from: stableStartKey,
                 fallback: startCanonical.cityName
@@ -47,7 +52,7 @@ enum JourneyFinalizer {
         }
 
         if let endCanonical {
-            updated.endCityKey = CityPlacemarkResolver.preferredStableCityKey(canonicalResult: endCanonical)
+            updated.endCityKey = endCanonical.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
             updated.countryISO2 = endCanonical.iso2 ?? updated.countryISO2
         }
 
@@ -86,6 +91,7 @@ enum JourneyFinalizer {
             r.preferredRouteSource = .corrected
         }
         r.distance = JourneyPostCorrection.correctedDistance(for: r)
+        r.isTooShort = shouldTreatAsStationaryDrift(route: r)
 
         func persistAndReturn(_ updated: JourneyRoute, notify: (() -> Void)?) {
             Task { @MainActor in
@@ -179,5 +185,38 @@ enum JourneyFinalizer {
                 persistAndReturn(r, notify: notify)
             }
         }
+    }
+
+    private static func shouldTreatAsStationaryDrift(route: JourneyRoute) -> Bool {
+        let effectiveCoords = (!route.correctedCoordinates.isEmpty ? route.correctedCoordinates : route.coordinates)
+            .clCoords
+            .filter(CLLocationCoordinate2DIsValid)
+        guard effectiveCoords.count >= 2 else { return route.isTooShort }
+
+        let start = CLLocation(latitude: effectiveCoords[0].latitude, longitude: effectiveCoords[0].longitude)
+        let end = CLLocation(
+            latitude: effectiveCoords[effectiveCoords.count - 1].latitude,
+            longitude: effectiveCoords[effectiveCoords.count - 1].longitude
+        )
+        let displacement = start.distance(from: end)
+        guard displacement < driftMinimumDisplacementMeters else { return route.isTooShort }
+
+        let pathDistance = max(0, route.distance)
+        if pathDistance <= driftLowCoverageDistanceMeters {
+            return true
+        }
+
+        guard
+            let startTime = route.startTime,
+            let endTime = route.endTime
+        else {
+            return route.isTooShort
+        }
+
+        let duration = abs(endTime.timeIntervalSince(startTime))
+        guard duration >= driftLongDurationThreshold else { return route.isTooShort }
+
+        let safeDisplacement = max(displacement, 1)
+        return (pathDistance / safeDisplacement) >= driftDetourRatioThreshold
     }
 }

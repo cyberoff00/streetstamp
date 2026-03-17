@@ -346,6 +346,7 @@
 "friends_badge_memory" = "MEMORY";
 "friends_delete_friend" = "Delete Friend";
 "friends_empty_activity" = "No friend activity yet";
+"friends_feed_new_activity_prompt" = "New activity available. Tap to refresh.";
 "friends_empty_all" = "No friends yet, tap + to add";
 "friends_event_added_memory" = "Added memory";
 "friends_event_added_memories" = "Added %d new memories";
@@ -503,7 +504,7 @@
 "lifelog_steps_modal_title" = "Today's Steps";
 "lifelog_steps_modal_subtitle" = "Keep moving. We'll remind you again after 1,000 more steps today.";
 "lifelog_steps_modal_close" = "Close";
-"lifelog_steps_modal_summary_format" = "Today you left %@ more footsteps on WORLDO";
+"lifelog_steps_modal_summary_format" = "Brilliant! you left %@ footsteps on WORLDO today";
 "postcard_profile_title" = "POSTCARD";
 "postcard_profile_subtitle" = "Sent · Received";
 "postcard_nav_title" = "Postcards";
@@ -527,6 +528,11 @@
 "postcard_preview_title" = "PREVIEW";
 "postcard_to_prefix" = "To: ";
 "postcard_sending" = "Sending...";
+"postcard_sending_status" = "Sending";
+"postcard_send_queued_detail" = "Queued for sending. Confirming delivery status...";
+"postcard_failed_status" = "Send failed";
+"postcard_failed_retry_detail" = "Send failed. Retry available.";
+"postcard_sent_status" = "Sent";
 "postcard_send" = "Send";
 "postcard_send_failed" = "Send failed. Please try again.";
 "postcard_quota_friend_limit_reached" = "You've reached this friend's postcard limit for the city. Start more journeys here to unlock more postcard quota.";

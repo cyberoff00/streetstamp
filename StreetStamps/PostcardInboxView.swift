@@ -25,6 +25,7 @@ struct PostcardInboxView: View {
     @State private var selectedBox: Box
     @State private var pendingFocusMessageID: String?
     @State private var isRefreshing = false
+    @State private var showComposer = false
     private let focusMessageID: String?
 
     init(initialBox: Box = .sent, focusMessageID: String? = nil) {
@@ -94,11 +95,27 @@ struct PostcardInboxView: View {
                 bottomPadding: 12,
                 onLeadingTap: { dismiss() }
             ) {
-                Color.clear
+                if selectedBox == .sent {
+                    Button {
+                        showComposer = true
+                    } label: {
+                        Image(systemName: "envelope")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(FigmaTheme.text)
+                            .frame(width: 42, height: 42)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("New postcard")
+                } else {
+                    Color.clear
+                }
             }
         }
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
+        .navigationDestination(isPresented: $showComposer) {
+            PostcardComposerView()
+        }
         .task {
             await refreshInbox()
             if focusMessageID != nil {
@@ -128,8 +145,7 @@ struct PostcardInboxView: View {
 
     @ViewBuilder
     private var sentSection: some View {
-        let visibleDrafts = pendingDrafts.filter { $0.status != .failed }
-        if postcardCenter.sentItems.isEmpty && visibleDrafts.isEmpty {
+        if postcardCenter.sentItems.isEmpty && pendingDrafts.isEmpty {
             emptyState(text: L10n.t("postcard_sent_empty"))
         } else {
             ForEach(postcardCenter.sentItems) { item in
@@ -157,12 +173,13 @@ struct PostcardInboxView: View {
                 )
             }
 
-            ForEach(visibleDrafts) { draft in
+            ForEach(pendingDrafts) { draft in
                 let recipientLabel = PostcardInboxPresentation.recipientLabel(
                     toDisplayName: draft.toDisplayName,
                     toUserID: draft.toUserID,
                     fallbackDisplayName: fallbackDisplayName(for: draft.toUserID)
                 )
+                let statusPresentation = PostcardInboxPresentation.draftStatusPresentation(for: draft.status)
                 PostcardCardRow(
                     cityName: displayCityName(for: draft),
                     nickname: myDisplayName.uppercased(),
@@ -172,7 +189,18 @@ struct PostcardInboxView: View {
                     avatarLoadout: myLoadout,
                     sentDate: draft.sentAt ?? draft.updatedAt,
                     metaLabel: "\(L10n.t("postcard_to_prefix"))\(recipientLabel)",
-                    statusBadge: draft.status == .sending ? L10n.t("postcard_sending") : nil
+                    statusBadge: statusPresentation?.badgeText,
+                    statusDetail: statusPresentation?.detailText,
+                    statusTone: statusTone(for: draft.status),
+                    retryTitle: statusPresentation?.showsRetry == true ? L10n.t("postcard_retry") : nil,
+                    onRetry: statusPresentation?.showsRetry == true ? {
+                        Task {
+                            await postcardCenter.retry(
+                                draftID: draft.draftID,
+                                token: sessionStore.currentAccessToken
+                            )
+                        }
+                    } : nil
                 )
             }
         }
@@ -251,17 +279,17 @@ struct PostcardInboxView: View {
     }
 
     private func displayCityName(for item: BackendPostcardMessageDTO) -> String {
-        CityDisplayTitlePresentation.title(
-            cityKey: item.cityID,
-            iso2: nil,
+        let collectionKey = CityCollectionResolver.resolveCollectionKey(cityKey: item.cityID)
+        return CityDisplayResolver.title(
+            for: collectionKey,
             fallbackTitle: item.cityName
         )
     }
 
     private func displayCityName(for draft: PostcardDraft) -> String {
-        CityDisplayTitlePresentation.title(
-            cityKey: draft.cityID,
-            iso2: nil,
+        let collectionKey = CityCollectionResolver.resolveCollectionKey(cityKey: draft.cityID)
+        return CityDisplayResolver.title(
+            for: collectionKey,
             fallbackTitle: draft.cityName
         )
     }
@@ -297,6 +325,19 @@ struct PostcardInboxView: View {
         isRefreshing = true
         defer { isRefreshing = false }
         await postcardCenter.refreshFromBackend(token: sessionStore.currentAccessToken)
+    }
+
+    private func statusTone(for status: PostcardDraftStatus) -> Color {
+        switch status {
+        case .sending:
+            return .orange
+        case .failed:
+            return .red
+        case .sent:
+            return .green
+        case .draft:
+            return FigmaTheme.subtext
+        }
     }
 
     private func syncErrorBanner(_ text: String) -> some View {
@@ -342,6 +383,10 @@ private struct PostcardCardRow: View {
     let sentDate: Date
     let metaLabel: String
     var statusBadge: String? = nil
+    var statusDetail: String? = nil
+    var statusTone: Color = .orange
+    var retryTitle: String? = nil
+    var onRetry: (() -> Void)? = nil
     var messageID: String? = nil
     var token: String? = nil
     var reaction: PostcardReaction? = nil
@@ -394,13 +439,34 @@ private struct PostcardCardRow: View {
                 if let statusBadge {
                     Text(statusBadge)
                         .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(.orange)
+                        .foregroundColor(statusTone)
                 }
                 Text(sentDate, style: .date)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(FigmaTheme.subtext)
             }
             .padding(.horizontal, 4)
+
+            if statusDetail != nil || retryTitle != nil {
+                HStack(spacing: 10) {
+                    if let statusDetail {
+                        Text(statusDetail)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(statusTone)
+                            .multilineTextAlignment(.leading)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    if let retryTitle, let onRetry {
+                        Button(retryTitle, action: onRetry)
+                            .font(.system(size: 12, weight: .bold))
+                            .buttonStyle(.plain)
+                            .foregroundColor(FigmaTheme.primary)
+                    }
+                }
+                .padding(.horizontal, 4)
+            }
 
             if let reaction {
                 VStack(alignment: .leading, spacing: 6) {

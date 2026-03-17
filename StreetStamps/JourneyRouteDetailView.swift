@@ -8,11 +8,13 @@ struct JourneyRouteDetailView: View {
     let isReadOnly: Bool
     let headerTitle: String?
     let userID: String?
+    let friendLoadout: RobotLoadout?
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var sessionStore: UserSessionStore
+    @EnvironmentObject private var locationHub: LocationHub
     @EnvironmentObject private var flow: AppFlowCoordinator
 
     @State private var shareImage: UIImage? = nil
@@ -28,12 +30,14 @@ struct JourneyRouteDetailView: View {
         journeyID: String,
         isReadOnly: Bool = false,
         headerTitle: String? = nil,
-        userID: String? = nil
+        userID: String? = nil,
+        friendLoadout: RobotLoadout? = nil
     ) {
         self.journeyID = journeyID
         self.isReadOnly = isReadOnly
         self.headerTitle = headerTitle
         self.userID = userID
+        self.friendLoadout = friendLoadout
     }
 
     private var journey: JourneyRoute? {
@@ -53,10 +57,18 @@ struct JourneyRouteDetailView: View {
             return localizedCityTitle
         }
         guard let journey else { return L10n.t("unknown") }
-        return JourneyCityNamePresentation.title(
+        let fallbackTitle = JourneyCityNamePresentation.title(
             for: journey,
             localizedCityNameByKey: [:],
             cachedCitiesByKey: cachedCitiesByKey
+        )
+        let collectionKey = CityCollectionResolver.resolveCollectionKey(
+            for: journey,
+            cachedCitiesByKey: cachedCitiesByKey
+        )
+        return CityDisplayResolver.title(
+            for: collectionKey,
+            fallbackTitle: fallbackTitle
         )
     }
 
@@ -209,6 +221,16 @@ struct JourneyRouteDetailView: View {
                 .environmentObject(sessionStore)
             }
         }
+        .overlay {
+            if isReadOnly, let loadout = friendLoadout, let j = journey {
+                let distText = FriendJourneyDistancePresentation.makeDistanceText(
+                    currentLocation: locationHub.currentLocation,
+                    lastKnownLocation: locationHub.lastKnownLocation,
+                    journeyEndCoordinate: j.coordinates.last?.cl
+                )
+                FriendMapCharacterOverlay(friendLoadout: loadout, distanceText: distText)
+            }
+        }
         .onAppear {
             flow.pushSidebarButtonHidden(token: sidebarHideToken)
         }
@@ -319,10 +341,10 @@ struct JourneyRouteDetailView: View {
                 cityKey: cachedCity.id,
                 iso2: cachedCity.countryISO2,
                 fallbackTitle: cachedCity.name,
-                availableLevelNamesRaw: cachedCity.reservedAvailableLevelNames,
-                storedAvailableLevelNamesLocaleID: cachedCity.reservedAvailableLevelNamesLocaleID,
-                parentRegionKey: cachedCity.reservedParentRegionKey,
-                preferredLevel: cachedCity.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
+                availableLevelNamesRaw: cachedCity.availableLevelNames,
+                storedAvailableLevelNamesLocaleID: cachedCity.availableLevelNamesLocaleID,
+                parentRegionKey: cachedCity.parentScopeKey,
+                preferredLevel: cachedCity.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
                 localizedDisplayNameByLocale: cachedCity.localizedDisplayNameByLocale,
                 locale: .current
             )

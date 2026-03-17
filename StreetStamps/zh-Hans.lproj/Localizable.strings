@@ -342,6 +342,7 @@
 "friends_badge_journey" = "旅程";
 "friends_badge_memory" = "记忆";
 "friends_empty_activity" = "还没有好友动态";
+"friends_feed_new_activity_prompt" = "有新动态，点击刷新";
 "friends_empty_all" = "还没有好友，点击 + 添加";
 "friends_event_added_memory" = "添加了记忆";
 "friends_event_added_memories" = "新增 %d 条记忆";
@@ -492,10 +493,10 @@
 "lifelog_mood_subtitle" = "今天过得怎么样呢？";
 "lifelog_mood_later" = "稍后再选";
 "lifelog_health_permission_denied_short" = "未授权健康步数";
-"lifelog_steps_modal_title" = "今日步数";
+"lifelog_steps_modal_title" = "太棒了";
 "lifelog_steps_modal_subtitle" = "继续加油，今天再增加 1000 步我们会再次提醒你。";
 "lifelog_steps_modal_close" = "关闭";
-"lifelog_steps_modal_summary_format" = "今天你在WORLDO上留下了许多足迹";
+"lifelog_steps_modal_summary_format" = "今天你在WORLDO留下了许多足迹";
 "postcard_profile_title" = "明信片";
 "postcard_profile_subtitle" = "我寄出的 · 我收到的";
 "postcard_nav_title" = "明信片";
@@ -519,6 +520,11 @@
 "postcard_preview_title" = "预览";
 "postcard_to_prefix" = "寄给：";
 "postcard_sending" = "发送中...";
+"postcard_sending_status" = "发送中";
+"postcard_send_queued_detail" = "已加入发送队列，正在确认是否发送成功";
+"postcard_failed_status" = "发送失败";
+"postcard_failed_retry_detail" = "发送失败，可重试";
+"postcard_sent_status" = "已发送";
 "postcard_send" = "发送";
 "postcard_send_failed" = "发送失败，请稍后重试。";
 "postcard_quota_friend_limit_reached" = "这位好友在这座城市的明信片额度已经满了，开启更多旅程即可解锁更多明信片额度。";

@@ -81,10 +81,10 @@ enum CurrentUserRepairDiagnostic {
         sourceMap: [String: JourneyRepairSource]
     ) -> JourneyRepairDisposition {
         guard let source = sourceMap[journeyID] else {
-            // Old local data often has no source metadata yet. Keep it visible and let
-            // the manual repair entry focus on index/city-cache self-healing unless we
-            // have explicit evidence that a journey came from an invalid source.
-            return .allow
+            // When an account is active, source-less legacy journeys cannot be trusted
+            // to belong to the signed-in user. Keep guest-mode behavior permissive so
+            // older offline-only device data still remains visible before sign-in.
+            return policy.currentAccountUserID == nil ? .allow : .quarantine
         }
         return policy.disposition(for: source)
     }

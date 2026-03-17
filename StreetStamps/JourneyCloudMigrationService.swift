@@ -347,11 +347,11 @@ enum JourneyCloudMigrationService {
     private static func cloudJourneyToRoute(_ journey: FriendSharedJourney, cards: [FriendCityCard]) -> JourneyRoute {
         let routeCoords = journey.routeCoordinates
         let cityID = FriendJourneyCityIdentity.resolveCityID(for: journey, cards: cards)
+        let collectionKey = FriendJourneyCityIdentity.resolveCollectionKey(for: journey, cards: cards)
         let cityCard = cards.first(where: { $0.id == cityID })
-        let cityName = CityDisplayTitlePresentation.title(
-            cityKey: cityCard?.id ?? cityID,
-            iso2: cityCard?.countryISO2,
-            fallbackTitle: cityCard?.name ?? journey.title
+        let cityName = CityDisplayResolver.title(
+            for: collectionKey,
+            fallbackTitle: CityCollectionResolver.configuredTitle(for: collectionKey) ?? cityCard?.name ?? journey.title
         )
 
         let fallbackCoordinate = routeCoords.first ?? CoordinateCodable(lat: 0, lon: 0)

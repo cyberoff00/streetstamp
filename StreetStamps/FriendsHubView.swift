@@ -35,6 +35,8 @@ private enum AddFriendMethod: String, CaseIterable, Identifiable {
 }
 
 private enum FriendsRoute: Hashable, Identifiable {
+    case myProfile
+    case myJourney(String)
     case profile(String)
     case cities(String)
     case publicMemories(String)
@@ -42,6 +44,10 @@ private enum FriendsRoute: Hashable, Identifiable {
 
     var id: String {
         switch self {
+        case .myProfile:
+            return "my_profile"
+        case .myJourney(let journeyID):
+            return "my_journey_\(journeyID)"
         case .profile(let friendID):
             return "profile_\(friendID)"
         case .cities(let friendID):
@@ -153,6 +159,7 @@ struct FriendsHubView: View {
     @EnvironmentObject private var deepLinkStore: AppDeepLinkStore
     @EnvironmentObject private var flow: AppFlowCoordinator
     @EnvironmentObject private var journeyStore: JourneyStore
+    @EnvironmentObject private var cityCache: CityCache
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
 
     @State private var tab: FriendsTopTab = .activity
@@ -163,6 +170,10 @@ struct FriendsHubView: View {
     @State private var showToast = false
     @State private var feedLikeStats: [String: (likes: Int, likedByMe: Bool)] = [:]
     @State private var feedLikeLoadingKeys: Set<String> = []
+    @State private var feedJourneyLikers: [JourneyLiker] = []
+    @State private var feedJourneyLikersLoading = false
+    @State private var feedJourneyLikersErrorMessage: String?
+    @State private var activeFeedLikesSheet: FeedLikesSheetContext?
     @State private var socialNotifications: [BackendNotificationItem] = []
     @State private var unreadSocialCount = 0
     @State private var showSocialNotificationsSheet = false
@@ -181,6 +192,9 @@ struct FriendsHubView: View {
     @State private var myRemoteProfile: BackendProfileDTO?
     @State private var showAuthEntry = false
     @State private var showQRScanner = false
+    @State private var pendingFeedRefreshProfiles: [FriendProfileSnapshot]?
+    @State private var feedScrollRestoreState = FriendsFeedScrollRestoreState()
+    @State private var didPerformInitialFeedRefresh = false
 
     private var sortedFriends: [FriendProfileSnapshot] {
         socialStore.friends.sorted { lhs, rhs in
@@ -214,11 +228,18 @@ struct FriendsHubView: View {
         )
     }
 
-    private var feedSourceProfiles: [FriendProfileSnapshot] {
-        if let me = selfSnapshotForFeed {
-            return [me] + sortedFriends.filter { $0.id != currentUserID }
+    private func feedSourceProfiles(using snapshots: [FriendProfileSnapshot]) -> [FriendProfileSnapshot] {
+        let sorted = snapshots.sorted { lhs, rhs in
+            lastActiveDate(of: lhs) > lastActiveDate(of: rhs)
         }
-        return sortedFriends
+        if let me = selfSnapshotForFeed {
+            return [me] + sorted.filter { $0.id != currentUserID }
+        }
+        return sorted
+    }
+
+    private var feedSourceProfiles: [FriendProfileSnapshot] {
+        feedSourceProfiles(using: socialStore.friends)
     }
 
     private var feedProfileByID: [String: FriendProfileSnapshot] {
@@ -230,14 +251,22 @@ struct FriendsHubView: View {
     }
 
     private var feedLikeSignature: String {
-        feedEvents
-            .compactMap { event -> String? in
-                guard let journeyID = event.journeyID else { return nil }
-                guard event.friendID != currentUserID else { return nil }
-                return feedLikeKey(friendID: event.friendID, journeyID: journeyID)
-            }
+        FriendsFeedLikePresentation.statsPairs(
+            from: feedEvents.map { ($0.friendID, $0.journeyID) }
+        )
+            .map { feedLikeKey(friendID: $0.friendID, journeyID: $0.journeyID) }
             .sorted()
             .joined(separator: ",")
+    }
+
+    private struct FeedLikesSheetContext: Identifiable {
+        let friendID: String
+        let journeyID: String
+        let title: String
+
+        var id: String {
+            "\(friendID)|\(journeyID)"
+        }
     }
 
     var body: some View {
@@ -300,6 +329,22 @@ struct FriendsHubView: View {
                 .id(PostcardInboxView.viewIdentity(initialBox: initialBox, focusMessageID: postcardInboxIntent.messageID))
             }
         }
+        .sheet(item: $activeFeedLikesSheet) { context in
+            JourneyLikesSheet(
+                title: context.title,
+                likers: feedJourneyLikers,
+                isLoading: feedJourneyLikersLoading,
+                errorMessage: feedJourneyLikersErrorMessage,
+                onRetry: {
+                    loadFeedJourneyLikers(friendID: context.friendID, journeyID: context.journeyID)
+                },
+                onEditVisibility: {}
+            )
+            .presentationBackground(FigmaTheme.background)
+            .presentationCornerRadius(28)
+            .presentationDetents(feedLikesSheetDetents)
+            .presentationDragIndicator(.visible)
+        }
         .fullScreenCover(isPresented: $showAuthEntry) {
             AuthEntryView(
                 onContinueGuest: { showAuthEntry = false },
@@ -321,17 +366,21 @@ struct FriendsHubView: View {
             }
         }
         .task {
-            await refreshRemoteFriends()
             await refreshMyInviteIdentityIfNeeded()
+            await performInitialFeedRefreshIfNeeded()
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 25 * 1_000_000_000)
-                await refreshRemoteFriends()
+                await detectUnseenFeedUpdates()
             }
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             Task {
-                await refreshRemoteFriends()
+                if didPerformInitialFeedRefresh {
+                    await detectUnseenFeedUpdates()
+                } else {
+                    await performInitialFeedRefreshIfNeeded()
+                }
             }
         }
         .onChange(of: sessionStore.currentAccessToken) { _, _ in
@@ -339,7 +388,12 @@ struct FriendsHubView: View {
                 await refreshSocialNotifications(showToastForLatestUnread: false)
                 await refreshFriendRequests()
                 await refreshMyInviteIdentityIfNeeded()
+                await refreshRemoteFriends(showUnreadToast: false)
             }
+        }
+        .onChange(of: activeRoute) { _, route in
+            guard route == nil else { return }
+            feedScrollRestoreState.prepareRestoreOnReturn()
         }
         .task(id: feedLikeSignature) {
             await loadFeedLikeStatsIfNeeded()
@@ -365,57 +419,123 @@ struct FriendsHubView: View {
         .onReceive(NotificationCenter.default.publisher(for: .socialNotificationsDidMarkRead)) { notification in
             applySocialNotificationReadSync(notification)
         }
-        .onAppear {
-            Task {
-                await refreshRemoteFriends()
-            }
-        }
     }
 
     private var activityContent: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: 16) {
-                if feedEvents.isEmpty {
-                    emptyState(L10n.t("friends_empty_activity"))
-                } else {
-                    ForEach(feedEvents) { event in
-                        if let friend = feedProfileByID[event.friendID] {
-                            FriendActivityCard(
-                                friend: friend,
-                                event: event,
-                                likeCount: likeCountForEvent(event),
-                                likedByMe: likedByMeForEvent(event),
-                                likeLoading: likeLoadingForEvent(event),
-                                canLike: event.friendID != currentUserID,
-                                onToggleLike: {
-                                    guard let journeyID = event.journeyID else { return }
-                                    Task {
-                                        await toggleFeedLike(friendID: friend.id, journeyID: journeyID)
-                                    }
-                                },
-                                onOpenProfile: {
-                                    ensureSelfSnapshotInSocialStoreIfNeeded(friendID: friend.id)
-                                    activeRoute = .profile(friend.id)
-                                },
-                                onOpenEvent: {
-                                    ensureSelfSnapshotInSocialStoreIfNeeded(friendID: friend.id)
-                                    if let jid = event.journeyID {
-                                        activeRoute = .journey(friendID: friend.id, snapshot: friend, journeyID: jid)
-                                    } else {
-                                        activeRoute = .profile(friend.id)
-                                    }
+        VStack(spacing: 8) {
+            if pendingFeedRefreshProfiles != nil {
+                Button {
+                    applyPendingFeedRefresh()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.clockwise.circle.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                        Text(L10n.t("friends_feed_new_activity_prompt"))
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .foregroundColor(FigmaTheme.text)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 40)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(FigmaTheme.border, lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 14)
+                .padding(.top, 6)
+            }
+
+            ScrollViewReader { proxy in
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 16) {
+                        if feedEvents.isEmpty {
+                            emptyState(L10n.t("friends_empty_activity"))
+                        } else {
+                            ForEach(feedEvents) { event in
+                                if let friend = feedProfileByID[event.friendID] {
+                                    FriendActivityCard(
+                                        friend: friend,
+                                        event: event,
+                                        likeCount: likeCountForEvent(event),
+                                        likedByMe: likedByMeForEvent(event),
+                                        likeLoading: likeLoadingForEvent(event),
+                                        likeActionMode: FriendsFeedLikePresentation.actionMode(
+                                            currentUserID: currentUserID,
+                                            eventFriendID: event.friendID,
+                                            hasJourney: event.journeyID != nil
+                                        ),
+                                        onLikeTap: {
+                                            guard let journeyID = event.journeyID else { return }
+                                            switch FriendsFeedLikePresentation.actionMode(
+                                                currentUserID: currentUserID,
+                                                eventFriendID: event.friendID,
+                                                hasJourney: true
+                                            ) {
+                                            case .toggleLike:
+                                                Task {
+                                                    await toggleFeedLike(friendID: friend.id, journeyID: journeyID)
+                                                }
+                                            case .showLikers:
+                                                presentFeedLikes(friendID: friend.id, journeyID: journeyID, title: event.location.isEmpty ? event.title : event.location)
+                                            case nil:
+                                                break
+                                            }
+                                        },
+                                        onOpenProfile: {
+                                            if FriendsFeedNavigationPolicy.opensCurrentUserProfile(
+                                                currentUserID: currentUserID,
+                                                targetFriendID: friend.id
+                                            ) {
+                                                activeRoute = .myProfile
+                                            } else {
+                                                activeRoute = .profile(friend.id)
+                                            }
+                                        },
+                                        onOpenEvent: {
+                                            feedScrollRestoreState.recordOpen(eventID: event.id)
+                                            if let jid = event.journeyID {
+                                                if FriendsFeedNavigationPolicy.opensCurrentUserJourneyDetail(
+                                                    currentUserID: currentUserID,
+                                                    targetFriendID: friend.id
+                                                ) {
+                                                    activeRoute = .myJourney(jid)
+                                                } else {
+                                                    activeRoute = .journey(friendID: friend.id, snapshot: friend, journeyID: jid)
+                                                }
+                                            } else {
+                                                if FriendsFeedNavigationPolicy.opensCurrentUserProfile(
+                                                    currentUserID: currentUserID,
+                                                    targetFriendID: friend.id
+                                                ) {
+                                                    activeRoute = .myProfile
+                                                } else {
+                                                    activeRoute = .profile(friend.id)
+                                                }
+                                            }
+                                        }
+                                    )
+                                    .id(event.id)
                                 }
-                            )
+                            }
                         }
                     }
+                    .padding(.horizontal, 14)
+                    .padding(.top, 12)
+                    .padding(.bottom, 54)
+                }
+                .refreshable {
+                    await refreshRemoteFriends()
+                }
+                .onChange(of: feedScrollRestoreState.pendingRestoreEventID) { _, eventID in
+                    restoreFeedScrollIfNeeded(eventID: eventID, proxy: proxy)
+                }
+                .onChange(of: feedLikeSignature) { _, _ in
+                    restoreFeedScrollIfNeeded(eventID: feedScrollRestoreState.pendingRestoreEventID, proxy: proxy)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 12)
-            .padding(.bottom, 54)
-        }
-        .refreshable {
-            await refreshRemoteFriends()
         }
         .background(FigmaTheme.background)
     }
@@ -502,6 +622,10 @@ struct FriendsHubView: View {
         @ViewBuilder
         private func destination(for route: FriendsRoute) -> some View {
             switch route {
+            case .myProfile:
+                ProfileView()
+            case .myJourney(let journeyID):
+                SelfJourneyDetailScreen(journeyID: journeyID)
             case .profile(let friendID):
                 FriendProfileScreen(friendID: friendID)
             case .cities(let friendID):
@@ -765,17 +889,49 @@ struct FriendsHubView: View {
                 .map { $0 }
         }
 
+        @MainActor
+        private func performInitialFeedRefreshIfNeeded() async {
+            guard !didPerformInitialFeedRefresh else { return }
+            await refreshRemoteFriends()
+        }
+
+        @MainActor
+        private func detectUnseenFeedUpdates() async {
+            guard didPerformInitialFeedRefresh else { return }
+            guard let remoteSnapshots = await socialStore.fetchFriendSnapshotsFromBackend(accessToken: sessionStore.currentAccessToken) else {
+                return
+            }
+
+            let candidateEventIDs = buildFeedEvents(from: feedSourceProfiles(using: remoteSnapshots)).map(\.id)
+            let currentEventIDs = feedEvents.map(\.id)
+            guard FriendsFeedUpdatePromptPolicy.hasUnseenEvents(
+                currentEventIDs: currentEventIDs,
+                candidateEventIDs: candidateEventIDs
+            ) else {
+                return
+            }
+
+            pendingFeedRefreshProfiles = remoteSnapshots
+        }
+
+        @MainActor
+        private func applyPendingFeedRefresh() {
+            guard let pendingFeedRefreshProfiles else { return }
+            socialStore.replaceFriends(pendingFeedRefreshProfiles)
+            self.pendingFeedRefreshProfiles = nil
+        }
+
         private func resolvedFriendCityID(for journey: FriendSharedJourney, cards: [FriendCityCard]) -> String {
             FriendJourneyCityIdentity.resolveCityID(for: journey, cards: cards)
         }
 
         private func resolvedFriendCityTitle(for journey: FriendSharedJourney, cards: [FriendCityCard]) -> String {
+            let collectionKey = FriendJourneyCityIdentity.resolveCollectionKey(for: journey, cards: cards)
             let cityID = resolvedFriendCityID(for: journey, cards: cards)
             let cityCard = cards.first(where: { $0.id == cityID })
-            return CityDisplayTitlePresentation.title(
-                cityKey: cityCard?.id ?? cityID,
-                iso2: cityCard?.countryISO2,
-                fallbackTitle: cityCard?.name
+            return CityDisplayResolver.title(
+                for: collectionKey,
+                fallbackTitle: CityCollectionResolver.configuredTitle(for: collectionKey) ?? cityCard?.name ?? journey.title
             )
         }
 
@@ -793,16 +949,6 @@ struct FriendsHubView: View {
 
         private func feedLikeKey(friendID: String, journeyID: String) -> String {
             "\(friendID)|\(journeyID)"
-        }
-
-        /// When tapping on own post in the feed, ensure the self-snapshot is available
-        /// in socialStore so that FriendProfileScreen / FriendJourneyDetailScreen can find it.
-        private func ensureSelfSnapshotInSocialStoreIfNeeded(friendID: String) {
-            let target = friendID.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !target.isEmpty, target == currentUserID else { return }
-            if let snapshot = selfSnapshotForFeed {
-                socialStore.importFriendSnapshot(snapshot)
-            }
         }
 
         private func likeCountForEvent(_ event: FriendFeedEvent) -> Int {
@@ -829,11 +975,9 @@ struct FriendsHubView: View {
                 return
             }
 
-            let pairs = feedEvents.compactMap { event -> (friendID: String, journeyID: String)? in
-                guard let journeyID = event.journeyID else { return nil }
-                guard event.friendID != currentUserID else { return nil }
-                return (event.friendID, journeyID)
-            }
+            let pairs = FriendsFeedLikePresentation.statsPairs(
+                from: feedEvents.map { ($0.friendID, $0.journeyID) }
+            )
             guard !pairs.isEmpty else {
                 feedLikeStats = [:]
                 return
@@ -856,6 +1000,57 @@ struct FriendsHubView: View {
                 feedLikeStats = next
             } catch {
                 // Keep feed available even if like stats request fails.
+            }
+        }
+
+        private var feedLikesSheetDetents: Set<PresentationDetent> {
+            let compactHeight = min(520, max(276, 194 + CGFloat(max(feedJourneyLikers.count, 1)) * 56))
+            return [.height(compactHeight), .large]
+        }
+
+        private func presentFeedLikes(friendID: String, journeyID: String, title: String) {
+            activeFeedLikesSheet = FeedLikesSheetContext(friendID: friendID, journeyID: journeyID, title: title)
+            loadFeedJourneyLikers(friendID: friendID, journeyID: journeyID)
+        }
+
+        private func loadFeedJourneyLikers(friendID: String, journeyID: String) {
+            guard BackendConfig.isEnabled,
+                  let token = sessionStore.currentAccessToken,
+                  !token.isEmpty else {
+                feedJourneyLikers = []
+                feedJourneyLikersErrorMessage = nil
+                return
+            }
+
+            feedJourneyLikersLoading = true
+            feedJourneyLikersErrorMessage = nil
+
+            Task {
+                do {
+                    let out: [JourneyLiker]
+                    do {
+                        out = try await BackendAPIClient.shared.fetchJourneyLikers(
+                            token: token,
+                            ownerUserID: friendID,
+                            journeyID: journeyID
+                        )
+                    } catch {
+                        let all = try await BackendAPIClient.shared.fetchNotifications(token: token, unreadOnly: false)
+                        out = JourneyLikesPresentation.likers(from: all, journeyID: journeyID)
+                    }
+
+                    await MainActor.run {
+                        feedJourneyLikers = out
+                        feedJourneyLikersErrorMessage = nil
+                        feedJourneyLikersLoading = false
+                    }
+                } catch {
+                    await MainActor.run {
+                        feedJourneyLikers = []
+                        feedJourneyLikersErrorMessage = error.localizedDescription
+                        feedJourneyLikersLoading = false
+                    }
+                }
             }
         }
 
@@ -896,16 +1091,20 @@ struct FriendsHubView: View {
         }
 
         @MainActor
-        private func refreshRemoteFriends() async {
+        private func refreshRemoteFriends(showUnreadToast: Bool = true) async {
             guard !loadingRemote else { return }
             loadingRemote = true
             defer { loadingRemote = false }
 
             let previousFriends = socialStore.friends
-            await socialStore.reloadFromBackendIfPossible(accessToken: sessionStore.currentAccessToken)
+            if let remoteSnapshots = await socialStore.fetchFriendSnapshotsFromBackend(accessToken: sessionStore.currentAccessToken) {
+                socialStore.replaceFriends(remoteSnapshots)
+                pendingFeedRefreshProfiles = nil
+            }
             socialStore.restoreFriendsIfEmpty(previousFriends)
+            didPerformInitialFeedRefresh = true
 
-            await refreshSocialNotifications(showToastForLatestUnread: true)
+            await refreshSocialNotifications(showToastForLatestUnread: showUnreadToast)
             await refreshFriendRequests()
         }
 
@@ -1232,6 +1431,15 @@ struct FriendsHubView: View {
                 }
             }
         }
+
+        private func restoreFeedScrollIfNeeded(eventID: String?, proxy: ScrollViewProxy) {
+            guard let eventID else { return }
+            guard feedEvents.contains(where: { $0.id == eventID }) else { return }
+            withAnimation(.easeInOut(duration: 0.22)) {
+                proxy.scrollTo(eventID, anchor: .center)
+            }
+            feedScrollRestoreState.consumeRestoreRequest()
+        }
     }
 
 private struct FriendActivityCard: View {
@@ -1240,8 +1448,8 @@ private struct FriendActivityCard: View {
     let likeCount: Int
     let likedByMe: Bool
     let likeLoading: Bool
-    let canLike: Bool
-    let onToggleLike: () -> Void
+    let likeActionMode: FriendsFeedLikeActionMode?
+    let onLikeTap: () -> Void
     let onOpenProfile: () -> Void
     let onOpenEvent: () -> Void
 
@@ -1333,12 +1541,12 @@ private struct FriendActivityCard: View {
 
                 Spacer()
 
-                if event.journeyID != nil {
-                    Button(action: onToggleLike) {
+                if let likeActionMode {
+                    Button(action: onLikeTap) {
                         HStack(spacing: 5) {
-                            Image(systemName: likedByMe ? "heart.fill" : "heart")
+                            Image(systemName: likeActionMode == .toggleLike && likedByMe ? "heart.fill" : "heart")
                                 .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(likedByMe ? .red : FigmaTheme.subtext)
+                                .foregroundColor(likeActionMode == .toggleLike && likedByMe ? .red : FigmaTheme.subtext)
                             Text("\(max(0, likeCount))")
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundColor(FigmaTheme.subtext)
@@ -1350,8 +1558,8 @@ private struct FriendActivityCard: View {
                         .appFullSurfaceTapTarget(.capsule)
                     }
                     .buttonStyle(.plain)
-                    .disabled(!canLike || likeLoading)
-                    .opacity(canLike ? 1 : 0.5)
+                    .disabled(likeActionMode == .toggleLike && likeLoading)
+                    .opacity(likeActionMode == .toggleLike ? 1 : 1)
                 }
             }
         }
@@ -1813,6 +2021,10 @@ private struct FriendProfileScreen: View {
         }
         .navigationDestination(item: $activeRoute) { route in
             switch route {
+            case .myProfile:
+                ProfileView()
+            case .myJourney(let journeyID):
+                SelfJourneyDetailScreen(journeyID: journeyID)
             case .profile(let friendID):
                 FriendProfileScreen(friendID: friendID)
             case .cities(let friendID):
@@ -2535,16 +2747,21 @@ private final class FriendMirrorContext: ObservableObject {
     }
 
     nonisolated private static func persistCities(from snapshot: FriendProfileSnapshot, mirroredRoutes: [JourneyRoute], paths: StoragePath) {
-        let routesByCityID = Dictionary(grouping: mirroredRoutes) { $0.startCityKey ?? $0.cityKey }
+        let routesByCityID = Dictionary(grouping: mirroredRoutes) {
+            ($0.startCityKey ?? $0.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         let deduplicatedCards = Dictionary(grouping: snapshot.unlockedCityCards) { $0.id }.compactMapValues { $0.first }.map { $0.value }
-        let cities: [CachedCity] = deduplicatedCards.map { card in
-            let js = routesByCityID[card.id] ?? []
+        let cities: [CachedCity] = deduplicatedCards.map { primaryCard in
+            let cityID = primaryCard.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            let js = routesByCityID[cityID] ?? []
             let memories = js.reduce(0) { $0 + $1.memories.count }
             let anchorCoord = js.first?.allCLCoords.first
             return CachedCity(
-                id: card.id,
-                name: card.name,
-                countryISO2: card.countryISO2,
+                id: cityID,
+                cityKey: cityID,
+                name: primaryCard.name,
+                canonicalNameEN: primaryCard.name,
+                countryISO2: primaryCard.countryISO2 ?? CityDisplayResolver.iso2(from: cityID),
                 journeyIds: js.map(\.id),
                 explorations: js.count,
                 memories: memories,
@@ -2552,9 +2769,10 @@ private final class FriendMirrorContext: ObservableObject {
                 anchor: anchorCoord.map(LatLon.init),
                 thumbnailBasePath: nil,
                 thumbnailRoutePath: nil,
-                reservedLevelRaw: nil,
-                reservedParentRegionKey: nil,
-                reservedAvailableLevelNames: nil,
+                identityLevelRaw: nil,
+                selectedDisplayLevelRaw: nil,
+                parentScopeKey: nil,
+                availableLevelNames: nil,
                 isTemporary: false
             )
         }
@@ -2573,14 +2791,14 @@ private final class FriendMirrorContext: ObservableObject {
     nonisolated private static func toJourneyRoute(friendJourney: FriendSharedJourney, cards: [FriendCityCard]) -> JourneyRoute {
         let routeCoords = friendJourney.routeCoordinates
         let cityID = FriendJourneyCityIdentity.resolveCityID(for: friendJourney, cards: cards)
+        let collectionKey = FriendJourneyCityIdentity.resolveCollectionKey(for: friendJourney, cards: cards)
         let cityCard = cards.first(where: { $0.id == cityID })
 
-        let effectiveCityID = (cityID == "Unknown|" || cityID.isEmpty) ? nil : cityID
-        let effectiveFallbackTitle = cityCard?.name ?? friendJourney.title
+        let effectiveCollectionKey = (collectionKey == "Unknown|" || collectionKey.isEmpty) ? nil : collectionKey
+        let effectiveFallbackTitle = CityCollectionResolver.configuredTitle(for: effectiveCollectionKey ?? "") ?? cityCard?.name ?? friendJourney.title
 
-        let cityName = CityDisplayTitlePresentation.title(
-            cityKey: effectiveCityID,
-            iso2: cityCard?.countryISO2,
+        let cityName = CityDisplayResolver.title(
+            for: effectiveCollectionKey ?? "",
             fallbackTitle: effectiveFallbackTitle
         )
 
@@ -2606,7 +2824,7 @@ private final class FriendMirrorContext: ObservableObject {
                 imageData: nil,
                 imagePaths: [],
                 remoteImageURLs: memory.imageURLs,
-                cityKey: effectiveCityID ?? "",
+                cityKey: cityID,
                 cityName: cityName,
                 coordinate: (coord.lat, coord.lon),
                 type: .memory,
@@ -2623,16 +2841,16 @@ private final class FriendMirrorContext: ObservableObject {
             elevationGain: 0,
             elevationLoss: 0,
             isTooShort: false,
-            cityKey: effectiveCityID ?? "",
+            cityKey: cityID,
             canonicalCity: cityName,
             coordinates: routeCoords,
             memories: memories,
             thumbnailCoordinates: routeCoords,
-            countryISO2: cityCard?.countryISO2,
+            countryISO2: cityCard?.countryISO2 ?? CityDisplayResolver.iso2(from: cityID),
             currentCity: cityName,
             cityName: cityName,
-            startCityKey: effectiveCityID ?? "",
-            endCityKey: effectiveCityID ?? "",
+            startCityKey: cityID,
+            endCityKey: cityID,
             exploreMode: .city,
             trackingMode: .daily,
             visibility: friendJourney.visibility,
@@ -2790,10 +3008,7 @@ private struct FriendJourneyDetailScreen: View {
             flow.popSidebarButtonHidden(token: sidebarHideToken)
         }
         .task {
-            await socialStore.refreshFriendProfileIfPossible(
-                friendID: friendID,
-                accessToken: sessionStore.currentAccessToken
-            )
+            await socialStore.refreshFriendProfileIfPossible(friendID: friendID, accessToken: sessionStore.currentAccessToken)
         }
         .navigationBarHidden(true)
     }
@@ -2807,7 +3022,8 @@ private struct FriendJourneyDetailScreen: View {
                 memories: mirroredJourney.memories.sorted(by: { $0.timestamp < $1.timestamp }),
                 cityName: resolvedCityName(for: mirroredJourney),
                 countryName: resolvedCountryName(for: mirroredJourney),
-                readOnly: true
+                readOnly: true,
+                friendLoadout: friend.loadout
             )
             .environmentObject(mirror.journeyStore)
             .environmentObject(mirror.cityCache)
@@ -2821,6 +3037,50 @@ private struct FriendJourneyDetailScreen: View {
                     await mirror.apply(snapshot: friend)
                 }
         }
+    }
+
+    private func resolvedCityName(for journey: JourneyRoute) -> String {
+        let title = journey.cityName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !title.isEmpty {
+            return title
+        }
+        let fallback = journey.currentCity.trimmingCharacters(in: .whitespacesAndNewlines)
+        return fallback.isEmpty ? L10n.t("unknown") : fallback
+    }
+
+    private func resolvedCountryName(for journey: JourneyRoute) -> String {
+        let iso = (journey.countryISO2 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard iso.count == 2 else { return L10n.t("unknown_country") }
+        return Locale.current.localizedString(forRegionCode: iso) ?? iso
+    }
+}
+
+private struct SelfJourneyDetailScreen: View {
+    @EnvironmentObject private var journeyStore: JourneyStore
+    @EnvironmentObject private var cityCache: CityCache
+    @EnvironmentObject private var sessionStore: UserSessionStore
+
+    let journeyID: String
+
+    var body: some View {
+        Group {
+            if let journey = journeyStore.journeys.first(where: { $0.id == journeyID }) {
+                JourneyMemoryDetailView(
+                    journey: journey,
+                    memories: journey.memories.sorted(by: { $0.timestamp < $1.timestamp }),
+                    cityName: resolvedCityName(for: journey),
+                    countryName: resolvedCountryName(for: journey)
+                )
+                .environmentObject(journeyStore)
+                .environmentObject(cityCache)
+                .environmentObject(sessionStore)
+            } else {
+                Text(L10n.t("content_unavailable"))
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .navigationBarHidden(true)
     }
 
     private func resolvedCityName(for journey: JourneyRoute) -> String {

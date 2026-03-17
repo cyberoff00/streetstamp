@@ -1898,10 +1898,10 @@ struct RecentJourneysView: View {
                     cityKey: cachedCity.id,
                     iso2: cachedCity.countryISO2,
                     fallbackTitle: cachedCity.name,
-                    availableLevelNamesRaw: cachedCity.reservedAvailableLevelNames,
-                    storedAvailableLevelNamesLocaleID: cachedCity.reservedAvailableLevelNamesLocaleID,
-                    parentRegionKey: cachedCity.reservedParentRegionKey,
-                    preferredLevel: cachedCity.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
+                    availableLevelNamesRaw: cachedCity.availableLevelNames,
+                    storedAvailableLevelNamesLocaleID: cachedCity.availableLevelNamesLocaleID,
+                    parentRegionKey: cachedCity.parentScopeKey,
+                    preferredLevel: cachedCity.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
                     localizedDisplayNameByLocale: cachedCity.localizedDisplayNameByLocale,
                     locale: .current
                 )
@@ -1911,7 +1911,7 @@ struct RecentJourneysView: View {
                 }
             }
 
-            let parentRegionKey = cachedCitiesByKey[key]?.reservedParentRegionKey
+            let parentRegionKey = cachedCitiesByKey[key]?.parentScopeKey
 
             if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key, parentRegionKey: parentRegionKey),
                !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -1928,10 +1928,18 @@ struct RecentJourneysView: View {
     }
 
     private func resolvedDisplayCityName(for journey: JourneyRoute) -> String {
-        JourneyCityNamePresentation.title(
+        let fallbackTitle = JourneyCityNamePresentation.title(
             for: journey,
             localizedCityNameByKey: localizedCityNameByKey,
             cachedCitiesByKey: cachedCitiesByKey
+        )
+        let collectionKey = CityCollectionResolver.resolveCollectionKey(
+            for: journey,
+            cachedCitiesByKey: cachedCitiesByKey
+        )
+        return CityDisplayResolver.title(
+            for: collectionKey,
+            fallbackTitle: fallbackTitle
         )
     }
 

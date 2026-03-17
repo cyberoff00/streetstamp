@@ -67,30 +67,33 @@ struct StreetStampsApp: App {
         LifelogBackgroundMode(rawValue: lifelogBackgroundModeRaw) ?? .defaultMode
     }
 
-    /// Ensure passive location stream is alive for Lifelog when no active journey is running.
-    private func ensurePassiveLocationTrackingIfNeeded() {
-        if !TrackingService.shared.isTracking {
-            locationHub.startPassiveLifelog(mode: lifelogBackgroundMode)
-        }
-    }
+    private func applyIdleLocationPolicy(requestSingleRefreshWhenIdle: Bool) {
+        guard !TrackingService.shared.isTracking else { return }
 
-    private func restoreFromICloudIfNeeded(userID: String) async {
-        guard AppSettings.isAutomaticICloudRestoreEnabled else { return }
-        let paths = StoragePath(userID: userID)
-        let restored = await ICloudSyncService.shared.restoreLatestIfNeeded(
-            userID: userID,
-            paths: paths
+        let action = LocationLifecycleDecision.idleActivationAction(
+            isTrackingJourney: false,
+            isPassiveEnabled: lifelogStore.isEnabled,
+            authorizationStatus: locationHub.authorizationStatus
         )
-        if restored {
-            print("☁️ Restored cloud snapshot for user:", userID)
+
+        switch action {
+        case .startPassive:
+            locationHub.startPassiveLifelog(mode: lifelogBackgroundMode)
+        case .requestSingleRefresh:
+            locationHub.stop()
+            if requestSingleRefreshWhenIdle {
+                locationHub.requestSingleRefresh()
+            }
+        case .stayIdle:
+            locationHub.stop()
         }
     }
 
-    private func uploadSnapshotToICloud(userID: String, reason: String) async {
-        let paths = StoragePath(userID: userID)
-        await ICloudSyncService.shared.uploadSnapshotIfEnabled(
+    private func syncPendingCloudChanges(userID: String, reason: String) async {
+        await CloudKitSyncService.shared.syncCurrentState(
             userID: userID,
-            paths: paths,
+            journeyStore: journeyStore,
+            lifelogStore: lifelogStore,
             reason: reason
         )
     }
@@ -120,6 +123,18 @@ struct StreetStampsApp: App {
 
         let paths = StoragePath(userID: session.activeLocalProfileID)
         let jStore = JourneyStore(paths: paths)
+        jStore.syncHooks = JourneyStore.SyncHooks(
+            upsertCompletedJourney: { route in
+                Task {
+                    await CloudKitSyncService.shared.syncJourneyUpsert(route)
+                }
+            },
+            deleteJourney: { journeyID in
+                Task {
+                    await CloudKitSyncService.shared.syncJourneyDeletion(id: journeyID)
+                }
+            }
+        )
         _journeyStore = StateObject(wrappedValue: jStore)
         _cityCache = StateObject(wrappedValue: CityCache(paths: paths, journeyStore: jStore))
         _cityRenderCache = StateObject(wrappedValue: CityRenderCacheStore(rootDir: paths.thumbnailsDir))
@@ -226,8 +241,8 @@ struct StreetStampsApp: App {
                 await LifelogMigrationService.migrateLegacyLifelogIfNeededAsync(
                     paths: StoragePath(userID: startupUserID)
                 )
-                await restoreFromICloudIfNeeded(userID: startupUserID)
-                journeyStore.load()
+                await journeyStore.loadAsync()
+                await lifelogStore.loadAsync()
                 let journeysSnapshot = journeyStore.journeys
                 let cachedCitiesSnapshot = cityCache.cachedCities
                 let appearanceRaw = MapAppearanceSettings.current.rawValue
@@ -241,7 +256,6 @@ struct StreetStampsApp: App {
                     renderCacheStore: renderCache,
                     limit: 16
                 )
-                lifelogStore.load()
                 lifelogStore.bind(to: locationHub)
                 lifelogRenderCache.reset()
                 lifelogRenderCache.bind(
@@ -258,19 +272,6 @@ struct StreetStampsApp: App {
                 )
 
                 Task { @MainActor in
-                    if sessionStore.currentAccessToken != nil {
-                        let count = try? await JourneyCloudMigrationService.downloadAndMerge(
-                            sessionStore: sessionStore,
-                            journeyStore: journeyStore,
-                            cityCache: cityCache
-                        )
-                        if let count, count > 0 {
-                            scheduleTrackTileRebuild(delay: 0.10, force: true)
-                        }
-                    }
-                }
-
-                Task { @MainActor in
                     await Task.yield()
                     VoiceBroadcastService.shared.start()
                     onboardingGuide.startIfNeeded()
@@ -279,8 +280,7 @@ struct StreetStampsApp: App {
 
                 Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 800_000_000)
-                    locationHub.requestPermissionIfNeeded()
-                    ensurePassiveLocationTrackingIfNeeded()
+                    applyIdleLocationPolicy(requestSingleRefreshWhenIdle: true)
                 }
             }
             .onChange(of: hasSeenIntroSlides) { _, seen in
@@ -295,10 +295,23 @@ struct StreetStampsApp: App {
                     await sessionStore.bootstrapFileSystemAsync()
                     await LifelogMigrationService.migrateLegacyLifelogIfNeededAsync(paths: paths)
                     guard sessionStore.activeLocalProfileID == uid else { return }
-                    await restoreFromICloudIfNeeded(userID: uid)
 
                     journeyStore.rebind(paths: paths)
-                    journeyStore.load()
+                    journeyStore.syncHooks = JourneyStore.SyncHooks(
+                        upsertCompletedJourney: { route in
+                            Task {
+                                await CloudKitSyncService.shared.syncJourneyUpsert(route)
+                            }
+                        },
+                        deleteJourney: { journeyID in
+                            Task {
+                                await CloudKitSyncService.shared.syncJourneyDeletion(id: journeyID)
+                            }
+                        }
+                    )
+                    await journeyStore.loadAsync()
+                    lifelogStore.rebind(paths: paths)
+                    await lifelogStore.loadAsync()
                     cityCache.rebind(paths: paths)
                     cityRenderCache.rebind(rootDir: paths.thumbnailsDir)
                     let journeysSnapshot = journeyStore.journeys
@@ -314,8 +327,6 @@ struct StreetStampsApp: App {
                         renderCacheStore: renderCache,
                         limit: 16
                     )
-                    lifelogStore.rebind(paths: paths)
-                    lifelogStore.load()
                     lifelogStore.bind(to: locationHub)
                     trackTileStore.rebind(paths: paths)
                     lifelogRenderCache.reset()
@@ -328,26 +339,9 @@ struct StreetStampsApp: App {
                     lifelogRenderCache.scheduleWarmupRecentDays(
                         countryISO2: lifelogStore.countryISO2 ?? locationHub.countryISO2
                     )
-                    ensurePassiveLocationTrackingIfNeeded()
+                    applyIdleLocationPolicy(requestSingleRefreshWhenIdle: true)
                     socialStore.switchUser(uid)
                     postcardCenter.switchUser(uid)
-                }
-            }
-            .onChange(of: sessionStore.currentAccessToken) { _, token in
-                guard let token, !token.isEmpty else { return }
-                guard journeyStore.journeys.isEmpty else {
-                    print("⚠️ 登录时检测到本地数据，跳过自动下载以防冲突")
-                    return
-                }
-                Task {
-                    let count = try? await JourneyCloudMigrationService.downloadAndMerge(
-                        sessionStore: sessionStore,
-                        journeyStore: journeyStore,
-                        cityCache: cityCache
-                    )
-                    if let count, count > 0 {
-                        scheduleTrackTileRebuild(delay: 0.10, force: false)
-                    }
                 }
             }
             .onChange(of: sessionStore.reauthenticationPromptVersion) { _, version in
@@ -360,14 +354,14 @@ struct StreetStampsApp: App {
                     journeyStore.flushPersist()
                     lifelogStore.flushPersistNow()
                     Task {
-                        await uploadSnapshotToICloud(
-                            userID: sessionStore.activeLocalProfileID,
+                        await syncPendingCloudChanges(
+                            userID: sessionStore.accountUserID ?? sessionStore.activeLocalProfileID,
                             reason: "scene_\(phase == .background ? "background" : "inactive")"
                         )
                     }
                 }
                 if phase == .active {
-                    ensurePassiveLocationTrackingIfNeeded()
+                    applyIdleLocationPolicy(requestSingleRefreshWhenIdle: true)
                     scheduleTrackTileRebuild(delay: 0.10, force: false)
                 }
             }
@@ -390,7 +384,14 @@ struct StreetStampsApp: App {
                 }
             }
             .onChange(of: lifelogBackgroundModeRaw) { _, _ in
-                ensurePassiveLocationTrackingIfNeeded()
+                applyIdleLocationPolicy(requestSingleRefreshWhenIdle: false)
+            }
+            .onChange(of: lifelogStore.isEnabled) { _, _ in
+                applyIdleLocationPolicy(requestSingleRefreshWhenIdle: false)
+            }
+            .onChange(of: locationHub.authorizationStatus) { _, _ in
+                guard lifelogStore.isEnabled else { return }
+                applyIdleLocationPolicy(requestSingleRefreshWhenIdle: false)
             }
             .onChange(of: trackTileStore.refreshRevision) { _, _ in
                 lifelogRenderCache.noteTrackTileRefresh(

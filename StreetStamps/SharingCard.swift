@@ -607,11 +607,21 @@ struct PopSharingCard: View {
         }()
 
         let title = (resolvedTitle?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
-            ?? JourneyCityNamePresentation.title(
-                for: journey,
-                localizedCityNameByKey: [:],
-                cachedCitiesByKey: cachedCitiesByKey
-            )
+            ?? {
+                let fallbackTitle = JourneyCityNamePresentation.title(
+                    for: journey,
+                    localizedCityNameByKey: [:],
+                    cachedCitiesByKey: cachedCitiesByKey
+                )
+                let collectionKey = CityCollectionResolver.resolveCollectionKey(
+                    for: journey,
+                    cachedCitiesByKey: cachedCitiesByKey
+                )
+                return CityDisplayResolver.title(
+                    for: collectionKey,
+                    fallbackTitle: fallbackTitle
+                )
+            }()
 
         let duration = durationText
         let distKm = max(0, journey.distance / 1000.0)
@@ -1044,11 +1054,21 @@ struct ShareCardGenerator {
             cachedCitiesByKey: cachedCitiesByKey
         ) { resolvedTitle in
             let title = (resolvedTitle?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
-                ?? JourneyCityNamePresentation.title(
-                    for: journey,
-                    localizedCityNameByKey: [:],
-                    cachedCitiesByKey: cachedCitiesByKey
-                )
+                ?? {
+                    let fallbackTitle = JourneyCityNamePresentation.title(
+                        for: journey,
+                        localizedCityNameByKey: [:],
+                        cachedCitiesByKey: cachedCitiesByKey
+                    )
+                    let collectionKey = CityCollectionResolver.resolveCollectionKey(
+                        for: journey,
+                        cachedCitiesByKey: cachedCitiesByKey
+                    )
+                    return CityDisplayResolver.title(
+                        for: collectionKey,
+                        fallbackTitle: fallbackTitle
+                    )
+                }()
 
             makeShareCardImage(
                 coords: safeCoords,

@@ -1,6 +1,12 @@
 import Foundation
 
 enum PostcardInboxPresentation {
+    struct DraftStatusPresentation: Equatable {
+        let badgeText: String
+        let detailText: String
+        let showsRetry: Bool
+    }
+
     static func recipientLabel(
         toDisplayName: String?,
         toUserID: String,
@@ -61,6 +67,35 @@ enum PostcardInboxPresentation {
         box _: PostcardInboxView.Box
     ) -> PostcardReaction? {
         message.reaction
+    }
+
+    static func draftStatusPresentation(
+        for status: PostcardDraftStatus,
+        localize: (String) -> String = L10n.t
+    ) -> DraftStatusPresentation? {
+        switch status {
+        case .draft:
+            return nil
+        case .sending:
+            return DraftStatusPresentation(
+                badgeText: localize("postcard_sending_status"),
+                detailText: localize("postcard_send_queued_detail"),
+                showsRetry: false
+            )
+        case .failed:
+            return DraftStatusPresentation(
+                badgeText: localize("postcard_failed_status"),
+                detailText: localize("postcard_failed_retry_detail"),
+                showsRetry: true
+            )
+        case .sent:
+            let sent = localize("postcard_sent_status")
+            return DraftStatusPresentation(
+                badgeText: sent,
+                detailText: sent,
+                showsRetry: false
+            )
+        }
     }
 
     private static func resolvedLabel(

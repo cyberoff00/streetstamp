@@ -120,6 +120,55 @@ final class PostcardInboxPresentationTests: XCTestCase {
         )
     }
 
+    func test_draftStatusPresentation_sendingShowsQueuedConfirmationMessage() {
+        let presentation = PostcardInboxPresentation.draftStatusPresentation(for: .sending) { key in
+            switch key {
+            case "postcard_sending_status":
+                return "发送中"
+            case "postcard_send_queued_detail":
+                return "已加入发送队列，正在确认是否发送成功"
+            default:
+                return key
+            }
+        }
+
+        XCTAssertEqual(presentation?.badgeText, "发送中")
+        XCTAssertEqual(presentation?.detailText, "已加入发送队列，正在确认是否发送成功")
+        XCTAssertEqual(presentation?.showsRetry, false)
+    }
+
+    func test_draftStatusPresentation_failedShowsRetryState() {
+        let presentation = PostcardInboxPresentation.draftStatusPresentation(for: .failed) { key in
+            switch key {
+            case "postcard_failed_status":
+                return "发送失败"
+            case "postcard_failed_retry_detail":
+                return "发送失败，可重试"
+            default:
+                return key
+            }
+        }
+
+        XCTAssertEqual(presentation?.badgeText, "发送失败")
+        XCTAssertEqual(presentation?.detailText, "发送失败，可重试")
+        XCTAssertEqual(presentation?.showsRetry, true)
+    }
+
+    func test_draftStatusPresentation_sentShowsConfirmedState() {
+        let presentation = PostcardInboxPresentation.draftStatusPresentation(for: .sent) { key in
+            switch key {
+            case "postcard_sent_status":
+                return "已发送"
+            default:
+                return key
+            }
+        }
+
+        XCTAssertEqual(presentation?.badgeText, "已发送")
+        XCTAssertEqual(presentation?.detailText, "已发送")
+        XCTAssertEqual(presentation?.showsRetry, false)
+    }
+
     private func makeMessage(
         fromUserID: String,
         toUserID: String,

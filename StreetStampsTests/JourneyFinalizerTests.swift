@@ -50,9 +50,9 @@ final class JourneyFinalizerTests: XCTestCase {
             endCanonical: endCanonical
         )
 
-        XCTAssertEqual(finalized.startCityKey, "Taiwan|TW")
-        XCTAssertEqual(finalized.cityKey, "Taiwan|TW")
-        XCTAssertEqual(finalized.canonicalCity, "Taiwan")
+        XCTAssertEqual(finalized.startCityKey, "Xinyi Township|TW")
+        XCTAssertEqual(finalized.cityKey, "Xinyi Township|TW")
+        XCTAssertEqual(finalized.canonicalCity, "Xinyi Township")
         XCTAssertEqual(finalized.endCityKey, "Taiwan|TW")
         XCTAssertEqual(finalized.cityName, "台湾")
         XCTAssertEqual(finalized.currentCity, "台湾")

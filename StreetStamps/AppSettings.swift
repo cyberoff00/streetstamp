@@ -7,6 +7,7 @@ enum AppSettings {
     static let avatarHeadlightEnabledKey = "streetstamps.avatar.headlight.enabled"
     static let liveActivityEnabledKey = "streetstamps.live_activity.enabled"
     static let lifelogBackgroundModeKey = "streetstamps.lifelog.background.mode"
+    static let lifelogPassiveEnabledKey = "streetstamps.lifelog.passive.enabled"
     static let iCloudSyncEnabledKey = "streetstamps.icloud.sync.enabled"
     static let iCloudAutomaticRestoreEnabledKey = "streetstamps.icloud.sync.auto_restore.enabled"
 
@@ -54,6 +55,22 @@ enum AppSettings {
             return .highPrecision
         }
         return mode
+    }
+
+    static var hasPassiveLifelogPreference: Bool {
+        UserDefaults.standard.object(forKey: lifelogPassiveEnabledKey) != nil
+    }
+
+    static var isPassiveLifelogEnabled: Bool {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: lifelogPassiveEnabledKey) == nil {
+            return false
+        }
+        return defaults.bool(forKey: lifelogPassiveEnabledKey)
+    }
+
+    static func setPassiveLifelogEnabled(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: lifelogPassiveEnabledKey)
     }
 
     static var isICloudSyncEnabled: Bool {

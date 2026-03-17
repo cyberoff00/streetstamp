@@ -5,6 +5,7 @@ final class CityDisplayNameResolverTests: XCTestCase {
     override func tearDown() {
         super.tearDown()
         LanguagePreference.shared.currentLanguage = nil
+        CityCollectionResolver.resetForTesting()
     }
 
     func test_languagePreferenceDisplayLocalePrefersAppLanguageSelection() {
@@ -342,6 +343,35 @@ final class CityDisplayNameResolverTests: XCTestCase {
         XCTAssertEqual(key, "Taiwan|TW")
     }
 
+    func test_identityLevelMatchesOriginalCityKeyAgainstAvailableLevels() {
+        let level = CityPlacemarkResolver.identityLevel(
+            cityKey: "Nanshan District|CN",
+            availableLevelNames: [
+                .locality: "Nanshan District",
+                .subAdmin: "Shenzhen",
+                .admin: "Guangdong",
+                .country: "China"
+            ],
+            iso2: "CN"
+        )
+
+        XCTAssertEqual(level, .locality)
+    }
+
+    func test_identityLevelSupportsRegionStyledKeys() {
+        let level = CityPlacemarkResolver.identityLevel(
+            cityKey: "Taiwan|TW",
+            availableLevelNames: [
+                .locality: "Xinyi Township",
+                .admin: "Taiwan",
+                .country: "China"
+            ],
+            iso2: "TW"
+        )
+
+        XCTAssertEqual(level, .country)
+    }
+
     func test_preferredAvailableLevelNamesRejectsEnglishStoredLabelsForChineseLocale() {
         let labels = CityPlacemarkResolver.preferredAvailableLevelNamesForDisplay(
             [
@@ -571,5 +601,249 @@ final class CityDisplayNameResolverTests: XCTestCase {
         )
 
         XCTAssertEqual(parentRegionKey, "Taiwan Province|TW")
+    }
+
+    func test_cityCollectionResolver_returnsMappedCollectionKeyWhenConfigured() {
+        CityCollectionResolver.setTestingMappings(
+            cityToCollection: ["Nanshan District|CN": "Shenzhen|CN"],
+            collectionTitles: [:]
+        )
+
+        XCTAssertEqual(
+            CityCollectionResolver.resolveCollectionKey(cityKey: "Nanshan District|CN"),
+            "Shenzhen|CN"
+        )
+    }
+
+    func test_cityDisplayResolver_usesConfiguredCollectionTitle() {
+        CityCollectionResolver.setTestingMappings(
+            cityToCollection: [:],
+            collectionTitles: ["Shenzhen|CN": "Shenzhen"]
+        )
+
+        XCTAssertEqual(
+            CityDisplayResolver.title(
+                for: "Shenzhen|CN",
+                fallbackTitle: "Nanshan District",
+                locale: Locale(identifier: "en_US")
+            ),
+            "Shenzhen"
+        )
+    }
+
+    func test_journeyPresentationUsesCollectionKeyWhenJourneyMapsIntoMergedCity() {
+        CityCollectionResolver.setTestingMappings(
+            cityToCollection: ["Nanshan District|CN": "Shenzhen|CN"],
+            collectionTitles: ["Shenzhen|CN": "Shenzhen"]
+        )
+
+        let journey = JourneyRoute(
+            id: "journey-merged-city",
+            startTime: Date(timeIntervalSince1970: 1_700_000_000),
+            endTime: Date(timeIntervalSince1970: 1_700_000_600),
+            cityKey: "Nanshan District|CN",
+            canonicalCity: "Nanshan District",
+            coordinates: [
+                CoordinateCodable(lat: 22.54, lon: 113.93)
+            ],
+            countryISO2: "CN",
+            currentCity: "Nanshan District",
+            cityName: "Nanshan District",
+            startCityKey: "Nanshan District|CN",
+            endCityKey: "Nanshan District|CN"
+        )
+
+        let title = JourneyCityNamePresentation.title(
+            for: journey,
+            localizedCityNameByKey: [:],
+            cachedCitiesByKey: [:],
+            locale: Locale(identifier: "en_US")
+        )
+
+        XCTAssertEqual(title, "Shenzhen")
+    }
+
+    func test_journeyDisplayCityNameUsesCollectionKeyTitleWhenConfigured() {
+        CityCollectionResolver.setTestingMappings(
+            cityToCollection: ["Nanshan District|CN": "Shenzhen|CN"],
+            collectionTitles: ["Shenzhen|CN": "Shenzhen"]
+        )
+
+        let journey = JourneyRoute(
+            id: "journey-display-city",
+            startTime: Date(timeIntervalSince1970: 1_700_000_000),
+            endTime: Date(timeIntervalSince1970: 1_700_000_600),
+            cityKey: "Nanshan District|CN",
+            canonicalCity: "Nanshan District",
+            coordinates: [
+                CoordinateCodable(lat: 22.54, lon: 113.93)
+            ],
+            countryISO2: "CN",
+            currentCity: "Nanshan District",
+            cityName: "Nanshan District",
+            startCityKey: "Nanshan District|CN",
+            endCityKey: "Nanshan District|CN"
+        )
+
+        XCTAssertEqual(journey.displayCityName, "Shenzhen")
+    }
+
+    func test_cityLibraryBuildCities_mergesCitiesSharingCollectionKey() {
+        CityCollectionResolver.setTestingMappings(
+            cityToCollection: [
+                "Nanshan District|CN": "Shenzhen|CN",
+                "Futian District|CN": "Shenzhen|CN"
+            ],
+            collectionTitles: ["Shenzhen|CN": "Shenzhen"]
+        )
+
+        var nanshanJourney = JourneyRoute(
+            id: "journey-nanshan",
+            startTime: Date(timeIntervalSince1970: 1_700_000_000),
+            endTime: Date(timeIntervalSince1970: 1_700_000_600),
+            distance: 1200,
+            coordinates: [CoordinateCodable(lat: 22.54, lon: 113.93)]
+        )
+        var futianJourney = JourneyRoute(
+            id: "journey-futian",
+            startTime: Date(timeIntervalSince1970: 1_700_001_000),
+            endTime: Date(timeIntervalSince1970: 1_700_001_600),
+            distance: 800,
+            coordinates: [CoordinateCodable(lat: 22.53, lon: 114.05)]
+        )
+        nanshanJourney.cityKey = "Nanshan District|CN"
+        nanshanJourney.startCityKey = "Nanshan District|CN"
+        nanshanJourney.cityName = "Nanshan District"
+        nanshanJourney.currentCity = "Nanshan District"
+        nanshanJourney.canonicalCity = "Nanshan District"
+        nanshanJourney.countryISO2 = "CN"
+
+        futianJourney.cityKey = "Futian District|CN"
+        futianJourney.startCityKey = "Futian District|CN"
+        futianJourney.cityName = "Futian District"
+        futianJourney.currentCity = "Futian District"
+        futianJourney.canonicalCity = "Futian District"
+        futianJourney.countryISO2 = "CN"
+
+        let cities = CityLibraryVM.buildCities(
+            journeys: [nanshanJourney, futianJourney],
+            cachedCities: [
+                CachedCity(
+                    id: "Nanshan District|CN",
+                    name: "Nanshan District",
+                    countryISO2: "CN",
+                    journeyIds: ["journey-nanshan"],
+                    explorations: 1,
+                    memories: 0,
+                    boundary: nil,
+                    anchor: nil,
+                    thumbnailBasePath: nil,
+                    thumbnailRoutePath: nil
+                ),
+                CachedCity(
+                    id: "Futian District|CN",
+                    name: "Futian District",
+                    countryISO2: "CN",
+                    journeyIds: ["journey-futian"],
+                    explorations: 1,
+                    memories: 0,
+                    boundary: nil,
+                    anchor: nil,
+                    thumbnailBasePath: nil,
+                    thumbnailRoutePath: nil
+                )
+            ]
+        )
+
+        XCTAssertEqual(cities.count, 1)
+        XCTAssertEqual(cities.first?.id, "Shenzhen|CN")
+        XCTAssertEqual(Set(cities.first?.journeys.map(\.id) ?? []), Set(["journey-nanshan", "journey-futian"]))
+        XCTAssertEqual(cities.first?.explorations, 2)
+    }
+
+    func test_cityLibraryBuildCities_mergesUsingSelectedDisplayLevelWithoutChangingIdentity() {
+        var nanshanJourney = JourneyRoute(
+            id: "journey-nanshan-2",
+            startTime: Date(timeIntervalSince1970: 1_700_000_000),
+            endTime: Date(timeIntervalSince1970: 1_700_000_600),
+            distance: 1200,
+            coordinates: [CoordinateCodable(lat: 22.54, lon: 113.93)]
+        )
+        var futianJourney = JourneyRoute(
+            id: "journey-futian-2",
+            startTime: Date(timeIntervalSince1970: 1_700_001_000),
+            endTime: Date(timeIntervalSince1970: 1_700_001_600),
+            distance: 800,
+            coordinates: [CoordinateCodable(lat: 22.53, lon: 114.05)]
+        )
+        nanshanJourney.cityKey = "Nanshan District|CN"
+        nanshanJourney.startCityKey = "Nanshan District|CN"
+        nanshanJourney.cityName = "Nanshan District"
+        nanshanJourney.currentCity = "Nanshan District"
+        nanshanJourney.canonicalCity = "Nanshan District"
+        nanshanJourney.countryISO2 = "CN"
+
+        futianJourney.cityKey = "Futian District|CN"
+        futianJourney.startCityKey = "Futian District|CN"
+        futianJourney.cityName = "Futian District"
+        futianJourney.currentCity = "Futian District"
+        futianJourney.canonicalCity = "Futian District"
+        futianJourney.countryISO2 = "CN"
+
+        let levelNames: [String: String] = [
+            CityPlacemarkResolver.CardLevel.locality.rawValue: "Nanshan District",
+            CityPlacemarkResolver.CardLevel.subAdmin.rawValue: "Shenzhen",
+            CityPlacemarkResolver.CardLevel.admin.rawValue: "Guangdong",
+            CityPlacemarkResolver.CardLevel.country.rawValue: "China"
+        ]
+        let futianLevelNames: [String: String] = [
+            CityPlacemarkResolver.CardLevel.locality.rawValue: "Futian District",
+            CityPlacemarkResolver.CardLevel.subAdmin.rawValue: "Shenzhen",
+            CityPlacemarkResolver.CardLevel.admin.rawValue: "Guangdong",
+            CityPlacemarkResolver.CardLevel.country.rawValue: "China"
+        ]
+
+        let cities = CityLibraryVM.buildCities(
+            journeys: [nanshanJourney, futianJourney],
+            cachedCities: [
+                CachedCity(
+                    id: "Nanshan District|CN",
+                    name: "Nanshan District",
+                    countryISO2: "CN",
+                    journeyIds: ["journey-nanshan-2"],
+                    explorations: 1,
+                    memories: 0,
+                    boundary: nil,
+                    anchor: nil,
+                    thumbnailBasePath: nil,
+                    thumbnailRoutePath: nil,
+                    identityLevelRaw: CityPlacemarkResolver.CardLevel.locality.rawValue,
+                    selectedDisplayLevelRaw: CityPlacemarkResolver.CardLevel.subAdmin.rawValue,
+                    availableLevelNames: levelNames,
+                    availableLevelNamesLocaleID: "en"
+                ),
+                CachedCity(
+                    id: "Futian District|CN",
+                    name: "Futian District",
+                    countryISO2: "CN",
+                    journeyIds: ["journey-futian-2"],
+                    explorations: 1,
+                    memories: 0,
+                    boundary: nil,
+                    anchor: nil,
+                    thumbnailBasePath: nil,
+                    thumbnailRoutePath: nil,
+                    identityLevelRaw: CityPlacemarkResolver.CardLevel.locality.rawValue,
+                    selectedDisplayLevelRaw: CityPlacemarkResolver.CardLevel.subAdmin.rawValue,
+                    availableLevelNames: futianLevelNames,
+                    availableLevelNamesLocaleID: "en"
+                )
+            ]
+        )
+
+        XCTAssertEqual(cities.count, 1)
+        XCTAssertEqual(cities.first?.id, "Shenzhen|CN")
+        XCTAssertEqual(Set(cities.first?.sourceCityKeys ?? []), Set(["Nanshan District|CN", "Futian District|CN"]))
+        XCTAssertEqual(Set(cities.first?.journeys.map(\.id) ?? []), Set(["journey-nanshan-2", "journey-futian-2"]))
     }
 }

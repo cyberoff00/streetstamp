@@ -248,6 +248,10 @@ final class LocationHub: ObservableObject {
         current.requestPermissionIfNeeded()
     }
 
+    func requestSingleRefresh() {
+        current.requestSingleLocation()
+    }
+
     func requestAlwaysPermissionIfNeeded() {
         if current === systemSource {
             systemSource.requestAlwaysAuthorizationIfNeeded()

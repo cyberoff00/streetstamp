@@ -347,15 +347,8 @@ final class SocialGraphStore: ObservableObject {
     }
 
     func reloadFromBackendIfPossible(accessToken: String?) async {
-        guard BackendConfig.isEnabled, let token = accessToken, !token.isEmpty else { return }
-        do {
-            let remote = try await BackendAPIClient.shared.fetchFriends(token: token)
-            let mapped = remote.map(Self.friendSnapshot(from:))
-            friends = mapped
-            persistToDisk()
-        } catch {
-            print("❌ fetch friends failed:", error)
-        }
+        guard let mapped = await fetchFriendSnapshotsFromBackend(accessToken: accessToken) else { return }
+        replaceFriends(mapped)
     }
 
     func refreshFriendProfileIfPossible(friendID: String, accessToken: String?) async {
@@ -370,6 +363,22 @@ final class SocialGraphStore: ObservableObject {
 
     func restoreFriendsIfEmpty(_ snapshots: [FriendProfileSnapshot]) {
         guard friends.isEmpty, !snapshots.isEmpty else { return }
+        friends = snapshots
+        persistToDisk()
+    }
+
+    func fetchFriendSnapshotsFromBackend(accessToken: String?) async -> [FriendProfileSnapshot]? {
+        guard BackendConfig.isEnabled, let token = accessToken, !token.isEmpty else { return nil }
+        do {
+            let remote = try await BackendAPIClient.shared.fetchFriends(token: token)
+            return remote.map(Self.friendSnapshot(from:))
+        } catch {
+            print("❌ fetch friends failed:", error)
+            return nil
+        }
+    }
+
+    func replaceFriends(_ snapshots: [FriendProfileSnapshot]) {
         friends = snapshots
         persistToDisk()
     }

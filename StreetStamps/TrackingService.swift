@@ -250,6 +250,7 @@ final class TrackingService: ObservableObject {
     private var latestRenderSegmentsForMap: [RouteSegment] = []
     private var latestRenderUnifiedSegmentsForMap: [RenderRouteSegment] = []
     private var latestRenderLiveTailForMap: [CLLocationCoordinate2D] = []
+    private let motionHub = MotionActivityHub.shared
     /// Dynamic debounce to reduce CPU/GPU wakeups without changing live-tracking UX.
     /// - While actively tracking (and not paused): keep original 10Hz.
     /// - Otherwise: relax updates; also respect iOS Low Power Mode.
@@ -610,7 +611,16 @@ final class TrackingService: ObservableObject {
         stationarySince = nil
         deferredWeakDriftJump = nil
         if !hub.isUsingMock {
-            hub.enterLowPower()
+            let action = LocationLifecycleDecision.postJourneyAction(
+                isPassiveEnabled: AppSettings.isPassiveLifelogEnabled,
+                authorizationStatus: hub.authorizationStatus
+            )
+            switch action {
+            case .startPassive:
+                hub.startPassiveLifelog(mode: AppSettings.lifelogBackgroundMode)
+            case .stayIdle, .requestSingleRefresh:
+                hub.stop()
+            }
         }
         resetLongStationaryReminderState()
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [longStationaryNotificationID])
@@ -932,8 +942,17 @@ final class TrackingService: ObservableObject {
             let nearAnchorRadius = max(dynamicMinMove * 1.2, weakDriftReturnRadiusMeters)
             let driftConfirmDistance = max(dynamicMinMove * 1.4, weakDriftConfirmationDistanceMeters)
 
-            let stationaryCandidate = (dRec < dynamicMinMove) && (speedUsed < stationarySpeedThreshold)
-            let exitCandidate = (dRec >= dynamicMinMove * stationaryExitMoveMultiplier) || (speedUsed >= stationarySpeedThreshold * 1.5)
+            let gpsStationaryCandidate = (dRec < dynamicMinMove) && (speedUsed < stationarySpeedThreshold)
+            let gpsExitCandidate = (dRec >= dynamicMinMove * stationaryExitMoveMultiplier) || (speedUsed >= stationarySpeedThreshold * 1.5)
+            let motion = motionHub.snapshot
+            let stationaryCandidate = TrackingMotionFusion.shouldTreatAsStationary(
+                gpsStationaryCandidate: gpsStationaryCandidate,
+                motion: motion
+            )
+            let exitCandidate = TrackingMotionFusion.shouldExitStationary(
+                gpsExitCandidate: gpsExitCandidate,
+                motion: motion
+            )
 
             if let deferred = deferredWeakDriftJump {
                 let anchorDistance = loc.distance(from: deferred.anchor)

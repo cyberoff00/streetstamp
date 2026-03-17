@@ -45,6 +45,8 @@
 	<string>我们需要您的位置来追踪您的旅程</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>我们需要您的位置来持续追踪您的旅程</string>
+	<key>NSMotionUsageDescription</key>
+	<string>用于识别步行、跑步和乘车状态，提升旅程与 Lifelog 记录准确度。</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>用于读取你当日步数并在 Lifelog 中展示每日记录。</string>
 	<key>NSHealthUpdateUsageDescription</key>

@@ -68,6 +68,7 @@ struct StoragePath: Sendable {
     var routeCacheURL: URL { cachesDir.appendingPathComponent("route_cache.json", isDirectory: false) }
     var trackTileManifestURL: URL { trackTilesDir.appendingPathComponent("manifest.json", isDirectory: false) }
     var journeyRepairSourcesURL: URL { cachesDir.appendingPathComponent("journey_repair_sources.json", isDirectory: false) }
+    var deletedJourneyIDsURL: URL { cachesDir.appendingPathComponent("deleted_journey_ids.json", isDirectory: false) }
 
     /// Marker file to ensure one-time migrations.
     var migrationMarkerV1: URL { userRoot.appendingPathComponent(".migrated_v1", isDirectory: false) }

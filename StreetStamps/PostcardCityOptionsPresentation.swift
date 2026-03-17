@@ -18,15 +18,15 @@ enum PostcardCityOptionsPresentation {
         }
 
         for journey in journeyCandidates {
-            let id = journey.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            let rawID = journey.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            let id = CityCollectionResolver.resolveCollectionKey(cityKey: rawID)
             if let prefetched = localizedCityNamesByID[id], !prefetched.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 appendOption(id: id, name: prefetched)
                 continue
             }
 
-            let resolved = CityPlacemarkResolver.displayTitle(
-                cityKey: id,
-                iso2: journey.countryISO2,
+            let resolved = CityDisplayResolver.title(
+                for: id,
                 fallbackTitle: journey.displayCityName,
                 locale: locale
             )
@@ -34,11 +34,15 @@ enum PostcardCityOptionsPresentation {
         }
 
         for city in cachedCities where !(city.isTemporary ?? false) {
-            let id = city.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            let id = CityCollectionResolver.resolveCollectionKey(cityKey: city.id.trimmingCharacters(in: .whitespacesAndNewlines))
             guard !id.isEmpty else { continue }
 
-            // Keep postcard city labels aligned with city-card naming rules.
-            let resolved = CityPlacemarkResolver.displayTitle(for: city, locale: locale)
+            // Keep postcard city labels aligned with collection-key naming rules.
+            let resolved = CityDisplayResolver.title(
+                for: id,
+                fallbackTitle: CityCollectionResolver.configuredTitle(for: id) ?? city.name,
+                locale: locale
+            )
             if !resolved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 appendOption(id: id, name: resolved)
                 continue

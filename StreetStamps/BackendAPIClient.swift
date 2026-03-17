@@ -114,6 +114,16 @@ struct JourneyLikeActionResponse: Codable {
     var likedByMe: Bool
 }
 
+struct BackendJourneyLikerItem: Codable {
+    var userID: String
+    var displayName: String
+    var likedAt: Date
+}
+
+struct BackendJourneyLikersResponse: Codable {
+    var items: [BackendJourneyLikerItem]
+}
+
 struct BackendNotificationItem: Codable, Identifiable {
     var id: String
     var type: String
@@ -945,6 +955,24 @@ final class BackendAPIClient {
             out[item.journeyID] = (max(0, item.likes), item.likedByMe ?? false)
         }
         return out
+    }
+
+    func fetchJourneyLikers(
+        token: String,
+        ownerUserID: String,
+        journeyID: String
+    ) async throws -> [JourneyLiker] {
+        let owner = encodePathSegment(ownerUserID)
+        let journey = encodePathSegment(journeyID)
+        let (data, _) = try await request(
+            path: "/v1/journeys/\(owner)/\(journey)/likes",
+            method: "GET",
+            token: token
+        )
+        let response = try decoder.decode(BackendJourneyLikersResponse.self, from: data)
+        return response.items.map {
+            JourneyLiker(id: $0.userID, name: $0.displayName, likedAt: $0.likedAt)
+        }
     }
 
     func likeJourney(token: String, ownerUserID: String, journeyID: String) async throws -> JourneyLikeActionResponse {

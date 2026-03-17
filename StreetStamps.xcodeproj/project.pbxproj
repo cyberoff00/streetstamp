@@ -804,7 +804,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = StreetStampsWatch/StreetStampsWatch.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_TEAM = XNPB3GQ7SF;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = StreetStampsWatch/Info.plist;
@@ -829,7 +829,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = StreetStampsWatch/StreetStampsWatch.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_TEAM = XNPB3GQ7SF;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = StreetStampsWatch/Info.plist;

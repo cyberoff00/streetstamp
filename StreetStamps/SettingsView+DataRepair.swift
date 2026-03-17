@@ -67,33 +67,27 @@ extension SettingsView {
         isRepairingData = true
 
         Task {
-            let userID = sessionStore.activeLocalProfileID
-            let paths = StoragePath(userID: userID)
             do {
-                let report = try CurrentUserRepairDiagnostic.buildReport(
+                let userID = sessionStore.activeLocalProfileID
+                let paths = StoragePath(userID: userID)
+                let result = try await ManualDeviceRepairService.repairAllDeviceData(
                     activeLocalProfileID: userID,
                     currentGuestScopedUserID: sessionStore.currentGuestScopedUserID,
                     currentAccountUserID: sessionStore.accountUserID
                 )
-                let result = try CurrentUserRepairService.repairCurrentUser(
-                    activeLocalProfileID: userID,
-                    report: report
-                )
-
-                try CityNameRepairService.rebuildCityCache(
-                    journeys: loadJourneysForRepair(ids: result.keptJourneyIDs, paths: paths),
-                    paths: paths
-                )
 
                 journeyStore.rebind(paths: paths)
-                journeyStore.load()
                 cityCache.rebind(paths: paths)
+                await journeyStore.loadAsync()
+                cityCache.rebuildFromJourneyStore()
 
                 isRepairingData = false
                 repairMessage = """
                 已修复当前用户数据。
-                保留旅程 \(result.keptJourneyIDs.count) 个
-                隔离旅程 \(result.quarantinedJourneyIDs.count) 个
+                扫描来源 \(result.scannedSourceUserIDs.count) 个
+                补回旅程 \(result.importedJourneyIDs.count) 个
+                重建语义 \(result.rebuiltSemanticJourneyIDs.count) 个
+                跳过已删除旅程 \(result.skippedDeletedJourneyIDs.count) 个
                 """
                 showRepairMessage = true
             } catch {
@@ -102,11 +96,5 @@ extension SettingsView {
                 showRepairMessage = true
             }
         }
-    }
-
-    @MainActor
-    private func loadJourneysForRepair(ids: [String], paths: StoragePath) -> [JourneyRoute] {
-        let fileStore = JourneysFileStore(baseURL: paths.journeysDir)
-        return ids.compactMap { try? fileStore.loadJourney(id: $0) }
     }
 }

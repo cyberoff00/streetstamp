@@ -471,6 +471,11 @@
 "postcard_send_failed" = "發送失敗，请稍後重試。";
 "postcard_send_to" = "寄给";
 "postcard_sending" = "發送中...";
+"postcard_sending_status" = "發送中";
+"postcard_send_queued_detail" = "已加入發送佇列，正在確認是否發送成功";
+"postcard_failed_status" = "發送失敗";
+"postcard_failed_retry_detail" = "發送失敗，可重試";
+"postcard_sent_status" = "已發送";
 "postcard_sent_empty" = "暂时还没有寄出明信片";
 "postcard_sent_success_title" = "明信片已寄出";
 "postcard_sync_error_format" = "明信片同步异常：%@";

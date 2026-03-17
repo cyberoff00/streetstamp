@@ -13,7 +13,7 @@ struct MainTabLayout {
     }
 
     static let bottomTabs: [Item] = [
-        Item(tab: .start, icon: .asset("tab_start_icon")),
+        Item(tab: .start, icon: .asset("tab_lifelog_icon")),
         Item(tab: .cities, icon: .asset("tab_memory_icon")),
         Item(tab: .lifelog, icon: .asset("tab_cities_icon")),
         Item(tab: .friends, icon: .asset("tab_friends_icon")),

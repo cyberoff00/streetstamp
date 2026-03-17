@@ -2,15 +2,43 @@ import SwiftUI
 import PhotosUI
 import CoreLocation
 
+struct PostcardRecipient: Equatable {
+    let userID: String
+    let displayName: String
+}
+
+enum PostcardComposerPresentation {
+    static func initialRecipient(
+        prefilledFriendID: String?,
+        prefilledFriendName: String?
+    ) -> PostcardRecipient? {
+        let friendID = prefilledFriendID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let friendName = prefilledFriendName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !friendID.isEmpty, !friendName.isEmpty else { return nil }
+        return PostcardRecipient(userID: friendID, displayName: friendName)
+    }
+
+    static func canPreview(
+        recipient: PostcardRecipient?,
+        selectedCityID: String,
+        localImagePath: String,
+        messageText: String
+    ) -> Bool {
+        recipient != nil &&
+        !selectedCityID.isEmpty &&
+        !localImagePath.isEmpty &&
+        !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
 struct PostcardComposerView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var flow: AppFlowCoordinator
     @EnvironmentObject private var journeyStore: JourneyStore
+    @EnvironmentObject private var socialStore: SocialGraphStore
 
-    let friendID: String
-    let friendName: String
-    let onSent: (() -> Void)? = nil
+    let onSent: (() -> Void)?
 
     @State private var selectedCityID: String = ""
     @State private var selectedCityName: String = ""
@@ -22,6 +50,22 @@ struct PostcardComposerView: View {
     @State private var loadingPhoto = false
     @State private var localizedCityNamesByID: [String: String] = [:]
     @State private var sidebarHideToken = "\(PostcardSidebarVisibilityScope.composer.token)-\(UUID().uuidString)"
+    @State private var selectedRecipient: PostcardRecipient?
+    @State private var showRecipientPicker = false
+
+    init(
+        friendID: String? = nil,
+        friendName: String? = nil,
+        onSent: (() -> Void)? = nil
+    ) {
+        self.onSent = onSent
+        _selectedRecipient = State(
+            initialValue: PostcardComposerPresentation.initialRecipient(
+                prefilledFriendID: friendID,
+                prefilledFriendName: friendName
+            )
+        )
+    }
 
     private var cityOptions: [(id: String, name: String)] {
         PostcardCityOptionsPresentation.buildOptions(
@@ -69,14 +113,15 @@ struct PostcardComposerView: View {
     }
 
     private func localizedCityName(for journey: JourneyRoute) -> String {
-        let key = journey.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = CityCollectionResolver.resolveCollectionKey(
+            cityKey: journey.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
         if let cachedCity = cityCache.cachedCities.first(where: { $0.id == key && !($0.isTemporary ?? false) }) {
             return localizedCityName(for: cachedCity)
         }
 
-        return CityPlacemarkResolver.displayTitle(
-            cityKey: key,
-            iso2: journey.countryISO2,
+        return CityDisplayResolver.title(
+            for: key,
             fallbackTitle: journey.displayCityName,
             locale: .current
         )
@@ -87,7 +132,9 @@ struct PostcardComposerView: View {
     }
 
     private func resolvedLocalizedCityName(for journey: JourneyRoute) -> String {
-        let key = journey.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = CityCollectionResolver.resolveCollectionKey(
+            cityKey: journey.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
         return localizedCityNamesByID[key] ?? localizedCityName(for: journey)
     }
 
@@ -106,7 +153,7 @@ struct PostcardComposerView: View {
             }.first
             guard let anchor, anchor.isValid else { continue }
 
-            if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key, parentRegionKey: city.reservedParentRegionKey),
+            if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key, parentRegionKey: city.parentScopeKey),
                !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 let resolved = normalizedPrefetchedCityName(for: city, candidateTitle: cached)
                 await MainActor.run { localizedCityNamesByID[key] = resolved }
@@ -114,7 +161,7 @@ struct PostcardComposerView: View {
             }
 
             let loc = CLLocation(latitude: anchor.latitude, longitude: anchor.longitude)
-            if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key, parentRegionKey: city.reservedParentRegionKey),
+            if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key, parentRegionKey: city.parentScopeKey),
                !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 let resolved = normalizedPrefetchedCityName(for: city, candidateTitle: title)
                 await MainActor.run { localizedCityNamesByID[key] = resolved }
@@ -123,14 +170,19 @@ struct PostcardComposerView: View {
     }
 
     private var canPreview: Bool {
-        !selectedCityID.isEmpty && !localImagePath.isEmpty && !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        PostcardComposerPresentation.canPreview(
+            recipient: selectedRecipient,
+            selectedCityID: selectedCityID,
+            localImagePath: localImagePath,
+            messageText: messageText
+        )
     }
 
     private var cityRefreshTaskID: String {
         cityCache.cachedCities.map { city in
             let localizedCount = city.localizedDisplayNameByLocale?.count ?? 0
-            let levelCount = city.reservedAvailableLevelNames?.count ?? 0
-            return "\(city.id)|\(city.name)|\(city.reservedLevelRaw ?? "")|\(city.reservedParentRegionKey ?? "")|\(city.reservedAvailableLevelNamesLocaleID ?? "")|\(localizedCount)|\(levelCount)"
+            let levelCount = city.availableLevelNames?.count ?? 0
+            return "\(city.id)|\(city.name)|\(city.selectedDisplayLevelRaw ?? "")|\(city.parentScopeKey ?? "")|\(city.availableLevelNamesLocaleID ?? "")|\(localizedCount)|\(levelCount)"
         }.joined(separator: ";")
     }
 
@@ -230,16 +282,48 @@ struct PostcardComposerView: View {
 
     private var recipientCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(L10n.t("postcard_send_to"))
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(FigmaTheme.subtext)
-            Text(friendName)
-                .font(.system(size: 20, weight: .bold))
-                .foregroundColor(FigmaTheme.text)
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(L10n.t("postcard_send_to"))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(FigmaTheme.subtext)
+                    if let selectedRecipient {
+                        Text(selectedRecipient.displayName)
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(FigmaTheme.text)
+                    } else {
+                        Text("添加收件人")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(FigmaTheme.subtext)
+                    }
+                }
+
+                Spacer(minLength: 12)
+
+                if selectedRecipient != nil {
+                    Button("更换") {
+                        showRecipientPicker = true
+                    }
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(FigmaTheme.primary)
+                    .buttonStyle(.plain)
+                } else {
+                    Button("添加") {
+                        showRecipientPicker = true
+                    }
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(FigmaTheme.primary)
+                    .buttonStyle(.plain)
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
         .postcardFeatureCardStyle()
+        .contentShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+        .onTapGesture {
+            showRecipientPicker = true
+        }
     }
 
     private var cityPickerCard: some View {
@@ -326,21 +410,23 @@ struct PostcardComposerView: View {
 
     private var previewLink: some View {
         NavigationLink(isActive: $showPreview) {
-            PostcardPreviewView(
-                friendID: friendID,
-                friendName: friendName,
-                selectedCityID: selectedCityID,
-                selectedCityName: selectedCityName,
-                selectedCityJourneyCount: selectedCityJourneyCount,
-                messageText: messageText,
-                localImagePath: localImagePath,
-                selectedImage: selectedImage,
-                allowedCityIDs: cityOptions.map(\.id),
-                onSent: {
-                    onSent?()
-                    dismiss()
-                }
-            )
+            if let selectedRecipient {
+                PostcardPreviewView(
+                    friendID: selectedRecipient.userID,
+                    friendName: selectedRecipient.displayName,
+                    selectedCityID: selectedCityID,
+                    selectedCityName: selectedCityName,
+                    selectedCityJourneyCount: selectedCityJourneyCount,
+                    messageText: messageText,
+                    localImagePath: localImagePath,
+                    selectedImage: selectedImage,
+                    allowedCityIDs: cityOptions.map(\.id),
+                    onSent: {
+                        onSent?()
+                        dismiss()
+                    }
+                )
+            }
         } label: {
             EmptyView()
         }
@@ -360,6 +446,14 @@ struct PostcardComposerView: View {
         }
         .buttonStyle(.plain)
         .disabled(!canPreview)
+        .sheet(isPresented: $showRecipientPicker) {
+            RecipientPickerSheet(
+                friends: socialStore.friends,
+                selectedRecipient: selectedRecipient
+            ) { recipient in
+                selectedRecipient = recipient
+            }
+        }
     }
 }
 
@@ -369,5 +463,55 @@ private extension View {
             .background(Color.white)
             .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
             .shadow(color: Color.black.opacity(0.04), radius: 20, x: 0, y: 8)
+    }
+}
+
+private struct RecipientPickerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let friends: [FriendProfileSnapshot]
+    let selectedRecipient: PostcardRecipient?
+    let onSelect: (PostcardRecipient) -> Void
+
+    var body: some View {
+        NavigationStack {
+            List(friends) { friend in
+                Button {
+                    onSelect(
+                        PostcardRecipient(
+                            userID: friend.id,
+                            displayName: friend.displayName
+                        )
+                    )
+                    dismiss()
+                } label: {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(friend.displayName)
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(FigmaTheme.text)
+                            Text(friend.handle)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(FigmaTheme.subtext)
+                        }
+                        Spacer()
+                        if selectedRecipient?.userID == friend.id {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(FigmaTheme.primary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            .navigationTitle("选择收件人")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(L10n.t("cancel")) {
+                        dismiss()
+                    }
+                }
+            }
+        }
     }
 }

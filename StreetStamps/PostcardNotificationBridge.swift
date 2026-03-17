@@ -42,10 +42,11 @@ final class PostcardNotificationBridge {
         let title = (item.fromDisplayName?.isEmpty == false)
             ? String(format: NSLocalizedString("postcard_received_title_format", comment: ""), item.fromDisplayName!)
             : NSLocalizedString("postcard_received_title_fallback", comment: "")
-        let city = CityDisplayTitlePresentation.title(
-            cityKey: item.cityID,
-            iso2: nil,
-            fallbackTitle: item.cityName ?? item.cityID
+        let rawCityID = item.cityID ?? ""
+        let collectionKey = CityCollectionResolver.resolveCollectionKey(cityKey: rawCityID)
+        let city = CityDisplayResolver.title(
+            for: collectionKey,
+            fallbackTitle: item.cityName ?? rawCityID
         )
         let body = city.isEmpty
             ? item.message

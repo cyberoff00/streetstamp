@@ -2,6 +2,11 @@ import XCTest
 @testable import StreetStamps
 
 final class CityMembershipIndexTests: XCTestCase {
+    override func tearDown() {
+        super.tearDown()
+        CityCollectionResolver.resetForTesting()
+    }
+
     func test_encodingAndDecodingPreservesEntries() throws {
         let index = CityMembershipIndex(entries: [
             "Paris|FR": CityMembershipEntry(
@@ -87,6 +92,49 @@ final class CityMembershipIndexTests: XCTestCase {
         XCTAssertEqual(index.entries["Tokyo|JP"], untouched)
         XCTAssertEqual(index.entries["Paris|FR"]?.journeyIDs, ["journey-1"])
         XCTAssertEqual(index.entries["Paris|FR"]?.memories, 3)
+    }
+
+    func test_applyJourneyMutationKeepsMembershipAtIdentityCityKey() {
+        CityCollectionResolver.setTestingMappings(
+            cityToCollection: ["Nanshan District|CN": "Shenzhen|CN"],
+            collectionTitles: ["Shenzhen|CN": "Shenzhen"]
+        )
+
+        var index = CityMembershipIndex()
+        let journey = makeJourney(
+            id: "journey-1",
+            cityKey: "Nanshan District|CN",
+            cityName: "Nanshan District",
+            iso: "CN",
+            memoryCount: 2
+        )
+
+        index.applyJourneyMutation(oldJourney: nil, newJourney: journey)
+
+        XCTAssertEqual(index.entries["Nanshan District|CN"]?.cityKey, "Nanshan District|CN")
+        XCTAssertEqual(index.entries["Nanshan District|CN"]?.cityName, "Nanshan District")
+        XCTAssertEqual(index.entries["Nanshan District|CN"]?.journeyIDs, ["journey-1"])
+        XCTAssertEqual(index.entries["Nanshan District|CN"]?.memories, 2)
+        XCTAssertNil(index.entries["Shenzhen|CN"])
+    }
+
+    func test_applyJourneyMutationDoesNotPromoteIdentityToPreferredLevelKey() {
+        let parentRegionKey = "membership-raw-key-\(UUID().uuidString)"
+        CityLevelPreferenceStore.shared.setPreferredLevel(.admin, for: parentRegionKey)
+
+        var index = CityMembershipIndex()
+        let journey = makeJourney(
+            id: "journey-raw-key",
+            cityKey: "Nanshan District|CN",
+            cityName: "Nanshan District",
+            iso: "CN",
+            memoryCount: 1
+        )
+
+        index.applyJourneyMutation(oldJourney: nil, newJourney: journey)
+
+        XCTAssertNotNil(index.entries["Nanshan District|CN"])
+        XCTAssertNil(index.entries["Shenzhen|CN"])
     }
 
     private func makeJourney(

@@ -158,7 +158,10 @@ struct CityStampLibraryView: View {
         }
         .alert(L10n.t("delete_city_alert_title"), isPresented: $showDeleteCityAlert, presenting: cityToDelete) { city in
             Button(L10n.t("delete"), role: .destructive) {
-                cache.deleteCity(id: city.id)
+                let keys = city.sourceCityKeys.isEmpty ? [city.id] : city.sourceCityKeys
+                for key in keys {
+                    cache.deleteCity(id: key)
+                }
                 vm.load(journeyStore: store, cityCache: cache)
             }
             Button(L10n.t("cancel"), role: .cancel) {}

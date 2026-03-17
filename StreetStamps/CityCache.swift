@@ -125,8 +125,10 @@ struct LatLon: Codable {
 
 // MARK: - CachedCity (disk)
 struct CachedCity: Identifiable, Codable {
-    let id: String                 // canonical: "name|ISO2" or temp: "__TMP__|journeyId"
+    let id: String                 // identity key; canonical: "name|ISO2" or temp: "__TMP__|journeyId"
+    let cityKey: String
     let name: String
+    let canonicalNameEN: String
     let countryISO2: String?
 
     var journeyIds: [String]
@@ -139,17 +141,167 @@ struct CachedCity: Identifiable, Codable {
     var thumbnailBasePath: String?
     var thumbnailRoutePath: String?
 
-    // Reserved from the city's first journey start (for city-level picker display stability).
-    var reservedLevelRaw: String? = nil
-    var reservedParentRegionKey: String? = nil
-    var reservedAvailableLevelNames: [String: String]? = nil
-    var reservedAvailableLevelNamesLocaleID: String? = nil
+    // Identity/display split:
+    // - identityLevelRaw is inferred from cityKey and does not move with display changes.
+    // - selectedDisplayLevelRaw is the current UI level and can move upward.
+    var identityLevelRaw: String? = nil
+    var selectedDisplayLevelRaw: String? = nil
+    var parentScopeKey: String? = nil
+    var availableLevelNames: [String: String]? = nil
+    var availableLevelNamesLocaleID: String? = nil
 
     /// Persisted localized display names keyed by locale identifier (e.g. "zh-Hans": "上海").
     /// Populated by CityLibraryVM after successful reverse-geocode localization.
     var localizedDisplayNameByLocale: [String: String]? = nil
 
     var isTemporary: Bool? = false
+
+    init(
+        id: String,
+        cityKey: String? = nil,
+        name: String,
+        canonicalNameEN: String? = nil,
+        countryISO2: String?,
+        journeyIds: [String],
+        explorations: Int,
+        memories: Int,
+        boundary: [LatLon]?,
+        anchor: LatLon?,
+        thumbnailBasePath: String?,
+        thumbnailRoutePath: String?,
+        identityLevelRaw: String? = nil,
+        selectedDisplayLevelRaw: String? = nil,
+        parentScopeKey: String? = nil,
+        availableLevelNames: [String: String]? = nil,
+        availableLevelNamesLocaleID: String? = nil,
+        localizedDisplayNameByLocale: [String: String]? = nil,
+        isTemporary: Bool? = false,
+        reservedLevelRaw: String? = nil,
+        reservedParentRegionKey: String? = nil,
+        reservedAvailableLevelNames: [String: String]? = nil,
+        reservedAvailableLevelNamesLocaleID: String? = nil
+    ) {
+        self.id = id
+        self.cityKey = (cityKey ?? id).trimmingCharacters(in: .whitespacesAndNewlines)
+        self.name = name
+        self.canonicalNameEN = canonicalNameEN ?? name
+        self.countryISO2 = countryISO2
+        self.journeyIds = journeyIds
+        self.explorations = explorations
+        self.memories = memories
+        self.boundary = boundary
+        self.anchor = anchor
+        self.thumbnailBasePath = thumbnailBasePath
+        self.thumbnailRoutePath = thumbnailRoutePath
+        self.identityLevelRaw = identityLevelRaw
+        self.selectedDisplayLevelRaw = selectedDisplayLevelRaw ?? reservedLevelRaw
+        self.parentScopeKey = parentScopeKey ?? reservedParentRegionKey
+        self.availableLevelNames = availableLevelNames ?? reservedAvailableLevelNames
+        self.availableLevelNamesLocaleID = availableLevelNamesLocaleID ?? reservedAvailableLevelNamesLocaleID
+        self.localizedDisplayNameByLocale = localizedDisplayNameByLocale
+        self.isTemporary = isTemporary
+    }
+
+    var reservedLevelRaw: String? {
+        get { selectedDisplayLevelRaw }
+        set { selectedDisplayLevelRaw = newValue }
+    }
+
+    var reservedParentRegionKey: String? {
+        get { parentScopeKey }
+        set { parentScopeKey = newValue }
+    }
+
+    var reservedAvailableLevelNames: [String: String]? {
+        get { availableLevelNames }
+        set { availableLevelNames = newValue }
+    }
+
+    var reservedAvailableLevelNamesLocaleID: String? {
+        get { availableLevelNamesLocaleID }
+        set { availableLevelNamesLocaleID = newValue }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case cityKey
+        case name
+        case canonicalNameEN
+        case countryISO2
+        case journeyIds
+        case explorations
+        case memories
+        case boundary
+        case anchor
+        case thumbnailBasePath
+        case thumbnailRoutePath
+        case identityLevelRaw
+        case selectedDisplayLevelRaw
+        case parentScopeKey
+        case availableLevelNames
+        case availableLevelNamesLocaleID
+        case localizedDisplayNameByLocale
+        case isTemporary
+        case reservedLevelRaw
+        case reservedParentRegionKey
+        case reservedAvailableLevelNames
+        case reservedAvailableLevelNamesLocaleID
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let id = try container.decode(String.self, forKey: .id)
+        let name = try container.decode(String.self, forKey: .name)
+
+        self.init(
+            id: id,
+            cityKey: try container.decodeIfPresent(String.self, forKey: .cityKey),
+            name: name,
+            canonicalNameEN: try container.decodeIfPresent(String.self, forKey: .canonicalNameEN),
+            countryISO2: try container.decodeIfPresent(String.self, forKey: .countryISO2),
+            journeyIds: try container.decodeIfPresent([String].self, forKey: .journeyIds) ?? [],
+            explorations: try container.decodeIfPresent(Int.self, forKey: .explorations) ?? 0,
+            memories: try container.decodeIfPresent(Int.self, forKey: .memories) ?? 0,
+            boundary: try container.decodeIfPresent([LatLon].self, forKey: .boundary),
+            anchor: try container.decodeIfPresent(LatLon.self, forKey: .anchor),
+            thumbnailBasePath: try container.decodeIfPresent(String.self, forKey: .thumbnailBasePath),
+            thumbnailRoutePath: try container.decodeIfPresent(String.self, forKey: .thumbnailRoutePath),
+            identityLevelRaw: try container.decodeIfPresent(String.self, forKey: .identityLevelRaw),
+            selectedDisplayLevelRaw: try container.decodeIfPresent(String.self, forKey: .selectedDisplayLevelRaw),
+            parentScopeKey: try container.decodeIfPresent(String.self, forKey: .parentScopeKey),
+            availableLevelNames: try container.decodeIfPresent([String: String].self, forKey: .availableLevelNames),
+            availableLevelNamesLocaleID: try container.decodeIfPresent(String.self, forKey: .availableLevelNamesLocaleID),
+            localizedDisplayNameByLocale: try container.decodeIfPresent([String: String].self, forKey: .localizedDisplayNameByLocale),
+            isTemporary: try container.decodeIfPresent(Bool.self, forKey: .isTemporary),
+            reservedLevelRaw: try container.decodeIfPresent(String.self, forKey: .reservedLevelRaw),
+            reservedParentRegionKey: try container.decodeIfPresent(String.self, forKey: .reservedParentRegionKey),
+            reservedAvailableLevelNames: try container.decodeIfPresent([String: String].self, forKey: .reservedAvailableLevelNames),
+            reservedAvailableLevelNamesLocaleID: try container.decodeIfPresent(String.self, forKey: .reservedAvailableLevelNamesLocaleID)
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(cityKey, forKey: .cityKey)
+        try container.encode(name, forKey: .name)
+        try container.encode(canonicalNameEN, forKey: .canonicalNameEN)
+        try container.encodeIfPresent(countryISO2, forKey: .countryISO2)
+        try container.encode(journeyIds, forKey: .journeyIds)
+        try container.encode(explorations, forKey: .explorations)
+        try container.encode(memories, forKey: .memories)
+        try container.encodeIfPresent(boundary, forKey: .boundary)
+        try container.encodeIfPresent(anchor, forKey: .anchor)
+        try container.encodeIfPresent(thumbnailBasePath, forKey: .thumbnailBasePath)
+        try container.encodeIfPresent(thumbnailRoutePath, forKey: .thumbnailRoutePath)
+        try container.encodeIfPresent(identityLevelRaw, forKey: .identityLevelRaw)
+        try container.encodeIfPresent(selectedDisplayLevelRaw, forKey: .selectedDisplayLevelRaw)
+        try container.encodeIfPresent(parentScopeKey, forKey: .parentScopeKey)
+        try container.encodeIfPresent(availableLevelNames, forKey: .availableLevelNames)
+        try container.encodeIfPresent(availableLevelNamesLocaleID, forKey: .availableLevelNamesLocaleID)
+        try container.encodeIfPresent(localizedDisplayNameByLocale, forKey: .localizedDisplayNameByLocale)
+        try container.encodeIfPresent(isTemporary, forKey: .isTemporary)
+    }
 }
 
 extension CachedCity: @unchecked Sendable {}
@@ -643,7 +795,7 @@ final class CityCache: ObservableObject {
                !existing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 continue
             }
-            let scope = CityLevelPreferenceStore.shared.displayCacheScope(for: city.reservedParentRegionKey)
+            let scope = CityLevelPreferenceStore.shared.displayCacheScope(for: city.parentScopeKey)
             let cacheKey = "\(city.id)|\(localeID)|\(scope)"
             if let title = dict[cacheKey]?.trimmingCharacters(in: .whitespacesAndNewlines),
                !title.isEmpty {
@@ -733,7 +885,9 @@ final class CityCache: ObservableObject {
             cachedCities[targetIdx].memories += addedMemories
             cachedCities[targetIdx] = CachedCity(
                 id: cachedCities[targetIdx].id,
+                cityKey: cachedCities[targetIdx].cityKey,
                 name: targetCityName,
+                canonicalNameEN: cachedCities[targetIdx].canonicalNameEN,
                 countryISO2: normalizedISO ?? cachedCities[targetIdx].countryISO2,
                 journeyIds: cachedCities[targetIdx].journeyIds,
                 explorations: cachedCities[targetIdx].explorations,
@@ -742,17 +896,20 @@ final class CityCache: ObservableObject {
                 anchor: cachedCities[targetIdx].anchor ?? anchor.map(LatLon.init) ?? sourceAnchor,
                 thumbnailBasePath: cachedCities[targetIdx].thumbnailBasePath,
                 thumbnailRoutePath: cachedCities[targetIdx].thumbnailRoutePath,
-                reservedLevelRaw: cachedCities[targetIdx].reservedLevelRaw,
-                reservedParentRegionKey: cachedCities[targetIdx].reservedParentRegionKey,
-                reservedAvailableLevelNames: cachedCities[targetIdx].reservedAvailableLevelNames,
-                reservedAvailableLevelNamesLocaleID: cachedCities[targetIdx].reservedAvailableLevelNamesLocaleID,
+                identityLevelRaw: cachedCities[targetIdx].identityLevelRaw,
+                selectedDisplayLevelRaw: cachedCities[targetIdx].selectedDisplayLevelRaw,
+                parentScopeKey: cachedCities[targetIdx].parentScopeKey,
+                availableLevelNames: cachedCities[targetIdx].availableLevelNames,
+                availableLevelNamesLocaleID: cachedCities[targetIdx].availableLevelNamesLocaleID,
                 localizedDisplayNameByLocale: cachedCities[targetIdx].localizedDisplayNameByLocale,
                 isTemporary: cachedCities[targetIdx].isTemporary
             )
         } else {
             let created = CachedCity(
                 id: targetCityKey,
+                cityKey: targetCityKey,
                 name: targetCityName,
+                canonicalNameEN: targetCityName,
                 countryISO2: normalizedISO,
                 journeyIds: movedIDs,
                 explorations: movedIDs.count,
@@ -761,10 +918,11 @@ final class CityCache: ObservableObject {
                 anchor: anchor.map(LatLon.init) ?? sourceAnchor,
                 thumbnailBasePath: nil,
                 thumbnailRoutePath: nil,
-                reservedLevelRaw: nil,
-                reservedParentRegionKey: nil,
-                reservedAvailableLevelNames: nil,
-                reservedAvailableLevelNamesLocaleID: nil,
+                identityLevelRaw: nil,
+                selectedDisplayLevelRaw: nil,
+                parentScopeKey: nil,
+                availableLevelNames: nil,
+                availableLevelNamesLocaleID: nil,
                 isTemporary: false
             )
             cachedCities.append(created)
@@ -798,19 +956,27 @@ final class CityCache: ObservableObject {
             )
         )
 
-        if let level, (force || cachedCities[idx].reservedLevelRaw == nil) {
-            cachedCities[idx].reservedLevelRaw = level.rawValue
+        if let level, (force || cachedCities[idx].selectedDisplayLevelRaw == nil) {
+            cachedCities[idx].selectedDisplayLevelRaw = level.rawValue
         }
         if let parentRegionKey, !parentRegionKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            cachedCities[idx].reservedParentRegionKey = parentRegionKey
+            cachedCities[idx].parentScopeKey = parentRegionKey
         }
         if let availableLevels {
             let mapped = Dictionary(uniqueKeysWithValues: availableLevels.map { ($0.key.rawValue, $0.value) })
-            cachedCities[idx].reservedAvailableLevelNames = mapped
+            cachedCities[idx].availableLevelNames = mapped
             let fallbackLocaleID = LanguagePreference.shared.effectiveLocaleIdentifier
             let localeID = (availableLevelsLocaleIdentifier ?? fallbackLocaleID)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            cachedCities[idx].reservedAvailableLevelNamesLocaleID = localeID.isEmpty ? fallbackLocaleID : localeID
+            cachedCities[idx].availableLevelNamesLocaleID = localeID.isEmpty ? fallbackLocaleID : localeID
+            if cachedCities[idx].identityLevelRaw == nil {
+                let inferred = CityPlacemarkResolver.identityLevel(
+                    cityKey: cachedCities[idx].cityKey,
+                    availableLevelNames: availableLevels,
+                    iso2: cachedCities[idx].countryISO2
+                )
+                cachedCities[idx].identityLevelRaw = inferred?.rawValue ?? level?.rawValue
+            }
         }
         if let anchor, anchor.isValid, cachedCities[idx].anchor == nil {
             cachedCities[idx].anchor = LatLon(anchor)
@@ -944,7 +1110,9 @@ final class CityCache: ObservableObject {
 
         return CachedCity(
             id: entry.cityKey,
+            cityKey: entry.cityKey,
             name: entry.cityName,
+            canonicalNameEN: previous?.canonicalNameEN ?? entry.cityName,
             countryISO2: entry.countryISO2,
             journeyIds: entry.journeyIDs,
             explorations: entry.explorations,
@@ -953,10 +1121,11 @@ final class CityCache: ObservableObject {
             anchor: anchorCoord.map(LatLon.init),
             thumbnailBasePath: previous?.thumbnailBasePath,
             thumbnailRoutePath: previous?.thumbnailRoutePath,
-            reservedLevelRaw: previous?.reservedLevelRaw,
-            reservedParentRegionKey: previous?.reservedParentRegionKey,
-            reservedAvailableLevelNames: previous?.reservedAvailableLevelNames,
-            reservedAvailableLevelNamesLocaleID: previous?.reservedAvailableLevelNamesLocaleID,
+            identityLevelRaw: previous?.identityLevelRaw,
+            selectedDisplayLevelRaw: previous?.selectedDisplayLevelRaw,
+            parentScopeKey: previous?.parentScopeKey,
+            availableLevelNames: previous?.availableLevelNames,
+            availableLevelNamesLocaleID: previous?.availableLevelNamesLocaleID,
             localizedDisplayNameByLocale: previous?.localizedDisplayNameByLocale,
             isTemporary: false
         )
@@ -1034,15 +1203,15 @@ final class CityCache: ObservableObject {
                 guard let self else { return }
 
                 if let r = result {
-                    let preferredKey = CityPlacemarkResolver.preferredStableCityKey(canonicalResult: r)
-                    let preferredName = CityPlacemarkResolver.stableCityName(
-                        from: preferredKey,
+                    let identityKey = r.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let identityName = CityPlacemarkResolver.stableCityName(
+                        from: identityKey,
                         fallback: r.cityName
                     )
                     _ = self.finishCompleteWithCanonical(
                         journey: journey,
-                        canonicalKey: preferredKey,
-                        canonicalName: preferredName,
+                        canonicalKey: identityKey,
+                        canonicalName: identityName,
                         iso: (r.iso2 ?? ""),
                         reserveLevel: r.level,
                         reserveParentRegionKey: r.parentRegionKey,
@@ -1056,7 +1225,11 @@ final class CityCache: ObservableObject {
                 // Final fallback - if no reliable key exists, skip card creation.
                 let fallbackKey = self.normalizedCardKey(journey.canonicalCityKeyFallback)
                 guard let fallbackKey else { return }
-                let fallbackName = journey.displayCityName
+                let collectionKey = CityCollectionResolver.resolveCollectionKey(cityKey: fallbackKey)
+                let fallbackName = CityDisplayResolver.title(
+                    for: collectionKey,
+                    fallbackTitle: journey.displayCityName
+                )
                 let fallbackIso = (journey.countryISO2 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
 
                 _ = self.finishCompleteWithCanonical(
@@ -1079,7 +1252,11 @@ final class CityCache: ObservableObject {
         guard let fallbackKey = normalizedCardKey(journey.canonicalCityKeyFallback) else {
             return nil
         }
-        let fallbackName = journey.displayCityName
+        let collectionKey = CityCollectionResolver.resolveCollectionKey(cityKey: fallbackKey)
+        let fallbackName = CityDisplayResolver.title(
+            for: collectionKey,
+            fallbackTitle: journey.displayCityName
+        )
         let fallbackIso = (journey.countryISO2 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         return finishCompleteWithCanonical(
             journey: journey,
@@ -1104,10 +1281,10 @@ final class CityCache: ObservableObject {
                 cityKey: c.id,
                 iso2: c.countryISO2,
                 fallbackTitle: c.name,
-                availableLevelNamesRaw: c.reservedAvailableLevelNames,
-                storedAvailableLevelNamesLocaleID: c.reservedAvailableLevelNamesLocaleID,
-                parentRegionKey: c.reservedParentRegionKey,
-                preferredLevel: c.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
+                availableLevelNamesRaw: c.availableLevelNames,
+                storedAvailableLevelNamesLocaleID: c.availableLevelNamesLocaleID,
+                parentRegionKey: c.parentScopeKey,
+                preferredLevel: c.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
                 localizedDisplayNameByLocale: c.localizedDisplayNameByLocale,
                 locale: .current
             ),
@@ -1488,10 +1665,10 @@ final class CityCache: ObservableObject {
                 cityKey: c.id,
                 iso2: c.countryISO2,
                 fallbackTitle: c.name,
-                availableLevelNamesRaw: c.reservedAvailableLevelNames,
-                storedAvailableLevelNamesLocaleID: c.reservedAvailableLevelNamesLocaleID,
-                parentRegionKey: c.reservedParentRegionKey,
-                preferredLevel: c.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
+                availableLevelNamesRaw: c.availableLevelNames,
+                storedAvailableLevelNamesLocaleID: c.availableLevelNamesLocaleID,
+                parentRegionKey: c.parentScopeKey,
+                preferredLevel: c.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
                 localizedDisplayNameByLocale: c.localizedDisplayNameByLocale,
                 locale: .current
             ),

@@ -24,6 +24,15 @@ enum WidgetCaptureLaunchPolicy {
     }
 }
 
+enum LiveTrackingRefreshPolicy {
+    static let coordinateSnapshotInterval: TimeInterval = 5
+
+    static func shouldPersistCoordinateSnapshot(lastPersistedAt: Date?, now: Date) -> Bool {
+        guard let lastPersistedAt else { return true }
+        return now.timeIntervalSince(lastPersistedAt) >= coordinateSnapshotInterval
+    }
+}
+
 struct CoordinateCodable: Codable, Hashable, Sendable {
     var lat: Double
     var lon: Double
@@ -380,14 +389,14 @@ struct JourneyRoute: Codable {
     var displayCityName: String {
         let unknownLocalized = L10n.t("unknown")
         let unknownEN = "Unknown"
-        let resolvedCityKey = (startCityKey ?? cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawCityKey = (startCityKey ?? cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedCityKey = CityCollectionResolver.resolveCollectionKey(cityKey: rawCityKey)
         let label = (cityName ?? canonicalCity).trimmingCharacters(in: .whitespacesAndNewlines)
         if !label.isEmpty,
            label.caseInsensitiveCompare(unknownEN) != .orderedSame,
            label != unknownLocalized {
-            return CityPlacemarkResolver.displayTitle(
-                cityKey: resolvedCityKey,
-                iso2: countryISO2,
+            return CityDisplayResolver.title(
+                for: resolvedCityKey,
                 fallbackTitle: label,
                 locale: .current
             )
@@ -396,9 +405,8 @@ struct JourneyRoute: Codable {
         if old.isEmpty || old.caseInsensitiveCompare(unknownEN) == .orderedSame || old == unknownLocalized {
             return unknownLocalized
         }
-        return CityPlacemarkResolver.displayTitle(
-            cityKey: resolvedCityKey,
-            iso2: countryISO2,
+        return CityDisplayResolver.title(
+            for: resolvedCityKey,
             fallbackTitle: old,
             locale: .current
         )
@@ -849,6 +857,7 @@ struct MapView: View {
     @State private var lastSyncedCoordCount = 0
 
     @State private var editingMemory: JourneyMemory? = nil
+    @State private var lastCoordinateSnapshotPersistAt: Date? = nil
 
     private func mapCoord(_ c: CLLocationCoordinate2D) -> CLLocationCoordinate2D {
         tracking.mapReady(c)
@@ -869,6 +878,9 @@ struct MapView: View {
             return
         }
         journeyStore.upsertSnapshotThrottled(journeyRoute, coordCount: tracking.coords.count)
+        if reason == .coordsTick {
+            lastCoordinateSnapshotPersistAt = Date()
+        }
     }
 
     private func flushSnapshot(_ reason: PersistReason) {
@@ -1392,7 +1404,7 @@ struct MapView: View {
                 }
             }
             if let canon = await ReverseGeocodeService.shared.canonical(for: loc) {
-                let resolvedKey = CityPlacemarkResolver.preferredStableCityKey(canonicalResult: canon)
+                let resolvedKey = canon.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
                 let resolvedCanonicalName = CityPlacemarkResolver.stableCityName(
                     from: resolvedKey,
                     fallback: canon.cityName
@@ -1472,6 +1484,11 @@ struct MapView: View {
         journeyRoute.elevationLoss = tracking.totalDescent
         syncTimingFields()
         guard journeyRoute.endTime == nil else { return }
+        let now = Date()
+        guard LiveTrackingRefreshPolicy.shouldPersistCoordinateSnapshot(
+            lastPersistedAt: lastCoordinateSnapshotPersistAt,
+            now: now
+        ) else { return }
         persistSnapshot(.coordsTick)
     }
 

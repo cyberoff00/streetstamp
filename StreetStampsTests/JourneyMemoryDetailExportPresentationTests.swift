@@ -2,6 +2,26 @@ import XCTest
 @testable import StreetStamps
 
 final class JourneyMemoryDetailExportPresentationTests: XCTestCase {
+    func test_journeyDateString_zeroPadsSingleDigitDay() {
+        var components = DateComponents()
+        components.calendar = Calendar(identifier: .gregorian)
+        components.timeZone = TimeZone(secondsFromGMT: 0)
+        components.year = 2026
+        components.month = 3
+        components.day = 8
+
+        let date = try XCTUnwrap(components.date)
+
+        XCTAssertEqual(
+            JourneyMemoryDatePresentation.journeyDateString(
+                for: date,
+                locale: Locale(identifier: "en_US_POSIX"),
+                timeZone: TimeZone(secondsFromGMT: 0) ?? .current
+            ),
+            "MAR 08, 2026"
+        )
+    }
+
     func test_normalizedCustomTitle_trimsMeaningfulTitle() {
         XCTAssertEqual(
             JourneyMemoryDetailTitlePresentation.normalizedCustomTitle(from: "  Sunset Run  "),

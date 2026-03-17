@@ -121,7 +121,9 @@ struct JourneyMemoryMainView: View {
         }
         .navigationBarBackButtonHidden(true)
         .onAppear {
-            store.load()
+            if JourneyMemoryMainLoadPolicy.shouldLoadOnAppear(hasLoaded: store.hasLoaded) {
+                store.load()
+            }
             onboardingGuide.advance(.openMemory)
         }
         // Keep city names localized to current language (do NOT rely on persisted English titles).
@@ -169,10 +171,10 @@ struct JourneyMemoryMainView: View {
                     cityKey: cachedCity.id,
                     iso2: cachedCity.countryISO2,
                     fallbackTitle: cachedCity.name,
-                    availableLevelNamesRaw: cachedCity.reservedAvailableLevelNames,
-                    storedAvailableLevelNamesLocaleID: cachedCity.reservedAvailableLevelNamesLocaleID,
-                    parentRegionKey: cachedCity.reservedParentRegionKey,
-                    preferredLevel: cachedCity.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
+                    availableLevelNamesRaw: cachedCity.availableLevelNames,
+                    storedAvailableLevelNamesLocaleID: cachedCity.availableLevelNamesLocaleID,
+                    parentRegionKey: cachedCity.parentScopeKey,
+                    preferredLevel: cachedCity.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
                     localizedDisplayNameByLocale: cachedCity.localizedDisplayNameByLocale,
                     locale: .current
                 )
@@ -183,7 +185,7 @@ struct JourneyMemoryMainView: View {
             }
 
             // Prefer service cache (now locale-aware) to avoid extra geocode calls.
-            let parentRegionKey = cachedCitiesByKey[key]?.reservedParentRegionKey
+            let parentRegionKey = cachedCitiesByKey[key]?.parentScopeKey
 
             if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key, parentRegionKey: parentRegionKey),
                !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -198,7 +200,7 @@ struct JourneyMemoryMainView: View {
             }
         }
     }
-    
+
     // MARK: - Header
     
     private var headerView: some View {
@@ -288,30 +290,34 @@ struct JourneyMemoryMainView: View {
         var countryForKey: [String: String] = [:]
 
         for j in journeys {
-            // ✅ 关键：永远用 Journey 的起点 cityKey
-            let key = (j.startCityKey ?? j.cityKey)
+            let rawKey = (j.startCityKey ?? j.cityKey)
+            let cached = cachedCitiesByKey[rawKey]
+            let key = cached.map(CityCollectionResolver.resolveCollectionKey(for:))
+                ?? CityCollectionResolver.resolveCollectionKey(cityKey: rawKey)
 
             // 把整个 journey 的 memories 都归到起点城市下面
             buckets[key, default: [:]][j.id] = j.memories
 
-            // 城市名：优先使用当前语言的本地化标题（基于 cityKey），再 fallback 到 journey 自带的 displayCityName。
+            // 城市名：统一按 collectionKey 解析，避免同城不同层级拆成多组。
             if nameForKey[key] == nil {
+                let fallbackTitle: String
                 if let localized = localizedCityNameByKey[key], !localized.isEmpty {
-                    nameForKey[key] = cityOnly(localized)
+                    fallbackTitle = localized
                 } else {
-                    nameForKey[key] = cityOnly(
-                        JourneyCityNamePresentation.title(
-                            for: j,
-                            localizedCityNameByKey: localizedCityNameByKey,
-                            cachedCitiesByKey: cachedCitiesByKey
-                        )
+                    fallbackTitle = JourneyCityNamePresentation.title(
+                        for: j,
+                        localizedCityNameByKey: localizedCityNameByKey,
+                        cachedCitiesByKey: cachedCitiesByKey
                     )
                 }
+                nameForKey[key] = cityOnly(
+                    CityDisplayResolver.title(for: key, fallbackTitle: fallbackTitle)
+                )
             }
 
-            // 国家从 cityKey (City|ISO2) 取
+            // 国家从 collectionKey (City|ISO2) 取
             if countryForKey[key] == nil {
-                if let iso2 = key.split(separator: "|").last.map(String.init) {
+                if let iso2 = CityDisplayResolver.iso2(from: key) {
                     countryForKey[key] = countryName(from: iso2)
                 }
             }
@@ -648,7 +654,10 @@ private struct CitySection: View {
                             .environmentObject(store)
                             .environmentObject(sessionStore)
                         } label: {
-                            JourneyEntryRow(journey: journey, memories: memories)
+                            JourneyEntryRow(
+                                journey: journey,
+                                memories: memories
+                            )
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -677,35 +686,16 @@ private struct JourneyEntryRow: View {
     let journey: JourneyRoute
     let memories: [JourneyMemory]
     
-    private var sortedMemories: [JourneyMemory] {
-        memories.sorted(by: { $0.timestamp < $1.timestamp })
-    }
-    
-    private var firstMemory: JourneyMemory? {
-        sortedMemories.first
-    }
-    
     private var journeyDate: String {
         let d = journey.startTime ?? memories.map(\.timestamp).min() ?? Date()
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d, yyyy"
-        return formatter.string(from: d).uppercased()
+        return JourneyMemoryDatePresentation.journeyDateString(for: d)
     }
     
-    private var distanceText: String {
-        let km = journey.distance / 1000.0
-        return String(format: "%.1fkm", km)
-    }
-    
-    private var durationText: String {
-        guard let start = journey.startTime, let end = journey.endTime else {
-            return "--:--:--"
-        }
-        let seconds = Int(end.timeIntervalSince(start))
-        let h = seconds / 3600
-        let m = (seconds % 3600) / 60
-        let s = seconds % 60
-        return String(format: "%d:%02d:%02d", h, m, s)
+    private var accessoryItems: [JourneyEntryAccessoryPresentation.Item] {
+        JourneyEntryAccessoryPresentation.items(
+            journey: journey,
+            memories: memories
+        )
     }
 
     private var previewText: String {
@@ -713,51 +703,122 @@ private struct JourneyEntryRow: View {
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Date with green dot
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(FigmaTheme.primary)
-                    .frame(width: 8, height: 8)
-                
-                Text(journeyDate)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.black)
+        HStack(alignment: .top, spacing: 14) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(FigmaTheme.primary)
+                        .frame(width: 8, height: 8)
+
+                    Text(journeyDate)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.black)
+                }
+
+                Text(previewText)
+                    .font(.system(size: 14))
+                    .foregroundColor(.black.opacity(0.8))
+                    .lineSpacing(3)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            
-//            // Distance & Duration
-//            HStack(spacing: 24) {
-//                VStack(alignment: .leading, spacing: 2) {
-//                    Text(L10n.key("lockscreen_distance"))
-//                        .font(.system(size: 10, weight: .medium))
-//                        .foregroundColor(.gray)
-//                        .tracking(0.5)
-//                    Text(distanceText)
-//                        .font(.system(size: 15, weight: .bold))
-//                        .foregroundColor(.black)
-//                }
-//
-//                VStack(alignment: .leading, spacing: 2) {
-//                    Text(L10n.key("lockscreen_duration"))
-//                        .font(.system(size: 10, weight: .medium))
-//                        .foregroundColor(.gray)
-//                        .tracking(0.5)
-//                    Text(durationText)
-//                        .font(.system(size: 15, weight: .bold))
-//                        .foregroundColor(.black)
-//                }
-//            }
-            
-            // Preview text
-            Text(previewText)
-                .font(.system(size: 14))
-                .foregroundColor(.black.opacity(0.8))
-                .lineSpacing(3)
-                .lineLimit(3)
-                .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if !accessoryItems.isEmpty {
+                VStack(alignment: .trailing, spacing: 8) {
+                    ForEach(accessoryItems) { item in
+                        JourneyEntryAccessoryView(item: item)
+                    }
+                }
+                .padding(.top, 1)
+            }
         }
         .padding(.vertical, 16)
-        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+enum JourneyEntryAccessoryPresentation {
+    struct Item: Identifiable {
+        let id: String
+        let icon: String
+        let text: String?
+        let tint: Color
+    }
+
+    static func items(journey: JourneyRoute, memories: [JourneyMemory]) -> [Item] {
+        var items: [Item] = []
+
+        if journey.visibility == .friendsOnly {
+            items.append(
+                Item(
+                id: "visibility",
+                icon: visibilityIcon(for: journey.visibility),
+                text: journey.visibility.localizedTitle,
+                tint: visibilityTint(for: journey.visibility)
+            )
+            )
+        }
+
+        if hasAnyPhoto(journey: journey, memories: memories) {
+            items.append(
+                Item(
+                    id: "photos",
+                    icon: "photo.fill",
+                    text: nil,
+                    tint: FigmaTheme.primary.opacity(0.9)
+                )
+            )
+        }
+
+        return items
+    }
+
+    static func hasAnyPhoto(journey: JourneyRoute, memories: [JourneyMemory]) -> Bool {
+        if !journey.overallMemoryImagePaths.isEmpty {
+            return true
+        }
+
+        return memories.contains { !$0.imagePaths.isEmpty || !$0.remoteImageURLs.isEmpty }
+    }
+
+    private static func visibilityIcon(for visibility: JourneyVisibility) -> String {
+        switch visibility {
+        case .private:
+            return "lock.fill"
+        case .friendsOnly:
+            return "person.2.fill"
+        case .public:
+            return "globe"
+        }
+    }
+
+    private static func visibilityTint(for visibility: JourneyVisibility) -> Color {
+        switch visibility {
+        case .private:
+            return FigmaTheme.subtext
+        case .friendsOnly:
+            return UITheme.accent
+        case .public:
+            return FigmaTheme.primary
+        }
+    }
+}
+
+private struct JourneyEntryAccessoryView: View {
+    let item: JourneyEntryAccessoryPresentation.Item
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: item.icon)
+                .font(.system(size: 11, weight: .semibold))
+
+            if let text = item.text, !text.isEmpty {
+                Text(text)
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+            }
+        }
+        .foregroundColor(item.tint)
     }
 }
 
@@ -796,7 +857,8 @@ struct JourneyMemoryDetailView: View {
     let cityName: String
     let countryName: String
     let readOnly: Bool
-    
+    let friendLoadout: RobotLoadout?
+
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var cityCache: CityCache
@@ -851,13 +913,15 @@ struct JourneyMemoryDetailView: View {
         memories: [JourneyMemory],
         cityName: String,
         countryName: String,
-        readOnly: Bool = false
+        readOnly: Bool = false,
+        friendLoadout: RobotLoadout? = nil
     ) {
         self.journey = journey
         self.memories = memories
         self.cityName = cityName
         self.countryName = countryName
         self.readOnly = readOnly
+        self.friendLoadout = friendLoadout
     }
 
     private enum ActivePhotoTarget: Equatable {
@@ -882,9 +946,7 @@ struct JourneyMemoryDetailView: View {
     
     private var journeyDate: String {
         let d = journey.startTime ?? memories.map(\.timestamp).min() ?? Date()
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d, yyyy"
-        return formatter.string(from: d).uppercased()
+        return JourneyMemoryDatePresentation.journeyDateString(for: d)
     }
     
     private var distanceText: String {
@@ -1340,7 +1402,8 @@ struct JourneyMemoryDetailView: View {
                 JourneyRouteDetailView(
                     journeyID: journey.id,
                     isReadOnly: readOnly,
-                    headerTitle: journeyDisplayTitle
+                    headerTitle: journeyDisplayTitle,
+                    friendLoadout: friendLoadout
                 )
                 .environmentObject(store)
             } label: {
@@ -1784,21 +1847,17 @@ struct JourneyMemoryDetailView: View {
 
         Task {
             do {
-                let all = try await BackendAPIClient.shared.fetchNotifications(token: token, unreadOnly: false)
-                let journeyLikes = all
-                    .filter { $0.type == "journey_like" && $0.journeyID == journeyID }
-                    .sorted { $0.createdAt > $1.createdAt }
-
-                var seen = Set<String>()
-                var out: [JourneyLiker] = []
-                for item in journeyLikes {
-                    let key = item.fromUserID ?? item.fromDisplayName ?? item.id
-                    if seen.contains(key) { continue }
-                    seen.insert(key)
-                    let name = (item.fromDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
-                        ? (item.fromDisplayName ?? "")
-                        : (item.fromUserID ?? L10n.t("unknown"))
-                    out.append(JourneyLiker(id: key, name: name, likedAt: item.createdAt))
+                let ownerUserID = sessionStore.accountUserID ?? sessionStore.currentUserID
+                let out: [JourneyLiker]
+                do {
+                    out = try await BackendAPIClient.shared.fetchJourneyLikers(
+                        token: token,
+                        ownerUserID: ownerUserID,
+                        journeyID: journeyID
+                    )
+                } catch {
+                    let all = try await BackendAPIClient.shared.fetchNotifications(token: token, unreadOnly: false)
+                    out = JourneyLikesPresentation.likers(from: all, journeyID: journeyID)
                 }
 
                 await MainActor.run {
@@ -2138,6 +2197,20 @@ struct JourneyMemoryDetailExportPresentation {
 
     var shouldShowOverallMemory: Bool {
         !overallMemoryText.isEmpty || !overallMemoryImagePaths.isEmpty
+    }
+}
+
+enum JourneyMemoryDatePresentation {
+    static func journeyDateString(
+        for date: Date,
+        locale: Locale = .current,
+        timeZone: TimeZone = .current
+    ) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "MMM dd, yyyy"
+        return formatter.string(from: date).uppercased()
     }
 }
 

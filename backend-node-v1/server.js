@@ -1649,10 +1649,14 @@ function ensureLikeRecord(ownerUserID, journeyID) {
       ownerUserID,
       journeyID,
       likerIDs: [],
+      likedAtByUserID: {},
       updatedAt: new Date().toISOString()
     };
   }
   if (!Array.isArray(db.likesIndex[key].likerIDs)) db.likesIndex[key].likerIDs = [];
+  if (!db.likesIndex[key].likedAtByUserID || typeof db.likesIndex[key].likedAtByUserID !== "object") {
+    db.likesIndex[key].likedAtByUserID = {};
+  }
   return db.likesIndex[key];
 }
 
@@ -3111,6 +3115,42 @@ async function main() {
     }
   });
 
+  app.get("/v1/journeys/:ownerUserID/:journeyID/likes", writeRateLimiter, (req, res) => {
+    try {
+      const viewerID = parseBearer(req);
+      const ownerUserID = String(req.params.ownerUserID || "").trim();
+      const journeyID = String(req.params.journeyID || "").trim();
+      if (!ownerUserID || !journeyID) return res.status(400).json({ message: "ownerUserID and journeyID required" });
+
+      const viewer = db.users[viewerID];
+      const owner = db.users[ownerUserID];
+      if (!viewer || !owner) return res.status(404).json({ message: "user not found" });
+
+      const journey = (owner.journeys || []).find((x) => String(x.id) === journeyID);
+      if (!journey) return res.status(404).json({ message: "journey not found" });
+      if (!canViewJourney(viewer, owner, journey)) return res.status(403).json({ message: "forbidden" });
+
+      const record = ensureLikeRecord(ownerUserID, journeyID);
+      const likedAtByUserID = record.likedAtByUserID || {};
+      const items = (record.likerIDs || [])
+        .map((userID) => {
+          const liker = db.users[userID];
+          if (!liker) return null;
+          return {
+            userID,
+            displayName: String(liker.displayName || userID),
+            likedAt: likedAtByUserID[userID] || record.updatedAt || new Date().toISOString()
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => Date.parse(b.likedAt || "") - Date.parse(a.likedAt || ""));
+
+      return res.status(200).json({ items });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
   app.post("/v1/journeys/:ownerUserID/:journeyID/like", writeRateLimiter, async (req, res) => {
     try {
       const viewerID = parseBearer(req);
@@ -3128,7 +3168,9 @@ async function main() {
       const record = ensureLikeRecord(ownerUserID, journeyID);
       if (!record.likerIDs.includes(viewerID)) {
         record.likerIDs.push(viewerID);
-        record.updatedAt = new Date().toISOString();
+        const now = new Date().toISOString();
+        record.likedAtByUserID[viewerID] = now;
+        record.updatedAt = now;
         if (viewerID !== ownerUserID) {
           pushJourneyLikeNotification(owner, viewer, journey);
         }
@@ -3159,6 +3201,7 @@ async function main() {
       const next = (record.likerIDs || []).filter((x) => x !== viewerID);
       if (next.length !== (record.likerIDs || []).length) {
         record.likerIDs = next;
+        delete record.likedAtByUserID[viewerID];
         record.updatedAt = new Date().toISOString();
         await saveDB();
       }

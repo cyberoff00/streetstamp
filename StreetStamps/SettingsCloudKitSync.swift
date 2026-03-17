@@ -38,29 +38,4 @@ actor SettingsCloudKitSync {
         }
         return nil
     }
-
-    func uploadCityCache(_ cities: [String: Any]) async throws {
-        let recordID = CKRecord.ID(recordName: "cityCache", zoneID: zoneID)
-        let record = CKRecord(recordType: CloudKitRecordType.cityCache, recordID: recordID)
-
-        let data = try JSONSerialization.data(withJSONObject: cities)
-        record["data"] = data as CKRecordValue
-        record["modifiedAt"] = Date() as CKRecordValue
-
-        _ = try await database.save(record)
-    }
-
-    func downloadCityCache() async throws -> [String: Any]? {
-        let recordID = CKRecord.ID(recordName: "cityCache", zoneID: zoneID)
-        do {
-            let record = try await database.record(for: recordID)
-            if let data = record["data"] as? Data,
-               let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                return json
-            }
-        } catch let error as CKError where error.code == .unknownItem {
-            return nil
-        }
-        return nil
-    }
 }

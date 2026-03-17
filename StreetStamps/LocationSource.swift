@@ -14,6 +14,7 @@ protocol LocationSource: AnyObject {
     var authorizationStatus: CLAuthorizationStatus { get }
 
     func requestPermissionIfNeeded()
+    func requestSingleLocation()
     func start()
     func stop()
 }

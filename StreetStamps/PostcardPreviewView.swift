@@ -25,7 +25,6 @@ struct PostcardPreviewView: View {
     @State private var isFrontShowing = true
     @State private var saveToastText: String?
     @State private var downsampledImage: UIImage?
-    @State private var sentSuccessfully = false
     @State private var sidebarHideToken = "\(PostcardSidebarVisibilityScope.preview.token)-\(UUID().uuidString)"
 
     var body: some View {
@@ -44,61 +43,21 @@ struct PostcardPreviewView: View {
                     .foregroundColor(.red)
             }
 
-            if sentSuccessfully {
-                VStack(spacing: 12) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                        Text(L10n.t("postcard_sent_success_title"))
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundColor(FigmaTheme.text)
-                    }
-
-                    Button {
-                        PostcardSendCompletionPresentation.performOpenSentBox(
-                            onSent: onSent,
-                            dismiss: { dismiss() }
-                        )
-                    } label: {
-                        Text(L10n.t("postcard_go_to_sent_box"))
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background(FigmaTheme.primary)
-                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        dismiss()
-                        DispatchQueue.main.asyncAfter(deadline: .now() + PostcardSendCompletionPresentation.sentBoxOpenDelay) {
-                            onSent?()
-                        }
-                    } label: {
-                        Text(L10n.t("cancel"))
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(FigmaTheme.subtext)
-                    }
-                    .buttonStyle(.plain)
+            Button {
+                Task {
+                    await sendNow()
                 }
-            } else {
-                Button {
-                    Task {
-                        await sendNow()
-                    }
-                } label: {
-                    Text(isSending ? L10n.t("postcard_sending") : L10n.t("postcard_send"))
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(isSending ? FigmaTheme.primary.opacity(0.45) : FigmaTheme.primary)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .disabled(isSending)
+            } label: {
+                Text(isSending ? L10n.t("postcard_sending") : L10n.t("postcard_send"))
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(isSending ? FigmaTheme.primary.opacity(0.45) : FigmaTheme.primary)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
+            .buttonStyle(.plain)
+            .disabled(isSending)
 
             Spacer(minLength: 0)
         }
@@ -184,7 +143,10 @@ struct PostcardPreviewView: View {
             cityJourneyCount: selectedCityJourneyCount
         )
         isSending = false
-        sentSuccessfully = true
+        PostcardSendCompletionPresentation.performOpenSentBox(
+            onSent: onSent,
+            dismiss: { dismiss() }
+        )
     }
 
     /// Save the downsampled raw photo to a temp file for upload.

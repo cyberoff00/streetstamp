@@ -921,10 +921,10 @@ private func makeRoutesFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
                         cityKey: c.id,
                         iso2: c.countryISO2,
                         fallbackTitle: c.name,
-                        availableLevelNamesRaw: c.reservedAvailableLevelNames,
-                        storedAvailableLevelNamesLocaleID: c.reservedAvailableLevelNamesLocaleID,
-                        parentRegionKey: c.reservedParentRegionKey,
-                        preferredLevel: c.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
+                        availableLevelNamesRaw: c.availableLevelNames,
+                        storedAvailableLevelNamesLocaleID: c.availableLevelNamesLocaleID,
+                        parentRegionKey: c.parentScopeKey,
+                        preferredLevel: c.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
                         localizedDisplayNameByLocale: c.localizedDisplayNameByLocale,
                         locale: .current
                     )

@@ -187,42 +187,75 @@ struct JourneySheetScaffold<Content: View>: View {
 }
 
 struct JourneyLikesSheet: View {
-    let journey: JourneyRoute
-    let displayCityName: String
+    private let subtitleTitle: String
+    private let showsEditVisibilityButton: Bool
     let likers: [JourneyLiker]
     let isLoading: Bool
     let errorMessage: String?
     let onRetry: () -> Void
     let onEditVisibility: () -> Void
 
-    private var title: String {
-        journey.customTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    init(
+        journey: JourneyRoute,
+        displayCityName: String,
+        likers: [JourneyLiker],
+        isLoading: Bool,
+        errorMessage: String?,
+        onRetry: @escaping () -> Void,
+        onEditVisibility: @escaping () -> Void
+    ) {
+        self.subtitleTitle = journey.customTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             ? (journey.customTitle ?? "")
             : displayCityName
+        self.showsEditVisibilityButton = true
+        self.likers = likers
+        self.isLoading = isLoading
+        self.errorMessage = errorMessage
+        self.onRetry = onRetry
+        self.onEditVisibility = onEditVisibility
+    }
+
+    init(
+        title: String,
+        likers: [JourneyLiker],
+        isLoading: Bool,
+        errorMessage: String?,
+        onRetry: @escaping () -> Void,
+        onEditVisibility: @escaping () -> Void
+    ) {
+        self.subtitleTitle = title
+        self.showsEditVisibilityButton = false
+        self.likers = likers
+        self.isLoading = isLoading
+        self.errorMessage = errorMessage
+        self.onRetry = onRetry
+        self.onEditVisibility = onEditVisibility
     }
 
     var body: some View {
-        JourneySheetScaffold(title: L10n.t("journey_likes_title"), subtitle: title) {
-            Button(action: onEditVisibility) {
-                HStack {
-                    Text(L10n.t("journey_change_permission"))
-                        .font(.system(size: 14, weight: .semibold))
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .bold))
+        JourneySheetScaffold(title: L10n.t("journey_likes_title"), subtitle: subtitleTitle) {
+            if showsEditVisibilityButton {
+                Button(action: onEditVisibility) {
+                    HStack {
+                        Text(L10n.t("journey_change_permission"))
+                            .font(.system(size: 14, weight: .semibold))
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .bold))
+                    }
+                    .foregroundColor(UITheme.softBlack)
+                    .padding(.horizontal, 14)
+                    .frame(height: 44)
+                    .background(Color.black.opacity(0.03))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(Color.black.opacity(0.05), lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .appFullSurfaceTapTarget(.roundedRect(16))
                 }
-                .foregroundColor(UITheme.softBlack)
-                .padding(.horizontal, 14)
-                .frame(height: 44)
-                .background(Color.black.opacity(0.03))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(Color.black.opacity(0.05), lineWidth: 1)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .appFullSurfaceTapTarget(.roundedRect(16))
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
 
             if isLoading {
                 statusCard(icon: "clock", text: L10n.t("journey_likes_loading"))

@@ -180,8 +180,6 @@ final class UserSessionStore: ObservableObject {
             let activePaths = StoragePath(userID: activeLocalProfileID)
             try activePaths.ensureBaseDirectoriesExist()
 
-            autoRecoverLegacySourcesIfNeeded(targetUserID: activeLocalProfileID)
-
         } catch {
             assertionFailure("Failed to bootstrap filesystem: \(error)")
         }
@@ -774,12 +772,6 @@ final class UserSessionStore: ObservableObject {
 
                     let activePaths = StoragePath(userID: context.activeLocalProfileID)
                     try activePaths.ensureBaseDirectoriesExist()
-
-                    autoRecoverLegacySourcesIfNeededWorker(
-                        targetUserID: context.activeLocalProfileID,
-                        guestID: context.guestID,
-                        sourceDevice: context.sourceDevice
-                    )
 
                 } catch {
                     assertionFailure("Failed to bootstrap filesystem: \(error)")

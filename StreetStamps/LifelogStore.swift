@@ -111,6 +111,7 @@ final class LifelogStore: ObservableObject {
     private let stationaryClusterRadiusMeters: CLLocationDistance = 15
     private let stationaryExitDistanceMeters: CLLocationDistance = 30
     private let stationaryExitSpeedMetersPerSecond: CLLocationSpeed = 1.2
+    private let motionHub = MotionActivityHub.shared
 
     private var userID: String
     private var persistURL: URL
@@ -131,6 +132,9 @@ final class LifelogStore: ObservableObject {
     private var archivedJourneyIDs = Set<String>()
     private var moodByDay: [String: String] = [:]
     private var availableDayKeys = Set<String>()
+    private var dirtyPointDayKeys = Set<String>()
+    private var dirtyMoodDayKeys = Set<String>()
+    private var deletedMoodDayKeys = Set<String>()
     private var pendingSnapshotPersist: DispatchWorkItem?
     private let snapshotPersistDebounce: TimeInterval = 4.0
     private var pendingTrackTileRevisionBump: DispatchWorkItem?
@@ -210,6 +214,9 @@ final class LifelogStore: ObservableObject {
         archivedJourneyIDs = []
         moodByDay = [:]
         availableDayKeys = []
+        dirtyPointDayKeys = []
+        dirtyMoodDayKeys = []
+        deletedMoodDayKeys = []
         availableDays = []
         countryISO2 = nil
         trackTileRevision = 0
@@ -219,26 +226,38 @@ final class LifelogStore: ObservableObject {
     }
 
     func load() {
+        Task {
+            await loadAsync()
+        }
+    }
+
+    func loadAsync() async {
         hasLoaded = false
         let url = persistURL
         let delta = deltaURL
         let moodURL = moodPersistURL
-        Task {
-            let loaded = await Self.loadState(from: url, deltaURL: delta, moodURL: moodURL)
-            applyLoadedState(loaded)
-            scheduleBackgroundDayIndexBuild()
-            hasLoaded = true
-            if let hub = pendingBindHub {
-                activateBindings(to: hub)
-            }
-            bumpTrackTileRevision()
+        let loaded = await Self.loadState(from: url, deltaURL: delta, moodURL: moodURL)
+        applyLoadedState(loaded)
+        dirtyPointDayKeys = []
+        dirtyMoodDayKeys = []
+        deletedMoodDayKeys = []
+        scheduleBackgroundDayIndexBuild()
+        hasLoaded = true
+        if let hub = pendingBindHub {
+            activateBindings(to: hub)
         }
+        bumpTrackTileRevision()
     }
 
     private func applyLoadedState(_ loaded: LoadedState) {
         points = loaded.points
         coordinates = loaded.points.map(\.coord)
-        isEnabled = loaded.isEnabled
+        if AppSettings.hasPassiveLifelogPreference {
+            isEnabled = AppSettings.isPassiveLifelogEnabled
+        } else {
+            isEnabled = loaded.isEnabled
+            AppSettings.setPassiveLifelogEnabled(loaded.isEnabled)
+        }
         archivedJourneyIDs = loaded.archivedJourneyIDs
         moodByDay = loaded.moodByDay
         cachedDistanceMeters = loaded.cachedDistanceMeters
@@ -446,6 +465,7 @@ final class LifelogStore: ObservableObject {
     func setEnabled(_ enabled: Bool) {
         guard isEnabled != enabled else { return }
         isEnabled = enabled
+        AppSettings.setPassiveLifelogEnabled(enabled)
         persistAsync()
     }
 
@@ -590,6 +610,7 @@ final class LifelogStore: ObservableObject {
         )
         points.append(appendedPoint)
         coordinates.append(c)
+        dirtyPointDayKeys.insert(dayKey(loc.timestamp))
         enqueueCountryAttribution(for: [appendedPoint])
         invalidatePolylineCaches()
         lastAccepted = loc
@@ -607,6 +628,7 @@ final class LifelogStore: ObservableObject {
 
     private func shouldAcceptPassiveLocation(_ loc: CLLocation) -> Bool {
         let speed = max(loc.speed, 0)
+        let motion = motionHub.snapshot
 
         guard let anchor = passiveMotionAnchor else {
             passiveMotionAnchor = loc
@@ -620,12 +642,17 @@ final class LifelogStore: ObservableObject {
 
         switch passiveMotionState {
         case .moving:
-            if speed >= stationaryExitSpeedMetersPerSecond || moved >= stationaryExitDistanceMeters {
+            let gpsExitCandidate = speed >= stationaryExitSpeedMetersPerSecond || moved >= stationaryExitDistanceMeters
+            if gpsExitCandidate {
                 passiveMotionAnchor = loc
                 passiveMotionAnchorTimestamp = loc.timestamp
                 return true
             }
-            if dt >= stationaryEnterWindow && moved <= stationaryClusterRadiusMeters {
+            let gpsStationaryCandidate = dt >= stationaryEnterWindow && moved <= stationaryClusterRadiusMeters
+            if PassiveMotionFusion.shouldEnterStationary(
+                gpsStationaryCandidate: gpsStationaryCandidate,
+                motion: motion
+            ) {
                 passiveMotionState = .stationary
                 passiveMotionAnchor = loc
                 passiveMotionAnchorTimestamp = loc.timestamp
@@ -638,7 +665,11 @@ final class LifelogStore: ObservableObject {
             return true
 
         case .stationary:
-            if speed >= stationaryExitSpeedMetersPerSecond || moved >= stationaryExitDistanceMeters {
+            let gpsExitCandidate = speed >= stationaryExitSpeedMetersPerSecond || moved >= stationaryExitDistanceMeters
+            if PassiveMotionFusion.shouldExitStationary(
+                gpsExitCandidate: gpsExitCandidate,
+                motion: motion
+            ) {
                 passiveMotionState = .moving
                 passiveMotionAnchor = loc
                 passiveMotionAnchorTimestamp = loc.timestamp
@@ -725,6 +756,7 @@ final class LifelogStore: ObservableObject {
             points.append(appendedPoint)
             appended.append(appendedPoint)
             coordinates.append(coord)
+            dirtyPointDayKeys.insert(dayKey(timestamp))
         }
 
         guard !appended.isEmpty else { return }
@@ -814,17 +846,105 @@ final class LifelogStore: ObservableObject {
         moodByDay[dayKey(day)]
     }
 
+    func snapshotPointsByDay() -> [String: [LifelogTrackPoint]] {
+        Dictionary(grouping: points, by: { dayKey($0.timestamp) })
+    }
+
+    func snapshotDirtyPointsByDay() -> [String: [LifelogTrackPoint]] {
+        guard !dirtyPointDayKeys.isEmpty else { return [:] }
+        let all = snapshotPointsByDay()
+        return dirtyPointDayKeys.reduce(into: [String: [LifelogTrackPoint]]()) { partial, key in
+            if let points = all[key] {
+                partial[key] = points
+            }
+        }
+    }
+
+    func snapshotMoodByDay() -> [String: String] {
+        moodByDay
+    }
+
+    func snapshotDirtyMoodByDay() -> [String: String] {
+        guard !dirtyMoodDayKeys.isEmpty else { return [:] }
+        return dirtyMoodDayKeys.reduce(into: [String: String]()) { partial, key in
+            if let mood = moodByDay[key] {
+                partial[key] = mood
+            }
+        }
+    }
+
+    func snapshotDeletedMoodDayKeys() -> [String] {
+        Array(deletedMoodDayKeys)
+    }
+
     func setMood(_ mood: String?, for day: Date) {
         let key = dayKey(day)
         if let mood, !mood.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             moodByDay[key] = mood
+            dirtyMoodDayKeys.insert(key)
+            deletedMoodDayKeys.remove(key)
         } else {
             moodByDay.removeValue(forKey: key)
+            dirtyMoodDayKeys.remove(key)
+            deletedMoodDayKeys.insert(key)
         }
         persistMoodSnapshotNow()
         pendingSnapshotPersist?.cancel()
         pendingSnapshotPersist = nil
         persistSnapshotNow()
+    }
+
+    func mergeCloudRestore(
+        dayBatches: [String: [LifelogTrackPoint]],
+        deletedDayKeys: [String],
+        moodByDay restoredMoodByDay: [String: String],
+        deletedMoodDayKeys: [String]
+    ) {
+        let touchedDayKeys = Set(dayBatches.keys).union(deletedDayKeys)
+        var mergedPoints = points.filter { point in
+            !touchedDayKeys.contains(dayKey(point.timestamp))
+        }
+        mergedPoints.append(contentsOf: dayBatches.values.flatMap { $0 })
+        mergedPoints.sort { lhs, rhs in
+            if lhs.timestamp == rhs.timestamp {
+                return lhs.id < rhs.id
+            }
+            return lhs.timestamp < rhs.timestamp
+        }
+
+        var mergedMoodByDay = moodByDay
+        deletedMoodDayKeys.forEach { mergedMoodByDay.removeValue(forKey: $0) }
+        restoredMoodByDay.forEach { mergedMoodByDay[$0.key] = $0.value }
+
+        let nextState = LoadedState(
+            points: mergedPoints,
+            coordinates: mergedPoints.map(\.coord),
+            isEnabled: isEnabled,
+            archivedJourneyIDs: archivedJourneyIDs,
+            moodByDay: mergedMoodByDay,
+            cachedDistanceMeters: totalDistanceMeters(coords: mergedPoints.map(\.coord)),
+            availableDays: Self.computeAvailableDays(from: mergedPoints),
+            countryISO2: countryISO2
+        )
+        applyLoadedState(nextState)
+        dirtyPointDayKeys.subtract(touchedDayKeys)
+        dirtyMoodDayKeys.subtract(Set(restoredMoodByDay.keys))
+        dirtyMoodDayKeys.subtract(Set(deletedMoodDayKeys))
+        self.deletedMoodDayKeys.subtract(Set(restoredMoodByDay.keys))
+        self.deletedMoodDayKeys.subtract(Set(deletedMoodDayKeys))
+        scheduleBackgroundDayIndexBuild()
+        persistSnapshotNow()
+        bumpTrackTileRevision()
+    }
+
+    func clearDirtyCloudSyncState(
+        uploadedPointDayKeys: [String],
+        uploadedMoodDayKeys: [String],
+        deletedMoodDayKeys: [String]
+    ) {
+        dirtyPointDayKeys.subtract(uploadedPointDayKeys)
+        dirtyMoodDayKeys.subtract(uploadedMoodDayKeys)
+        self.deletedMoodDayKeys.subtract(deletedMoodDayKeys)
     }
 
     func sampledCoordinates(day: Date?, maxPoints: Int) -> [CoordinateCodable] {

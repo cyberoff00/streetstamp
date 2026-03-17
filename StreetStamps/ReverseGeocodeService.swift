@@ -140,7 +140,7 @@ actor ReverseGeocodeService {
                     cont.resume(returning: nil)
                     return
                 }
-                let canon = CityPlacemarkResolver.resolveCanonical(from: pm)
+                let canon = CityPlacemarkResolver.resolveIdentityCanonical(from: pm)
                 cont.resume(returning: CanonicalResult(
                     cityName: canon.city,
                     iso2: canon.iso2,

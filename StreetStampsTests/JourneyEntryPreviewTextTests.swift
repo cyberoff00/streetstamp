@@ -67,4 +67,45 @@ final class JourneyEntryPreviewTextTests: XCTestCase {
 
         XCTAssertEqual(preview, "Quiet sky over the river")
     }
+
+    func test_hasAnyPhoto_returnsTrueWhenJourneyHasOverallPhotos() {
+        let journey = JourneyRoute(
+            overallMemoryImagePaths: ["cover.jpg"]
+        )
+
+        XCTAssertTrue(JourneyEntryAccessoryPresentation.hasAnyPhoto(journey: journey, memories: []))
+    }
+
+    func test_hasAnyPhoto_returnsTrueWhenAnyMemoryHasPhoto() {
+        let memories = [
+            JourneyMemory(
+                id: "m1",
+                timestamp: Date(timeIntervalSince1970: 1),
+                title: "",
+                notes: "",
+                imageData: nil,
+                imagePaths: ["memory.jpg"],
+                coordinate: (0, 0),
+                type: .memory
+            )
+        ]
+
+        XCTAssertTrue(JourneyEntryAccessoryPresentation.hasAnyPhoto(journey: JourneyRoute(), memories: memories))
+    }
+
+    func test_hasAnyPhoto_returnsFalseWhenJourneyAndMemoriesHaveNoPhotos() {
+        let memories = [
+            JourneyMemory(
+                id: "m1",
+                timestamp: Date(timeIntervalSince1970: 1),
+                title: "",
+                notes: "",
+                imageData: nil,
+                coordinate: (0, 0),
+                type: .memory
+            )
+        ]
+
+        XCTAssertFalse(JourneyEntryAccessoryPresentation.hasAnyPhoto(journey: JourneyRoute(), memories: memories))
+    }
 }

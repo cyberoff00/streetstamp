@@ -1,10 +1,20 @@
 import CloudKit
 import Foundation
 
+struct LifelogDayCloudSnapshot {
+    var dayKey: String
+    var points: [LifelogStore.LifelogTrackPoint]
+    var modifiedAt: Date
+    var isDeleted: Bool
+}
+
 actor LifelogCloudKitSync {
     private let database: CKDatabase
     private let zoneID = CKRecordZone.ID(zoneName: "LifelogZone", ownerName: CKCurrentUserDefaultName)
-    private let batchSize = 1000
+    private let dayKeyField = "dayKey"
+    private let pointsField = "points"
+    private let modifiedAtField = "modifiedAt"
+    private let isDeletedField = "isDeleted"
 
     init(database: CKDatabase) {
         self.database = database
@@ -15,39 +25,76 @@ actor LifelogCloudKitSync {
         _ = try await database.save(zone)
     }
 
-    func uploadBatch(yearMonth: String, points: [LifelogStore.LifelogTrackPoint]) async throws {
-        let recordID = CKRecord.ID(recordName: "lifelog_\(yearMonth)", zoneID: zoneID)
-        let record = CKRecord(recordType: CloudKitRecordType.lifelogBatch, recordID: recordID)
+    func uploadBatch(dayKey: String, points: [LifelogStore.LifelogTrackPoint]) async throws {
+        let recordID = CKRecord.ID(recordName: "lifelog_\(dayKey)", zoneID: zoneID)
+        let record = CKRecord(recordType: CloudKitRecordType.passiveLifelogBatch, recordID: recordID)
 
         let encoder = JSONEncoder()
         let compressed = try encoder.encode(points)
 
-        record["yearMonth"] = yearMonth as CKRecordValue
-        record["points"] = compressed as CKRecordValue
-        record["modifiedAt"] = Date() as CKRecordValue
+        record[dayKeyField] = dayKey as CKRecordValue
+        record[pointsField] = compressed as CKRecordValue
+        record[modifiedAtField] = Date() as CKRecordValue
+        record[isDeletedField] = 0 as CKRecordValue
 
         _ = try await database.save(record)
     }
 
+    func uploadBatches(_ batches: [String: [LifelogStore.LifelogTrackPoint]]) async throws {
+        for (dayKey, points) in batches {
+            try await uploadBatch(dayKey: dayKey, points: points)
+        }
+    }
+
     func downloadBatches(modifiedAfter: Date?) async throws -> [String: [LifelogStore.LifelogTrackPoint]] {
+        let snapshots = try await downloadSnapshots(modifiedAfter: modifiedAfter)
+        return snapshots.reduce(into: [String: [LifelogStore.LifelogTrackPoint]]()) { partial, snapshot in
+            guard !snapshot.isDeleted else { return }
+            partial[snapshot.dayKey] = snapshot.points
+        }
+    }
+
+    func downloadSnapshots(modifiedAfter: Date?) async throws -> [LifelogDayCloudSnapshot] {
         var predicate: NSPredicate
         if let date = modifiedAfter {
-            predicate = NSPredicate(format: "modifiedAt > %@", date as NSDate)
+            predicate = NSPredicate(format: "\(modifiedAtField) > %@", date as NSDate)
         } else {
             predicate = NSPredicate(value: true)
         }
 
-        let query = CKQuery(recordType: CloudKitRecordType.lifelogBatch, predicate: predicate)
+        let query = CKQuery(recordType: CloudKitRecordType.passiveLifelogBatch, predicate: predicate)
         let records = try await database.records(matching: query, inZoneWith: zoneID)
 
-        var batches: [String: [LifelogStore.LifelogTrackPoint]] = [:]
+        var snapshots: [LifelogDayCloudSnapshot] = []
         for record in records {
-            if let yearMonth = record["yearMonth"] as? String,
-               let data = record["points"] as? Data {
-                let points = try JSONDecoder().decode([LifelogStore.LifelogTrackPoint].self, from: data)
-                batches[yearMonth] = points
+            guard let dayKey = record[dayKeyField] as? String else { continue }
+            let modifiedAt = (record[modifiedAtField] as? Date) ?? record.modificationDate ?? .distantPast
+            let isDeleted = ((record[isDeletedField] as? Int64) ?? 0) != 0
+            let points: [LifelogStore.LifelogTrackPoint]
+            if let data = record[pointsField] as? Data {
+                points = try JSONDecoder().decode([LifelogStore.LifelogTrackPoint].self, from: data)
+            } else {
+                points = []
             }
+            snapshots.append(
+                LifelogDayCloudSnapshot(
+                    dayKey: dayKey,
+                    points: points,
+                    modifiedAt: modifiedAt,
+                    isDeleted: isDeleted
+                )
+            )
         }
-        return batches
+        return snapshots
+    }
+
+    func deleteBatch(dayKey: String) async throws {
+        let recordID = CKRecord.ID(recordName: "lifelog_\(dayKey)", zoneID: zoneID)
+        let record = CKRecord(recordType: CloudKitRecordType.passiveLifelogBatch, recordID: recordID)
+        record[dayKeyField] = dayKey as CKRecordValue
+        record[modifiedAtField] = Date() as CKRecordValue
+        record[isDeletedField] = 1 as CKRecordValue
+        record[pointsField] = nil
+        _ = try await database.save(record)
     }
 }

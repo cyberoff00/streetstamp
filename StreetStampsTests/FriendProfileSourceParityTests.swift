@@ -57,6 +57,23 @@ final class FriendProfileSourceParityTests: XCTestCase {
         XCTAssertTrue(contents.contains("socialStore.friends.first(where: { $0.id == friendID }) ?? fallbackSnapshot"))
     }
 
+    func test_activityFeedUsesPromptRefreshAndScrollRestoreFlow() throws {
+        let root = projectRoot().appendingPathComponent("StreetStamps", isDirectory: true)
+        let contents = try String(
+            contentsOf: root.appendingPathComponent("FriendsHubView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(contents.contains("@State private var pendingFeedRefreshProfiles: [FriendProfileSnapshot]?"))
+        XCTAssertTrue(contents.contains("@State private var feedScrollRestoreState = FriendsFeedScrollRestoreState()"))
+        XCTAssertTrue(contents.contains("await detectUnseenFeedUpdates()"))
+        XCTAssertFalse(contents.contains("try? await Task.sleep(nanoseconds: 25 * 1_000_000_000)\n                await refreshRemoteFriends()"))
+        XCTAssertTrue(contents.contains("Text(L10n.t(\"friends_feed_new_activity_prompt\"))"))
+        XCTAssertTrue(contents.contains("ScrollViewReader { proxy in"))
+        XCTAssertTrue(contents.contains("feedScrollRestoreState.recordOpen(eventID: event.id)"))
+        XCTAssertTrue(contents.contains("proxy.scrollTo(eventID, anchor: .center)"))
+    }
+
     func test_friendProfileSourceAvoidsHardcodedEnglishUserFacingCopy() throws {
         let root = projectRoot().appendingPathComponent("StreetStamps", isDirectory: true)
         let contents = try String(

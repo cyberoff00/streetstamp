@@ -139,6 +139,16 @@ final class PostcardCenter: ObservableObject {
         )
     }
 
+    func retry(draftID: String, token: String?) async {
+        guard let draft = drafts.first(where: { $0.draftID == draftID }) else { return }
+        await retry(
+            draftID: draftID,
+            token: token,
+            allowedCityIDs: [draft.cityID],
+            cityJourneyCount: 1
+        )
+    }
+
     func enqueueSend(draftID: String, token: String?, allowedCityIDs: [String], cityJourneyCount: Int) async {
         await enqueueSend(
             draftID: draftID,

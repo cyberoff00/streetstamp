@@ -1738,13 +1738,6 @@ struct LifelogView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                     .multilineTextAlignment(.center)
 
-                Text(String(format: L10n.t("lifelog_steps_modal_summary_format"), formattedStepCount(stepModalStepCount)))
-                    .font(.system(size: 15, weight: .medium, design: .rounded))
-                    .foregroundColor(FigmaTheme.subtext)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 8)
-
                 if LifelogStepMilestonePresentation.showsFooterCloseButton {
                     Button(L10n.t("lifelog_steps_modal_close")) {
                         dismissStepModal()

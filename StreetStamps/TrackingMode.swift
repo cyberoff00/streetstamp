@@ -111,7 +111,7 @@ struct TrackingModeConfig {
         enableStorageDownsample: false,     // 不抽稀，保留完整轨迹
         storageMaxPointsPerHour: 99999,
         
-        renderDebounceInterval: 0.08        // 12Hz渲染
+        renderDebounceInterval: 0.16        // 约6Hz渲染，保留实时感同时降低前台重绘
     )
     
     /// 日常模式：省电，适合8小时daytrip
@@ -138,7 +138,7 @@ struct TrackingModeConfig {
         enableStorageDownsample: true,      // 启用存盘抽稀
         storageMaxPointsPerHour: 200,       // 每小时最多200点
         
-        renderDebounceInterval: 0.25        // 4Hz渲染
+        renderDebounceInterval: 0.5         // 2Hz渲染，更适合日常长时记录
     )
     
     /// 根据模式获取配置

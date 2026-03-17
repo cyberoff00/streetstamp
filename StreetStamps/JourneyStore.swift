@@ -73,14 +73,26 @@ final class JourneysIndexStore {
 
 @MainActor
 final class JourneyStore: ObservableObject {
+    struct SyncHooks {
+        var upsertCompletedJourney: ((JourneyRoute) -> Void)?
+        var deleteJourney: ((String) -> Void)?
+
+        static let disabled = SyncHooks(
+            upsertCompletedJourney: nil,
+            deleteJourney: nil
+        )
+    }
+
     @Published private(set) var journeys: [JourneyRoute] = []
     @Published var latestOngoing: JourneyRoute? = nil
     @Published private(set) var hasLoaded: Bool = false
     @Published private(set) var isLoading: Bool = false
     @Published private(set) var trackTileRevision: Int = 0
+    var syncHooks: SyncHooks = .disabled
 
     private var fileStore: JourneysFileStore
     private var indexStore: JourneysIndexStore
+    private var userID: String
 
     private let ioQueue = DispatchQueue(label: "ss.journeys.store", qos: .utility)
 
@@ -104,6 +116,7 @@ final class JourneyStore: ObservableObject {
     private let metaPersistDebounce: TimeInterval = 0.6
 
     init(paths: StoragePath) {
+        self.userID = paths.userID
         self.fileStore = JourneysFileStore(baseURL: paths.journeysDir)
         self.indexStore = JourneysIndexStore(baseURL: paths.journeysDir)
     }
@@ -120,6 +133,7 @@ final class JourneyStore: ObservableObject {
         hasLoaded = false
         trackTileRevision = 0
 
+        userID = paths.userID
         fileStore = JourneysFileStore(baseURL: paths.journeysDir)
         indexStore = JourneysIndexStore(baseURL: paths.journeysDir)
         bumpTrackTileRevision()
@@ -127,27 +141,31 @@ final class JourneyStore: ObservableObject {
 
     /// Load journeys from file-backed store.
     func load() {
-        guard !isLoading else { return }
         Task {
-            self.isLoading = true
-            defer { self.isLoading = false }
+            await self.loadAsync()
+        }
+    }
 
-            let ids = await indexStore.loadJourneyIDsAsync()
-            guard !ids.isEmpty else {
-                self.journeys = []
-                self.latestOngoing = nil
-                self.hasLoaded = true
-                self.bumpTrackTileRevision()
-                return
-            }
-            let loaded = await fileStore.loadJourneys(ids: ids)
-            self.journeys = loaded
+    func loadAsync() async {
+        guard !isLoading else { return }
+        self.isLoading = true
+        defer { self.isLoading = false }
 
-            // Best-effort: restore "ongoing" journey pointer after a cold start.
-            self.latestOngoing = loaded.first(where: { $0.endTime == nil })
+        let ids = await indexStore.loadJourneyIDsAsync()
+        guard !ids.isEmpty else {
+            self.journeys = []
+            self.latestOngoing = nil
             self.hasLoaded = true
             self.bumpTrackTileRevision()
+            return
         }
+        let loaded = await fileStore.loadJourneys(ids: ids)
+        self.journeys = loaded
+
+        // Best-effort: restore "ongoing" journey pointer after a cold start.
+        self.latestOngoing = loaded.first(where: { $0.endTime == nil })
+        self.hasLoaded = true
+        self.bumpTrackTileRevision()
     }
 
     /// Update in-memory list and schedule persistence.
@@ -224,6 +242,7 @@ final class JourneyStore: ObservableObject {
     /// without relying on debounced meta persistence.
     func flushPersist(journey: JourneyRoute) {
         flushPersist(journey: journey, force: true)
+        syncCompletedJourneyIfNeeded(journey)
     }
 
     private func scheduleMetaPersist(journey: JourneyRoute) {
@@ -353,6 +372,7 @@ final class JourneyStore: ObservableObject {
         bumpTrackTileRevision()
         GlobeRefreshCoordinator.shared.requestRefresh(reason: .journeySaved)
         flushPersist(journey: journey, force: true)
+        syncCompletedJourneyIfNeeded(journey)
     }
 
     /// Apply many completed-journey updates in one pass to avoid UI stalls.
@@ -369,6 +389,9 @@ final class JourneyStore: ObservableObject {
 
         let snapshots = journeys
         bumpTrackTileRevision()
+        updates
+            .filter { $0.endTime != nil }
+            .forEach(syncCompletedJourneyIfNeeded)
 
         ioQueue.async { [weak self] in
             guard let self else { return }
@@ -418,6 +441,8 @@ final class JourneyStore: ObservableObject {
             object: self,
             userInfo: ["ids": uniqueIDs]
         )
+        DeletedJourneyStore.record(uniqueIDs, userID: userID)
+        uniqueIDs.forEach { syncHooks.deleteJourney?($0) }
 
         ioQueue.async { [weak self] in
             guard let self else { return }
@@ -430,6 +455,50 @@ final class JourneyStore: ObservableObject {
                 print("❌ discard journeys failed:", error)
             }
         }
+    }
+
+    func mergeCloudSnapshots(upserts: [JourneyRoute], deletedIDs: [String]) {
+        let deletedSet = Set(deletedIDs.filter { !$0.isEmpty })
+        if !deletedSet.isEmpty {
+            journeys.removeAll(where: { deletedSet.contains($0.id) })
+            if let ongoingID = latestOngoing?.id, deletedSet.contains(ongoingID) {
+                latestOngoing = nil
+            }
+        }
+
+        for route in upserts {
+            if let index = journeys.firstIndex(where: { $0.id == route.id }) {
+                journeys[index] = route
+            } else {
+                journeys.insert(route, at: 0)
+            }
+        }
+
+        guard !upserts.isEmpty || !deletedSet.isEmpty else { return }
+
+        let snapshots = journeys
+        bumpTrackTileRevision()
+
+        ioQueue.async { [weak self] in
+            guard let self else { return }
+            do {
+                for id in deletedSet {
+                    try self.fileStore.deleteJourney(id: id)
+                    try self.indexStore.removeID(id)
+                }
+                for route in upserts {
+                    try self.fileStore.finalizeJourney(route)
+                }
+                try self.indexStore.replaceIDs(snapshots.map(\.id))
+            } catch {
+                print("❌ merge cloud snapshots failed:", error)
+            }
+        }
+    }
+
+    private func syncCompletedJourneyIfNeeded(_ journey: JourneyRoute) {
+        guard journey.endTime != nil else { return }
+        syncHooks.upsertCompletedJourney?(journey)
     }
 
     func trackRenderEvents() -> [TrackRenderEvent] {
@@ -445,10 +514,10 @@ final class JourneyStore: ObservableObject {
 
     private nonisolated static func makeTrackRenderEvents(from journeys: [JourneyRoute]) -> [TrackRenderEvent] {
         var out: [TrackRenderEvent] = []
-        out.reserveCapacity(journeys.reduce(0) { $0 + $1.coordinates.count })
+        out.reserveCapacity(journeys.reduce(0) { $0 + $1.displayRouteCoordinates.count })
 
         for journey in journeys {
-            let coords = journey.coordinates
+            let coords = journey.displayRouteCoordinates
             guard !coords.isEmpty else { continue }
             guard let (start, end) = Self.resolveRenderRange(for: journey) else { continue }
             let span = max(0, end.timeIntervalSince(start))

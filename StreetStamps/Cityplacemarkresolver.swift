@@ -146,6 +146,23 @@ enum CityPlacemarkResolver {
         )
     }
 
+    static func resolveIdentityCanonical(from pm: CLPlacemark, preferredISO2: String? = nil) -> Canonical {
+        let candidates = makeLevelCandidates(from: pm, preferredISO2: preferredISO2)
+        let level = decideLevel(candidates: candidates, preferred: nil)
+        let name = canonicalName(level: level, candidates: candidates)
+
+        return Canonical(
+            city: name,
+            iso2: candidates.iso2,
+            level: level,
+            admin: candidates.admin,
+            subAdmin: candidates.subAdmin,
+            country: candidates.country,
+            parentRegionKey: candidates.parentRegionKey,
+            availableLevelNames: candidates.availableLevelNames
+        )
+    }
+
     static func resolveDisplay(from pm: CLPlacemark, preferredISO2: String? = nil) -> Display {
         let candidates = makeLevelCandidates(from: pm, preferredISO2: preferredISO2)
         let preferred = CityLevelPreferenceStore.shared.preferredLevel(for: candidates.parentRegionKey)
@@ -376,10 +393,10 @@ enum CityPlacemarkResolver {
             cityKey: cachedCity.id,
             iso2: cachedCity.countryISO2,
             fallbackTitle: cachedCity.name,
-            availableLevelNamesRaw: cachedCity.reservedAvailableLevelNames,
-            storedAvailableLevelNamesLocaleID: cachedCity.reservedAvailableLevelNamesLocaleID,
-            parentRegionKey: cachedCity.reservedParentRegionKey,
-            preferredLevel: preferredLevelOverride ?? cachedCity.reservedLevelRaw.flatMap { CardLevel(rawValue: $0) },
+            availableLevelNamesRaw: cachedCity.availableLevelNames,
+            storedAvailableLevelNamesLocaleID: cachedCity.availableLevelNamesLocaleID,
+            parentRegionKey: cachedCity.parentScopeKey,
+            preferredLevel: preferredLevelOverride ?? cachedCity.selectedDisplayLevelRaw.flatMap { CardLevel(rawValue: $0) },
             localizedDisplayNameByLocale: localizedMap,
             locale: locale
         )
@@ -424,6 +441,40 @@ enum CityPlacemarkResolver {
             .first?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return split.isEmpty ? trimmedFallback : split
+    }
+
+    static func identityLevel(
+        cityKey: String,
+        availableLevelNames: [CardLevel: String]?,
+        iso2: String? = nil
+    ) -> CardLevel? {
+        let cityNameFromKey = cityKey.components(separatedBy: "|").first?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let normalizedKeyName = normalizeForMatching(cityNameFromKey)
+        guard !normalizedKeyName.isEmpty else { return nil }
+
+        for level in [CardLevel.island, .locality, .subAdmin, .admin, .country] {
+            let title = availableLevelNames?[level]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !title.isEmpty, normalizeForMatching(title) == normalizedKeyName {
+                return level
+            }
+        }
+
+        let inferredISO2Source: String? = iso2 ?? cityKey
+            .components(separatedBy: "|")
+            .dropFirst()
+            .first
+            .map { String($0) }
+        let inferredISO2 = inferredISO2Source?
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+            .uppercased()
+        if isRegionStyledDisplayKey(cityKey: cityKey, iso2: inferredISO2),
+           let countryTitle = availableLevelNames?[.country]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !countryTitle.isEmpty {
+            return .country
+        }
+
+        return nil
     }
 
     private static let strategyCountry: Set<String> = ["SG", "HK", "MO", "TW", "MC", "VA", "LI", "AD", "LU", "MT", "BH", "SC", "MV", "SM"]
@@ -657,29 +708,11 @@ enum CityPlacemarkResolver {
            !title.isEmpty {
             return effectivePreferred
         }
-
-        let cityNameFromKey = cityKey.components(separatedBy: "|").first?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let normalizedKeyName = normalizeForMatching(cityNameFromKey)
-        guard !normalizedKeyName.isEmpty else { return nil }
-
-        for level in [CardLevel.island, .locality, .subAdmin, .admin, .country] {
-            let title = availableLevelNames?[level]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if !title.isEmpty, normalizeForMatching(title) == normalizedKeyName {
-                return level
-            }
+        if let matched = identityLevel(cityKey: cityKey, availableLevelNames: availableLevelNames) {
+            return matched
         }
 
         if let availableLevelNames {
-            let inferredISO2 = cityKey.components(separatedBy: "|").dropFirst().first?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .uppercased()
-            if isRegionStyledDisplayKey(cityKey: cityKey, iso2: inferredISO2),
-               let countryTitle = availableLevelNames[.country]?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !countryTitle.isEmpty {
-                return .country
-            }
-
             for level in [CardLevel.admin, .subAdmin, .locality, .country] {
                 let title = availableLevelNames[level]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 if !title.isEmpty {
@@ -886,7 +919,7 @@ enum JourneyCityNamePresentation {
     ) -> String? {
         let key = journey.stableCityKey ?? ""
         guard !key.isEmpty else { return nil }
-        return cachedCitiesByKey[key]?.reservedParentRegionKey
+        return cachedCitiesByKey[key]?.parentScopeKey
     }
 
     static func title(for journey: JourneyRoute, localizedCityNameByKey: [String: String]) -> String {
@@ -904,19 +937,22 @@ enum JourneyCityNamePresentation {
         cachedCitiesByKey: [String: CachedCity],
         locale: Locale = .current
     ) -> String {
-        let key = journey.stableCityKey ?? ""
+        let rawKey = journey.stableCityKey ?? ""
+        let key = CityCollectionResolver.resolveCollectionKey(cityKey: rawKey)
         if let localized = localizedCityNameByKey[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
            !localized.isEmpty {
             return localized
         }
-        if let cachedCity = cachedCitiesByKey[key] {
+        if let cachedCity = cachedCitiesByKey[rawKey] ?? cachedCitiesByKey[key] {
+            let fallbackTitle = CityCollectionResolver.configuredTitle(for: key) ?? cachedCity.name
             let title = CityPlacemarkResolver.displayTitle(
-                cityKey: cachedCity.id,
-                iso2: cachedCity.countryISO2,
-                fallbackTitle: cachedCity.name,
-                availableLevelNamesRaw: cachedCity.reservedAvailableLevelNames,
-                storedAvailableLevelNamesLocaleID: cachedCity.reservedAvailableLevelNamesLocaleID,
-                parentRegionKey: cachedCity.reservedParentRegionKey,
+                cityKey: key,
+                iso2: cachedCity.countryISO2 ?? CityDisplayResolver.iso2(from: key),
+                fallbackTitle: fallbackTitle,
+                availableLevelNamesRaw: cachedCity.availableLevelNames,
+                storedAvailableLevelNamesLocaleID: cachedCity.availableLevelNamesLocaleID,
+                parentRegionKey: cachedCity.parentScopeKey,
+                preferredLevel: cachedCity.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
                 localizedDisplayNameByLocale: cachedCity.localizedDisplayNameByLocale,
                 locale: locale
             ).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -924,7 +960,12 @@ enum JourneyCityNamePresentation {
                 return title
             }
         }
-        return journey.displayCityName
+        let fallbackTitle = journey.displayCityName
+        return CityDisplayResolver.title(
+            for: key,
+            fallbackTitle: fallbackTitle,
+            locale: locale
+        )
     }
 }
 

@@ -100,13 +100,14 @@ final class GuestDataRecoveryServiceTests: XCTestCase {
     }
 
     @MainActor
-    func test_logoutToGuest_preservesActiveLocalProfileID() {
+    func test_applyAuth_switchesActiveLocalProfileIDToAccountScope() {
         let store = UserSessionStore()
         let initialLocalProfileID = store.activeLocalProfileID
+        let accountUserID = "account-local-profile-\(UUID().uuidString)"
 
         store.applyAuth(
             BackendAuthResponse(
-                userId: "account-local-profile-\(UUID().uuidString)",
+                userId: accountUserID,
                 provider: "email",
                 email: "local@example.com",
                 accessToken: "token",
@@ -114,7 +115,29 @@ final class GuestDataRecoveryServiceTests: XCTestCase {
                 needsProfileSetup: false
             )
         )
-        XCTAssertEqual(store.activeLocalProfileID, initialLocalProfileID)
+
+        XCTAssertNotEqual(store.activeLocalProfileID, initialLocalProfileID)
+        XCTAssertEqual(store.activeLocalProfileID, "account_\(accountUserID)")
+    }
+
+    @MainActor
+    func test_logoutToGuest_restoresGuestScopedActiveLocalProfileID() {
+        let store = UserSessionStore()
+        let initialLocalProfileID = store.activeLocalProfileID
+        let accountUserID = "account-local-profile-\(UUID().uuidString)"
+
+        store.applyAuth(
+            BackendAuthResponse(
+                userId: accountUserID,
+                provider: "email",
+                email: "local@example.com",
+                accessToken: "token",
+                refreshToken: "refresh",
+                needsProfileSetup: false
+            )
+        )
+
+        XCTAssertEqual(store.activeLocalProfileID, "account_\(accountUserID)")
 
         store.logoutToGuest()
 
@@ -147,12 +170,13 @@ final class GuestDataRecoveryServiceTests: XCTestCase {
     }
 
     @MainActor
-    func test_applyFirebaseAccountSession_preservesActiveLocalProfileID() {
+    func test_applyFirebaseAccountSession_switchesActiveLocalProfileIDToAccountScope() {
         let store = UserSessionStore()
         let initialLocalProfileID = store.activeLocalProfileID
+        let accountUserID = "firebase-local-\(UUID().uuidString)"
 
         store.applyFirebaseAccountSession(
-            appUserID: "firebase-local-\(UUID().uuidString)",
+            appUserID: accountUserID,
             firebaseUID: "firebase-\(UUID().uuidString)",
             provider: "google",
             email: "firebase-local@example.com",
@@ -161,12 +185,13 @@ final class GuestDataRecoveryServiceTests: XCTestCase {
             preserveGuestBoundary: false
         )
 
-        XCTAssertEqual(store.activeLocalProfileID, initialLocalProfileID)
-        XCTAssertEqual(store.accountUserID?.hasPrefix("firebase-local-"), true)
+        XCTAssertNotEqual(store.activeLocalProfileID, initialLocalProfileID)
+        XCTAssertEqual(store.activeLocalProfileID, "account_\(accountUserID)")
+        XCTAssertEqual(store.accountUserID, accountUserID)
     }
 
     @MainActor
-    func test_bootstrapFileSystemAsync_importsPreviouslyBoundAccountRootIntoActiveLocalProfile() async throws {
+    func test_bootstrapFileSystemAsync_doesNotImportPreviouslyBoundAccountRootIntoActiveLocalProfile() async throws {
         let store = UserSessionStore()
         let localPaths = StoragePath(userID: store.activeLocalProfileID)
         let accountUserID = "bootstrap-bound-\(UUID().uuidString)"
@@ -193,10 +218,7 @@ final class GuestDataRecoveryServiceTests: XCTestCase {
         await store.bootstrapFileSystemAsync()
 
         let localMoodURL = localPaths.cachesDir.appendingPathComponent("lifelog_mood.json", isDirectory: false)
-        let data = try Data(contentsOf: localMoodURL)
-        let restored = try JSONDecoder().decode([String: String].self, from: data)
-        let moodKey = dayKey(Calendar.current.startOfDay(for: Date()))
-        XCTAssertEqual(restored[moodKey], "account-seeded")
+        XCTAssertFalse(fm.fileExists(atPath: localMoodURL.path))
 
         try? fm.removeItem(at: localPaths.userRoot)
         try? fm.removeItem(at: accountPaths.userRoot)
@@ -260,7 +282,7 @@ final class GuestDataRecoveryServiceTests: XCTestCase {
     }
 
     @MainActor
-    func test_bootstrapFileSystemAsync_importsRecoverableGuestSourceEvenWhenBindingSourceDeviceDiffers() async throws {
+    func test_bootstrapFileSystemAsync_doesNotImportRecoverableGuestSourceEvenWhenBindingSourceDeviceDiffers() async throws {
         let store = UserSessionStore()
         store.logoutToGuest()
         store.clearPendingGuestMigrationMarker()
@@ -292,7 +314,7 @@ final class GuestDataRecoveryServiceTests: XCTestCase {
 
         await store.bootstrapFileSystemAsync()
 
-        XCTAssertEqual(loadJourneyCoordinatesCount(id: recoveredJourneyID, from: localPaths), 5)
+        XCTAssertEqual(loadJourneyCoordinatesCount(id: recoveredJourneyID, from: localPaths), 0)
 
         try? fm.removeItem(at: localPaths.userRoot)
         try? fm.removeItem(at: recoverableGuestPaths.userRoot)

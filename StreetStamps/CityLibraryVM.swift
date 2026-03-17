@@ -3,6 +3,131 @@ import MapKit
 import SwiftUI
 import Combine   // ✅ 必须：ObservableObject / @Published
 
+enum CityCollectionResolver {
+    fileprivate struct Mapping: Decodable {
+        var cityToCollection: [String: String] = [:]
+        var collectionTitles: [String: String] = [:]
+    }
+
+    private static var testingMapping = Mapping()
+    private static let bundleMapping: Mapping = loadBundleMapping()
+
+    static func resolveCollectionKey(cityKey: String) -> String {
+        let trimmed = cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return trimmed }
+        return activeMapping.cityToCollection[trimmed] ?? trimmed
+    }
+
+    static func resolveCollectionKey(for journey: JourneyRoute) -> String {
+        resolveCollectionKey(cityKey: journey.startCityKey ?? journey.cityKey)
+    }
+
+    static func resolveCollectionKey(
+        for journey: JourneyRoute,
+        cachedCitiesByKey: [String: CachedCity]
+    ) -> String {
+        let rawKey = (journey.startCityKey ?? journey.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawKey.isEmpty else { return rawKey }
+        if let cached = cachedCitiesByKey[rawKey] {
+            return resolveCollectionKey(for: cached)
+        }
+        return resolveCollectionKey(cityKey: rawKey)
+    }
+
+    static func resolveCollectionKey(
+        cityKey: String,
+        selectedDisplayLevelRaw: String?,
+        availableLevelNamesRaw: [String: String]?,
+        iso2: String?
+    ) -> String {
+        let trimmed = cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return trimmed }
+
+        // Use raw identity (cityKey) to query mapping, not dynamic key based on user selection
+        return activeMapping.cityToCollection[trimmed] ?? trimmed
+    }
+
+    static func resolveCollectionKey(for cachedCity: CachedCity) -> String {
+        resolveCollectionKey(
+            cityKey: cachedCity.cityKey,
+            selectedDisplayLevelRaw: cachedCity.selectedDisplayLevelRaw,
+            availableLevelNamesRaw: cachedCity.availableLevelNames,
+            iso2: cachedCity.countryISO2
+        )
+    }
+
+    static func configuredTitle(for collectionKey: String) -> String? {
+        let trimmed = collectionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return activeMapping.collectionTitles[trimmed]
+    }
+
+    static func setTestingMappings(
+        cityToCollection: [String: String],
+        collectionTitles: [String: String]
+    ) {
+        testingMapping = Mapping(cityToCollection: cityToCollection, collectionTitles: collectionTitles)
+    }
+
+    static func resetForTesting() {
+        testingMapping = Mapping()
+    }
+
+    private static var activeMapping: Mapping {
+        var merged = bundleMapping
+        if !testingMapping.cityToCollection.isEmpty {
+            merged.cityToCollection.merge(testingMapping.cityToCollection) { _, new in new }
+        }
+        if !testingMapping.collectionTitles.isEmpty {
+            merged.collectionTitles.merge(testingMapping.collectionTitles) { _, new in new }
+        }
+        return merged
+    }
+
+    private static func loadBundleMapping() -> Mapping {
+        guard let url = Bundle.main.url(forResource: "CityCollectionMapping", withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let decoded = try? JSONDecoder().decode(Mapping.self, from: data) else {
+            return Mapping()
+        }
+        return decoded
+    }
+
+    private static func iso2FromKey(_ key: String) -> String? {
+        key
+            .split(separator: "|", omittingEmptySubsequences: false)
+            .dropFirst()
+            .first
+            .map(String.init)
+    }
+}
+
+enum CityDisplayResolver {
+    static func title(
+        for collectionKey: String,
+        fallbackTitle: String,
+        locale: Locale = LanguagePreference.shared.displayLocale
+    ) -> String {
+        let trimmedKey = collectionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedKey.isEmpty else { return fallbackTitle }
+        let configured = CityCollectionResolver.configuredTitle(for: trimmedKey) ?? fallbackTitle
+        return CityDisplayTitlePresentation.title(
+            cityKey: trimmedKey,
+            iso2: iso2(from: trimmedKey),
+            fallbackTitle: configured,
+            locale: locale
+        )
+    }
+
+    static func iso2(from collectionKey: String) -> String? {
+        collectionKey
+            .split(separator: "|", omittingEmptySubsequences: false)
+            .dropFirst()
+            .first
+            .map(String.init)
+    }
+}
+
 struct City: Identifiable {
     /// UI display name (localized, from reverse geocode). Falls back to `name`.
     var displayName: String? = nil
@@ -19,10 +144,12 @@ struct City: Identifiable {
 
     var thumbnailBasePath: String?
     var thumbnailRoutePath: String?
-    var reservedLevelRaw: String? = nil
-    var reservedParentRegionKey: String? = nil
-    var reservedAvailableLevelNames: [String: String]? = nil
-    var reservedAvailableLevelNamesLocaleID: String? = nil
+    var sourceCityKeys: [String] = []
+    var identityLevelRaw: String? = nil
+    var selectedDisplayLevelRaw: String? = nil
+    var parentScopeKey: String? = nil
+    var availableLevelNames: [String: String]? = nil
+    var availableLevelNamesLocaleID: String? = nil
     var localizedDisplayNameByLocale: [String: String]? = nil
 
     var allCoordinates: [CLLocationCoordinate2D] {
@@ -75,10 +202,10 @@ final class CityLibraryVM: ObservableObject {
             cityKey: city.id,
             iso2: city.countryISO2,
             fallbackTitle: city.displayName ?? city.name,
-            availableLevelNamesRaw: city.reservedAvailableLevelNames,
-            storedAvailableLevelNamesLocaleID: city.reservedAvailableLevelNamesLocaleID,
-            parentRegionKey: city.reservedParentRegionKey,
-            preferredLevel: city.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
+            availableLevelNamesRaw: city.availableLevelNames,
+            storedAvailableLevelNamesLocaleID: city.availableLevelNamesLocaleID,
+            parentRegionKey: city.parentScopeKey,
+            preferredLevel: city.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
             localizedDisplayNameByLocale: localizedMap,
             locale: locale
         )
@@ -94,21 +221,27 @@ final class CityLibraryVM: ObservableObject {
 
     func upsertCity(cityKey: String, journeyStore: JourneyStore, cityCache: CityCache) {
         self.cityCache = cityCache
-        let byId = Dictionary(uniqueKeysWithValues: journeyStore.journeys.map { ($0.id, $0) })
-        guard let cached = cityCache.cachedCities.first(where: { $0.id == cityKey && !($0.isTemporary ?? false) }) else {
-            removeCity(cityKey: cityKey)
-            return
-        }
+        let collectionKey = cityCache.cachedCities
+            .first(where: { $0.id == cityKey && !($0.isTemporary ?? false) })
+            .map(CityCollectionResolver.resolveCollectionKey(for:))
+            ?? CityCollectionResolver.resolveCollectionKey(cityKey: cityKey)
+        let nextCities = Self.buildCities(
+            journeys: journeyStore.journeys,
+            cachedCities: cityCache.cachedCities
+        )
 
-        var next = makeCity(from: cached, journeysById: byId)
-        if let idx = cities.firstIndex(where: { $0.id == cityKey }) {
-            cities[idx] = next
+        if let next = nextCities.first(where: { $0.id == collectionKey }) {
+            if let idx = cities.firstIndex(where: { $0.id == collectionKey }) {
+                cities[idx] = next
+            } else {
+                cities.append(next)
+            }
         } else {
-            cities.append(next)
+            removeCity(cityKey: collectionKey)
         }
         sortCities()
         Task {
-            await prefetchDisplayNameDetached(cityID: cityKey)
+            await prefetchDisplayNameDetached(cityID: collectionKey)
         }
     }
 
@@ -130,10 +263,12 @@ final class CityLibraryVM: ObservableObject {
             memories: cached.memories,
             thumbnailBasePath: cached.thumbnailBasePath,
             thumbnailRoutePath: cached.thumbnailRoutePath,
-            reservedLevelRaw: cached.reservedLevelRaw,
-            reservedParentRegionKey: cached.reservedParentRegionKey,
-            reservedAvailableLevelNames: cached.reservedAvailableLevelNames,
-            reservedAvailableLevelNamesLocaleID: cached.reservedAvailableLevelNamesLocaleID,
+            sourceCityKeys: [cached.cityKey],
+            identityLevelRaw: cached.identityLevelRaw,
+            selectedDisplayLevelRaw: cached.selectedDisplayLevelRaw,
+            parentScopeKey: cached.parentScopeKey,
+            availableLevelNames: cached.availableLevelNames,
+            availableLevelNamesLocaleID: cached.availableLevelNamesLocaleID,
             localizedDisplayNameByLocale: cached.localizedDisplayNameByLocale
         )
     }
@@ -158,28 +293,100 @@ final class CityLibraryVM: ObservableObject {
         let byId = Dictionary(uniqueKeysWithValues: journeys.map { ($0.id, $0) })
         let cached = cachedCities.filter { !($0.isTemporary ?? false) }
 
-        var out: [City] = []
-        out.reserveCapacity(cached.count)
+        struct Aggregate {
+            let collectionKey: String
+            var fallbackName: String
+            var countryISO2: String?
+            var sourceCityKeys: [String]
+            var journeys: [JourneyRoute]
+            var boundaryPolygon: [CLLocationCoordinate2D]?
+            var anchor: CLLocationCoordinate2D?
+            var explorations: Int
+            var memories: Int
+            var thumbnailBasePath: String?
+            var thumbnailRoutePath: String?
+            var identityLevelRaw: String?
+            var selectedDisplayLevelRaw: String?
+            var parentScopeKey: String?
+            var availableLevelNames: [String: String]?
+            var availableLevelNamesLocaleID: String?
+            var localizedDisplayNameByLocale: [String: String]?
+        }
+
+        var grouped: [String: Aggregate] = [:]
         for c in cached {
-            out.append(
-                City(
-                    displayName: CityPlacemarkResolver.displayTitle(for: c, locale: LanguagePreference.shared.displayLocale),
-                    id: c.id,
-                    name: c.name,
+            let collectionKey = CityCollectionResolver.resolveCollectionKey(for: c)
+            let resolvedJourneys = c.journeyIds.compactMap { byId[$0] }.filter { $0.isCompleted }
+            let fallbackName = CityCollectionResolver.configuredTitle(for: collectionKey) ?? c.name
+
+            if var existing = grouped[collectionKey] {
+                let existingIDs = Set(existing.journeys.map(\.id))
+                let appended = resolvedJourneys.filter { !existingIDs.contains($0.id) }
+                existing.journeys.append(contentsOf: appended)
+                if !existing.sourceCityKeys.contains(c.cityKey) {
+                    existing.sourceCityKeys.append(c.cityKey)
+                }
+                existing.explorations += c.explorations
+                existing.memories += c.memories
+                existing.countryISO2 = existing.countryISO2 ?? c.countryISO2
+                existing.boundaryPolygon = existing.boundaryPolygon ?? c.boundary?.map { $0.cl }
+                existing.anchor = existing.anchor ?? c.anchor?.cl
+                existing.thumbnailBasePath = existing.thumbnailBasePath ?? c.thumbnailBasePath
+                existing.thumbnailRoutePath = existing.thumbnailRoutePath ?? c.thumbnailRoutePath
+                existing.identityLevelRaw = existing.identityLevelRaw ?? c.identityLevelRaw
+                existing.selectedDisplayLevelRaw = existing.selectedDisplayLevelRaw ?? c.selectedDisplayLevelRaw
+                existing.parentScopeKey = existing.parentScopeKey ?? c.parentScopeKey
+                existing.availableLevelNames = existing.availableLevelNames ?? c.availableLevelNames
+                existing.availableLevelNamesLocaleID = existing.availableLevelNamesLocaleID ?? c.availableLevelNamesLocaleID
+                existing.localizedDisplayNameByLocale = existing.localizedDisplayNameByLocale ?? c.localizedDisplayNameByLocale
+                grouped[collectionKey] = existing
+            } else {
+                grouped[collectionKey] = Aggregate(
+                    collectionKey: collectionKey,
+                    fallbackName: fallbackName,
                     countryISO2: c.countryISO2,
-                    journeys: c.journeyIds.compactMap { byId[$0] }.filter { $0.isCompleted },
+                    sourceCityKeys: [c.cityKey],
+                    journeys: resolvedJourneys,
                     boundaryPolygon: c.boundary?.map { $0.cl },
                     anchor: c.anchor?.cl,
                     explorations: c.explorations,
                     memories: c.memories,
                     thumbnailBasePath: c.thumbnailBasePath,
                     thumbnailRoutePath: c.thumbnailRoutePath,
-                    reservedLevelRaw: c.reservedLevelRaw,
-                    reservedParentRegionKey: c.reservedParentRegionKey,
-                    reservedAvailableLevelNames: c.reservedAvailableLevelNames,
-                    reservedAvailableLevelNamesLocaleID: c.reservedAvailableLevelNamesLocaleID,
+                    identityLevelRaw: c.identityLevelRaw,
+                    selectedDisplayLevelRaw: c.selectedDisplayLevelRaw,
+                    parentScopeKey: c.parentScopeKey,
+                    availableLevelNames: c.availableLevelNames,
+                    availableLevelNamesLocaleID: c.availableLevelNamesLocaleID,
                     localizedDisplayNameByLocale: c.localizedDisplayNameByLocale
                 )
+            }
+        }
+
+        var out: [City] = grouped.values.map { aggregate in
+            City(
+                displayName: CityDisplayResolver.title(
+                    for: aggregate.collectionKey,
+                    fallbackTitle: aggregate.fallbackName,
+                    locale: LanguagePreference.shared.displayLocale
+                ),
+                id: aggregate.collectionKey,
+                name: aggregate.fallbackName,
+                countryISO2: aggregate.countryISO2 ?? CityDisplayResolver.iso2(from: aggregate.collectionKey),
+                journeys: aggregate.journeys,
+                boundaryPolygon: aggregate.boundaryPolygon,
+                anchor: aggregate.anchor,
+                explorations: aggregate.explorations,
+                memories: aggregate.memories,
+                thumbnailBasePath: aggregate.thumbnailBasePath,
+                thumbnailRoutePath: aggregate.thumbnailRoutePath,
+                sourceCityKeys: aggregate.sourceCityKeys.sorted(),
+                identityLevelRaw: aggregate.identityLevelRaw,
+                selectedDisplayLevelRaw: aggregate.selectedDisplayLevelRaw,
+                parentScopeKey: aggregate.parentScopeKey,
+                availableLevelNames: aggregate.availableLevelNames,
+                availableLevelNamesLocaleID: aggregate.availableLevelNamesLocaleID,
+                localizedDisplayNameByLocale: aggregate.localizedDisplayNameByLocale
             )
         }
 
@@ -214,10 +421,10 @@ final class CityLibraryVM: ObservableObject {
                 cityKey: city.id,
                 iso2: city.countryISO2,
                 fallbackTitle: city.localizedName,
-                availableLevelNamesRaw: city.reservedAvailableLevelNames,
-                storedAvailableLevelNamesLocaleID: city.reservedAvailableLevelNamesLocaleID,
-                parentRegionKey: city.reservedParentRegionKey,
-                preferredLevel: city.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
+                availableLevelNamesRaw: city.availableLevelNames,
+                storedAvailableLevelNamesLocaleID: city.availableLevelNamesLocaleID,
+                parentRegionKey: city.parentScopeKey,
+                preferredLevel: city.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
                 localizedDisplayNameByLocale: city.localizedDisplayNameByLocale,
                 locale: displayLocale
             )
@@ -234,7 +441,7 @@ final class CityLibraryVM: ObservableObject {
             }
 
             // 1) Use cached value first (no rate-limit hit)
-            if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key, parentRegionKey: city.reservedParentRegionKey) {
+            if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key, parentRegionKey: city.parentScopeKey) {
                 let t = Self.normalizedPrefetchedDisplayTitle(
                     for: city,
                     candidateLocalizedTitle: cached,
@@ -256,12 +463,12 @@ final class CityLibraryVM: ObservableObject {
             }
 
             // 2) Fetch with rate-limit friendly pacing
-            var fetched: String? = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key, parentRegionKey: city.reservedParentRegionKey)
+            var fetched: String? = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key, parentRegionKey: city.parentScopeKey)
 
             if fetched == nil {
                 // Wait a bit then try once more (ReverseGeocodeService skips when rate-limited)
                 try? await Task.sleep(nanoseconds: 1_650_000_000)
-                fetched = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key, parentRegionKey: city.reservedParentRegionKey)
+                fetched = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key, parentRegionKey: city.parentScopeKey)
             }
 
             if let fetched {
@@ -315,10 +522,10 @@ final class CityLibraryVM: ObservableObject {
             cityKey: city.id,
             iso2: city.countryISO2,
             fallbackTitle: city.displayName ?? city.name,
-            availableLevelNamesRaw: city.reservedAvailableLevelNames,
-            storedAvailableLevelNamesLocaleID: city.reservedAvailableLevelNamesLocaleID,
-            parentRegionKey: city.reservedParentRegionKey,
-            preferredLevel: city.reservedLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
+            availableLevelNamesRaw: city.availableLevelNames,
+            storedAvailableLevelNamesLocaleID: city.availableLevelNamesLocaleID,
+            parentRegionKey: city.parentScopeKey,
+            preferredLevel: city.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
             localizedDisplayNameByLocale: city.localizedDisplayNameByLocale,
             locale: displayLocale
         )
@@ -334,7 +541,7 @@ final class CityLibraryVM: ObservableObject {
             return
         }
 
-        if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key, parentRegionKey: city.reservedParentRegionKey) {
+        if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key, parentRegionKey: city.parentScopeKey) {
             let t = Self.normalizedPrefetchedDisplayTitle(
                 for: city,
                 candidateLocalizedTitle: cached,
@@ -356,7 +563,7 @@ final class CityLibraryVM: ObservableObject {
         }
 
         let loc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
-        if let fetched = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key, parentRegionKey: city.reservedParentRegionKey) {
+        if let fetched = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key, parentRegionKey: city.parentScopeKey) {
             let t = Self.normalizedPrefetchedDisplayTitle(
                 for: city,
                 candidateLocalizedTitle: fetched,

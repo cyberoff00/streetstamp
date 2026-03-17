@@ -97,6 +97,135 @@ final class LifelogStoreBehaviorTests: XCTestCase {
     }
 
     @MainActor
+    func test_snapshotPointsByDay_groupsPassivePointsByDayKey() async throws {
+        let userID = "lifelog-day-snapshot-\(UUID().uuidString)"
+        let paths = StoragePath(userID: userID)
+        try? FileManager.default.removeItem(at: paths.userRoot)
+        try paths.ensureBaseDirectoriesExist()
+
+        let store = LifelogStore(paths: paths)
+        store.load()
+        let loaded = await waitUntil(timeout: 1.0) { store.hasLoaded }
+        XCTAssertTrue(loaded)
+
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let yesterday = cal.date(byAdding: .day, value: -1, to: today)!
+        store.importExternalTrack(points: [
+            (coord: CoordinateCodable(lat: 10, lon: 10), timestamp: yesterday.addingTimeInterval(3600)),
+            (coord: CoordinateCodable(lat: 20, lon: 20), timestamp: today.addingTimeInterval(7200))
+        ])
+
+        let byDay = store.snapshotPointsByDay()
+        XCTAssertEqual(byDay.keys.sorted(), ["\(cal.component(.year, from: yesterday))-\(String(format: "%02d", cal.component(.month, from: yesterday)))-\(String(format: "%02d", cal.component(.day, from: yesterday)))", "\(cal.component(.year, from: today))-\(String(format: "%02d", cal.component(.month, from: today)))-\(String(format: "%02d", cal.component(.day, from: today)))"].sorted())
+        XCTAssertEqual(byDay.values.flatMap { $0 }.count, 2)
+    }
+
+    @MainActor
+    func test_snapshotDirtyPointsByDay_onlyReturnsTouchedDays() async throws {
+        let userID = "lifelog-dirty-day-snapshot-\(UUID().uuidString)"
+        let paths = StoragePath(userID: userID)
+        try? FileManager.default.removeItem(at: paths.userRoot)
+        try paths.ensureBaseDirectoriesExist()
+
+        let store = LifelogStore(paths: paths)
+        store.load()
+        let loaded = await waitUntil(timeout: 1.0) { store.hasLoaded }
+        XCTAssertTrue(loaded)
+
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let yesterday = cal.date(byAdding: .day, value: -1, to: today)!
+        let todayKey = dayKey(today)
+        let yesterdayKey = dayKey(yesterday)
+
+        store.importExternalTrack(points: [
+            (coord: CoordinateCodable(lat: 10, lon: 10), timestamp: yesterday.addingTimeInterval(3600)),
+            (coord: CoordinateCodable(lat: 20, lon: 20), timestamp: today.addingTimeInterval(7200))
+        ])
+        store.clearDirtyCloudSyncState(
+            uploadedPointDayKeys: [yesterdayKey],
+            uploadedMoodDayKeys: [],
+            deletedMoodDayKeys: []
+        )
+
+        let dirtyByDay = store.snapshotDirtyPointsByDay()
+        XCTAssertEqual(Array(dirtyByDay.keys), [todayKey])
+        XCTAssertEqual(dirtyByDay[todayKey]?.count, 1)
+    }
+
+    @MainActor
+    func test_snapshotDeletedMoodDayKeys_tracksMoodClears() async throws {
+        let userID = "lifelog-dirty-mood-delete-\(UUID().uuidString)"
+        let paths = StoragePath(userID: userID)
+        try? FileManager.default.removeItem(at: paths.userRoot)
+        try paths.ensureBaseDirectoriesExist()
+
+        let store = LifelogStore(paths: paths)
+        store.load()
+        let loaded = await waitUntil(timeout: 1.0) { store.hasLoaded }
+        XCTAssertTrue(loaded)
+
+        let today = Calendar.current.startOfDay(for: Date())
+        let todayKey = dayKey(today)
+
+        store.setMood("calm", for: today)
+        XCTAssertEqual(store.snapshotDirtyMoodByDay()[todayKey], "calm")
+
+        store.clearDirtyCloudSyncState(
+            uploadedPointDayKeys: [],
+            uploadedMoodDayKeys: [todayKey],
+            deletedMoodDayKeys: []
+        )
+        store.setMood(nil, for: today)
+
+        XCTAssertNil(store.snapshotDirtyMoodByDay()[todayKey])
+        XCTAssertEqual(store.snapshotDeletedMoodDayKeys(), [todayKey])
+    }
+
+    @MainActor
+    func test_mergeCloudRestore_replacesMatchingDayPointsAndMood() async throws {
+        let userID = "lifelog-cloud-merge-\(UUID().uuidString)"
+        let paths = StoragePath(userID: userID)
+        try? FileManager.default.removeItem(at: paths.userRoot)
+        try paths.ensureBaseDirectoriesExist()
+
+        let store = LifelogStore(paths: paths)
+        store.load()
+        let loaded = await waitUntil(timeout: 1.0) { store.hasLoaded }
+        XCTAssertTrue(loaded)
+
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let todayKey = "\(cal.component(.year, from: today))-\(String(format: "%02d", cal.component(.month, from: today)))-\(String(format: "%02d", cal.component(.day, from: today)))"
+
+        store.importExternalTrack(points: [
+            (coord: CoordinateCodable(lat: 1, lon: 1), timestamp: today.addingTimeInterval(3600))
+        ])
+        store.setMood("sad", for: today)
+
+        let restoredPoints = [
+            LifelogStore.LifelogTrackPoint(
+                lat: 30,
+                lon: 30,
+                timestamp: today.addingTimeInterval(7200)
+            )
+        ]
+        store.mergeCloudRestore(
+            dayBatches: [todayKey: restoredPoints],
+            deletedDayKeys: [],
+            moodByDay: [todayKey: "happy"],
+            deletedMoodDayKeys: []
+        )
+
+        let pointsForToday = store.snapshotPointsByDay()[todayKey] ?? []
+        XCTAssertEqual(pointsForToday.count, 1)
+        XCTAssertEqual(pointsForToday.first?.lat, 30, accuracy: 0.000_001)
+        XCTAssertEqual(pointsForToday.first?.lon, 30, accuracy: 0.000_001)
+        XCTAssertEqual(store.mood(for: today), "happy")
+    }
+
+    @MainActor
     func test_flushPersistNow_beforeInitialLoadCompletes_doesNotOverwritePersistedTrack() async throws {
         let userID = "lifelog-no-preload-overwrite-\(UUID().uuidString)"
         let paths = StoragePath(userID: userID)

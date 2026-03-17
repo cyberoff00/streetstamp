@@ -313,8 +313,8 @@ struct SettingsView: View {
     private var iCloudSyncSubtitle: String {
         guard iCloudAvailable else { return L10n.t("settings_icloud_sync_unavailable_desc") }
         let userID = sessionStore.activeLocalProfileID
-        let statusKey = ICloudSyncService.statusKey(for: userID)
-        let statusAtKey = ICloudSyncService.statusAtKey(for: userID)
+        let statusKey = CloudKitSyncService.statusKey(for: userID)
+        let statusAtKey = CloudKitSyncService.statusAtKey(for: userID)
         let status = UserDefaults.standard.string(forKey: statusKey)
         let statusAt = UserDefaults.standard.object(forKey: statusAtKey) as? Date
         let statusLine = iCloudStatusLine(status: status, at: statusAt)
@@ -1329,7 +1329,7 @@ struct SettingsView: View {
     }
 
     private func refreshICloudAvailability() async {
-        iCloudAvailable = await ICloudSyncService.shared.isAccountAvailable()
+        iCloudAvailable = await CloudKitSyncService.shared.isAvailable()
     }
 
     private func handleICloudSyncToggleChanged(enabled: Bool) async {
@@ -1338,11 +1338,13 @@ struct SettingsView: View {
             lifelogStore.flushPersistNow()
             let localUserID = sessionStore.activeLocalProfileID
             let accountID = sessionStore.accountUserID ?? localUserID
-            let paths = StoragePath(userID: localUserID)
-            await ICloudSyncService.shared.uploadSnapshotIfEnabled(
+            await CloudKitSyncService.shared.syncCurrentState(
                 userID: accountID,
-                paths: paths,
-                reason: "settings_toggle_on"
+                journeyStore: journeyStore,
+                lifelogStore: lifelogStore,
+                reason: "settings_toggle_on",
+                forceFullJourneyUpload: true,
+                forceFullLifelogUpload: true
             )
             accountMessage = L10n.t("settings_icloud_sync_enabled_hint")
             showAccountMessage = true
@@ -1359,19 +1361,18 @@ struct SettingsView: View {
 
         let localUserID = sessionStore.activeLocalProfileID
         let accountID = sessionStore.accountUserID ?? localUserID
-        let paths = StoragePath(userID: localUserID)
-        let restored = await ICloudSyncService.shared.restoreLatestIfNeeded(
+        let restoreResult = await CloudKitSyncService.shared.restoreAllData(
+            into: journeyStore,
+            lifelogStore: lifelogStore,
+            cityCache: cityCache,
             userID: accountID,
-            paths: paths,
-            force: true
+            forceFull: true,
+            writeManualStatus: true
         )
 
-        if restored {
-            journeyStore.load()
-            cityCache.rebuildFromJourneyStore()
-            lifelogStore.load()
+        if restoreResult.totalCount > 0 {
             try? await Task.sleep(nanoseconds: 500_000_000)
-            print("🔄 iCloud restore: journeys=\(journeyStore.journeys.count), cities=\(cityCache.cachedCities.count)")
+            print("🔄 iCloud restore: journeys=\(journeyStore.journeys.count), cities=\(cityCache.cachedCities.count), lifelogRestore=\(restoreResult.restoredLifelogCount)")
             accountMessage = L10n.t("settings_restore_from_icloud_success") + "\n" + L10n.t("settings_restart_app_to_see_changes")
         } else {
             accountMessage = L10n.t("settings_restore_from_icloud_no_backup")
