@@ -1,5 +1,4 @@
 import Foundation
-
 enum DeletedJourneyStore {
     static func load(userID: String) -> Set<String> {
         let paths = StoragePath(userID: userID)

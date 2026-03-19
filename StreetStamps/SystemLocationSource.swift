@@ -14,7 +14,6 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
     
     private let manager = CLLocationManager()
     private let subject = PassthroughSubject<CLLocation, Never>()
-    private let headingSubject = CurrentValueSubject<Double, Never>(0)
     private let authSubject = CurrentValueSubject<CLAuthorizationStatus, Never>(.notDetermined)
 
     private enum PassiveState {
@@ -28,9 +27,9 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
     private var passiveAnchorLocation: CLLocation?
     private var passiveAnchorTimestamp: Date = .distantPast
     private var pendingSingleLocationRequest = false
+    private var passiveMode: LifelogBackgroundMode?
     
     var locationPublisher: AnyPublisher<CLLocation, Never> { subject.eraseToAnyPublisher() }
-    var headingPublisher: AnyPublisher<Double, Never> { headingSubject.eraseToAnyPublisher() }
     var authorizationStatus: CLAuthorizationStatus { manager.authorizationStatus }
     var authorizationPublisher: AnyPublisher<CLAuthorizationStatus, Never> { authSubject.eraseToAnyPublisher() }
     
@@ -92,12 +91,12 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
     
     func stop() {
         manager.stopUpdatingLocation()
-        manager.stopUpdatingHeading()
         manager.stopMonitoringSignificantLocationChanges()
         manager.stopMonitoringVisits()
         // ✅ 停止时关闭后台更新
         manager.allowsBackgroundLocationUpdates = false
         passiveState = .none
+        passiveMode = nil
         passiveAnchorLocation = nil
         passiveAnchorTimestamp = .distantPast
     }
@@ -124,7 +123,6 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         manager.distanceFilter = kCLDistanceFilterNone
         
         manager.startUpdatingLocation()
-        startHeadingUpdatesIfPossible()
         requestImmediateLocationRefresh()
     }
     
@@ -140,7 +138,6 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         manager.distanceFilter = 15
         
         manager.startUpdatingLocation()
-        startHeadingUpdatesIfPossible()
         requestImmediateLocationRefresh()
     }
     
@@ -157,7 +154,6 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         manager.distanceFilter = 20
 
         manager.startUpdatingLocation()
-        startHeadingUpdatesIfPossible()
         requestImmediateLocationRefresh()
     }
     
@@ -174,15 +170,13 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         manager.allowsBackgroundLocationUpdates = true
         manager.pausesLocationUpdatesAutomatically = false
         manager.showsBackgroundLocationIndicator = false
-        let profile = PassiveLocationProfile.profile(for: .highPrecision)
-        manager.activityType = profile.activityType
+        passiveMode = .highPrecision
 
         passiveState = .highPrecisionCalmed
         passiveAnchorLocation = nil
         passiveAnchorTimestamp = .distantPast
 
-        manager.desiredAccuracy = profile.desiredAccuracy
-        manager.distanceFilter = profile.distanceFilter
+        applyPassiveProfile(for: .stationary)
         manager.startUpdatingLocation()
         requestImmediateLocationRefresh()
     }
@@ -194,15 +188,13 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         manager.allowsBackgroundLocationUpdates = true
         manager.pausesLocationUpdatesAutomatically = false
         manager.showsBackgroundLocationIndicator = false
-        let profile = PassiveLocationProfile.profile(for: .lowPrecision)
-        manager.activityType = profile.activityType
+        passiveMode = .lowPrecision
 
         passiveState = .lowPrecisionCalmed
         passiveAnchorLocation = nil
         passiveAnchorTimestamp = .distantPast
 
-        manager.desiredAccuracy = profile.desiredAccuracy
-        manager.distanceFilter = profile.distanceFilter
+        applyPassiveProfile(for: .stationary)
         manager.startUpdatingLocation()
         requestImmediateLocationRefresh()
     }
@@ -220,7 +212,6 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         manager.distanceFilter = 5
         
         manager.startUpdatingLocation()
-        startHeadingUpdatesIfPossible()
         requestImmediateLocationRefresh()
     }
     
@@ -233,11 +224,10 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         manager.showsBackgroundLocationIndicator = true
         manager.activityType = .fitness
         
-        manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
-        manager.distanceFilter = kCLDistanceFilterNone
+        manager.desiredAccuracy = kCLLocationAccuracyBest
+        manager.distanceFilter = 10
         
         manager.startUpdatingLocation()
-        startHeadingUpdatesIfPossible()
         requestImmediateLocationRefresh()
     }
     
@@ -251,17 +241,18 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         manager.activityType = .otherNavigation
         
         manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
-        manager.distanceFilter = 30  // 30米才更新
+        manager.distanceFilter = 50  // 50米才更新
         
         manager.startUpdatingLocation()
-        startHeadingUpdatesIfPossible()
         requestImmediateLocationRefresh()
     }
 
-    private func startHeadingUpdatesIfPossible() {
-        guard CLLocationManager.headingAvailable() else { return }
-        manager.headingFilter = 2
-        manager.startUpdatingHeading()
+    private func applyPassiveProfile(for state: PassiveLocationState) {
+        guard let passiveMode else { return }
+        let profile = PassiveLocationProfile.profile(for: passiveMode, state: state)
+        manager.activityType = profile.activityType
+        manager.desiredAccuracy = profile.desiredAccuracy
+        manager.distanceFilter = profile.distanceFilter
     }
 
     private func adaptPassiveHighPrecisionIfNeeded(for loc: CLLocation) {
@@ -283,8 +274,7 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         case .highPrecisionCalmed:
             if moved >= 30 || speed >= 1.2 {
                 passiveState = .highPrecisionActive
-                manager.desiredAccuracy = PassiveLocationProfile.profile(for: .highPrecision).desiredAccuracy
-                manager.distanceFilter = PassiveLocationProfile.profile(for: .highPrecision).distanceFilter
+                applyPassiveProfile(for: .moving)
                 passiveAnchorLocation = loc
                 passiveAnchorTimestamp = loc.timestamp
             } else if dt >= 10 * 60 {
@@ -294,8 +284,7 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         case .highPrecisionActive:
             if dt >= 2 * 60, moved < 25, speed < 0.8 {
                 passiveState = .highPrecisionCalmed
-                manager.desiredAccuracy = PassiveLocationProfile.profile(for: .highPrecision).desiredAccuracy
-                manager.distanceFilter = PassiveLocationProfile.profile(for: .highPrecision).distanceFilter
+                applyPassiveProfile(for: .stationary)
                 passiveAnchorLocation = loc
                 passiveAnchorTimestamp = loc.timestamp
             } else if dt >= 6 * 60 {
@@ -305,8 +294,7 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         case .lowPrecisionCalmed:
             if moved >= 60 || speed >= 1.6 {
                 passiveState = .lowPrecisionActive
-                manager.desiredAccuracy = PassiveLocationProfile.profile(for: .lowPrecision).desiredAccuracy
-                manager.distanceFilter = PassiveLocationProfile.profile(for: .lowPrecision).distanceFilter
+                applyPassiveProfile(for: .moving)
                 passiveAnchorLocation = loc
                 passiveAnchorTimestamp = loc.timestamp
             } else if dt >= 12 * 60 {
@@ -316,8 +304,7 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         case .lowPrecisionActive:
             if dt >= 3 * 60, moved < 35, speed < 0.8 {
                 passiveState = .lowPrecisionCalmed
-                manager.desiredAccuracy = PassiveLocationProfile.profile(for: .lowPrecision).desiredAccuracy
-                manager.distanceFilter = PassiveLocationProfile.profile(for: .lowPrecision).distanceFilter
+                applyPassiveProfile(for: .stationary)
                 passiveAnchorLocation = loc
                 passiveAnchorTimestamp = loc.timestamp
             } else if dt >= 8 * 60 {
@@ -380,13 +367,4 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         }
     }
 
-    func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
-        let raw = (newHeading.trueHeading >= 0) ? newHeading.trueHeading : newHeading.magneticHeading
-        let h = raw.truncatingRemainder(dividingBy: 360)
-        headingSubject.send(h >= 0 ? h : (h + 360))
-    }
-
-    func locationManagerShouldDisplayHeadingCalibration(_ manager: CLLocationManager) -> Bool {
-        false
-    }
 }

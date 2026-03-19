@@ -20,8 +20,8 @@ enum LifelogStepMilestonePresentation {
 }
 
 enum LifelogRenderModeSelector {
-    static let nearModeLatitudeDeltaThreshold: CLLocationDegrees = 0.05
-    static let nearModeLongitudeDeltaThreshold: CLLocationDegrees = 0.05
+    static let nearModeLatitudeDeltaThreshold: CLLocationDegrees = 0.08
+    static let nearModeLongitudeDeltaThreshold: CLLocationDegrees = 0.08
     static let footprintStepMeters: CLLocationDistance = 80
 
     static func isNearMode(_ region: MKCoordinateRegion?) -> Bool {
@@ -440,8 +440,6 @@ struct LifelogView: View {
     @EnvironmentObject private var lifelogRenderCache: LifelogRenderCacheCoordinator
     @EnvironmentObject private var flow: AppFlowCoordinator
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
-    @AppStorage(AppSettings.avatarHeadlightEnabledKey) private var avatarHeadlightEnabled = true
-
     @State private var position: MapCameraPosition = .automatic
     @State private var showGlobe = false
     @State private var showEnableHint = false
@@ -790,18 +788,11 @@ struct LifelogView: View {
                             .transition(.scale.combined(with: .opacity))
                         }
 
-                        ZStack {
-                            if avatarHeadlightEnabled {
-                                AvatarHeadlightConeView(headingDegrees: currentHeadingDegrees)
-                                    .allowsHitTesting(false)
-                            }
-
-                            RobotRendererView(
-                                size: AvatarMapMarkerStyle.visualSize,
-                                face: .front,
-                                loadout: AvatarLoadoutStore.load()
-                            )
-                        }
+                        RobotRendererView(
+                            size: AvatarMapMarkerStyle.visualSize,
+                            face: .front,
+                            loadout: AvatarLoadoutStore.load()
+                        )
                         .frame(width: AvatarMapMarkerStyle.annotationSize, height: AvatarMapMarkerStyle.annotationSize)
                         .shadow(color: .black.opacity(0.24), radius: 8, y: 2)
                         .contentShape(Rectangle())
@@ -1208,11 +1199,6 @@ struct LifelogView: View {
                 .shadow(color: Color.black.opacity(0.18), radius: 6, y: 2)
         }
         .buttonStyle(.plain)
-    }
-
-    private var currentHeadingDegrees: Double {
-        let h = tracking.headingDegrees.truncatingRemainder(dividingBy: 360)
-        return h >= 0 ? h : (h + 360)
     }
 
     private var renderLodLevel: Int {

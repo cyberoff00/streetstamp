@@ -16,6 +16,72 @@ private final class JourneySyncEventBox: @unchecked Sendable {
 
 final class JourneyCloudIncrementalSyncTests: XCTestCase {
     @MainActor
+    func test_runDeletionSync_recordsMigrationFailure() async {
+        let failureStore = JourneyDeletionSyncFailureStore()
+
+        await JourneyDeletionSyncRunner.run(
+            journeyID: "journey-selected",
+            failureStore: failureStore,
+            cloudDeletion: {},
+            migrationDeletion: {
+                throw BackendAPIError.unauthorized
+            }
+        )
+
+        XCTAssertEqual(failureStore.failure(for: "journey-selected")?.journeyID, "journey-selected")
+        XCTAssertEqual(
+            failureStore.failure(for: "journey-selected")?.message,
+            "unauthorized"
+        )
+    }
+
+    @MainActor
+    func test_syncDeletedJourney_buildsRemovalPayloadWithCurrentFriendCards() async throws {
+        let userID = "journey-remove-\(UUID().uuidString)"
+        let paths = StoragePath(userID: userID)
+        try? FileManager.default.removeItem(at: paths.userRoot)
+        try paths.ensureBaseDirectoriesExist()
+        let originalBaseURL = BackendConfig.baseURLString
+        BackendConfig.baseURLString = "https://example.com"
+        defer {
+            BackendConfig.baseURLString = originalBaseURL
+            try? FileManager.default.removeItem(at: paths.userRoot)
+        }
+
+        let journeyStore = JourneyStore(paths: paths)
+        let cityCache = CityCache(paths: paths, journeyStore: journeyStore)
+
+        let sessionStore = UserSessionStore()
+        sessionStore.applyAuth(
+            BackendAuthResponse(
+                userId: "account-\(UUID().uuidString)",
+                provider: "email",
+                email: "journey@example.com",
+                accessToken: "token",
+                refreshToken: "refresh",
+                needsProfileSetup: false
+            )
+        )
+
+        let payloadBox = MigrationPayloadBox()
+
+        try await JourneyCloudMigrationService.syncDeletedJourney(
+            journeyID: "journey-selected",
+            sessionStore: sessionStore,
+            cityCache: cityCache,
+            migrationSender: { token, payload in
+                XCTAssertEqual(token, "token")
+                payloadBox.value = payload
+            }
+        )
+
+        XCTAssertEqual(payloadBox.value?.journeys.count, 0)
+        XCTAssertEqual(payloadBox.value?.removedJourneyIDs, ["journey-selected"])
+        XCTAssertEqual(payloadBox.value?.unlockedCityCards, [])
+        XCTAssertEqual(payloadBox.value?.snapshotComplete, false)
+    }
+
+    @MainActor
     func test_addCompletedJourney_triggersIncrementalUpsertHook() async throws {
         let userID = "journey-upsert-\(UUID().uuidString)"
         let paths = StoragePath(userID: userID)

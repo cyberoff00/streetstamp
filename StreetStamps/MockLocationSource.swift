@@ -12,9 +12,7 @@ import Combine
 #if DEBUG
 final class MockLocationSource: LocationSource {
     private let subject = PassthroughSubject<CLLocation, Never>()
-    private let headingSubject = CurrentValueSubject<Double, Never>(0)
     var locationPublisher: AnyPublisher<CLLocation, Never> { subject.eraseToAnyPublisher() }
-    var headingPublisher: AnyPublisher<Double, Never> { headingSubject.eraseToAnyPublisher() }
 
     var authorizationStatus: CLAuthorizationStatus { .authorizedAlways }
 
@@ -46,7 +44,6 @@ final class MockLocationSource: LocationSource {
         player.load(points: points)
         player.start { [weak self] loc in
             self?.subject.send(loc)
-            self?.headingSubject.send(0)
         }
     }
 }

@@ -25,7 +25,6 @@ final class TrackingService: ObservableObject {
     @Published var totalAscent: Double = 0
     /// Total negative elevation loss (meters) accumulated from accepted points.
     @Published var totalDescent: Double = 0
-    @Published var headingDegrees: Double = 0
     @Published private(set) var elapsedSeconds: Int = 0
     @Published private(set) var movingSeconds: Int = 0
     @Published private(set) var pausedSeconds: Int = 0
@@ -236,8 +235,13 @@ final class TrackingService: ObservableObject {
         let anchor: CLLocation
         let candidate: CLLocation
     }
+    private struct SignalInterruptionCandidate {
+        let anchor: CLLocation
+        let interruptedAt: Date
+    }
     private let longStationaryNotificationID = "streetstamps.long_stationary_reminder"
     private let longStationaryNotificationPermissionAskedKey = "streetstamps.long_stationary_reminder.notification_asked.v1"
+    private var recentSignalInterruption: SignalInterruptionCandidate?
 
     // MARK: - ✅ Render cache internals
 
@@ -357,15 +361,6 @@ final class TrackingService: ObservableObject {
             }
             .store(in: &bag)
 
-        hub.$headingDegrees
-            .removeDuplicates { abs($0 - $1) < 1.0 }
-            .sink { [weak self] heading in
-                guard let self else { return }
-                let h = heading.truncatingRemainder(dividingBy: 360)
-                self.headingDegrees = h >= 0 ? h : (h + 360)
-            }
-            .store(in: &bag)
-
         // ✅ gating subscription
         hub.$countryISO2
             .map { ($0 ?? "").uppercased() }
@@ -430,6 +425,7 @@ final class TrackingService: ObservableObject {
         stationarySince = nil
         isInForegroundStationaryPowerMode = false
         deferredWeakDriftJump = nil
+        recentSignalInterruption = nil
 
         isLocationLocked = false
         lockStreak = 0
@@ -610,6 +606,7 @@ final class TrackingService: ObservableObject {
         isInForegroundStationaryPowerMode = false
         stationarySince = nil
         deferredWeakDriftJump = nil
+        recentSignalInterruption = nil
         if !hub.isUsingMock {
             let action = LocationLifecycleDecision.postJourneyAction(
                 isPassiveEnabled: AppSettings.isPassiveLifelogEnabled,
@@ -634,6 +631,7 @@ final class TrackingService: ObservableObject {
         lastLocation = nil
         lastRecordedLocationForStationary = nil
         deferredWeakDriftJump = nil
+        recentSignalInterruption = nil
         resetLongStationaryReminderState()
         wasExplicitlyPaused = true  // ✅ 标记为主动暂停
         if currentPauseStartedAt == nil {
@@ -650,6 +648,7 @@ final class TrackingService: ObservableObject {
         lastLocation = nil
         lastRecordedLocationForStationary = nil
         deferredWeakDriftJump = nil
+        recentSignalInterruption = nil
         resetLongStationaryReminderState()
         requestLongStationaryNotificationPermissionIfNeeded()
         wasExplicitlyPaused = false  // ✅ 恢复后清除标记
@@ -668,8 +667,7 @@ final class TrackingService: ObservableObject {
         if trackingMode == .sport {
             hub.enterBackgroundHighFidelity()  // 运动模式保持高精度
         } else {
-            hub.enterBackgroundBalanced()  // 日常模式平衡模式，或者:
-            // hub.enterBackgroundPowerSaving()  // 更省电
+            hub.enterBackgroundPowerSaving()  // 日常模式优先省电
         }
     }
 
@@ -845,6 +843,29 @@ final class TrackingService: ObservableObject {
         }
     }
 
+    private func noteSignalInterruptionCandidate(anchor: CLLocation, droppedAt timestamp: Date) {
+        recentSignalInterruption = SignalInterruptionCandidate(anchor: anchor, interruptedAt: timestamp)
+    }
+
+    private func shouldTreatAsSignalRecoveryGap(
+        for loc: CLLocation,
+        minDistance: Double
+    ) -> Bool {
+        guard let recentSignalInterruption else { return false }
+
+        let recoveryDelay = loc.timestamp.timeIntervalSince(recentSignalInterruption.anchor.timestamp)
+        let interruptionDelay = loc.timestamp.timeIntervalSince(recentSignalInterruption.interruptedAt)
+        let recoveryDistance = loc.distance(from: recentSignalInterruption.anchor)
+        let trustedAccuracy = loc.horizontalAccuracy <= max(lockAccuracy, weakAccuracyThreshold)
+
+        guard trustedAccuracy else { return false }
+        guard interruptionDelay >= 6 else { return false }
+        guard recoveryDelay >= 10 else { return false }
+        guard recoveryDistance >= max(80, minDistance * 4.0) else { return false }
+
+        return true
+    }
+
     // MARK: - Ingest (EXTREME: anti-spike turns + OneEuro)
 
     func ingest(_ loc: CLLocation) {
@@ -895,6 +916,7 @@ final class TrackingService: ObservableObject {
             appendPointToInternalSegments(coord: loc.coordinate, at: loc.timestamp, preferredStyle: .solid)
             lastRecordedLocationForStationary = loc
             stationarySince = nil
+            recentSignalInterruption = nil
             publishIfNeeded()
             rebuildRenderCache(force: false)
             return
@@ -910,6 +932,7 @@ final class TrackingService: ObservableObject {
             appendPointToInternalSegments(coord: loc.coordinate, at: loc.timestamp, preferredStyle: .solid)
             lastRecordedLocationForStationary = loc
             stationarySince = nil
+            recentSignalInterruption = nil
             publishIfNeeded()
             rebuildRenderCache(force: false)
             return
@@ -1058,6 +1081,7 @@ final class TrackingService: ObservableObject {
 
         // Drift-like: if NOT turning, drop
         if isDriftLike && !keepBecauseTurn {
+            noteSignalInterruptionCandidate(anchor: last, droppedAt: loc.timestamp)
             droppedByJumpCount += 1
             return
         }
@@ -1065,6 +1089,7 @@ final class TrackingService: ObservableObject {
         // Accuracy hard gate:
         // if too bad and not turning -> drop
         if acc > maxAcceptableAccuracy && !keepBecauseTurn {
+            noteSignalInterruptionCandidate(anchor: last, droppedAt: loc.timestamp)
             droppedByAccuracyCount += 1
             return
         }
@@ -1081,10 +1106,12 @@ final class TrackingService: ObservableObject {
 
         // Gap-like -> dashed (be conservative: prefer solid unless we truly lost signal / jumped)
         var isGapLike = false
+        let isSignalRecoveryGap = shouldTreatAsSignalRecoveryGap(for: loc, minDistance: minD)
 
         // Hard gaps (time-only gaps should not create dashed segments if the user didn't move much)
         if dt >= gapSec && d2d >= max(25, minD * 2.0) { isGapLike = true }
         if d2d  >= gapDist { isGapLike = true }
+        if isSignalRecoveryGap { isGapLike = true }
 
         // Weak accuracy alone should NOT create dashed "confetti" in cities.
         // Only treat as gap if it's also temporally/spatially suspicious.
@@ -1184,6 +1211,7 @@ final class TrackingService: ObservableObject {
         // update stationary reference anchor only when we actually record a point
         lastRecordedLocationForStationary = loc
         stationarySince = nil
+        recentSignalInterruption = nil
 
         publishIfNeeded()
         refreshDurations(now: loc.timestamp)

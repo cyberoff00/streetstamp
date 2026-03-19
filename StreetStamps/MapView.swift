@@ -804,8 +804,6 @@ struct MapView: View {
     @EnvironmentObject private var lifelogStore: LifelogStore
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
-    @AppStorage(AppSettings.avatarHeadlightEnabledKey) private var avatarHeadlightEnabled = true
-
     @StateObject private var mapController = JourneyMapController()
     @State private var cameraDistance: CLLocationDistance = 900
 
@@ -1056,8 +1054,6 @@ struct MapView: View {
         JourneyMKMapView(
             controller: mapController,
             userCoordinate: mapUserCoord(),
-            headingDegrees: tracking.headingDegrees,
-            headlightEnabled: avatarHeadlightEnabled,
             travelMode: tracking.mode,
             segments: displaySegments,
             liveTail: liveTail,
@@ -3234,28 +3230,19 @@ private final class MemoryGroupAnnotation: NSObject, MKAnnotation {
 private final class RobotAnnotation: NSObject, MKAnnotation {
     dynamic var coordinate: CLLocationCoordinate2D
     var face: RobotFace
-    var headingDegrees: Double
 
-    init(coordinate: CLLocationCoordinate2D, face: RobotFace, headingDegrees: Double) {
+    init(coordinate: CLLocationCoordinate2D, face: RobotFace) {
         self.coordinate = coordinate
         self.face = face
-        self.headingDegrees = headingDegrees
     }
 }
 
 private struct RobotMapMarkerView: View {
     let face: RobotFace
-    let headingDegrees: Double
-    let showsHeadlight: Bool
     let onOpenEquipment: () -> Void
 
     var body: some View {
-        ZStack {
-            if showsHeadlight {
-                AvatarHeadlightConeView(headingDegrees: headingDegrees)
-            }
-            RobotRendererView(size: AvatarMapMarkerStyle.visualSize, face: face, loadout: AvatarLoadoutStore.load())
-        }
+        RobotRendererView(size: AvatarMapMarkerStyle.visualSize, face: face, loadout: AvatarLoadoutStore.load())
         .frame(width: AvatarMapMarkerStyle.annotationSize, height: AvatarMapMarkerStyle.annotationSize)
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
@@ -3269,8 +3256,6 @@ private struct JourneyMKMapView: UIViewRepresentable {
     @AppStorage(MapAppearanceSettings.storageKey) private var mapAppearanceRaw = MapAppearanceSettings.current.rawValue
 
     let userCoordinate: CLLocationCoordinate2D?
-    let headingDegrees: Double
-    let headlightEnabled: Bool
     let travelMode: TravelMode
 
     let segments: [RenderRouteSegment]
@@ -3310,7 +3295,7 @@ private struct JourneyMKMapView: UIViewRepresentable {
         pinch.cancelsTouchesInView = false
         map.addGestureRecognizer(pinch)
 
-        context.coordinator.ensureRobotAnnotation(on: map, coord: userCoordinate, heading: headingDegrees)
+        context.coordinator.ensureRobotAnnotation(on: map, coord: userCoordinate)
         context.coordinator.syncOverlays(on: map, segments: segments, liveTail: liveTail)
         context.coordinator.syncMemoryAnnotations(on: map, groups: memoryGroups)
 
@@ -3326,7 +3311,7 @@ private struct JourneyMKMapView: UIViewRepresentable {
             context.coordinator.apply(cmd.kind, to: map)
         }
 
-        context.coordinator.ensureRobotAnnotation(on: map, coord: userCoordinate, heading: headingDegrees)
+        context.coordinator.ensureRobotAnnotation(on: map, coord: userCoordinate)
         context.coordinator.syncOverlays(on: map, segments: segments, liveTail: liveTail)
         context.coordinator.syncMemoryAnnotations(on: map, groups: memoryGroups)
 
@@ -3389,7 +3374,7 @@ private struct JourneyMKMapView: UIViewRepresentable {
             }
         }
 
-        func ensureRobotAnnotation(on map: MKMapView, coord: CLLocationCoordinate2D?, heading: Double) {
+        func ensureRobotAnnotation(on map: MKMapView, coord: CLLocationCoordinate2D?) {
             guard let coord else {
                 if let existing = robotAnnotation {
                     map.removeAnnotation(existing)
@@ -3398,42 +3383,18 @@ private struct JourneyMKMapView: UIViewRepresentable {
                 return
             }
 
-            let h = normalizedHeading(heading)
             if let existing = robotAnnotation {
                 existing.coordinate = coord
-                if headingDelta(existing.headingDegrees, h) >= 2 {
-                    existing.headingDegrees = h
-                    if let view = map.view(for: existing) {
-                        configureRobotAnnotationView(
-                            view,
-                            face: existing.face,
-                            worldHeading: h,
-                            cameraHeading: map.camera.heading
-                        )
-                    }
-                }
             } else {
-                let ann = RobotAnnotation(coordinate: coord, face: .front, headingDegrees: h)
+                let ann = RobotAnnotation(coordinate: coord, face: .front)
                 robotAnnotation = ann
                 map.addAnnotation(ann)
             }
         }
 
-        private func normalizedHeading(_ raw: Double) -> Double {
-            let h = raw.truncatingRemainder(dividingBy: 360)
-            return h >= 0 ? h : (h + 360)
-        }
-
-        private func headingDelta(_ a: Double, _ b: Double) -> Double {
-            let d = abs(normalizedHeading(a) - normalizedHeading(b))
-            return min(d, 360 - d)
-        }
-
         private func configureRobotAnnotationView(
             _ view: MKAnnotationView,
-            face _: RobotFace,
-            worldHeading: Double,
-            cameraHeading: Double
+            face _: RobotFace
         ) {
             let fixedFace: RobotFace = .front
             view.canShowCallout = false
@@ -3451,12 +3412,9 @@ private struct JourneyMKMapView: UIViewRepresentable {
                 view.zPriority = .min
             }
 
-            let displayHeading = normalizedHeading(worldHeading - cameraHeading)
             let hosting = UIHostingController(
                 rootView: RobotMapMarkerView(
                     face: fixedFace,
-                    headingDegrees: displayHeading,
-                    showsHeadlight: parent.headlightEnabled,
                     onOpenEquipment: {
                         AppFlowCoordinator.shared.requestOpenSidebarDestination(.equipment)
                     }
@@ -3702,18 +3660,16 @@ private struct JourneyMKMapView: UIViewRepresentable {
         }
 
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
-    if let ann = annotation as? RobotAnnotation {
-        let view = mapView.dequeueReusableAnnotationView(withIdentifier: "robot", for: ann)
-        configureRobotAnnotationView(
-            view,
-            face: ann.face,
-            worldHeading: ann.headingDegrees,
-            cameraHeading: mapView.camera.heading
-        )
-        return view
-    }
+            if let ann = annotation as? RobotAnnotation {
+                let view = mapView.dequeueReusableAnnotationView(withIdentifier: "robot", for: ann)
+                configureRobotAnnotationView(
+                    view,
+                    face: ann.face
+                )
+                return view
+            }
 
-if let ann = annotation as? MemoryGroupAnnotation {
+            if let ann = annotation as? MemoryGroupAnnotation {
                 let view = mapView.dequeueReusableAnnotationView(withIdentifier: "memoryGroup", for: ann)
                 view.canShowCallout = false
                 view.bounds = CGRect(x: 0, y: 0, width: 56, height: 56)
@@ -3736,22 +3692,41 @@ if let ann = annotation as? MemoryGroupAnnotation {
         }
 
         func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
-    if let ann = view.annotation as? RobotAnnotation {
-        // Keep avatar always front-facing on map.
-        ann.face = .front
-        configureRobotAnnotationView(
-            view,
-            face: .front,
-            worldHeading: ann.headingDegrees,
-            cameraHeading: mapView.camera.heading
-        )
-        mapView.deselectAnnotation(ann, animated: false)
-        return
-    }
+            if let ann = view.annotation as? RobotAnnotation {
+                // Keep avatar always front-facing on map.
+                ann.face = .front
+                configureRobotAnnotationView(
+                    view,
+                    face: .front
+                )
+                mapView.deselectAnnotation(ann, animated: false)
+                return
+            }
 
-    if let ann = view.annotation as? MemoryGroupAnnotation {
-        parent.onSelectMemories(ann.items)
-        mapView.deselectAnnotation(ann, animated: false)
+            if let ann = view.annotation as? MemoryGroupAnnotation {
+                parent.onSelectMemories(ann.items)
+                mapView.deselectAnnotation(ann, animated: false)
+            }
+        }
+
+        func mapView(_ mapView: MKMapView, regionWillChangeAnimated animated: Bool) {
+            if !isProgrammaticRegionChange {
+                parent.followUser = false
+                parent.isUserInteracting = true
+            }
+        }
+
+        func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
+            if isProgrammaticRegionChange { isProgrammaticRegionChange = false }
+            let currentBucket = MapViewRouteRenderStyle.altitudeBucket(for: mapView.camera.altitude)
+            if lastAltitudeBucket != currentBucket {
+                refreshOverlayStyles(on: mapView)
+                lastAltitudeBucket = currentBucket
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                self.parent.isUserInteracting = false
+            }
+        }
     }
 }
 
@@ -3771,27 +3746,6 @@ private final class MultiPolylineRenderer: MKOverlayRenderer {
     override func draw(_ mapRect: MKMapRect, zoomScale: MKZoomScale, in context: CGContext) {
         for r in renderers {
             r.draw(mapRect, zoomScale: zoomScale, in: context)
-        }
-    }
-}
-
-        func mapView(_ mapView: MKMapView, regionWillChangeAnimated animated: Bool) {
-            if !isProgrammaticRegionChange {
-                parent.followUser = false
-                parent.isUserInteracting = true
-            }
-        }
-
-        func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
-            if isProgrammaticRegionChange { isProgrammaticRegionChange = false }
-            let currentBucket = MapViewRouteRenderStyle.altitudeBucket(for: mapView.camera.altitude)
-            if lastAltitudeBucket != currentBucket {
-                refreshOverlayStyles(on: mapView)
-                lastAltitudeBucket = currentBucket
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                self.parent.isUserInteracting = false
-            }
         }
     }
 }

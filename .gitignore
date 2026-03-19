@@ -2,4 +2,10 @@
 DerivedData/
 **/DerivedData/
 build/DerivedData*/
+build/SourcePackages/
+build/XCBuildData/
+build/swift-module-cache/
+build/tmp-home/
+build/postcard-status-build.*/
+build/postcard-status-test.*/
 .worktrees/

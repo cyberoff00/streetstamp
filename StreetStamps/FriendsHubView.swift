@@ -194,6 +194,7 @@ struct FriendsHubView: View {
     @State private var showQRScanner = false
     @State private var pendingFeedRefreshProfiles: [FriendProfileSnapshot]?
     @State private var feedScrollRestoreState = FriendsFeedScrollRestoreState()
+    @State private var friendsListScrollRestoreState = FriendsListScrollRestoreState()
     @State private var didPerformInitialFeedRefresh = false
 
     private var sortedFriends: [FriendProfileSnapshot] {
@@ -256,6 +257,15 @@ struct FriendsHubView: View {
         )
             .map { feedLikeKey(friendID: $0.friendID, journeyID: $0.journeyID) }
             .sorted()
+            .joined(separator: ",")
+    }
+
+    private var allFriendsScrollSignature: String {
+        sortedFriends
+            .map { friend in
+                let lastActive = lastActiveDate(of: friend).timeIntervalSinceReferenceDate
+                return "\(friend.id)|\(lastActive)"
+            }
             .joined(separator: ",")
     }
 
@@ -394,6 +404,7 @@ struct FriendsHubView: View {
         .onChange(of: activeRoute) { _, route in
             guard route == nil else { return }
             feedScrollRestoreState.prepareRestoreOnReturn()
+            friendsListScrollRestoreState.prepareRestoreOnReturn()
         }
         .task(id: feedLikeSignature) {
             await loadFeedLikeStatsIfNeeded()
@@ -541,39 +552,49 @@ struct FriendsHubView: View {
     }
 
     private var allFriendsContent: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: 16) {
-                if !incomingFriendRequests.isEmpty {
-                    friendRequestSectionTitle(L10n.t("friends_section_pending_approval"))
-                    ForEach(incomingFriendRequests) { req in
-                        friendRequestCard(request: req, isIncoming: true)
-                    }
-                }
-
-                if sortedFriends.isEmpty {
-                    if incomingFriendRequests.isEmpty {
-                        emptyState(L10n.t("friends_empty_all"))
-                    }
-                } else {
-                    ForEach(sortedFriends) { friend in
-                        Button {
-                            activeRoute = .profile(friend.id)
-                        } label: {
-                            AllFriendsCard(
-                                friend: friend,
-                                subtitleText: FriendListPresencePresentation.subtitle(for: friend)
-                            )
+        ScrollViewReader { proxy in
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 16) {
+                    if !incomingFriendRequests.isEmpty {
+                        friendRequestSectionTitle(L10n.t("friends_section_pending_approval"))
+                        ForEach(incomingFriendRequests) { req in
+                            friendRequestCard(request: req, isIncoming: true)
                         }
-                        .buttonStyle(.plain)
+                    }
+
+                    if sortedFriends.isEmpty {
+                        if incomingFriendRequests.isEmpty {
+                            emptyState(L10n.t("friends_empty_all"))
+                        }
+                    } else {
+                        ForEach(sortedFriends) { friend in
+                            Button {
+                                friendsListScrollRestoreState.recordOpen(friendID: friend.id)
+                                activeRoute = .profile(friend.id)
+                            } label: {
+                                AllFriendsCard(
+                                    friend: friend,
+                                    subtitleText: FriendListPresencePresentation.subtitle(for: friend)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .id(friend.id)
+                        }
                     }
                 }
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+                .padding(.bottom, 54)
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 12)
-            .padding(.bottom, 54)
-        }
-        .refreshable {
-            await refreshRemoteFriends()
+            .refreshable {
+                await refreshRemoteFriends()
+            }
+            .onChange(of: friendsListScrollRestoreState.pendingRestoreFriendID) { _, friendID in
+                restoreAllFriendsScrollIfNeeded(friendID: friendID, proxy: proxy)
+            }
+            .onChange(of: allFriendsScrollSignature) { _, _ in
+                restoreAllFriendsScrollIfNeeded(friendID: friendsListScrollRestoreState.pendingRestoreFriendID, proxy: proxy)
+            }
         }
         .background(FigmaTheme.background)
     }
@@ -926,12 +947,11 @@ struct FriendsHubView: View {
         }
 
         private func resolvedFriendCityTitle(for journey: FriendSharedJourney, cards: [FriendCityCard]) -> String {
-            let collectionKey = FriendJourneyCityIdentity.resolveCollectionKey(for: journey, cards: cards)
             let cityID = resolvedFriendCityID(for: journey, cards: cards)
             let cityCard = cards.first(where: { $0.id == cityID })
             return CityDisplayResolver.title(
-                for: collectionKey,
-                fallbackTitle: CityCollectionResolver.configuredTitle(for: collectionKey) ?? cityCard?.name ?? journey.title
+                for: cityID,
+                fallbackTitle: cityCard?.name ?? journey.title
             )
         }
 
@@ -1435,10 +1455,23 @@ struct FriendsHubView: View {
         private func restoreFeedScrollIfNeeded(eventID: String?, proxy: ScrollViewProxy) {
             guard let eventID else { return }
             guard feedEvents.contains(where: { $0.id == eventID }) else { return }
-            withAnimation(.easeInOut(duration: 0.22)) {
-                proxy.scrollTo(eventID, anchor: .center)
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                proxy.scrollTo(eventID, anchor: .top)
             }
             feedScrollRestoreState.consumeRestoreRequest()
+        }
+
+        private func restoreAllFriendsScrollIfNeeded(friendID: String?, proxy: ScrollViewProxy) {
+            guard let friendID else { return }
+            guard sortedFriends.contains(where: { $0.id == friendID }) else { return }
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                proxy.scrollTo(friendID, anchor: .top)
+            }
+            friendsListScrollRestoreState.consumeRestoreRequest()
         }
     }
 
@@ -2791,15 +2824,11 @@ private final class FriendMirrorContext: ObservableObject {
     nonisolated private static func toJourneyRoute(friendJourney: FriendSharedJourney, cards: [FriendCityCard]) -> JourneyRoute {
         let routeCoords = friendJourney.routeCoordinates
         let cityID = FriendJourneyCityIdentity.resolveCityID(for: friendJourney, cards: cards)
-        let collectionKey = FriendJourneyCityIdentity.resolveCollectionKey(for: friendJourney, cards: cards)
         let cityCard = cards.first(where: { $0.id == cityID })
 
-        let effectiveCollectionKey = (collectionKey == "Unknown|" || collectionKey.isEmpty) ? nil : collectionKey
-        let effectiveFallbackTitle = CityCollectionResolver.configuredTitle(for: effectiveCollectionKey ?? "") ?? cityCard?.name ?? friendJourney.title
-
         let cityName = CityDisplayResolver.title(
-            for: effectiveCollectionKey ?? "",
-            fallbackTitle: effectiveFallbackTitle
+            for: cityID,
+            fallbackTitle: cityCard?.name ?? friendJourney.title
         )
 
         let fallbackCoordinate: CoordinateCodable = routeCoords.first ?? CoordinateCodable(lat: 0, lon: 0)

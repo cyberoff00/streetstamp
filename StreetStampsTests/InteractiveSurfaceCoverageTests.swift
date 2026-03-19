@@ -60,4 +60,52 @@ final class InteractiveSurfaceCoverageTests: XCTestCase {
             "Expected SharingCard discard action to no longer live inside an ellipsis menu"
         )
     }
+
+    func test_equipmentCategoryRowIncludesHorizontalScrollAffordance() throws {
+        let url = projectRoot()
+            .appendingPathComponent("StreetStamps", isDirectory: true)
+            .appendingPathComponent("EquipmentView.swift")
+        let contents = try String(contentsOf: url, encoding: .utf8)
+
+        XCTAssertTrue(
+            contents.contains("equipmentCategoryTrailingPeekWidth"),
+            "Expected EquipmentView category row to expose a named trailing peek affordance"
+        )
+        XCTAssertTrue(
+            contents.contains("categoryScrollHintOverlay"),
+            "Expected EquipmentView category row to expose a right-edge scroll hint overlay"
+        )
+    }
+
+    func test_equipmentViewKeepsSwipeBackEnablerWhenNavigationBarIsHidden() throws {
+        let url = projectRoot()
+            .appendingPathComponent("StreetStamps", isDirectory: true)
+            .appendingPathComponent("EquipmentView.swift")
+        let contents = try String(contentsOf: url, encoding: .utf8)
+
+        XCTAssertTrue(
+            contents.contains(".toolbar(.hidden, for: .navigationBar)"),
+            "Expected EquipmentView to continue hiding the stock navigation bar for its custom header"
+        )
+        XCTAssertTrue(
+            contents.contains(".background(SwipeBackEnabler())"),
+            "Expected EquipmentView to re-enable the interactive swipe-back gesture after hiding the navigation bar"
+        )
+    }
+
+    func test_equipmentCategoryIconsUseUnifiedDisplaySize() throws {
+        let url = projectRoot()
+            .appendingPathComponent("StreetStamps", isDirectory: true)
+            .appendingPathComponent("EquipmentView.swift")
+        let contents = try String(contentsOf: url, encoding: .utf8)
+
+        XCTAssertTrue(
+            contents.contains(".frame(width: 24, height: 24)"),
+            "Expected EquipmentView asset-backed category icons to keep a unified 24pt display size"
+        )
+        XCTAssertFalse(
+            contents.contains("case \"suit\":\n            return 28"),
+            "Expected EquipmentView to avoid a suit-only icon size override once the asset matches Figma"
+        )
+    }
 }

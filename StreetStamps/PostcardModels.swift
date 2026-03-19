@@ -37,6 +37,8 @@ struct BackendPostcardMessageDTO: Codable, Identifiable {
     var clientDraftID: String
     var status: String?
     var reaction: PostcardReaction?
+    var myReaction: PostcardReaction?
+    var peerReaction: PostcardReaction?
 
     var id: String { messageID }
 
@@ -56,6 +58,44 @@ struct BackendPostcardMessageDTO: Codable, Identifiable {
         case clientDraftID
         case status
         case reaction
+        case myReaction
+        case peerReaction
+    }
+
+    init(
+        messageID: String,
+        type: String,
+        fromUserID: String,
+        fromDisplayName: String?,
+        toUserID: String,
+        toDisplayName: String?,
+        cityID: String,
+        cityName: String,
+        photoURL: String?,
+        messageText: String,
+        sentAt: Date,
+        clientDraftID: String,
+        status: String?,
+        reaction: PostcardReaction?,
+        myReaction: PostcardReaction? = nil,
+        peerReaction: PostcardReaction? = nil
+    ) {
+        self.messageID = messageID
+        self.type = type
+        self.fromUserID = fromUserID
+        self.fromDisplayName = fromDisplayName
+        self.toUserID = toUserID
+        self.toDisplayName = toDisplayName
+        self.cityID = cityID
+        self.cityName = cityName
+        self.photoURL = photoURL
+        self.messageText = messageText
+        self.sentAt = sentAt
+        self.clientDraftID = clientDraftID
+        self.status = status
+        self.reaction = reaction
+        self.myReaction = myReaction ?? reaction
+        self.peerReaction = peerReaction ?? reaction
     }
 
     init(from decoder: Decoder) throws {
@@ -76,6 +116,8 @@ struct BackendPostcardMessageDTO: Codable, Identifiable {
         clientDraftID = (try? c.decode(String.self, forKey: .clientDraftID)) ?? ""
         status = try? c.decode(String.self, forKey: .status)
         reaction = try? c.decode(PostcardReaction.self, forKey: .reaction)
+        myReaction = (try? c.decode(PostcardReaction.self, forKey: .myReaction)) ?? reaction
+        peerReaction = (try? c.decode(PostcardReaction.self, forKey: .peerReaction)) ?? reaction
     }
 
     func encode(to encoder: Encoder) throws {
@@ -94,6 +136,8 @@ struct BackendPostcardMessageDTO: Codable, Identifiable {
         try c.encode(clientDraftID, forKey: .clientDraftID)
         try c.encodeIfPresent(status, forKey: .status)
         try c.encodeIfPresent(reaction, forKey: .reaction)
+        try c.encodeIfPresent(myReaction, forKey: .myReaction)
+        try c.encodeIfPresent(peerReaction, forKey: .peerReaction)
     }
 }
 
@@ -110,7 +154,7 @@ struct BackendSendPostcardResponse: Codable {
 
 // MARK: - Postcard Reactions
 
-struct PostcardReaction: Codable, Identifiable {
+struct PostcardReaction: Codable, Identifiable, Equatable {
     var id: String
     var postcardMessageID: String
     var fromUserID: String

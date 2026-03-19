@@ -100,7 +100,6 @@ final class LocationHub: ObservableObject {
 
     /// Expose auth + fix state for UI.
     @Published private(set) var authorizationStatus: CLAuthorizationStatus = .notDetermined
-    @Published private(set) var headingDegrees: Double = 0
     @Published private(set) var lastLocationAccuracy: CLLocationAccuracy?
     @Published private(set) var lastLocationUpdateTime: Date?
     @Published private(set) var isFirstFixReady: Bool = false
@@ -179,14 +178,6 @@ final class LocationHub: ObservableObject {
             }
             .store(in: &cancellables)
 
-        current.headingPublisher
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] heading in
-                guard let self else { return }
-                let h = heading.truncatingRemainder(dividingBy: 360)
-                headingDegrees = h >= 0 ? h : (h + 360)
-            }
-            .store(in: &cancellables)
     }
 
     // MARK: - Fast CN bbox guess (cheap)
@@ -364,6 +355,19 @@ final class LocationHub: ObservableObject {
 
         if current === systemSource {
             systemSource.startBackgroundHighFidelity()
+        } else {
+            current.start()
+        }
+    }
+
+    /// ✅ Background Power Saving: prioritize battery over route fidelity.
+    func enterBackgroundPowerSaving() {
+        #if DEBUG
+        if mode == .mock { return }
+        #endif
+
+        if current === systemSource {
+            systemSource.startBackgroundPowerSaving()
         } else {
             current.start()
         }

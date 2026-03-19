@@ -4,7 +4,6 @@ enum AppSettings {
     static let voiceBroadcastEnabledKey = "streetstamps.voice.broadcast.enabled"
     static let voiceBroadcastIntervalKMKey = "streetstamps.voice.broadcast.interval_km"
     static let longStationaryReminderEnabledKey = "streetstamps.long_stationary_reminder.enabled"
-    static let avatarHeadlightEnabledKey = "streetstamps.avatar.headlight.enabled"
     static let liveActivityEnabledKey = "streetstamps.live_activity.enabled"
     static let lifelogBackgroundModeKey = "streetstamps.lifelog.background.mode"
     static let lifelogPassiveEnabledKey = "streetstamps.lifelog.passive.enabled"
@@ -30,14 +29,6 @@ enum AppSettings {
             return true
         }
         return defaults.bool(forKey: longStationaryReminderEnabledKey)
-    }
-
-    static var isAvatarHeadlightEnabled: Bool {
-        let defaults = UserDefaults.standard
-        if defaults.object(forKey: avatarHeadlightEnabledKey) == nil {
-            return true
-        }
-        return defaults.bool(forKey: avatarHeadlightEnabledKey)
     }
 
     static var isLiveActivityEnabled: Bool {

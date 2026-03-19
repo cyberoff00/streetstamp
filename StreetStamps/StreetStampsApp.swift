@@ -5,6 +5,51 @@ import UIKit
 import FirebaseCore
 #endif
 
+struct JourneyDeletionSyncFailure: Equatable {
+    let journeyID: String
+    let message: String
+}
+
+@MainActor
+final class JourneyDeletionSyncFailureStore {
+    private var failuresByJourneyID: [String: JourneyDeletionSyncFailure] = [:]
+
+    func failure(for journeyID: String) -> JourneyDeletionSyncFailure? {
+        failuresByJourneyID[journeyID]
+    }
+
+    func clear(journeyID: String) {
+        failuresByJourneyID.removeValue(forKey: journeyID)
+    }
+
+    func record(journeyID: String, error: Error) {
+        failuresByJourneyID[journeyID] = JourneyDeletionSyncFailure(
+            journeyID: journeyID,
+            message: String(describing: error)
+        )
+    }
+}
+
+enum JourneyDeletionSyncRunner {
+    @MainActor
+    static func run(
+        journeyID: String,
+        failureStore: JourneyDeletionSyncFailureStore,
+        cloudDeletion: @escaping () async -> Void,
+        migrationDeletion: @escaping () async throws -> Void
+    ) async {
+        failureStore.clear(journeyID: journeyID)
+        await cloudDeletion()
+
+        do {
+            try await migrationDeletion()
+            failureStore.clear(journeyID: journeyID)
+        } catch {
+            failureStore.record(journeyID: journeyID, error: error)
+        }
+    }
+}
+
 enum FirstProfileSetupPresentation {
     static func shouldPresent(
         requiresProfileSetup: Bool,
@@ -33,6 +78,7 @@ struct StreetStampsApp: App {
     @StateObject private var flow = AppFlowCoordinator.shared
     @StateObject private var deepLinkStore = AppDeepLinkStore()
     @StateObject private var onboardingGuide = OnboardingGuideStore()
+    @State private var journeyDeletionSyncFailureStore = JourneyDeletionSyncFailureStore()
     @State private var showAuthEntry = false
     @State private var showSplash = true
     @State private var scheduledTileRebuild: DispatchWorkItem?
@@ -89,12 +135,54 @@ struct StreetStampsApp: App {
         }
     }
 
+    private func syncMotionActivityPolicy() {
+        MotionActivityHub.shared.setShouldRun(
+            MotionActivityPolicy.shouldRun(
+                isTrackingJourney: TrackingService.shared.isTracking,
+                isPassiveLifelogEnabled: lifelogStore.isEnabled,
+                authorizationStatus: locationHub.authorizationStatus
+            )
+        )
+    }
+
     private func syncPendingCloudChanges(userID: String, reason: String) async {
         await CloudKitSyncService.shared.syncCurrentState(
             userID: userID,
             journeyStore: journeyStore,
             lifelogStore: lifelogStore,
             reason: reason
+        )
+    }
+
+    private static func makeJourneySyncHooks(
+        sessionStore: UserSessionStore,
+        cityCache: CityCache,
+        failureStore: JourneyDeletionSyncFailureStore
+    ) -> JourneyStore.SyncHooks {
+        JourneyStore.SyncHooks(
+            upsertCompletedJourney: { route in
+                Task {
+                    await CloudKitSyncService.shared.syncJourneyUpsert(route)
+                }
+            },
+            deleteJourney: { journeyID in
+                Task {
+                    await JourneyDeletionSyncRunner.run(
+                        journeyID: journeyID,
+                        failureStore: failureStore,
+                        cloudDeletion: {
+                            await CloudKitSyncService.shared.syncJourneyDeletion(id: journeyID)
+                        },
+                        migrationDeletion: {
+                            try await JourneyCloudMigrationService.syncDeletedJourney(
+                                journeyID: journeyID,
+                                sessionStore: sessionStore,
+                                cityCache: cityCache
+                            )
+                        }
+                    )
+                }
+            }
         )
     }
 
@@ -123,20 +211,12 @@ struct StreetStampsApp: App {
 
         let paths = StoragePath(userID: session.activeLocalProfileID)
         let jStore = JourneyStore(paths: paths)
-        jStore.syncHooks = JourneyStore.SyncHooks(
-            upsertCompletedJourney: { route in
-                Task {
-                    await CloudKitSyncService.shared.syncJourneyUpsert(route)
-                }
-            },
-            deleteJourney: { journeyID in
-                Task {
-                    await CloudKitSyncService.shared.syncJourneyDeletion(id: journeyID)
-                }
-            }
-        )
+        let cCache = CityCache(paths: paths, journeyStore: jStore)
+        let failureStore = JourneyDeletionSyncFailureStore()
+        _journeyDeletionSyncFailureStore = State(initialValue: failureStore)
+        jStore.syncHooks = Self.makeJourneySyncHooks(sessionStore: session, cityCache: cCache, failureStore: failureStore)
         _journeyStore = StateObject(wrappedValue: jStore)
-        _cityCache = StateObject(wrappedValue: CityCache(paths: paths, journeyStore: jStore))
+        _cityCache = StateObject(wrappedValue: cCache)
         _cityRenderCache = StateObject(wrappedValue: CityRenderCacheStore(rootDir: paths.thumbnailsDir))
         let llStore = LifelogStore(paths: paths)
         _lifelogStore = StateObject(wrappedValue: llStore)
@@ -225,7 +305,7 @@ struct StreetStampsApp: App {
             }
     }
 
-    private var appContentWithLifecycleHandlers: some View {
+    private var appContentWithStartupTasks: some View {
         appContentWithPresentation
             .task {
                 guard showSplash else { return }
@@ -281,8 +361,13 @@ struct StreetStampsApp: App {
                 Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 800_000_000)
                     applyIdleLocationPolicy(requestSingleRefreshWhenIdle: true)
+                    syncMotionActivityPolicy()
                 }
             }
+    }
+
+    private var appContentWithSessionHandlers: some View {
+        appContentWithStartupTasks
             .onChange(of: hasSeenIntroSlides) { _, seen in
                 guard seen else { return }
                 maybeShowFirstAuthPromptIfNeeded()
@@ -297,22 +382,15 @@ struct StreetStampsApp: App {
                     guard sessionStore.activeLocalProfileID == uid else { return }
 
                     journeyStore.rebind(paths: paths)
-                    journeyStore.syncHooks = JourneyStore.SyncHooks(
-                        upsertCompletedJourney: { route in
-                            Task {
-                                await CloudKitSyncService.shared.syncJourneyUpsert(route)
-                            }
-                        },
-                        deleteJourney: { journeyID in
-                            Task {
-                                await CloudKitSyncService.shared.syncJourneyDeletion(id: journeyID)
-                            }
-                        }
+                    cityCache.rebind(paths: paths)
+                    journeyStore.syncHooks = Self.makeJourneySyncHooks(
+                        sessionStore: sessionStore,
+                        cityCache: cityCache,
+                        failureStore: journeyDeletionSyncFailureStore
                     )
                     await journeyStore.loadAsync()
                     lifelogStore.rebind(paths: paths)
                     await lifelogStore.loadAsync()
-                    cityCache.rebind(paths: paths)
                     cityRenderCache.rebind(rootDir: paths.thumbnailsDir)
                     let journeysSnapshot = journeyStore.journeys
                     let cachedCitiesSnapshot = cityCache.cachedCities
@@ -340,6 +418,7 @@ struct StreetStampsApp: App {
                         countryISO2: lifelogStore.countryISO2 ?? locationHub.countryISO2
                     )
                     applyIdleLocationPolicy(requestSingleRefreshWhenIdle: true)
+                    syncMotionActivityPolicy()
                     socialStore.switchUser(uid)
                     postcardCenter.switchUser(uid)
                 }
@@ -348,6 +427,10 @@ struct StreetStampsApp: App {
                 guard version > 0 else { return }
                 showAuthEntry = true
             }
+    }
+
+    private var appContentWithLifecycleHandlers: some View {
+        appContentWithSessionHandlers
             .onChange(of: scenePhase) { phase in
                 // Best-effort: reduce data loss when the app is backgrounded or suspended.
                 if phase == .background || phase == .inactive {
@@ -362,6 +445,7 @@ struct StreetStampsApp: App {
                 }
                 if phase == .active {
                     applyIdleLocationPolicy(requestSingleRefreshWhenIdle: true)
+                    syncMotionActivityPolicy()
                     scheduleTrackTileRebuild(delay: 0.10, force: false)
                 }
             }
@@ -385,13 +469,16 @@ struct StreetStampsApp: App {
             }
             .onChange(of: lifelogBackgroundModeRaw) { _, _ in
                 applyIdleLocationPolicy(requestSingleRefreshWhenIdle: false)
+                syncMotionActivityPolicy()
             }
             .onChange(of: lifelogStore.isEnabled) { _, _ in
                 applyIdleLocationPolicy(requestSingleRefreshWhenIdle: false)
+                syncMotionActivityPolicy()
             }
             .onChange(of: locationHub.authorizationStatus) { _, _ in
                 guard lifelogStore.isEnabled else { return }
                 applyIdleLocationPolicy(requestSingleRefreshWhenIdle: false)
+                syncMotionActivityPolicy()
             }
             .onChange(of: trackTileStore.refreshRevision) { _, _ in
                 lifelogRenderCache.noteTrackTileRefresh(

@@ -248,6 +248,93 @@ final class LifelogRenderSnapshotTests: XCTestCase {
         XCTAssertEqual(snapshot.cachedPathCoordsWGS84.first?.latitude ?? 0, 37.7749, accuracy: 0.000_001)
     }
 
+    func test_daySnapshot_doesNotBridgeAdjacentRuns() {
+        let day = Date(timeIntervalSince1970: 1_700_000_000)
+        let key = LifelogDaySnapshotKey(
+            day: day,
+            countryISO2: "US",
+            journeyRevision: 11,
+            lifelogRevision: 22
+        )
+        let segments = [
+            TrackTileSegment(
+                sourceType: .passive,
+                coordinates: [
+                    CoordinateCodable(lat: 37.7749, lon: -122.4194),
+                    CoordinateCodable(lat: 37.7752, lon: -122.4190)
+                ],
+                startTimestamp: day,
+                endTimestamp: day.addingTimeInterval(60)
+            ),
+            TrackTileSegment(
+                sourceType: .passive,
+                coordinates: [
+                    CoordinateCodable(lat: 37.7800, lon: -122.4100),
+                    CoordinateCodable(lat: 37.7810, lon: -122.4090)
+                ],
+                startTimestamp: day.addingTimeInterval(600),
+                endTimestamp: day.addingTimeInterval(720)
+            )
+        ]
+
+        let snapshot = LifelogRenderSnapshotBuilder.buildDaySnapshot(
+            key: key,
+            segments: segments
+        )
+        let rendered = snapshot.allDayRenderSnapshot.farRouteSegments
+        let dashed = rendered.filter { $0.style == .dashed }
+
+        XCTAssertTrue(dashed.isEmpty)
+    }
+
+    func test_daySnapshot_keepsAllSeparatedRunsDisconnected() {
+        let day = Date(timeIntervalSince1970: 1_700_000_000)
+        let key = LifelogDaySnapshotKey(
+            day: day,
+            countryISO2: "US",
+            journeyRevision: 11,
+            lifelogRevision: 22
+        )
+        let segments = [
+            TrackTileSegment(
+                sourceType: .passive,
+                coordinates: [
+                    CoordinateCodable(lat: 37.7749, lon: -122.4194),
+                    CoordinateCodable(lat: 37.7752, lon: -122.4190)
+                ],
+                startTimestamp: day,
+                endTimestamp: day.addingTimeInterval(60)
+            ),
+            TrackTileSegment(
+                sourceType: .passive,
+                coordinates: [
+                    CoordinateCodable(lat: 37.7800, lon: -122.4100),
+                    CoordinateCodable(lat: 37.7810, lon: -122.4090)
+                ],
+                startTimestamp: day.addingTimeInterval(600),
+                endTimestamp: day.addingTimeInterval(720)
+            ),
+            TrackTileSegment(
+                sourceType: .passive,
+                coordinates: [
+                    CoordinateCodable(lat: 37.7747, lon: -122.4192),
+                    CoordinateCodable(lat: 37.7745, lon: -122.4195)
+                ],
+                startTimestamp: day.addingTimeInterval(1_200),
+                endTimestamp: day.addingTimeInterval(1_320)
+            )
+        ]
+
+        let snapshot = LifelogRenderSnapshotBuilder.buildDaySnapshot(
+            key: key,
+            segments: segments
+        )
+        let rendered = snapshot.allDayRenderSnapshot.farRouteSegments
+        let dashed = rendered.filter { $0.style == .dashed }
+
+        XCTAssertTrue(dashed.isEmpty)
+    }
+
     func test_incrementalReusePrefixCount_allowsTailAppendOnly() {
         let day = Date(timeIntervalSince1970: 1_700_000_000)
         let existing = [

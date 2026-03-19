@@ -64,9 +64,14 @@ enum PostcardInboxPresentation {
 
     static func cardReaction(
         for message: BackendPostcardMessageDTO,
-        box _: PostcardInboxView.Box
+        box: PostcardInboxView.Box
     ) -> PostcardReaction? {
-        message.reaction
+        switch box {
+        case .sent:
+            return message.peerReaction ?? message.reaction
+        case .received:
+            return message.myReaction ?? message.reaction
+        }
     }
 
     static func draftStatusPresentation(

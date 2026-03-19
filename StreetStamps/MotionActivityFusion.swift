@@ -114,6 +114,7 @@ final class MotionActivityHub: ObservableObject {
     static let shared = MotionActivityHub()
 
     @Published private(set) var snapshot: MotionActivitySnapshot = .unknown
+    @Published private(set) var isRunning = false
 
     #if canImport(CoreMotion)
     private let activityManager = CMMotionActivityManager()
@@ -128,15 +129,23 @@ final class MotionActivityHub: ObservableObject {
     private var started = false
 
     private init() {
-        start()
+    }
+
+    func setShouldRun(_ shouldRun: Bool) {
+        if shouldRun {
+            start()
+        } else {
+            stop()
+        }
     }
 
     func start() {
         guard !started else { return }
-        started = true
 
         #if canImport(CoreMotion)
         guard CMMotionActivityManager.isActivityAvailable() else { return }
+        started = true
+        isRunning = true
         activityManager.startActivityUpdates(to: activityQueue) { [weak self] activity in
             guard let self, let activity else { return }
             let next = MotionActivitySnapshot(activity: activity)
@@ -144,6 +153,20 @@ final class MotionActivityHub: ObservableObject {
                 self.snapshot = next
             }
         }
+        #else
+        started = true
+        isRunning = true
+        #endif
+    }
+
+    func stop() {
+        guard started else { return }
+        started = false
+        isRunning = false
+        snapshot = .unknown
+
+        #if canImport(CoreMotion)
+        activityManager.stopActivityUpdates()
         #endif
     }
 }

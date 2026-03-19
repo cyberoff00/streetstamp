@@ -61,6 +61,7 @@ struct EquipmentView: View {
     @State private var expandedColorCategoryId: String?
 
     private let itemPrice = 200
+    private let equipmentCategoryTrailingPeekWidth: CGFloat = 28
     private let hairColorOptions = [
         // Classic tones
         "#2B2A28", // natural black (default)
@@ -126,6 +127,7 @@ struct EquipmentView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
+        .background(SwipeBackEnabler())
         .onAppear {
             if store.catalog.categories.first(where: { $0.id == selectedCategoryId }) == nil {
                 selectedCategoryId = store.catalog.categories.first?.id ?? "hair"
@@ -386,6 +388,9 @@ struct EquipmentView: View {
                     }
                     .buttonStyle(.plain)
                 }
+
+                Color.clear
+                    .frame(width: equipmentCategoryTrailingPeekWidth, height: 1)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -397,6 +402,30 @@ struct EquipmentView: View {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .stroke(FigmaTheme.border, lineWidth: 1)
         )
+        .overlay(alignment: .trailing) {
+            categoryScrollHintOverlay
+        }
+    }
+
+    private var categoryScrollHintOverlay: some View {
+        HStack(spacing: 6) {
+            LinearGradient(
+                colors: [
+                    Color.white.opacity(0),
+                    Color.white.opacity(0.92),
+                    Color.white
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(width: 34)
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(FigmaTheme.subtext.opacity(0.72))
+                .padding(.trailing, 12)
+        }
+        .allowsHitTesting(false)
     }
 
     private func compactColorSwatches(

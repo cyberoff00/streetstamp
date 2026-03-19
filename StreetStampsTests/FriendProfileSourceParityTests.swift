@@ -71,7 +71,8 @@ final class FriendProfileSourceParityTests: XCTestCase {
         XCTAssertTrue(contents.contains("Text(L10n.t(\"friends_feed_new_activity_prompt\"))"))
         XCTAssertTrue(contents.contains("ScrollViewReader { proxy in"))
         XCTAssertTrue(contents.contains("feedScrollRestoreState.recordOpen(eventID: event.id)"))
-        XCTAssertTrue(contents.contains("proxy.scrollTo(eventID, anchor: .center)"))
+        XCTAssertFalse(contents.contains("proxy.scrollTo(eventID, anchor: .center)"))
+        XCTAssertTrue(contents.contains("proxy.scrollTo(eventID, anchor: .top)"))
     }
 
     func test_friendProfileSourceAvoidsHardcodedEnglishUserFacingCopy() throws {
@@ -107,5 +108,20 @@ final class FriendProfileSourceParityTests: XCTestCase {
         XCTAssertFalse(contents.contains(#"Image(systemName: "mappin.and.ellipse")"#))
         XCTAssertFalse(contents.contains(#"Text("•")"#))
         XCTAssertTrue(contents.contains(#"Text(String(format: L10n.t("friends_joined_format"), heroJoinedDateText(friend.createdAt)))"#))
+    }
+
+    func test_friendFeedAndMirrorScreensDoNotDependOnCollectionKeyForFriendCityPresentation() throws {
+        let root = projectRoot().appendingPathComponent("StreetStamps", isDirectory: true)
+        let contents = try String(
+            contentsOf: root.appendingPathComponent("FriendsHubView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertFalse(contents.contains("FriendJourneyCityIdentity.resolveCollectionKey(for: journey, cards: cards)"))
+        XCTAssertFalse(contents.contains("FriendJourneyCityIdentity.resolveCollectionKey(for: friendJourney, cards: cards)"))
+        XCTAssertFalse(contents.contains("CityCollectionResolver.configuredTitle(for: collectionKey)"))
+        XCTAssertTrue(contents.contains("fallbackTitle: cityCard?.name ?? journey.title"))
+        XCTAssertTrue(contents.contains("fallbackTitle: cityCard?.name ?? friendJourney.title"))
+        XCTAssertTrue(contents.contains("for: cityID"))
     }
 }

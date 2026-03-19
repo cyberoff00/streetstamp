@@ -191,6 +191,38 @@ enum JourneyCloudMigrationService {
         try await migrationSender(token, payload)
     }
 
+    @MainActor
+    static func syncDeletedJourney(
+        journeyID: String,
+        sessionStore: UserSessionStore,
+        cityCache: CityCache,
+        migrationSender: @escaping MigrationSender = liveMigrationSender
+    ) async throws {
+        guard BackendConfig.isEnabled else { return }
+
+        let snapshot = await MainActor.run {
+            (
+                token: sessionStore.currentAccessToken,
+                cards: cityCache.cachedCities
+            )
+        }
+
+        guard let token = snapshot.token, !token.isEmpty else {
+            throw BackendAPIError.unauthorized
+        }
+
+        let cards = snapshot.cards
+            .filter { !($0.isTemporary ?? false) }
+            .map { FriendCityCard(id: $0.id, name: $0.name, countryISO2: $0.countryISO2) }
+
+        let payload = makeJourneyRemovalPayload(
+            journeyID: journeyID,
+            unlockedCityCards: cards
+        )
+
+        try await migrationSender(token, payload)
+    }
+
     private static func removedRemoteJourneyIDsIfNeeded(
         token: String,
         hasLoaded: Bool,
