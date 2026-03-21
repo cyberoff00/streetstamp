@@ -18,6 +18,7 @@ const { OAuth2Client } = require("google-auth-library");
 const { createRemoteJWKSet, jwtVerify } = require("jose");
 const { canSendPostcard } = require("./postcard-rules");
 const bcrypt = require("bcrypt");
+const DB = require("./db-relational");
 
 const PORT = Number(process.env.PORT || 18080);
 const JWT_SECRET = (process.env.JWT_SECRET || "change-me-in-production").trim();
@@ -64,6 +65,12 @@ const GOOGLE_CLIENT_ID = (process.env.GOOGLE_CLIENT_ID || "").trim();
 const APPLE_AUDIENCES = (process.env.APPLE_AUDIENCES || process.env.APPLE_BUNDLE_ID || "").trim();
 const APPSTORE_FALLBACK_URL = (process.env.APPSTORE_FALLBACK_URL || "https://apps.apple.com/us/search?term=StreetStamps").trim();
 const FIREBASE_AUTH_ENABLED = String(process.env.FIREBASE_AUTH_ENABLED || "").trim().toLowerCase();
+const FIREBASE_BEARER_COMPAT_ENABLED = String(
+  process.env.FIREBASE_BEARER_COMPAT_ENABLED == null
+    ? "true"
+    : process.env.FIREBASE_BEARER_COMPAT_ENABLED
+).trim().toLowerCase();
+const WRITE_FREEZE_ENABLED = String(process.env.WRITE_FREEZE_ENABLED || "").trim().toLowerCase();
 const FIREBASE_PROJECT_ID = (process.env.FIREBASE_PROJECT_ID || "").trim();
 const FIREBASE_SERVICE_ACCOUNT_PATH = (process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.FIREBASE_SERVICE_ACCOUNT_PATH || "").trim();
 const FIREBASE_SERVICE_ACCOUNT_JSON = (process.env.FIREBASE_SERVICE_ACCOUNT_JSON || "").trim();
@@ -168,10 +175,30 @@ function firebaseAuthEnabled() {
   return FIREBASE_AUTH_ENABLED === "1" || FIREBASE_AUTH_ENABLED === "true" || FIREBASE_AUTH_ENABLED === "yes";
 }
 
+function firebaseBearerCompatEnabled() {
+  return FIREBASE_BEARER_COMPAT_ENABLED === "1"
+    || FIREBASE_BEARER_COMPAT_ENABLED === "true"
+    || FIREBASE_BEARER_COMPAT_ENABLED === "yes";
+}
+
+function writeFreezeEnabled() {
+  return WRITE_FREEZE_ENABLED === "1"
+    || WRITE_FREEZE_ENABLED === "true"
+    || WRITE_FREEZE_ENABLED === "yes";
+}
+
 function parseTruthy(raw) {
   if (typeof raw === "boolean") return raw;
   const value = String(raw || "").trim().toLowerCase();
   return value === "true" || value === "1";
+}
+
+function rejectWhenWriteFrozen(_req, res, next) {
+  if (!writeFreezeEnabled()) return next();
+  return res.status(503).json({
+    code: "write_frozen",
+    message: "service is temporarily read-only for migration"
+  });
 }
 
 function corsConfigured() {
@@ -1110,6 +1137,9 @@ function normalizeJourneyPayload(raw, ownerUserID) {
     cityID: String(raw?.cityID || raw?.cityId || "").trim() || null,
     activityTag: raw?.activityTag == null ? null : String(raw.activityTag).slice(0, 32),
     overallMemory: raw?.overallMemory == null ? null : String(raw.overallMemory).slice(0, 4000),
+    overallMemoryImageURLs: Array.isArray(raw?.overallMemoryImageURLs)
+      ? raw.overallMemoryImageURLs.map((x) => String(x || "")).filter(Boolean).slice(0, 32)
+      : [],
     distance: Number(raw?.distance || 0),
     startTime: normalizeISOTime(raw?.startTime),
     endTime: normalizeISOTime(raw?.endTime),
@@ -1303,6 +1333,9 @@ async function resolveBearerUserID(token) {
   try {
     return parseLegacyAccessToken(token);
   } catch {}
+  if (!firebaseBearerCompatEnabled()) {
+    throw new Error("firebase bearer auth disabled");
+  }
   return resolveFirebaseBearerUserID(token);
 }
 
@@ -1550,6 +1583,9 @@ async function loadDBFromFile() {
 
 async function ensurePGSchema() {
   if (!pgPool || pgSchemaReady) return;
+  // Create relational tables
+  await DB.ensureSchema(pgPool);
+  // Keep legacy app_state table for migration fallback
   await pgPool.query(`
     CREATE TABLE IF NOT EXISTS app_state (
       key TEXT PRIMARY KEY,
@@ -1563,21 +1599,551 @@ async function ensurePGSchema() {
 async function loadDBFromPostgres() {
   if (!pgPool) return null;
   await ensurePGSchema();
+
+  // Try loading from relational tables first
+  const usersResult = await pgPool.query("SELECT COUNT(*) AS c FROM users");
+  const hasRelationalData = Number(usersResult.rows[0].c) > 0;
+
+  if (hasRelationalData) {
+    console.log("[db] loading from relational tables");
+    return loadDBFromRelationalTables();
+  }
+
+  // Fall back to legacy app_state blob
   const result = await pgPool.query("SELECT state FROM app_state WHERE key = $1 LIMIT 1", [PG_STATE_KEY]);
   if (!result.rows.length) return null;
   return normalizeDBShape(result.rows[0]?.state || {});
 }
 
+async function loadDBFromRelationalTables() {
+  const loaded = emptyDB();
+
+  // Users
+  const { rows: userRows } = await pgPool.query("SELECT * FROM users");
+  for (const row of userRows) {
+    const user = {
+      id: row.id,
+      email: row.email,
+      provider: row.provider,
+      displayName: row.display_name,
+      handle: row.handle,
+      inviteCode: row.invite_code,
+      profileVisibility: row.profile_visibility,
+      profileSetupCompleted: row.profile_setup_completed,
+      handleChangeUsed: row.handle_change_used,
+      bio: row.bio,
+      loadout: row.loadout || null,
+      createdAt: Number(row.created_at),
+      journeys: [],
+      cityCards: [],
+      friendIDs: [],
+      notifications: [],
+      sentPostcards: [],
+      receivedPostcards: [],
+    };
+    loaded.users[row.id] = user;
+    if (row.email) loaded.emailIndex[row.email] = row.id;
+    if (row.handle) loaded.handleIndex[row.handle] = row.id;
+    if (row.invite_code) loaded.inviteIndex[row.invite_code] = row.id;
+  }
+
+  // Journeys
+  const { rows: journeyRows } = await pgPool.query("SELECT user_id, data FROM journeys");
+  for (const row of journeyRows) {
+    if (loaded.users[row.user_id]) {
+      loaded.users[row.user_id].journeys.push(row.data);
+    }
+  }
+
+  // City cards
+  const { rows: cityRows } = await pgPool.query("SELECT * FROM city_cards");
+  for (const row of cityRows) {
+    if (loaded.users[row.user_id]) {
+      loaded.users[row.user_id].cityCards.push({
+        id: row.city_id,
+        name: row.city_name,
+        countryISO2: row.country_iso2,
+      });
+    }
+  }
+
+  // Friendships
+  const { rows: friendRows } = await pgPool.query("SELECT user_id, friend_id FROM friendships");
+  for (const row of friendRows) {
+    if (loaded.users[row.user_id]) {
+      loaded.users[row.user_id].friendIDs.push(row.friend_id);
+    }
+  }
+
+  // Notifications
+  const { rows: notifRows } = await pgPool.query(
+    "SELECT * FROM notifications ORDER BY created_at DESC"
+  );
+  for (const row of notifRows) {
+    if (loaded.users[row.user_id]) {
+      loaded.users[row.user_id].notifications.push({
+        id: row.id,
+        type: row.type,
+        fromUserID: row.from_user_id,
+        fromDisplayName: row.from_display_name,
+        journeyID: row.journey_id,
+        journeyTitle: row.journey_title,
+        message: row.message,
+        read: row.read,
+        createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+      });
+    }
+  }
+
+  // Auth identities
+  const { rows: authRows } = await pgPool.query("SELECT * FROM auth_identities");
+  for (const row of authRows) {
+    loaded.authIdentities[row.id] = {
+      id: row.id,
+      userID: row.user_id,
+      provider: row.provider,
+      providerSubject: row.provider_subject,
+      email: row.email,
+      passwordHash: row.password_hash,
+      emailVerified: row.email_verified,
+      createdAt: Number(row.created_at),
+      updatedAt: Number(row.updated_at),
+    };
+  }
+
+  // OAuth index
+  const { rows: oauthRows } = await pgPool.query("SELECT * FROM oauth_index");
+  for (const row of oauthRows) {
+    loaded.oauthIndex[row.oauth_key] = row.user_id;
+  }
+
+  // Firebase identities
+  const { rows: fbRows } = await pgPool.query("SELECT * FROM firebase_identities");
+  for (const row of fbRows) {
+    loaded.firebaseIdentityIndex[row.firebase_uid] = {
+      firebaseUid: row.firebase_uid,
+      appUserId: row.app_user_id,
+      email: row.email,
+      emailVerified: row.email_verified,
+      providers: row.providers || [],
+      createdAt: row.created_at,
+      lastLoginAt: row.last_login_at,
+    };
+  }
+
+  // Email verification tokens
+  const { rows: evtRows } = await pgPool.query("SELECT * FROM email_verification_tokens");
+  for (const row of evtRows) {
+    loaded.emailVerificationTokens[row.id] = {
+      id: row.id,
+      userID: row.user_id,
+      email: row.email,
+      tokenHash: row.token_hash,
+      expiresAt: Number(row.expires_at),
+      usedAt: row.used_at ? Number(row.used_at) : null,
+      createdAt: Number(row.created_at),
+    };
+  }
+
+  // Password reset tokens
+  const { rows: prtRows } = await pgPool.query("SELECT * FROM password_reset_tokens");
+  for (const row of prtRows) {
+    loaded.passwordResetTokens[row.id] = {
+      id: row.id,
+      userID: row.user_id,
+      email: row.email,
+      tokenHash: row.token_hash,
+      expiresAt: Number(row.expires_at),
+      usedAt: row.used_at ? Number(row.used_at) : null,
+      createdAt: Number(row.created_at),
+    };
+  }
+
+  // Refresh tokens
+  const { rows: rtRows } = await pgPool.query("SELECT * FROM refresh_tokens");
+  for (const row of rtRows) {
+    loaded.refreshTokens[row.id] = {
+      id: row.id,
+      userID: row.user_id,
+      tokenHash: row.token_hash,
+      deviceInfo: row.device_info,
+      expiresAt: Number(row.expires_at),
+      revokedAt: row.revoked_at ? Number(row.revoked_at) : null,
+      createdAt: Number(row.created_at),
+    };
+  }
+
+  // Friend requests
+  const { rows: frRows } = await pgPool.query("SELECT * FROM friend_requests");
+  for (const row of frRows) {
+    loaded.friendRequestsIndex[row.id] = {
+      id: row.id,
+      fromUserID: row.from_user_id,
+      toUserID: row.to_user_id,
+      note: row.note,
+      createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+      updatedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at),
+    };
+  }
+
+  // Likes
+  const { rows: likeRows } = await pgPool.query("SELECT * FROM journey_likes");
+  for (const row of likeRows) {
+    const key = `${row.owner_user_id}:${row.journey_id}`;
+    if (!loaded.likesIndex[key]) {
+      loaded.likesIndex[key] = {
+        ownerUserID: row.owner_user_id,
+        journeyID: row.journey_id,
+        likerIDs: [],
+        likedAtByUserID: {},
+        updatedAt: new Date().toISOString(),
+      };
+    }
+    loaded.likesIndex[key].likerIDs.push(row.liker_user_id);
+    loaded.likesIndex[key].likedAtByUserID[row.liker_user_id] =
+      row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at);
+  }
+
+  // Postcards
+  const { rows: pcRows } = await pgPool.query("SELECT * FROM postcards ORDER BY sent_at DESC");
+  for (const row of pcRows) {
+    const pc = {
+      messageID: row.message_id,
+      type: "postcard",
+      fromUserID: row.from_user_id,
+      fromDisplayName: row.from_display_name,
+      toUserID: row.to_user_id,
+      toDisplayName: row.to_display_name,
+      cityID: row.city_id,
+      cityName: row.city_name,
+      photoURL: row.photo_url,
+      messageText: row.message_text,
+      clientDraftID: row.client_draft_id,
+      status: row.status,
+      sentAt: row.sent_at instanceof Date ? row.sent_at.toISOString() : String(row.sent_at),
+    };
+    loaded.postcardsIndex[row.message_id] = pc;
+    if (loaded.users[row.from_user_id]) {
+      loaded.users[row.from_user_id].sentPostcards.push(pc);
+    }
+    if (loaded.users[row.to_user_id]) {
+      loaded.users[row.to_user_id].receivedPostcards.push(pc);
+    }
+  }
+
+  // Postcard reactions → stored on user.postcardReactions
+  const { rows: prRows } = await pgPool.query(
+    `SELECT pr.*, p.from_user_id AS sender_uid
+     FROM postcard_reactions pr
+     JOIN postcards p ON p.message_id = pr.postcard_message_id`
+  );
+  for (const row of prRows) {
+    const senderUID = row.sender_uid;
+    if (loaded.users[senderUID]) {
+      if (!loaded.users[senderUID].postcardReactions) {
+        loaded.users[senderUID].postcardReactions = {};
+      }
+      loaded.users[senderUID].postcardReactions[row.postcard_message_id] = {
+        id: row.id,
+        postcardMessageID: row.postcard_message_id,
+        fromUserID: row.from_user_id,
+        viewedAt: row.viewed_at instanceof Date ? row.viewed_at.toISOString() : row.viewed_at,
+        reactionEmoji: row.reaction_emoji,
+        comment: row.comment,
+        reactedAt: row.reacted_at instanceof Date ? row.reacted_at.toISOString() : row.reacted_at,
+      };
+    }
+  }
+
+  return loaded;
+}
+
+async function saveDBToRelationalTables(nextDB) {
+  if (!pgPool) return;
+  const client = await pgPool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Users — upsert all
+    for (const [uid, user] of Object.entries(nextDB.users || {})) {
+      await client.query(
+        `INSERT INTO users (id, email, display_name, handle, invite_code,
+          profile_visibility, profile_setup_completed, handle_change_used,
+          bio, loadout, provider, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         ON CONFLICT (id) DO UPDATE SET
+           email = EXCLUDED.email,
+           display_name = EXCLUDED.display_name,
+           handle = EXCLUDED.handle,
+           invite_code = EXCLUDED.invite_code,
+           profile_visibility = EXCLUDED.profile_visibility,
+           profile_setup_completed = EXCLUDED.profile_setup_completed,
+           handle_change_used = EXCLUDED.handle_change_used,
+           bio = EXCLUDED.bio,
+           loadout = EXCLUDED.loadout,
+           provider = EXCLUDED.provider`,
+        [
+          uid,
+          user.email || null,
+          user.displayName || "Explorer",
+          user.handle || null,
+          user.inviteCode || null,
+          user.profileVisibility || "friendsOnly",
+          user.profileSetupCompleted ?? false,
+          user.handleChangeUsed ?? false,
+          user.bio || "",
+          user.loadout ? JSON.stringify(user.loadout) : null,
+          user.provider || null,
+          user.createdAt || 0,
+        ]
+      );
+
+      // Journeys — replace for this user
+      await client.query("DELETE FROM journeys WHERE user_id = $1", [uid]);
+      for (const j of user.journeys || []) {
+        if (!j || !j.id) continue;
+        await client.query(
+          `INSERT INTO journeys (id, user_id, title, city_id, distance,
+            start_time, end_time, visibility, data, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+           ON CONFLICT DO NOTHING`,
+          [
+            j.id, uid, j.title || null,
+            j.cityID || j.cityId || null,
+            j.distance || 0,
+            j.startTime ? new Date(j.startTime).toISOString() : null,
+            j.endTime ? new Date(j.endTime).toISOString() : null,
+            j.visibility || "friendsOnly",
+            JSON.stringify(j),
+            j.createdAt || user.createdAt || 0,
+          ]
+        );
+      }
+
+      // City cards — replace for this user
+      await client.query("DELETE FROM city_cards WHERE user_id = $1", [uid]);
+      for (const card of user.cityCards || []) {
+        if (!card || !card.id) continue;
+        await client.query(
+          `INSERT INTO city_cards (user_id, city_id, city_name, country_iso2, created_at)
+           VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
+          [uid, card.id, card.name || card.id, card.countryISO2 || null, user.createdAt || 0]
+        );
+      }
+
+      // Friendships — replace for this user
+      await client.query("DELETE FROM friendships WHERE user_id = $1", [uid]);
+      for (const fid of user.friendIDs || []) {
+        await client.query(
+          `INSERT INTO friendships (user_id, friend_id, created_at)
+           VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+          [uid, fid, user.createdAt || 0]
+        );
+      }
+
+      // Notifications — replace for this user
+      await client.query("DELETE FROM notifications WHERE user_id = $1", [uid]);
+      for (const n of user.notifications || []) {
+        if (!n || !n.id) continue;
+        await client.query(
+          `INSERT INTO notifications (id, user_id, type, from_user_id, from_display_name,
+            journey_id, journey_title, message, read, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO NOTHING`,
+          [
+            n.id, uid, n.type || "unknown", n.fromUserID || null,
+            n.fromDisplayName || null, n.journeyID || null,
+            n.journeyTitle || null, n.message || "",
+            n.read ?? false,
+            n.createdAt ? new Date(n.createdAt).toISOString() : new Date().toISOString(),
+          ]
+        );
+      }
+
+      // Postcard reactions
+      for (const [messageID, r] of Object.entries(user.postcardReactions || {})) {
+        if (!r) continue;
+        await client.query(
+          `INSERT INTO postcard_reactions (id, postcard_message_id, from_user_id,
+            viewed_at, reaction_emoji, comment, reacted_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)
+           ON CONFLICT (postcard_message_id, from_user_id) DO UPDATE SET
+             viewed_at = COALESCE(postcard_reactions.viewed_at, EXCLUDED.viewed_at),
+             reaction_emoji = COALESCE(EXCLUDED.reaction_emoji, postcard_reactions.reaction_emoji),
+             comment = COALESCE(EXCLUDED.comment, postcard_reactions.comment),
+             reacted_at = COALESCE(EXCLUDED.reacted_at, postcard_reactions.reacted_at)`,
+          [
+            r.id || `pr_migrated_${uid}_${messageID}`,
+            messageID, r.fromUserID || uid,
+            r.viewedAt ? new Date(r.viewedAt).toISOString() : null,
+            r.reactionEmoji || null, r.comment || null,
+            r.reactedAt ? new Date(r.reactedAt).toISOString() : null,
+          ]
+        );
+      }
+    }
+
+    // Auth identities
+    for (const [aid, identity] of Object.entries(nextDB.authIdentities || {})) {
+      if (!identity || !identity.userID) continue;
+      await client.query(
+        `INSERT INTO auth_identities (id, user_id, provider, provider_subject,
+          email, password_hash, email_verified, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         ON CONFLICT (id) DO UPDATE SET
+           user_id = EXCLUDED.user_id,
+           email = EXCLUDED.email,
+           password_hash = EXCLUDED.password_hash,
+           email_verified = EXCLUDED.email_verified,
+           updated_at = EXCLUDED.updated_at`,
+        [
+          aid, identity.userID, identity.provider || "unknown",
+          identity.providerSubject || null, identity.email || null,
+          identity.passwordHash || null, identity.emailVerified ?? false,
+          identity.createdAt || 0, identity.updatedAt || identity.createdAt || 0,
+        ]
+      );
+    }
+
+    // OAuth index
+    for (const [key, userID] of Object.entries(nextDB.oauthIndex || {})) {
+      if (!key || !userID) continue;
+      await client.query(
+        `INSERT INTO oauth_index (oauth_key, user_id) VALUES ($1, $2)
+         ON CONFLICT (oauth_key) DO UPDATE SET user_id = EXCLUDED.user_id`,
+        [key, userID]
+      );
+    }
+
+    // Firebase identities
+    for (const [fbUID, record] of Object.entries(nextDB.firebaseIdentityIndex || {})) {
+      if (!record || !record.appUserId) continue;
+      await client.query(
+        `INSERT INTO firebase_identities (firebase_uid, app_user_id, email,
+          email_verified, providers, created_at, last_login_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (firebase_uid) DO UPDATE SET
+           app_user_id = EXCLUDED.app_user_id,
+           email = EXCLUDED.email,
+           email_verified = EXCLUDED.email_verified,
+           providers = EXCLUDED.providers,
+           last_login_at = EXCLUDED.last_login_at`,
+        [
+          fbUID, record.appUserId, record.email || null,
+          record.emailVerified ?? false,
+          JSON.stringify(record.providers || []),
+          record.createdAt || 0, record.lastLoginAt || 0,
+        ]
+      );
+    }
+
+    // Email verification tokens
+    for (const [tid, token] of Object.entries(nextDB.emailVerificationTokens || {})) {
+      if (!token || !token.userID) continue;
+      await client.query(
+        `INSERT INTO email_verification_tokens (id, user_id, email, token_hash, expires_at, used_at, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (id) DO UPDATE SET used_at = EXCLUDED.used_at`,
+        [tid, token.userID, token.email || "", token.tokenHash || "", token.expiresAt || 0, token.usedAt || null, token.createdAt || 0]
+      );
+    }
+
+    // Password reset tokens
+    for (const [tid, token] of Object.entries(nextDB.passwordResetTokens || {})) {
+      if (!token || !token.userID) continue;
+      await client.query(
+        `INSERT INTO password_reset_tokens (id, user_id, email, token_hash, expires_at, used_at, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (id) DO UPDATE SET used_at = EXCLUDED.used_at`,
+        [tid, token.userID, token.email || "", token.tokenHash || "", token.expiresAt || 0, token.usedAt || null, token.createdAt || 0]
+      );
+    }
+
+    // Refresh tokens
+    for (const [tid, token] of Object.entries(nextDB.refreshTokens || {})) {
+      if (!token || !token.userID) continue;
+      await client.query(
+        `INSERT INTO refresh_tokens (id, user_id, token_hash, device_info, expires_at, revoked_at, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (id) DO UPDATE SET revoked_at = EXCLUDED.revoked_at`,
+        [tid, token.userID, token.tokenHash || "", token.deviceInfo || null, token.expiresAt || 0, token.revokedAt || null, token.createdAt || 0]
+      );
+    }
+
+    // Friend requests
+    for (const [rid, req] of Object.entries(nextDB.friendRequestsIndex || {})) {
+      if (!req || !req.fromUserID || !req.toUserID) continue;
+      await client.query(
+        `INSERT INTO friend_requests (id, from_user_id, to_user_id, note, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT (id) DO NOTHING`,
+        [
+          rid, req.fromUserID, req.toUserID, req.note || null,
+          req.createdAt ? new Date(req.createdAt).toISOString() : new Date().toISOString(),
+          req.updatedAt ? new Date(req.updatedAt).toISOString() : new Date().toISOString(),
+        ]
+      );
+    }
+    // Delete removed friend requests
+    const frIDs = Object.keys(nextDB.friendRequestsIndex || {});
+    if (frIDs.length > 0) {
+      await client.query(
+        "DELETE FROM friend_requests WHERE id != ALL($1::text[])",
+        [frIDs]
+      );
+    } else {
+      await client.query("DELETE FROM friend_requests");
+    }
+
+    // Likes
+    await client.query("DELETE FROM journey_likes");
+    for (const [, record] of Object.entries(nextDB.likesIndex || {})) {
+      if (!record || !record.ownerUserID || !record.journeyID) continue;
+      for (const likerID of record.likerIDs || []) {
+        const likedAt = record.likedAtByUserID?.[likerID];
+        await client.query(
+          `INSERT INTO journey_likes (owner_user_id, journey_id, liker_user_id, created_at)
+           VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
+          [
+            record.ownerUserID, record.journeyID, likerID,
+            likedAt ? new Date(likedAt).toISOString() : new Date().toISOString(),
+          ]
+        );
+      }
+    }
+
+    // Postcards
+    for (const [, pc] of Object.entries(nextDB.postcardsIndex || {})) {
+      if (!pc || !pc.messageID) continue;
+      await client.query(
+        `INSERT INTO postcards (message_id, from_user_id, from_display_name,
+          to_user_id, to_display_name, city_id, city_name, photo_url,
+          message_text, client_draft_id, status, sent_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         ON CONFLICT (message_id) DO NOTHING`,
+        [
+          pc.messageID, pc.fromUserID, pc.fromDisplayName || null,
+          pc.toUserID, pc.toDisplayName || null,
+          pc.cityID || "", pc.cityName || "",
+          pc.photoURL || null, pc.messageText || "",
+          pc.clientDraftID || null, pc.status || "sent",
+          pc.sentAt ? new Date(pc.sentAt).toISOString() : new Date().toISOString(),
+        ]
+      );
+    }
+
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 async function saveDBToPostgres(nextDB) {
   if (!pgPool) return;
   await ensurePGSchema();
-  await pgPool.query(
-    `INSERT INTO app_state (key, state, updated_at)
-     VALUES ($1, $2::jsonb, NOW())
-     ON CONFLICT (key)
-     DO UPDATE SET state = EXCLUDED.state, updated_at = NOW()`,
-    [PG_STATE_KEY, JSON.stringify(nextDB || emptyDB())]
-  );
+  await saveDBToRelationalTables(nextDB);
 }
 
 async function loadDB() {
@@ -1860,6 +2426,46 @@ function postcardsForUser(uid, box) {
   return out;
 }
 
+function postcardReactionPayloadForViewer(viewerID, item, box) {
+  const viewer = db.users?.[viewerID];
+  const sender = db.users?.[item?.fromUserID];
+  const receiver = db.users?.[item?.toUserID];
+  const messageID = String(item?.messageID || "").trim();
+  if (!messageID) {
+    return {
+      reaction: null,
+      myReaction: null,
+      peerReaction: null
+    };
+  }
+
+  let myReaction = null;
+  let peerReaction = null;
+
+  if (box === "received") {
+    // Reactions made by the receiver are stored on the sender record.
+    myReaction = sender?.postcardReactions?.[messageID] || null;
+  } else {
+    // Reactions made by the receiver of my sent postcard are stored on my record.
+    peerReaction = viewer?.postcardReactions?.[messageID] || null;
+  }
+
+  // Keep a defensive peer lookup so legacy data still renders if the payload is stored on the
+  // opposite side unexpectedly.
+  if (!peerReaction && box === "received") {
+    peerReaction = receiver?.postcardReactions?.[messageID] || null;
+  }
+  if (!myReaction && box === "sent") {
+    myReaction = viewer?.postcardReactions?.[messageID] || null;
+  }
+
+  return {
+    reaction: box === "received" ? myReaction : peerReaction,
+    myReaction,
+    peerReaction
+  };
+}
+
 function reconcilePostcardsForUser(user, uid) {
   ensurePostcardCollections(user);
   const expectedSent = postcardsForUser(uid, "sent");
@@ -2136,7 +2742,7 @@ async function main() {
     throw new Error(firebaseConfigError);
   }
   db = await loadDB();
-  console.log(`[streetstamps-node-v1] storage=${pgPool ? "postgresql" : "file"}`);
+  console.log(`[streetstamps-node-v1] storage=${pgPool ? "postgresql-relational" : "file"}`);
   db.handleIndex = {};
   db.inviteIndex = {};
   let shouldPersistMigration = false;
@@ -2319,6 +2925,14 @@ async function main() {
     status: "ok",
     storage: pgPool ? "postgresql" : "file",
     cors: corsConfigured() ? "allowlist" : "open",
+    auth: {
+      businessBearer: firebaseBearerCompatEnabled() ? "backend_or_firebase_compat" : "backend_jwt_only",
+      firebaseBearerCompat: firebaseBearerCompatEnabled(),
+      firebaseAdminConfigured: firebaseAuthEnabled()
+    },
+    maintenance: {
+      writeFrozen: writeFreezeEnabled()
+    },
     media: {
       maxUploadBytes: Number.isFinite(MEDIA_UPLOAD_MAX_BYTES) && MEDIA_UPLOAD_MAX_BYTES > 0
         ? MEDIA_UPLOAD_MAX_BYTES
@@ -2879,7 +3493,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/friends", writeRateLimiter, async (req, res) => {
+  app.post("/v1/friends", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
       if (!db.users[uid]) return res.status(404).json({ message: "user not found" });
@@ -2907,7 +3521,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/friends/requests", writeRateLimiter, async (req, res) => {
+  app.post("/v1/friends/requests", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -2982,7 +3596,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/friends/requests/:requestID/accept", writeRateLimiter, async (req, res) => {
+  app.post("/v1/friends/requests/:requestID/accept", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -3016,7 +3630,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/friends/requests/:requestID/reject", writeRateLimiter, async (req, res) => {
+  app.post("/v1/friends/requests/:requestID/reject", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -3036,7 +3650,7 @@ async function main() {
     }
   });
 
-  app.delete("/v1/friends/:friendID", writeRateLimiter, async (req, res) => {
+  app.delete("/v1/friends/:friendID", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -3055,7 +3669,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/journeys/migrate", writeRateLimiter, async (req, res) => {
+  app.post("/v1/journeys/migrate", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -3073,7 +3687,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/journeys/likes/batch", writeRateLimiter, (req, res) => {
+  app.post("/v1/journeys/likes/batch", writeRateLimiter, rejectWhenWriteFrozen, (req, res) => {
     try {
       const viewerID = parseBearer(req);
       const viewer = db.users[viewerID];
@@ -3151,7 +3765,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/journeys/:ownerUserID/:journeyID/like", writeRateLimiter, async (req, res) => {
+  app.post("/v1/journeys/:ownerUserID/:journeyID/like", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const viewerID = parseBearer(req);
       const ownerUserID = String(req.params.ownerUserID || "").trim();
@@ -3188,7 +3802,7 @@ async function main() {
     }
   });
 
-  app.delete("/v1/journeys/:ownerUserID/:journeyID/like", writeRateLimiter, async (req, res) => {
+  app.delete("/v1/journeys/:ownerUserID/:journeyID/like", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const viewerID = parseBearer(req);
       const ownerUserID = String(req.params.ownerUserID || "").trim();
@@ -3216,7 +3830,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/postcards/send", writeRateLimiter, async (req, res) => {
+  app.post("/v1/postcards/send", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     const requestStartedAt = timingNowNs();
     try {
       const uid = parseBearer(req);
@@ -3354,11 +3968,13 @@ async function main() {
         .filter(Boolean)
         .filter((item) => String(item.photoURL || "").trim().length > 0)
         .map((item) => {
-          const reaction = (me.postcardReactions || {})[item.messageID];
+          const reactionPayload = postcardReactionPayloadForViewer(uid, item, box);
           return {
             ...item,
             photoURL: absolutizePostcardPhotoURL(item.photoURL, req),
-            reaction: reaction || null
+            reaction: reactionPayload.reaction,
+            myReaction: reactionPayload.myReaction,
+            peerReaction: reactionPayload.peerReaction
           };
         })
         .sort((a, b) => Date.parse(b.sentAt || "") - Date.parse(a.sentAt || ""));
@@ -3368,7 +3984,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/postcards/:messageID/view", writeRateLimiter, async (req, res) => {
+  app.post("/v1/postcards/:messageID/view", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -3404,7 +4020,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/postcards/:messageID/react", writeRateLimiter, async (req, res) => {
+  app.post("/v1/postcards/:messageID/react", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -3472,7 +4088,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/notifications/read", writeRateLimiter, async (req, res) => {
+  app.post("/v1/notifications/read", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -3513,7 +4129,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/profile/:userID/stomp", writeRateLimiter, async (req, res) => {
+  app.post("/v1/profile/:userID/stomp", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const viewerID = parseBearer(req);
       const targetID = String(req.params.userID || "").trim();
@@ -3571,10 +4187,10 @@ async function main() {
     }
   };
 
-  app.patch("/v1/profile/exclusive-id", updateExclusiveID);
-  app.patch("/v1/profile/handle", updateExclusiveID);
+  app.patch("/v1/profile/exclusive-id", rejectWhenWriteFrozen, updateExclusiveID);
+  app.patch("/v1/profile/handle", rejectWhenWriteFrozen, updateExclusiveID);
 
-  app.patch("/v1/profile/display-name", async (req, res) => {
+  app.patch("/v1/profile/display-name", rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -3594,7 +4210,7 @@ async function main() {
     }
   });
 
-  app.patch("/v1/profile/visibility", async (req, res) => {
+  app.patch("/v1/profile/visibility", rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -3609,7 +4225,7 @@ async function main() {
     }
   });
 
-  app.patch("/v1/profile/bio", async (req, res) => {
+  app.patch("/v1/profile/bio", rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -3624,7 +4240,7 @@ async function main() {
     }
   });
 
-  app.patch("/v1/profile/loadout", async (req, res) => {
+  app.patch("/v1/profile/loadout", rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -3643,7 +4259,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/profile/setup", async (req, res) => {
+  app.post("/v1/profile/setup", rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -3692,7 +4308,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/media/upload", uploadRateLimiter, upload.single("file"), async (req, res) => {
+  app.post("/v1/media/upload", uploadRateLimiter, rejectWhenWriteFrozen, upload.single("file"), async (req, res) => {
     const requestStartedAt = timingNowNs();
     try {
       const uid = parseBearer(req);
