@@ -138,7 +138,8 @@ async function migrate() {
 
     // ---- city_cards (nested in user) ----
     for (const card of user.cityCards || []) {
-      if (!card || !card.cityID) continue;
+      const cityID = card?.cityID || card?.id || "";
+      if (!card || !cityID) continue;
       try {
         await pool.query(
           `INSERT INTO city_cards (user_id, city_id, city_name, country_iso2, created_at)
@@ -146,8 +147,8 @@ async function migrate() {
            ON CONFLICT DO NOTHING`,
           [
             uid,
-            card.cityID,
-            card.cityName || card.cityID,
+            cityID,
+            card.cityName || card.name || cityID,
             card.countryISO2 || null,
             card.createdAt || user.createdAt || 0,
           ]
@@ -186,30 +187,6 @@ async function migrate() {
       }
     }
 
-    // ---- postcard_reactions (nested in user.postcardReactions) ----
-    for (const [messageID, r] of Object.entries(user.postcardReactions || {})) {
-      if (!r) continue;
-      try {
-        await pool.query(
-          `INSERT INTO postcard_reactions (id, postcard_message_id, from_user_id,
-            viewed_at, reaction_emoji, comment, reacted_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7)
-           ON CONFLICT DO NOTHING`,
-          [
-            r.id || `pr_migrated_${uid}_${messageID}`,
-            messageID,
-            r.fromUserID || uid,
-            r.viewedAt ? new Date(r.viewedAt).toISOString() : null,
-            r.reactionEmoji || null,
-            r.comment || null,
-            r.reactedAt ? new Date(r.reactedAt).toISOString() : null,
-          ]
-        );
-        count("postcard_reactions");
-      } catch (e) {
-        console.warn(`[migrate] skipping postcard_reaction ${messageID}: ${e.message}`);
-      }
-    }
   }
 
   // ---- 2. auth_identities ----
@@ -431,6 +408,33 @@ async function migrate() {
       count("postcards");
     } catch (e) {
       console.warn(`[migrate] skipping postcard ${pc.messageID}: ${e.message}`);
+    }
+  }
+
+  // ---- 11. postcard_reactions (must run AFTER postcards) ----
+  for (const [uid, user] of Object.entries(db.users || {})) {
+    for (const [messageID, r] of Object.entries(user.postcardReactions || {})) {
+      if (!r) continue;
+      try {
+        await pool.query(
+          `INSERT INTO postcard_reactions (id, postcard_message_id, from_user_id,
+            viewed_at, reaction_emoji, comment, reacted_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)
+           ON CONFLICT DO NOTHING`,
+          [
+            r.id || `pr_migrated_${uid}_${messageID}`,
+            messageID,
+            r.fromUserID || uid,
+            r.viewedAt ? new Date(r.viewedAt).toISOString() : null,
+            r.reactionEmoji || null,
+            r.comment || null,
+            r.reactedAt ? new Date(r.reactedAt).toISOString() : null,
+          ]
+        );
+        count("postcard_reactions");
+      } catch (e) {
+        console.warn(`[migrate] skipping postcard_reaction ${messageID}: ${e.message}`);
+      }
     }
   }
 
