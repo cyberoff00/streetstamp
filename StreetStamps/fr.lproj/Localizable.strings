@@ -254,6 +254,17 @@
 "friends_delete_friend" = "Delete Friend";
 "friends_distance_compact_format" = "%.1fkm";
 "friends_empty_activity" = "No friend activity yet";
+"edit_save_republish_title" = "Ce voyage a été partagé";
+"edit_save_republish_action" = "Enregistrer et republier";
+"edit_save_local_only_action" = "Enregistrer localement";
+"friends_feed_new_activity_prompt" = "Nouvelle activité disponible. Appuyez pour actualiser.";
+"friends_feed_loading" = "Chargement de l'activité…";
+"friends_feed_retry" = "Appuyez pour réessayer";
+"publish_banner_sending_format" = "Partage de « %@ »…";
+"publish_banner_success_format" = "« %@ » partagé avec succès";
+"publish_banner_failed_format" = "Échec du partage de « %@ »";
+"publish_banner_retry" = "Réessayer";
+"publish_banner_save_private" = "Enregistrer en privé";
 "friends_empty_all" = "No friends yet, tap + to add";
 "friends_event_added_memory" = "Added memory";
 "friends_event_added_memories" = "Added %d new memories";

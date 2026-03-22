@@ -382,13 +382,16 @@ final class CitySnapshotService {
                         snapshot.image.draw(at: .zero)
 
                         if drawRoute, overlaySegments.count >= 1 {
+                            let isDark = appearance == .dark
                             RouteSnapshotDrawer.draw(
                                 segments: overlaySegments,
                                 isFlightLike: isFlightLike,
                                 snapshot: snapshot,
                                 ctx: renderer.cgContext,
                                 coreColor: MapAppearanceSettings.routeCoreColorForSnapshot(for: appearance),
-                                stroke: .init(coreWidth: 3.5)
+                                stroke: .init(coreWidth: 3.5),
+                                glowColor: MapAppearanceSettings.routeGlowColor(for: appearance),
+                                isDarkMap: isDark
                             )
                         }
                         // Dots removed - only show route line
@@ -750,6 +753,9 @@ final class CityCache: ObservableObject {
     }
 
     // MARK: disk
+    private static let thumbnailStyleVersion = 3
+    private static let thumbnailStyleVersionKey = "streetstamps.thumbnailStyleVersion"
+
     func loadFromDisk() {
         do {
             let data = try Data(contentsOf: fileURL)
@@ -767,6 +773,17 @@ final class CityCache: ObservableObject {
             self.cachedCities = []
         }
         backfillLocalizedNamesFromGeocodeDefaults()
+        invalidateThumbnailsIfStyleChanged()
+    }
+
+    private func invalidateThumbnailsIfStyleChanged() {
+        let stored = UserDefaults.standard.integer(forKey: Self.thumbnailStyleVersionKey)
+        guard stored < Self.thumbnailStyleVersion else { return }
+        for i in cachedCities.indices {
+            cachedCities[i].thumbnailRoutePath = nil
+        }
+        saveToDisk()
+        UserDefaults.standard.set(Self.thumbnailStyleVersion, forKey: Self.thumbnailStyleVersionKey)
     }
 
     private func loadMembershipIndexFromDisk() {

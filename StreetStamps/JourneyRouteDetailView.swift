@@ -457,31 +457,41 @@ private struct JourneyDetailMap: UIViewRepresentable {
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             guard let poly = overlay as? JourneyStyledPolyline else { return MKOverlayRenderer(overlay: overlay) }
             let base = MapAppearanceSettings.routeBaseColor
+            let glowTint = MapAppearanceSettings.routeGlowColor
+            let isDark = MapAppearanceSettings.current == .dark
             let gapDash = RouteRenderStyleTokens.dashLengths.map { NSNumber(value: Double($0)) }
             let weight = CGFloat(max(0, min(1, poly.repeatWeight)))
             let isGap = poly.isGap
 
-            let glow = MKPolylineRenderer(polyline: poly)
-            glow.lineWidth = isGap ? 2.0 : (3.0 + weight * 1.2)
-            glow.lineCap = .round
-            glow.lineJoin = .round
-            glow.strokeColor = base.withAlphaComponent(isGap ? 0.08 : 0.12)
-            if isGap { glow.lineDashPattern = gapDash }
+            let mainWidth: CGFloat = isGap ? 1.4 : (2.2 + weight * 0.8)
+            let glowWidth: CGFloat = mainWidth * (isGap ? 2.2 : 2.5)
 
-            let core = MKPolylineRenderer(polyline: poly)
-            core.lineWidth = isGap ? 1.1 : (1.6 + weight * 0.8)
-            core.lineCap = .round
-            core.lineJoin = .round
-            core.strokeColor = base.withAlphaComponent(isGap ? 0.30 : 0.84)
-            if isGap { core.lineDashPattern = gapDash }
+            let glowLayer = MKPolylineRenderer(polyline: poly)
+            glowLayer.lineWidth = glowWidth
+            glowLayer.lineCap = .round
+            glowLayer.lineJoin = .round
+            glowLayer.strokeColor = glowTint.withAlphaComponent(isGap ? 0.06 : (isDark ? 0.25 : 0.12))
+            if isGap { glowLayer.lineDashPattern = gapDash }
 
-            let freq = MKPolylineRenderer(polyline: poly)
-            freq.lineWidth = isGap ? 0 : (2.2 + weight * 1.2)
-            freq.lineCap = .round
-            freq.lineJoin = .round
-            freq.strokeColor = base.withAlphaComponent(isGap ? 0 : (0.05 + 0.15 * weight))
+            let mainLayer = MKPolylineRenderer(polyline: poly)
+            mainLayer.lineWidth = mainWidth
+            mainLayer.lineCap = .round
+            mainLayer.lineJoin = .round
+            mainLayer.strokeColor = base.withAlphaComponent(isGap ? 0.50 : 1.0)
+            if isGap { mainLayer.lineDashPattern = gapDash }
 
-            return JourneyLayeredPolylineRenderer(renderers: [glow, freq, core])
+            let highlightLayer = MKPolylineRenderer(polyline: poly)
+            highlightLayer.lineWidth = mainWidth * 0.35
+            highlightLayer.lineCap = .round
+            highlightLayer.lineJoin = .round
+            highlightLayer.strokeColor = isGap ? .clear : UIColor.white.withAlphaComponent(isDark ? 0.45 : 0.25)
+
+            let lr = JourneyLayeredPolylineRenderer(renderers: [glowLayer, mainLayer, highlightLayer])
+            if isDark {
+                lr.glowBlur = 6.0
+                lr.glowColor = glowTint.withAlphaComponent(0.50).cgColor
+            }
+            return lr
         }
 
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
@@ -533,6 +543,8 @@ private final class JourneyStyledPolyline: MKPolyline {
 
 private final class JourneyLayeredPolylineRenderer: MKOverlayRenderer {
     private let renderers: [MKPolylineRenderer]
+    var glowBlur: CGFloat = 0
+    var glowColor: CGColor?
 
     init(renderers: [MKPolylineRenderer]) {
         precondition(!renderers.isEmpty)
@@ -541,8 +553,16 @@ private final class JourneyLayeredPolylineRenderer: MKOverlayRenderer {
     }
 
     override func draw(_ mapRect: MKMapRect, zoomScale: MKZoomScale, in context: CGContext) {
-        for renderer in renderers {
-            renderer.draw(mapRect, zoomScale: zoomScale, in: context)
+        for (i, renderer) in renderers.enumerated() {
+            if i == 0 && glowBlur > 0, let color = glowColor {
+                context.saveGState()
+                let scaledBlur = glowBlur / zoomScale
+                context.setShadow(offset: .zero, blur: scaledBlur, color: color)
+                renderer.draw(mapRect, zoomScale: zoomScale, in: context)
+                context.restoreGState()
+            } else {
+                renderer.draw(mapRect, zoomScale: zoomScale, in: context)
+            }
         }
     }
 }

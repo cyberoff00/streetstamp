@@ -12,6 +12,7 @@ import Foundation
 import SwiftUI
 import UIKit
 import CoreLocation
+import MapKit
 
 // =======================================================
 // MARK: - Main Journey Memory View (Screen 1 & 2)
@@ -866,9 +867,10 @@ struct JourneyMemoryDetailView: View {
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var flow: AppFlowCoordinator
+    @EnvironmentObject private var publishStore: JourneyPublishStore
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
-    
+
     // 默认只读；点右上角 Edit 才进入编辑（避免 TextEditor 一直占用焦点导致键盘下不去）
     @State private var isEditing: Bool = false
 
@@ -881,6 +883,7 @@ struct JourneyMemoryDetailView: View {
     @State private var snapshotOverallMemoryBeforeEdit: String = ""
     @State private var draftOverallMemoryImagePaths: [String] = []
     @State private var snapshotOverallMemoryImagePathsBeforeEdit: [String] = []
+    @State private var showRepublishConfirmation = false
 
     // Which memory's text field is focused (used to keep caret visible in the outer ScrollView).
     @FocusState private var focusedMemoryID: String?
@@ -1131,6 +1134,19 @@ struct JourneyMemoryDetailView: View {
         } message: {
             Text(messageText)
         }
+        .confirmationDialog(
+            L10n.t("edit_save_republish_title"),
+            isPresented: $showRepublishConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(L10n.t("edit_save_republish_action")) {
+                saveEditingAndRepublish()
+            }
+            Button(L10n.t("edit_save_local_only_action")) {
+                saveEditing()
+            }
+            Button(L10n.t("cancel"), role: .cancel) {}
+        }
         .sheet(item: $shareItem) { item in
             ActivityView(activityItems: [item.image])
         }
@@ -1277,7 +1293,7 @@ struct JourneyMemoryDetailView: View {
                             .buttonStyle(.plain)
 
                             Button {
-                                saveEditing()
+                                handleSaveTap()
                             } label: {
                                 Image(systemName: "checkmark")
                                     .font(.system(size: 16, weight: .semibold))
@@ -1542,6 +1558,39 @@ struct JourneyMemoryDetailView: View {
     }
 
     @MainActor
+    private func handleSaveTap() {
+        let action = JourneyPublishDirtyPolicy.evaluateSaveAction(
+            visibility: currentJourney.visibility,
+            snapshotMemories: snapshotBeforeEdit,
+            draftMemories: draftMemories,
+            snapshotTitle: snapshotJourneyTitleBeforeEdit,
+            draftTitle: draftJourneyTitle,
+            snapshotOverallMemory: snapshotOverallMemoryBeforeEdit,
+            draftOverallMemory: draftOverallMemory,
+            snapshotOverallMemoryImagePaths: snapshotOverallMemoryImagePathsBeforeEdit,
+            draftOverallMemoryImagePaths: draftOverallMemoryImagePaths
+        )
+        switch action {
+        case .saveLocal:
+            saveEditing()
+        case .promptRepublish:
+            showRepublishConfirmation = true
+        }
+    }
+
+    @MainActor
+    private func saveEditingAndRepublish() {
+        saveEditing()
+        guard let updated = store.journeys.first(where: { $0.id == journey.id }) else { return }
+        publishStore.publish(
+            journey: updated,
+            sessionStore: sessionStore,
+            cityCache: cityCache,
+            journeyStore: store
+        )
+    }
+
+    @MainActor
     private func saveEditing() {
         guard var j = store.journeys.first(where: { $0.id == journey.id }) else {
             isEditing = false
@@ -1707,6 +1756,55 @@ struct JourneyMemoryDetailView: View {
             shareItem = ShareImageItem(image: img)   // ✅ 有图才弹
         }
 
+    }
+
+    @MainActor
+    private func generateRouteThumbnail() async {
+        let coords = journey.coordinates.clCoords
+        guard coords.count >= 2 else { return }
+
+        let built = RouteRenderingPipeline.buildSegments(
+            .init(coordsWGS84: coords, applyGCJForChina: false, gapDistanceMeters: 2_200,
+                  countryISO2: journey.countryISO2, cityKey: journey.stableCityKey),
+            surface: .mapKit
+        )
+        let drawCoords: [CLLocationCoordinate2D] = built.segments.flatMap { $0.coords }
+        guard drawCoords.count >= 2 else { return }
+
+        var minLat: Double = drawCoords.map(\.latitude).min()!
+        var maxLat: Double = drawCoords.map(\.latitude).max()!
+        var minLon: Double = drawCoords.map(\.longitude).min()!
+        var maxLon: Double = drawCoords.map(\.longitude).max()!
+        let latPad: Double = max((maxLat - minLat) * 0.25, 0.002)
+        let lonPad: Double = max((maxLon - minLon) * 0.25, 0.002)
+        minLat -= latPad; maxLat += latPad; minLon -= lonPad; maxLon += lonPad
+        let center = CLLocationCoordinate2D(latitude: (minLat + maxLat) / 2.0, longitude: (minLon + maxLon) / 2.0)
+        let span = MKCoordinateSpan(latitudeDelta: maxLat - minLat, longitudeDelta: maxLon - minLon)
+        let region = MKCoordinateRegion(center: center, span: span)
+
+        let snapshotSize = CGSize(width: 400, height: 200)
+        let options = MKMapSnapshotter.Options()
+        options.region = region
+        options.size = snapshotSize
+        options.scale = UIScreen.main.scale
+
+        do {
+            let snap = try await MKMapSnapshotter(options: options).start()
+            let img = UIGraphicsImageRenderer(size: snapshotSize).image { renderer in
+                snap.image.draw(at: .zero)
+                RouteSnapshotDrawer.draw(
+                    segments: built.segments,
+                    isFlightLike: built.isFlightLike,
+                    snapshot: snap,
+                    ctx: renderer.cgContext,
+                    coreColor: UIColor(red: 0.20, green: 0.40, blue: 0.95, alpha: 1.0),
+                    stroke: .init(coreWidth: 3.0)
+                )
+            }
+            self.routeThumbnail = img
+        } catch {
+            print("Route thumbnail snapshot error:", error)
+        }
     }
 
     private var visibilityStatusButton: some View {
@@ -1902,11 +2000,11 @@ private struct ExportMemoryTimelineItem: View {
         return formatter.string(from: memory.timestamp).uppercased()
     }
 
-    private var contentText: String {
+    private var contentText: String? {
         let notes = memory.notes.trimmingCharacters(in: .whitespacesAndNewlines)
         if !notes.isEmpty { return notes }
         let title = memory.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return title.isEmpty ? L10n.t("no_notes") : title
+        return title.isEmpty ? nil : title
     }
 
     var body: some View {
@@ -1924,13 +2022,14 @@ private struct ExportMemoryTimelineItem: View {
                 )
             }
 
-            // ✅ 导出用纯 SwiftUI Text，ImageRenderer 能渲出来
-            Text(contentText)
-                .font(.system(size: 14))
-                .foregroundColor(Color(red: 0.21, green: 0.26, blue: 0.32))
-                .lineSpacing(8.75)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if let text = contentText {
+                Text(text)
+                    .font(.system(size: 14))
+                    .foregroundColor(Color(red: 0.21, green: 0.26, blue: 0.32))
+                    .lineSpacing(8.75)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
 }
@@ -1945,11 +2044,11 @@ struct ReadOnlyMemoryTimelineItem: View {
         return formatter.string(from: memory.timestamp).uppercased()
     }
 
-    private var contentText: String {
+    private var contentText: String? {
         let notes = memory.notes.trimmingCharacters(in: .whitespacesAndNewlines)
         if !notes.isEmpty { return notes }
         let title = memory.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return title.isEmpty ? L10n.t("no_notes") : title
+        return title.isEmpty ? nil : title
     }
 
     var body: some View {
@@ -1960,7 +2059,7 @@ struct ReadOnlyMemoryTimelineItem: View {
                 .tracking(1.2)
                 .foregroundColor(Color(red: 0.60, green: 0.63, blue: 0.69))
 
-            // Images（只读态现在也完整展示）
+            // Images
             if !memory.imagePaths.isEmpty || !memory.remoteImageURLs.isEmpty {
                 MemoryImagesView(
                     imagePaths: memory.imagePaths,
@@ -1970,14 +2069,16 @@ struct ReadOnlyMemoryTimelineItem: View {
             }
 
             // Text
-            SelectableTextView(
-                text: contentText,
-                font: .systemFont(ofSize: 14),
-                textColor: UIColor(red: 0.21, green: 0.26, blue: 0.32, alpha: 1.0),
-                lineSpacing: 8.75
-            )
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            if let text = contentText {
+                SelectableTextView(
+                    text: text,
+                    font: .systemFont(ofSize: 14),
+                    textColor: UIColor(red: 0.21, green: 0.26, blue: 0.32, alpha: 1.0),
+                    lineSpacing: 8.75
+                )
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
 }
@@ -2265,7 +2366,13 @@ struct ActivityView: UIViewControllerRepresentable {
     let activityItems: [Any]
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+        let vc = UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+        if let pop = vc.popoverPresentationController {
+            pop.permittedArrowDirections = []
+            pop.sourceView = UIView()
+            pop.sourceRect = .zero
+        }
+        return vc
     }
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
@@ -2303,6 +2410,7 @@ private struct JourneyMemoryDetailExportSnapshotView: View {
                     overallMemorySection
                 }
                 memoriesTimeline
+                brandingFooter
             }
             .padding(.bottom, 40)
         }
@@ -2330,13 +2438,17 @@ private struct JourneyMemoryDetailExportSnapshotView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(cityName.uppercased())
-                        .font(.system(size: 30, weight: .bold))
+                        .font(.system(size: 22, weight: .bold))
                         .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
 
                     Text("\(countryName.uppercased()) • \(journeyDate)")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: 11, weight: .medium))
                         .tracking(1.2)
                         .foregroundColor(Color(red: 0.42, green: 0.45, blue: 0.51))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                 }
 
                 Spacer()
@@ -2398,13 +2510,11 @@ private struct JourneyMemoryDetailExportSnapshotView: View {
 
             if !presentation.overallMemoryText.isEmpty {
                 Text(presentation.overallMemoryText)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(Color(red: 0.48, green: 0.54, blue: 0.62))
+                    .font(.system(size: 14))
+                    .foregroundColor(Color(red: 0.21, green: 0.26, blue: 0.32))
+                    .lineSpacing(8.75)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .frame(minHeight: 52, alignment: .topLeading)
-                    .padding(12)
-                    .background(FigmaTheme.background)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
 
             if !presentation.overallMemoryImagePaths.isEmpty {
@@ -2436,5 +2546,24 @@ private struct JourneyMemoryDetailExportSnapshotView: View {
         }
         .padding(.horizontal, 32)
         .padding(.top, 4)
+    }
+
+    private var brandingFooter: some View {
+        HStack(spacing: 5) {
+            if let icon = UIImage(named: "AppIcon") {
+                Image(uiImage: icon)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 14, height: 14)
+                    .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+            }
+
+            Text("WORLDO")
+                .font(.system(size: 10, weight: .medium))
+                .tracking(1.0)
+                .foregroundColor(Color(red: 0.62, green: 0.65, blue: 0.70))
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.top, 12)
     }
 }

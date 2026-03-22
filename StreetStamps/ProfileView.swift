@@ -144,10 +144,9 @@ struct ProfileView: View {
             }
             await refreshDisplayNameIfNeeded()
             await refreshSocialNotifications(showToastForLatestUnread: true)
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 25 * 1_000_000_000)
-                await refreshSocialNotifications(showToastForLatestUnread: true)
-            }
+        }
+        .onReceive(Timer.publish(every: 25, on: .main, in: .common).autoconnect()) { _ in
+            Task { await refreshSocialNotifications(showToastForLatestUnread: true) }
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }

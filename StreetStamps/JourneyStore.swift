@@ -139,6 +139,15 @@ final class JourneyStore: ObservableObject {
         bumpTrackTileRevision()
     }
 
+    /// Populate in-memory journeys directly without disk I/O.
+    /// Used by FriendMirrorContext to avoid async loading flash.
+    func loadFromMemory(_ routes: [JourneyRoute]) {
+        self.journeys = routes
+        self.latestOngoing = nil
+        self.hasLoaded = true
+        self.bumpTrackTileRevision()
+    }
+
     /// Load journeys from file-backed store.
     func load() {
         Task {

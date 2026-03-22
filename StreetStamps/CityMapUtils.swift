@@ -290,10 +290,11 @@ enum CityDeepRenderEngine {
     }
 
     static func routeBaseColor(for appearanceRaw: String) -> UIColor {
-        if appearanceRaw == MapAppearanceStyle.light.rawValue {
-            return UIColor(red: 214.0 / 255.0, green: 109.0 / 255.0, blue: 34.0 / 255.0, alpha: 1.0)
-        }
-        return UIColor(red: 221.0 / 255.0, green: 247.0 / 255.0, blue: 161.0 / 255.0, alpha: 1.0)
+        MapAppearanceSettings.routeBaseColor(for: appearanceRaw)
+    }
+
+    static func routeGlowColor(for appearanceRaw: String) -> UIColor {
+        MapAppearanceSettings.routeGlowColor(for: appearanceRaw)
     }
 
     static func drawStyledSegments(
@@ -305,20 +306,35 @@ enum CityDeepRenderEngine {
         guard !segments.isEmpty else { return }
 
         let base = routeBaseColor(for: appearanceRaw)
+        let glowTint = routeGlowColor(for: appearanceRaw)
+        let isDark = MapAppearanceSettings.resolved(from: appearanceRaw) == .dark
         let dash = RouteRenderStyleTokens.dashLengths
 
         for seg in segments where seg.coords.count >= 2 {
             let points = seg.coords.map(snapshot.point(for:)).filter { $0.x.isFinite && $0.y.isFinite }
             guard points.count >= 2 else { continue }
 
-            let weight = CGFloat(max(0, min(1, seg.repeatWeight)))
-            let glowWidth: CGFloat = seg.isGap ? 2.0 : (3.0 + weight * 1.2)
-            let coreWidth: CGFloat = seg.isGap ? 1.1 : (1.6 + weight * 0.8)
-            let glowAlpha: CGFloat = seg.isGap ? 0.08 : 0.12
-            let coreAlpha: CGFloat = seg.isGap ? 0.30 : 0.84
+            let mainWidth: CGFloat = seg.isGap ? 1.2 : 2.2
+            let glowWidth: CGFloat = seg.isGap ? mainWidth * 2.2 : mainWidth * 2.5
+            let segDash: [CGFloat]? = seg.isGap ? dash : nil
 
-            drawPolyline(points: points, in: context, color: base.withAlphaComponent(glowAlpha), lineWidth: glowWidth, dash: seg.isGap ? dash : nil)
-            drawPolyline(points: points, in: context, color: base.withAlphaComponent(coreAlpha), lineWidth: coreWidth, dash: seg.isGap ? dash : nil)
+            // 1) Glow with shadow blur
+            context.saveGState()
+            context.setShadow(
+                offset: .zero,
+                blur: isDark ? 5.0 : 2.0,
+                color: glowTint.withAlphaComponent(isDark ? 0.50 : 0.30).cgColor
+            )
+            drawPolyline(points: points, in: context, color: glowTint.withAlphaComponent(seg.isGap ? 0.10 : (isDark ? 0.35 : 0.20)), lineWidth: glowWidth, dash: segDash)
+            context.restoreGState()
+
+            // 2) Main line
+            drawPolyline(points: points, in: context, color: base.withAlphaComponent(seg.isGap ? 0.50 : 1.0), lineWidth: mainWidth, dash: segDash)
+
+            // 3) Highlight
+            if !seg.isGap {
+                drawPolyline(points: points, in: context, color: UIColor.white.withAlphaComponent(isDark ? 0.45 : 0.25), lineWidth: mainWidth * 0.35, dash: nil)
+            }
         }
     }
 

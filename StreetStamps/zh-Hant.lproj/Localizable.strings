@@ -254,6 +254,17 @@
 "friends_delete_friend" = "刪除好友";
 "friends_distance_compact_format" = "%.1f公里";
 "friends_empty_activity" = "还没有好友動態";
+"edit_save_republish_title" = "這段旅程已分享給好友";
+"edit_save_republish_action" = "儲存並重新發佈";
+"edit_save_local_only_action" = "僅儲存到本機";
+"friends_feed_new_activity_prompt" = "有新動態，點擊刷新";
+"friends_feed_loading" = "正在載入好友動態…";
+"friends_feed_retry" = "點擊重試";
+"publish_banner_sending_format" = "正在分享「%@」…";
+"publish_banner_success_format" = "「%@」分享成功";
+"publish_banner_failed_format" = "「%@」分享失敗";
+"publish_banner_retry" = "重試";
+"publish_banner_save_private" = "儲存為私密";
 "friends_empty_all" = "还没有好友，点击 + 添加";
 "friends_event_added_memory" = "添加了記憶";
 "friends_event_added_memories" = "新增 %d 条記憶";

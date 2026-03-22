@@ -918,13 +918,16 @@ struct PopSharingCard: View {
                     }
 
                     // ✅ Shared segmented drawing (solid/dashed consistent across surfaces)
+                    let isDarkSnap = appearance == .dark
                     RouteSnapshotDrawer.draw(
                         segments: drawSegments,
                         isFlightLike: isFlightLike,
                         snapshot: snap,
                         ctx: renderer.cgContext,
                         coreColor: MapAppearanceSettings.routeCoreColorForSnapshot(for: appearance),
-                        stroke: .init(coreWidth: isFlightLike ? 8 : 7)
+                        stroke: .init(coreWidth: isFlightLike ? 8 : 7),
+                        glowColor: MapAppearanceSettings.routeGlowColor(for: appearance),
+                        isDarkMap: isDarkSnap
                     )
                     // ✅ Draw robot marker at the end of route
                     if let last = drawCoords.last {
@@ -1384,13 +1387,16 @@ struct ShareCardGenerator {
                         return
                     }
 
+                    let isDarkSnap2 = appearance == .dark
                     RouteSnapshotDrawer.draw(
                         segments: drawSegments,
                         isFlightLike: isFlightLike,
                         snapshot: snap,
                         ctx: renderer.cgContext,
                         coreColor: MapAppearanceSettings.routeCoreColorForSnapshot(for: appearance),
-                        stroke: .init(coreWidth: isFlightLike ? 8 : 7)
+                        stroke: .init(coreWidth: isFlightLike ? 8 : 7),
+                        glowColor: MapAppearanceSettings.routeGlowColor(for: appearance),
+                        isDarkMap: isDarkSnap2
                     )
 
                     if drawRobot, let last = drawCoords.last {
@@ -1608,7 +1614,13 @@ private func blurred(_ image: UIImage, radius: Double) -> UIImage {
 struct ShareSheet: UIViewControllerRepresentable {
     var activityItems: [Any]
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+        let vc = UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+        if let pop = vc.popoverPresentationController {
+            pop.permittedArrowDirections = []
+            pop.sourceView = UIView()
+            pop.sourceRect = .zero
+        }
+        return vc
     }
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

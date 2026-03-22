@@ -346,7 +346,17 @@
 "friends_badge_memory" = "MEMORY";
 "friends_delete_friend" = "Delete Friend";
 "friends_empty_activity" = "No friend activity yet";
+"edit_save_republish_title" = "This journey has been shared";
+"edit_save_republish_action" = "Save & Republish";
+"edit_save_local_only_action" = "Save Locally";
 "friends_feed_new_activity_prompt" = "New activity available. Tap to refresh.";
+"friends_feed_loading" = "Loading friend activity…";
+"friends_feed_retry" = "Tap to retry";
+"publish_banner_sending_format" = "Sharing \"%@\"…";
+"publish_banner_success_format" = "\"%@\" shared successfully";
+"publish_banner_failed_format" = "Failed to share \"%@\"";
+"publish_banner_retry" = "Retry";
+"publish_banner_save_private" = "Save as Private";
 "friends_empty_all" = "No friends yet, tap + to add";
 "friends_event_added_memory" = "Added memory";
 "friends_event_added_memories" = "Added %d new memories";

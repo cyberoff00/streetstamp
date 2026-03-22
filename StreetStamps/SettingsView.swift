@@ -436,6 +436,7 @@ struct SettingsView: View {
                     set: { newValue in
                         appearance = newValue ? .dark : .light
                         MapAppearanceSettings.apply(newValue ? .dark : .light)
+                        cityCache.refreshThumbnailsForCurrentMapAppearance()
                     }
                 )
             )
@@ -1858,12 +1859,7 @@ private enum GPXImportService {
     }
 
     private static func canonicalResultWithRetry(for location: CLLocation, retryCount: Int) async -> ReverseGeocodeService.CanonicalResult? {
-        if let value = await ReverseGeocodeService.shared.canonical(for: location) {
-            return value
-        }
-        guard retryCount > 0 else { return nil }
-        try? await Task.sleep(nanoseconds: 1_600_000_000)
-        return await canonicalResultWithRetry(for: location, retryCount: retryCount - 1)
+        await ReverseGeocodeService.shared.canonicalWithRetry(for: location, maxAttempts: retryCount + 1)
     }
 
     private static func sampledPoints(_ points: [GPXRawPoint], maxSamples: Int) -> [GPXRawPoint] {

@@ -82,14 +82,31 @@ enum MapAppearanceSettings {
     static func routeBaseColor(for style: MapAppearanceStyle) -> UIColor {
         switch style {
         case .dark:
-            return UIColor(red: 221.0 / 255.0, green: 247.0 / 255.0, blue: 161.0 / 255.0, alpha: 1.0)
+            return UIColor(red: 220.0 / 255.0, green: 235.0 / 255.0, blue: 255.0 / 255.0, alpha: 1.0)
         case .light:
-            return UIColor(red: 214.0 / 255.0, green: 109.0 / 255.0, blue: 34.0 / 255.0, alpha: 1.0)
+            return UIColor(red: 252.0 / 255.0, green: 76.0 / 255.0, blue: 2.0 / 255.0, alpha: 1.0)
         }
     }
 
     static func routeBaseColor(for raw: String?) -> UIColor {
         routeBaseColor(for: resolved(from: raw))
+    }
+
+    static var routeGlowColor: UIColor {
+        routeGlowColor(for: current)
+    }
+
+    static func routeGlowColor(for style: MapAppearanceStyle) -> UIColor {
+        switch style {
+        case .dark:
+            return UIColor(red: 80.0 / 255.0, green: 160.0 / 255.0, blue: 255.0 / 255.0, alpha: 1.0)
+        case .light:
+            return UIColor(red: 140.0 / 255.0, green: 40.0 / 255.0, blue: 0.0 / 255.0, alpha: 1.0)
+        }
+    }
+
+    static func routeGlowColor(for raw: String?) -> UIColor {
+        routeGlowColor(for: resolved(from: raw))
     }
 
     static var routeCoreColorForSnapshot: UIColor {
@@ -122,6 +139,15 @@ enum MapAppearanceSettings {
 
     static func routeCoreWidthForSnapshot(for raw: String?) -> CGFloat {
         routeCoreWidthForSnapshot(for: resolved(from: raw))
+    }
+}
+
+extension UIColor {
+    func darkened(by factor: CGFloat) -> UIColor {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        getRed(&r, green: &g, blue: &b, alpha: &a)
+        let f = max(0, min(1, factor))
+        return UIColor(red: r * (1 - f), green: g * (1 - f), blue: b * (1 - f), alpha: a)
     }
 }
 

@@ -254,6 +254,17 @@
 "friends_delete_friend" = "Delete Friend";
 "friends_distance_compact_format" = "%.1fkm";
 "friends_empty_activity" = "No friend activity yet";
+"edit_save_republish_title" = "この旅は共有済みです";
+"edit_save_republish_action" = "保存して再公開";
+"edit_save_local_only_action" = "ローカルに保存";
+"friends_feed_new_activity_prompt" = "新しいアクティビティがあります。タップして更新。";
+"friends_feed_loading" = "フレンドのアクティビティを読み込み中…";
+"friends_feed_retry" = "タップして再試行";
+"publish_banner_sending_format" = "「%@」を共有中…";
+"publish_banner_success_format" = "「%@」を共有しました";
+"publish_banner_failed_format" = "「%@」の共有に失敗しました";
+"publish_banner_retry" = "再試行";
+"publish_banner_save_private" = "非公開で保存";
 "friends_empty_all" = "No friends yet, tap + to add";
 "friends_event_added_memory" = "Added memory";
 "friends_event_added_memories" = "Added %d new memories";

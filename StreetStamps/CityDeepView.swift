@@ -617,14 +617,7 @@ struct CityDeepView: View {
                 return
             }
 
-            let displayLocale = LanguagePreference.shared.displayLocale
-            let liveLevels: [CityPlacemarkResolver.CardLevel: String]
-            if let localized {
-                liveLevels = localized.availableLevels
-            } else {
-                let langCode = displayLocale.identifier.lowercased()
-                liveLevels = langCode.hasPrefix("en") ? canonical.availableLevels : [:]
-            }
+            let liveLevels = localized?.availableLevels ?? canonical.availableLevels
             let iso = (canonical.iso2 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
             let sourceKey = await MainActor.run { activeCityKey }
             let sourceKeys = await MainActor.run { sourceCityKeys }
@@ -785,14 +778,7 @@ struct CityDeepView: View {
                     return
                 }
                 let displayLocale = LanguagePreference.shared.displayLocale
-                let liveLabels: [CityPlacemarkResolver.CardLevel: String]
-                if let localized {
-                    liveLabels = localized.availableLevels
-                } else {
-                    // canonical is en_US only — use it only when display locale is English
-                    let langCode = displayLocale.identifier.lowercased()
-                    liveLabels = langCode.hasPrefix("en") ? canonical.availableLevels : [:]
-                }
+                let liveLabels = localized?.availableLevels ?? canonical.availableLevels
                 let labels = CityPlacemarkResolver.resolvedStableLevelNamesForDisplay(
                     storedAvailableLevelNamesRaw: activeCachedCity?.availableLevelNames,
                     storedLocaleIdentifier: activeCachedCity?.availableLevelNamesLocaleID,
@@ -1078,28 +1064,16 @@ struct CityDeepView: View {
     }
 
     private func canonicalWithRetry(for location: CLLocation) async -> ReverseGeocodeService.CanonicalResult? {
-        if let first = await ReverseGeocodeService.shared.canonical(for: location) {
-            return first
-        }
-        try? await Task.sleep(nanoseconds: 1_650_000_000)
-        return await ReverseGeocodeService.shared.canonical(for: location)
+        await ReverseGeocodeService.shared.canonicalWithRetry(for: location)
     }
 
     private func localizedHierarchyWithRetry(for location: CLLocation) async -> ReverseGeocodeService.CanonicalResult? {
-        if let first = await ReverseGeocodeService.shared.localizedHierarchy(for: location) {
-            CityDeepDebugLogger.log(
-                "localizedHierarchyWithRetry",
-                "cityKey=\(activeCityKey) attempt=1 result=hit parentRegionKey=\(first.parentRegionKey ?? "nil") locale=\(first.localeIdentifier)"
-            )
-            return first
-        }
-        try? await Task.sleep(nanoseconds: 1_650_000_000)
-        let second = await ReverseGeocodeService.shared.localizedHierarchy(for: location)
+        let result = await ReverseGeocodeService.shared.localizedHierarchyWithRetry(for: location)
         CityDeepDebugLogger.log(
             "localizedHierarchyWithRetry",
-            "cityKey=\(activeCityKey) attempt=2 result=\(second == nil ? "nil" : "hit")"
+            "cityKey=\(activeCityKey) result=\(result == nil ? "nil" : "hit") parentRegionKey=\(result?.parentRegionKey ?? "nil")"
         )
-        return second
+        return result
     }
 
     private func refreshRegionAndBoundary() {
@@ -1281,31 +1255,41 @@ private struct CityDeepMKMap: UIViewRepresentable {
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             guard let poly = overlay as? StyledPolyline else { return MKOverlayRenderer(overlay: overlay) }
             let base = MapAppearanceSettings.routeBaseColor
+            let glowTint = MapAppearanceSettings.routeGlowColor
+            let isDark = MapAppearanceSettings.current == .dark
             let gapDash = RouteRenderStyleTokens.dashLengths.map { NSNumber(value: Double($0)) }
             let weight = CGFloat(max(0, min(1, poly.repeatWeight)))
             let isGap = poly.isGap
 
-            let glow = MKPolylineRenderer(polyline: poly)
-            glow.lineWidth = isGap ? 2.0 : (3.0 + weight * 1.2)
-            glow.lineCap = .round
-            glow.lineJoin = .round
-            glow.strokeColor = base.withAlphaComponent(isGap ? 0.08 : 0.12)
-            if isGap { glow.lineDashPattern = gapDash }
+            let mainWidth: CGFloat = isGap ? 1.4 : (2.2 + weight * 0.8)
+            let glowWidth: CGFloat = mainWidth * (isGap ? 2.2 : 2.5)
 
-            let core = MKPolylineRenderer(polyline: poly)
-            core.lineWidth = isGap ? 1.1 : (1.6 + weight * 0.8)
-            core.lineCap = .round
-            core.lineJoin = .round
-            core.strokeColor = base.withAlphaComponent(isGap ? 0.30 : 0.84)
-            if isGap { core.lineDashPattern = gapDash }
+            let glowLayer = MKPolylineRenderer(polyline: poly)
+            glowLayer.lineWidth = glowWidth
+            glowLayer.lineCap = .round
+            glowLayer.lineJoin = .round
+            glowLayer.strokeColor = glowTint.withAlphaComponent(isGap ? 0.06 : (isDark ? 0.25 : 0.12))
+            if isGap { glowLayer.lineDashPattern = gapDash }
 
-            let freq = MKPolylineRenderer(polyline: poly)
-            freq.lineWidth = isGap ? 0 : (2.2 + weight * 1.2)
-            freq.lineCap = .round
-            freq.lineJoin = .round
-            freq.strokeColor = base.withAlphaComponent(isGap ? 0 : (0.05 + 0.15 * weight))
+            let mainLayer = MKPolylineRenderer(polyline: poly)
+            mainLayer.lineWidth = mainWidth
+            mainLayer.lineCap = .round
+            mainLayer.lineJoin = .round
+            mainLayer.strokeColor = base.withAlphaComponent(isGap ? 0.50 : 1.0)
+            if isGap { mainLayer.lineDashPattern = gapDash }
 
-            return LayeredPolylineRenderer(renderers: [glow, freq, core])
+            let highlightLayer = MKPolylineRenderer(polyline: poly)
+            highlightLayer.lineWidth = mainWidth * 0.35
+            highlightLayer.lineCap = .round
+            highlightLayer.lineJoin = .round
+            highlightLayer.strokeColor = isGap ? .clear : UIColor.white.withAlphaComponent(isDark ? 0.45 : 0.25)
+
+            let lr = LayeredPolylineRenderer(renderers: [glowLayer, mainLayer, highlightLayer])
+            if isDark {
+                lr.glowBlur = 6.0
+                lr.glowColor = glowTint.withAlphaComponent(0.50).cgColor
+            }
+            return lr
         }
 
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
@@ -1355,6 +1339,8 @@ private final class StyledPolyline: MKPolyline {
 
 private final class LayeredPolylineRenderer: MKOverlayRenderer {
     private let renderers: [MKPolylineRenderer]
+    var glowBlur: CGFloat = 0
+    var glowColor: CGColor?
 
     init(renderers: [MKPolylineRenderer]) {
         precondition(!renderers.isEmpty)
@@ -1363,8 +1349,16 @@ private final class LayeredPolylineRenderer: MKOverlayRenderer {
     }
 
     override func draw(_ mapRect: MKMapRect, zoomScale: MKZoomScale, in context: CGContext) {
-        for renderer in renderers {
-            renderer.draw(mapRect, zoomScale: zoomScale, in: context)
+        for (i, renderer) in renderers.enumerated() {
+            if i == 0 && glowBlur > 0, let color = glowColor {
+                context.saveGState()
+                let scaledBlur = glowBlur / zoomScale
+                context.setShadow(offset: .zero, blur: scaledBlur, color: color)
+                renderer.draw(mapRect, zoomScale: zoomScale, in: context)
+                context.restoreGState()
+            } else {
+                renderer.draw(mapRect, zoomScale: zoomScale, in: context)
+            }
         }
     }
 }

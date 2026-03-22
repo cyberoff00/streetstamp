@@ -169,18 +169,13 @@ enum RouteSnapshotDrawer {
         snapshot: MKMapSnapshotter.Snapshot,
         ctx: CGContext,
         coreColor: UIColor,
-        stroke: Stroke
+        stroke: Stroke,
+        glowColor: UIColor? = nil,
+        isDarkMap: Bool = false
     ) {
         guard segments.count > 0 else { return }
 
-        // Frequency weighting by segment signature (log + p95 normalization).
-        var counts: [String: Int] = [:]
-        for seg in segments where seg.style != .dashed && seg.coords.count >= 2 {
-            let sig = signature(seg.coords)
-            counts[sig, default: 0] += 1
-        }
-        let p95 = max(1.0, quantile(Array(counts.values), p: 0.95))
-
+        let glowTint = glowColor ?? coreColor
         ctx.saveGState()
         ctx.setLineCap(.round)
         ctx.setLineJoin(.round)
@@ -194,48 +189,41 @@ enum RouteSnapshotDrawer {
             }
 
             let isGap = seg.style == .dashed
-            let weight: CGFloat = {
-                guard !isGap else { return 0 }
-                let sig = signature(seg.coords)
-                let n = Double(counts[sig, default: 1])
-                let w = min(1.0, log(1.0 + n) / log(1.0 + p95))
-                return CGFloat(w)
-            }()
+            let mainWidth: CGFloat = isGap ? max(1.0, stroke.coreWidth * 0.45) : stroke.coreWidth
+            let glowWidth: CGFloat = mainWidth * (isGap ? 2.2 : 2.5)
 
-            // dash
-            if isGap {
-                let dash = isFlightLike ? RouteRenderStyleTokens.flightDashLengths : RouteRenderStyleTokens.dashLengths
-                ctx.setLineDash(phase: 0, lengths: dash)
-            } else {
-                ctx.setLineDash(phase: 0, lengths: [])
-            }
+            // dash setup
+            let dashPattern: [CGFloat]? = isGap ? (isFlightLike ? RouteRenderStyleTokens.flightDashLengths : RouteRenderStyleTokens.dashLengths) : nil
 
-            // 1) halo
-            ctx.setStrokeColor(coreColor.withAlphaComponent(isGap ? 0.08 : 0.12).cgColor)
-            ctx.setLineWidth(isGap ? max(1.5, stroke.coreWidth * 0.65) : (stroke.coreWidth + 1.0 + weight * 1.0))
+            // 1) Glow with shadow blur
+            ctx.saveGState()
+            if let dp = dashPattern { ctx.setLineDash(phase: 0, lengths: dp) } else { ctx.setLineDash(phase: 0, lengths: []) }
+            ctx.setShadow(
+                offset: .zero,
+                blur: isDarkMap ? 5.0 : 2.0,
+                color: glowTint.withAlphaComponent(isDarkMap ? 0.50 : 0.30).cgColor
+            )
+            ctx.setStrokeColor(glowTint.withAlphaComponent(isGap ? 0.08 : (isDarkMap ? 0.30 : 0.15)).cgColor)
+            ctx.setLineWidth(glowWidth)
+            ctx.addPath(path.cgPath)
+            ctx.strokePath()
+            ctx.restoreGState()
+
+            // 2) Main line
+            if let dp = dashPattern { ctx.setLineDash(phase: 0, lengths: dp) } else { ctx.setLineDash(phase: 0, lengths: []) }
+            ctx.setStrokeColor(coreColor.withAlphaComponent(isGap ? 0.50 : 1.0).cgColor)
+            ctx.setLineWidth(mainWidth)
             ctx.addPath(path.cgPath)
             ctx.strokePath()
 
-            // 2) frequency overlay
+            // 3) Highlight
             if !isGap {
                 ctx.setLineDash(phase: 0, lengths: [])
-                ctx.setStrokeColor(coreColor.withAlphaComponent(0.05 + 0.15 * weight).cgColor)
-                ctx.setLineWidth(stroke.coreWidth + 0.5 + weight * 0.9)
+                ctx.setStrokeColor(UIColor.white.withAlphaComponent(isDarkMap ? 0.45 : 0.25).cgColor)
+                ctx.setLineWidth(mainWidth * 0.35)
                 ctx.addPath(path.cgPath)
                 ctx.strokePath()
             }
-
-            // 3) core
-            if isGap {
-                let dash = isFlightLike ? RouteRenderStyleTokens.flightDashLengths : RouteRenderStyleTokens.dashLengths
-                ctx.setLineDash(phase: 0, lengths: dash)
-            } else {
-                ctx.setLineDash(phase: 0, lengths: [])
-            }
-            ctx.setStrokeColor(coreColor.withAlphaComponent(isGap ? 0.30 : 0.84).cgColor)
-            ctx.setLineWidth(isGap ? max(1.0, stroke.coreWidth * 0.45) : (stroke.coreWidth * 0.65 + weight * 0.5))
-            ctx.addPath(path.cgPath)
-            ctx.strokePath()
         }
 
         ctx.restoreGState()

@@ -3506,6 +3506,14 @@ private struct JourneyMKMapView: UIViewRepresentable {
         }
 
         func syncOverlays(on map: MKMapView, segments: [RenderRouteSegment], liveTail: [CLLocationCoordinate2D]) {
+            let currentAppearance = MapAppearanceSettings.current.rawValue
+            if currentAppearance != lastAppearance {
+                lastAppearance = currentAppearance
+                if lastSegmentsSignature != "" {
+                    refreshOverlayStyles(on: map)
+                    return
+                }
+            }
             lastAltitudeBucket = MapViewRouteRenderStyle.altitudeBucket(for: map.camera.altitude)
             let (segSig, tailSig) = signature(for: segments, tail: liveTail)
             let needsSegUpdate = (segSig != lastSegmentsSignature)

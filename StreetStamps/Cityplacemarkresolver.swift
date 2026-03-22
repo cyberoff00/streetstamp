@@ -640,6 +640,14 @@ enum CityPlacemarkResolver {
         let decoded = decodeAvailableLevelNames(availableLevelNamesRaw)
         guard !decoded.isEmpty else { return nil }
 
+        // Always check per-value locale compatibility.
+        // Even when storedLocaleIdentifier matches, individual values may have been
+        // written at different times under different locales (mixed-locale data).
+        let hasIncompatibleValue = decoded.values.contains { value in
+            !shouldUseStoredDisplayTitle(value, locale: locale)
+        }
+        if hasIncompatibleValue { return nil }
+
         if let storedLocaleIdentifier,
            localeDisplayLanguageIdentifier(storedLocaleIdentifier) == localeDisplayLanguageIdentifier(locale.identifier) {
             return decoded
@@ -648,10 +656,7 @@ enum CityPlacemarkResolver {
             return nil
         }
 
-        let hasIncompatibleValue = decoded.values.contains { value in
-            !shouldUseStoredDisplayTitle(value, locale: locale)
-        }
-        return hasIncompatibleValue ? nil : decoded
+        return decoded
     }
 
     /// Resolve stable per-level labels for the current locale.

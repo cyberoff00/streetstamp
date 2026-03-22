@@ -463,13 +463,7 @@ final class CityLibraryVM: ObservableObject {
             }
 
             // 2) Fetch with rate-limit friendly pacing
-            var fetched: String? = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key, parentRegionKey: city.parentScopeKey)
-
-            if fetched == nil {
-                // Wait a bit then try once more (ReverseGeocodeService skips when rate-limited)
-                try? await Task.sleep(nanoseconds: 1_650_000_000)
-                fetched = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key, parentRegionKey: city.parentScopeKey)
-            }
+            let fetched = await ReverseGeocodeService.shared.displayTitleWithRetry(for: loc, cityKey: key, parentRegionKey: city.parentScopeKey)
 
             if let fetched {
                 let t = Self.normalizedPrefetchedDisplayTitle(
@@ -491,8 +485,6 @@ final class CityLibraryVM: ObservableObject {
                 }
             }
 
-            // Small pace to avoid spamming geocoder and to let UI stay smooth
-            try? await Task.sleep(nanoseconds: 1_650_000_000)
         }
 
         // Batch-persist localized names to CityCache for cold-start access

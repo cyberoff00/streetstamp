@@ -17,43 +17,47 @@ enum PostcardCityOptionsPresentation {
             ordered.append((trimmedID, trimmedName))
         }
 
-        for journey in journeyCandidates {
-            let rawID = journey.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
-            let id = CityCollectionResolver.resolveCollectionKey(cityKey: rawID)
-            if let prefetched = localizedCityNamesByID[id], !prefetched.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                appendOption(id: id, name: prefetched)
-                continue
+        // Build a lookup so journey candidates can reuse CachedCity locale data.
+        let cityByCollectionKey: [String: CachedCity] = {
+            var map: [String: CachedCity] = [:]
+            for city in cachedCities where !(city.isTemporary ?? false) {
+                let id = CityCollectionResolver.resolveCollectionKey(cityKey: city.id.trimmingCharacters(in: .whitespacesAndNewlines))
+                if !id.isEmpty { map[id] = city }
             }
+            return map
+        }()
 
-            let resolved = CityDisplayResolver.title(
-                for: id,
-                fallbackTitle: journey.displayCityName,
-                locale: locale
-            )
-            appendOption(id: id, name: resolved)
+        func resolveName(id: String, city: CachedCity) -> String {
+            if let prefetched = localizedCityNamesByID[id], !prefetched.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return prefetched
+            }
+            let resolved = CityPlacemarkResolver.displayTitle(for: city, locale: locale)
+            if !resolved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return resolved
+            }
+            let keyName = id.split(separator: "|", omittingEmptySubsequences: false).first.map(String.init) ?? ""
+            return keyName.isEmpty ? city.name : keyName
         }
 
+        // 1) City library entries first — highest-quality locale-aware names.
         for city in cachedCities where !(city.isTemporary ?? false) {
             let id = CityCollectionResolver.resolveCollectionKey(cityKey: city.id.trimmingCharacters(in: .whitespacesAndNewlines))
             guard !id.isEmpty else { continue }
+            appendOption(id: id, name: resolveName(id: id, city: city))
+        }
 
-            // Keep postcard city labels aligned with collection-key naming rules.
-            let resolved = CityDisplayResolver.title(
-                for: id,
-                fallbackTitle: CityCollectionResolver.configuredTitle(for: id) ?? city.name,
-                locale: locale
-            )
-            if !resolved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                appendOption(id: id, name: resolved)
-                continue
+        // 2) Journey candidates — only adds cities not already covered by the library.
+        //    Still uses CachedCity data when available for name consistency.
+        for journey in journeyCandidates {
+            let rawID = journey.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            let id = CityCollectionResolver.resolveCollectionKey(cityKey: rawID)
+            guard !id.isEmpty else { continue }
+            if let city = cityByCollectionKey[id] {
+                appendOption(id: id, name: resolveName(id: id, city: city))
+            } else {
+                let keyName = id.split(separator: "|", omittingEmptySubsequences: false).first.map(String.init) ?? ""
+                appendOption(id: id, name: keyName.isEmpty ? journey.displayCityName : keyName)
             }
-
-            if let prefetched = localizedCityNamesByID[id], !prefetched.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                appendOption(id: id, name: prefetched)
-                continue
-            }
-
-            appendOption(id: id, name: city.name)
         }
 
         return ordered

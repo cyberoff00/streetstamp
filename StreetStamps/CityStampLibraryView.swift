@@ -766,7 +766,8 @@ final class CityThumbnailLoader: ObservableObject {
             .joined(separator: "~")
         let boundarySignature = "ignored-for-cache"
         let anchorSignature = "ignored-for-cache"
-        let fullKey = "render|\(city.id)|\(appearanceRaw)|\(journeySignature)"
+        let styleVersion = 3
+        let fullKey = "render|v\(styleVersion)|\(city.id)|\(appearanceRaw)|\(journeySignature)"
         return CityThumbnailDebugLogger.RenderKeyParts(
             fullKey: fullKey,
             journeySignature: journeySignature,

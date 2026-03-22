@@ -342,7 +342,17 @@
 "friends_badge_journey" = "旅程";
 "friends_badge_memory" = "记忆";
 "friends_empty_activity" = "还没有好友动态";
+"edit_save_republish_title" = "这段旅程已分享给好友";
+"edit_save_republish_action" = "保存并重新发布";
+"edit_save_local_only_action" = "仅保存到本地";
 "friends_feed_new_activity_prompt" = "有新动态，点击刷新";
+"friends_feed_loading" = "正在加载好友动态…";
+"friends_feed_retry" = "点击重试";
+"publish_banner_sending_format" = "正在分享「%@」…";
+"publish_banner_success_format" = "「%@」分享成功";
+"publish_banner_failed_format" = "「%@」分享失败";
+"publish_banner_retry" = "重试";
+"publish_banner_save_private" = "保存为私密";
 "friends_empty_all" = "还没有好友，点击 + 添加";
 "friends_event_added_memory" = "添加了记忆";
 "friends_event_added_memories" = "新增 %d 条记忆";
