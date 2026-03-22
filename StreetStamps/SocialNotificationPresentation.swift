@@ -1,11 +1,11 @@
 import Foundation
 
 enum SocialNotificationPresentation {
-    static func badgeTitle(for item: BackendNotificationItem, locale: Locale = .current) -> String {
+    static func badgeTitle(for item: BackendNotificationItem, locale: Locale = LanguagePreference.shared.displayLocale) -> String {
         L10n.t(badgeTitleKey(for: item), locale: locale)
     }
 
-    static func message(for item: BackendNotificationItem, locale: Locale = .current) -> String {
+    static func message(for item: BackendNotificationItem, locale: Locale = LanguagePreference.shared.displayLocale) -> String {
         switch item.type {
         case "journey_like":
             guard

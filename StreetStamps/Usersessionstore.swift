@@ -45,6 +45,7 @@ final class UserSessionStore: ObservableObject {
     @Published private(set) var activeLocalProfileID: String
     @Published private(set) var reauthenticationPromptVersion: Int = 0
     @Published private(set) var requiresProfileSetup: Bool
+    @Published var hasEmailPassword: Bool = false
 
     private static let guestIDKey = "streetstamps.guest_id.v1"
     private static let activeLocalProfileIDKey = "streetstamps.active_local_profile_id.v1"
@@ -209,6 +210,10 @@ final class UserSessionStore: ObservableObject {
     func loginWithApple(idToken: String) async throws {
         let auth = try await BackendAPIClient.shared.loginWithApple(idToken: idToken)
         applyAuth(auth)
+    }
+
+    func linkEmailPassword(email: String, password: String) async throws -> BackendLinkEmailPasswordResponse {
+        try await BackendAPIClient.shared.linkEmailPassword(email: email, password: password)
     }
 
     func resendVerificationEmail(email: String) async throws {

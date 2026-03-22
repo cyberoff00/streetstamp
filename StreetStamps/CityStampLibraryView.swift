@@ -52,6 +52,7 @@ struct CityStampLibraryView: View {
     @State private var showPublicDetailUnavailableAlert = false
 
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var languagePreference = LanguagePreference.shared
     @Binding var showSidebar: Bool
     private let autoRebuildFromJourneyStore: Bool
     private let usesSidebarHeader: Bool
@@ -129,6 +130,10 @@ struct CityStampLibraryView: View {
                 digestByCityID = makeDigestMap(from: cache.cachedCities)
                 StartupWarmupService.shared.start(cities: displayCities, appearanceRaw: MapAppearanceSettings.current.rawValue, renderCacheStore: renderCacheStore, limit: 16)
             }
+        }
+        .onChange(of: languagePreference.currentLanguage) { _ in
+            guard store.hasLoaded else { return }
+            vm.load(journeyStore: store, cityCache: cache)
         }
         .onReceive(cache.$cachedCities) { nextCities in
             guard store.hasLoaded else { return }

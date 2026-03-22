@@ -48,6 +48,7 @@ struct PostcardComposerView: View {
     @State private var localImagePath: String = ""
     @State private var showPreview = false
     @State private var loadingPhoto = false
+    @ObservedObject private var languagePreference = LanguagePreference.shared
     @State private var localizedCityNamesByID: [String: String] = [:]
     @State private var sidebarHideToken = "\(PostcardSidebarVisibilityScope.composer.token)-\(UUID().uuidString)"
     @State private var selectedRecipient: PostcardRecipient?
@@ -101,13 +102,13 @@ struct PostcardComposerView: View {
     }
 
     private func localizedCityName(for city: CachedCity) -> String {
-        CityPlacemarkResolver.displayTitle(for: city, locale: .current)
+        CityPlacemarkResolver.displayTitle(for: city, locale: LanguagePreference.shared.displayLocale)
     }
 
     private func normalizedPrefetchedCityName(for city: CachedCity, candidateTitle: String?) -> String {
         CityPlacemarkResolver.displayTitle(
             for: city,
-            locale: .current,
+            locale: LanguagePreference.shared.displayLocale,
             localizedCandidate: candidateTitle
         )
     }
@@ -123,7 +124,7 @@ struct PostcardComposerView: View {
         return CityDisplayResolver.title(
             for: key,
             fallbackTitle: journey.displayCityName,
-            locale: .current
+            locale: LanguagePreference.shared.displayLocale
         )
     }
 
@@ -139,6 +140,7 @@ struct PostcardComposerView: View {
     }
 
     private func refreshLocalizedCityNames() async {
+        await MainActor.run { localizedCityNamesByID = [:] }
         for city in cityCache.cachedCities where !(city.isTemporary ?? false) {
             let key = city.id.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !key.isEmpty else { continue }
@@ -179,11 +181,13 @@ struct PostcardComposerView: View {
     }
 
     private var cityRefreshTaskID: String {
-        cityCache.cachedCities.map { city in
+        let lang = languagePreference.currentLanguage ?? "sys"
+        let citiesPart = cityCache.cachedCities.map { city in
             let localizedCount = city.localizedDisplayNameByLocale?.count ?? 0
             let levelCount = city.availableLevelNames?.count ?? 0
             return "\(city.id)|\(city.name)|\(city.selectedDisplayLevelRaw ?? "")|\(city.parentScopeKey ?? "")|\(city.availableLevelNamesLocaleID ?? "")|\(localizedCount)|\(levelCount)"
         }.joined(separator: ";")
+        return "\(lang)|\(citiesPart)"
     }
 
     private var content: some View {

@@ -16,6 +16,7 @@ struct JourneyRouteDetailView: View {
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var locationHub: LocationHub
     @EnvironmentObject private var flow: AppFlowCoordinator
+    @ObservedObject private var languagePreference = LanguagePreference.shared
 
     @State private var shareImage: UIImage? = nil
     @State private var showShareSheet = false
@@ -75,7 +76,7 @@ struct JourneyRouteDetailView: View {
     private var countryTitle: String {
         let iso = (journey?.countryISO2 ?? "").uppercased()
         if iso.count == 2 {
-            return Locale.current.localizedString(forRegionCode: iso) ?? iso
+            return LanguagePreference.shared.displayLocale.localizedString(forRegionCode: iso) ?? iso
         }
         return L10n.t("unknown_country")
     }
@@ -83,7 +84,7 @@ struct JourneyRouteDetailView: View {
     private var dateText: String {
         guard let d = journey?.endTime ?? journey?.startTime else { return "--" }
         let df = DateFormatter()
-        df.locale = Locale.current
+        df.locale = LanguagePreference.shared.displayLocale
         df.dateFormat = "MMM d, yyyy"
         return df.string(from: d)
     }
@@ -234,7 +235,7 @@ struct JourneyRouteDetailView: View {
         .onAppear {
             flow.pushSidebarButtonHidden(token: sidebarHideToken)
         }
-        .task(id: journey?.id) {
+        .task(id: "\(journey?.id ?? "")|\(languagePreference.currentLanguage ?? "sys")") {
             await refreshLocalizedCityTitle()
         }
         .onDisappear {
@@ -346,7 +347,7 @@ struct JourneyRouteDetailView: View {
                 parentRegionKey: cachedCity.parentScopeKey,
                 preferredLevel: cachedCity.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
                 localizedDisplayNameByLocale: cachedCity.localizedDisplayNameByLocale,
-                locale: .current
+                locale: LanguagePreference.shared.displayLocale
             )
             if !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 await MainActor.run { localizedCityTitle = title }

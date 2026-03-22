@@ -182,6 +182,8 @@
 "equipment_pat" = "贴片";
 "equipment_purchase_confirm_message" = "%@\n價格：%d 金幣\n余额：%d -> %d";
 "equipment_purchased_and_applied" = "已購買并应用";
+"equipment_coins_label" = "金幣";
+"equipment_iap_loading_hint" = "正在載入商品...";
 "equipment_shop_gear" = "商店裝備";
 "equipment_status_equipped" = "已裝備";
 "equipment_status_owned" = "已拥有";

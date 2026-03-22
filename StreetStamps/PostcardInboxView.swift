@@ -280,17 +280,19 @@ struct PostcardInboxView: View {
 
     private func displayCityName(for item: BackendPostcardMessageDTO) -> String {
         let collectionKey = CityCollectionResolver.resolveCollectionKey(cityKey: item.cityID)
+        let keyName = collectionKey.split(separator: "|", omittingEmptySubsequences: false).first.map(String.init) ?? ""
         return CityDisplayResolver.title(
             for: collectionKey,
-            fallbackTitle: item.cityName
+            fallbackTitle: keyName.isEmpty ? item.cityName : keyName
         )
     }
 
     private func displayCityName(for draft: PostcardDraft) -> String {
         let collectionKey = CityCollectionResolver.resolveCollectionKey(cityKey: draft.cityID)
+        let keyName = collectionKey.split(separator: "|", omittingEmptySubsequences: false).first.map(String.init) ?? ""
         return CityDisplayResolver.title(
             for: collectionKey,
-            fallbackTitle: draft.cityName
+            fallbackTitle: keyName.isEmpty ? draft.cityName : keyName
         )
     }
 

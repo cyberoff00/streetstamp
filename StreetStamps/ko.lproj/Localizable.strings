@@ -182,6 +182,8 @@
 "equipment_pat" = "Pat";
 "equipment_purchase_confirm_message" = "%@\nPrice: %d coins\nBalance: %d -> %d";
 "equipment_purchased_and_applied" = "Purchased and applied";
+"equipment_coins_label" = "coins";
+"equipment_iap_loading_hint" = "Loading store products...";
 "equipment_shop_gear" = "상점 장비";
 "equipment_status_equipped" = "장착됨";
 "equipment_status_owned" = "보유";

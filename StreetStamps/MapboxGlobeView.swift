@@ -926,7 +926,7 @@ private func makeRoutesFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
                         parentRegionKey: c.parentScopeKey,
                         preferredLevel: c.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
                         localizedDisplayNameByLocale: c.localizedDisplayNameByLocale,
-                        locale: .current
+                        locale: LanguagePreference.shared.displayLocale
                     )
                 ),
                 "iso2": .string(c.countryISO2 ?? "")

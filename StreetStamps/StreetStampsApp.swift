@@ -315,6 +315,9 @@ struct StreetStampsApp: App {
                 }
             }
             .task {
+                await FeatureFlagStore.shared.fetchFlags()
+            }
+            .task {
                 BackendAPIClient.shared.bindSessionStore(sessionStore)
                 let startupUserID = sessionStore.activeLocalProfileID
                 await sessionStore.bootstrapFileSystemAsync()

@@ -590,6 +590,8 @@
 "equipment_total_price_format" = "Total %d";
 "equipment_buy_all_and_apply" = "Buy all and apply";
 "equipment_purchased_and_applied" = "Purchased and applied";
+"equipment_coins_label" = "coins";
+"equipment_iap_loading_hint" = "Loading store products...";
 "settings_private_transfer_row" = "PRIVATE DATA TRANSFER";
 "settings_subscription_row" = "SUBSCRIPTION";
 "settings_sign_in_title" = "Sign in to Worldo";

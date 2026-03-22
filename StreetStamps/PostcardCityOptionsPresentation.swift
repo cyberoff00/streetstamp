@@ -5,7 +5,7 @@ enum PostcardCityOptionsPresentation {
         cachedCities: [CachedCity],
         journeyCandidates: [JourneyRoute],
         localizedCityNamesByID: [String: String],
-        locale: Locale = .current
+        locale: Locale = LanguagePreference.shared.displayLocale
     ) -> [(id: String, name: String)] {
         var ordered: [(id: String, name: String)] = []
 

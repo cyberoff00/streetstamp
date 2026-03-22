@@ -87,6 +87,7 @@ async function updateUser(pool, uid, fields) {
     bio: "bio",
     loadout: "loadout",
     provider: "provider",
+    // passwordHash lives in auth_identities, not users table
   };
 
   for (const [key, col] of Object.entries(columnMap)) {

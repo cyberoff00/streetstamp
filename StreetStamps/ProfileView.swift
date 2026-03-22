@@ -1816,6 +1816,7 @@ struct StatNavRow: View {
 struct RecentJourneysView: View {
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var cityCache: CityCache
+    @ObservedObject private var languagePreference = LanguagePreference.shared
     @Environment(\.dismiss) private var dismiss
     @State private var localizedCityNameByKey: [String: String] = [:]
 
@@ -1867,9 +1868,11 @@ struct RecentJourneysView: View {
     }
 
     private var cityLocalizationTaskKey: String {
-        recentJourneys
+        let lang = languagePreference.currentLanguage ?? "sys"
+        let journeyPart = recentJourneys
             .map { "\($0.id)|\($0.startCityKey ?? $0.cityKey)" }
             .joined(separator: ",")
+        return "\(lang)|\(journeyPart)"
     }
 
     private var cachedCitiesByKey: [String: CachedCity] {
@@ -1881,6 +1884,7 @@ struct RecentJourneysView: View {
     }
 
     private func refreshCityLocalizations() async {
+        await MainActor.run { localizedCityNameByKey = [:] }
         var coordByKey: [String: CLLocationCoordinate2D] = [:]
         for journey in recentJourneys {
             let key = journey.stableCityKey ?? ""
@@ -1891,7 +1895,7 @@ struct RecentJourneysView: View {
         }
 
         for (key, coord) in coordByKey {
-            if localizedCityNameByKey[key] != nil { continue }
+            let displayLocale = LanguagePreference.shared.displayLocale
 
             if let cachedCity = cachedCitiesByKey[key] {
                 let title = CityPlacemarkResolver.displayTitle(
@@ -1903,7 +1907,7 @@ struct RecentJourneysView: View {
                     parentRegionKey: cachedCity.parentScopeKey,
                     preferredLevel: cachedCity.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
                     localizedDisplayNameByLocale: cachedCity.localizedDisplayNameByLocale,
-                    locale: .current
+                    locale: displayLocale
                 )
                 if !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     await MainActor.run { localizedCityNameByKey[key] = title }
@@ -2029,7 +2033,7 @@ struct RecentJourneyCard: View {
         guard iso.count == 2 else {
             return L10n.t("unknown_country")
         }
-        return Locale.current.localizedString(forRegionCode: iso) ?? iso
+        return LanguagePreference.shared.displayLocale.localizedString(forRegionCode: iso) ?? iso
     }
 
     private var detailButtonText: String {

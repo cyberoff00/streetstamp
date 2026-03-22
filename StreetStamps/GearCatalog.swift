@@ -126,6 +126,12 @@ final class AvatarCatalogStore: ObservableObject {
                             nameKey: "Expression 0013",
                             layer: "expression",
                             images: .init(front: "front_exp013", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "expr_0014",
+                            nameKey: "Expression 0014",
+                            layer: "expression",
+                            images: .init(front: "front_exp014", right: nil, back: nil, left: nil)
                         )
                     ]
                 ),
@@ -181,6 +187,12 @@ final class AvatarCatalogStore: ObservableObject {
                             nameKey: "Pat 007",
                             layer: "accessory",
                             images: .init(front: "front_pat007", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "pat_010",
+                            nameKey: "Pat 010",
+                            layer: "accessory",
+                            images: .init(front: "front_pat010", right: nil, back: nil, left: nil)
                         )
                     ]
                 ),
@@ -272,6 +284,30 @@ final class AvatarCatalogStore: ObservableObject {
                             nameKey: "Hair 0015",
                             layer: "hair",
                             images: .init(front: "front_hair012", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "hair_0016",
+                            nameKey: "Hair 0016",
+                            layer: "hair",
+                            images: .init(front: "front_hair013", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "hair_0017",
+                            nameKey: "Hair 0017",
+                            layer: "hair",
+                            images: .init(front: "front_hair014", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "hair_0018",
+                            nameKey: "Hair 0018",
+                            layer: "hair",
+                            images: .init(front: "front_hair015", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "hair_0019",
+                            nameKey: "Hair 0019",
+                            layer: "hair",
+                            images: .init(front: "front_hair016", right: nil, back: nil, left: nil)
                         )
                     ]
                 ),
@@ -418,6 +454,12 @@ final class AvatarCatalogStore: ObservableObject {
                             nameKey: "Upper 0017",
                             layer: "upper",
                             images: .init(front: "front_upper016", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "upper_0018",
+                            nameKey: "Upper 0018",
+                            layer: "upper",
+                            images: .init(front: "front_pat009", right: nil, back: nil, left: nil)
                         )
                     ]
                 ),
@@ -609,6 +651,12 @@ final class AvatarCatalogStore: ObservableObject {
                             nameKey: "Accessory 012",
                             layer: "accessory",
                             images: .init(front: "front_ac013", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "acc_015",
+                            nameKey: "Accessory 015",
+                            layer: "accessory",
+                            images: .init(front: "front_ac016", right: nil, back: nil, left: nil)
                         )
                     ]
                 )

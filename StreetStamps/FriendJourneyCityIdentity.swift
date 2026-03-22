@@ -1,12 +1,23 @@
 import Foundation
+import CoreLocation
 
 enum FriendJourneyCityIdentity {
+    private static let cacheLock = NSLock()
+    private static var geocodedCityIDCache: [String: String] = [:]
+
     static func resolveCityID(for journey: FriendSharedJourney, cards: [FriendCityCard]) -> String {
+        // 1. Trust stored cityID if it looks like a valid city key ("Name|ISO2")
         if let stableCityID = normalizedStableCityID(from: journey),
-           cards.contains(where: { normalizeStableCityID($0.id) == stableCityID }) {
+           looksLikeCityKey(stableCityID) {
             return stableCityID
         }
 
+        // 2. Check geocode cache
+        if let cached = cachedGeocodedCityID(for: journey.id) {
+            return cached
+        }
+
+        // 3. Exact text match only (no fuzzy)
         guard !cards.isEmpty else {
             return normalizedStableCityID(from: journey) ?? "Unknown|"
         }
@@ -17,17 +28,44 @@ enum FriendJourneyCityIdentity {
         }) {
             return hit.id
         }
-        if let fuzzy = cards.first(where: {
-            let normalizedName = normalizedCardIdentity($0)
-            return exactCandidates.contains(where: { candidate in
-                !candidate.isEmpty
-                    && !normalizedName.isEmpty
-                    && (candidate.contains(normalizedName) || normalizedName.contains(candidate))
-            })
-        }) {
-            return fuzzy.id
-        }
+
         return "Unknown|"
+    }
+
+    /// Async version: reverse geocodes from coordinates if sync resolution failed.
+    static func resolvedCityIDAsync(for journey: FriendSharedJourney, cards: [FriendCityCard]) async -> String {
+        let syncResult = resolveCityID(for: journey, cards: cards)
+        if syncResult != "Unknown|" {
+            return syncResult
+        }
+
+        // Try reverse geocode from journey coordinates
+        guard let first = journey.routeCoordinates.first else {
+            return syncResult
+        }
+        let coord = CLLocationCoordinate2D(latitude: first.lat, longitude: first.lon)
+        guard coord.isValid else { return syncResult }
+
+        let location = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+        let geocoder = CLGeocoder()
+        let fixedLocale = Locale(identifier: "en_US")
+
+        do {
+            let placemarks = try await geocoder.reverseGeocodeLocation(location, preferredLocale: fixedLocale)
+            guard let pm = placemarks.first else { return syncResult }
+
+            let cityName = (pm.locality ?? pm.subAdministrativeArea ?? pm.administrativeArea ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let iso2 = (pm.isoCountryCode ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+
+            guard !cityName.isEmpty, iso2.count == 2 else { return syncResult }
+
+            let cityKey = "\(cityName)|\(iso2)"
+            setCachedGeocodedCityID(cityKey, for: journey.id)
+            return cityKey
+        } catch {
+            return syncResult
+        }
     }
 
     static func resolveCollectionKey(for journey: FriendSharedJourney, cards: [FriendCityCard]) -> String {
@@ -37,6 +75,27 @@ enum FriendJourneyCityIdentity {
 
     static func stableCityID(from route: JourneyRoute) -> String? {
         normalizeStableCityID(route.stableCityKey)
+    }
+
+    // MARK: - Private
+
+    private static func looksLikeCityKey(_ value: String) -> Bool {
+        let parts = value.split(separator: "|", omittingEmptySubsequences: false)
+        guard parts.count == 2 else { return false }
+        return !parts[0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && parts[1].trimmingCharacters(in: .whitespacesAndNewlines).count == 2
+    }
+
+    private static func cachedGeocodedCityID(for journeyID: String) -> String? {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        return geocodedCityIDCache[journeyID]
+    }
+
+    private static func setCachedGeocodedCityID(_ cityID: String, for journeyID: String) {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        geocodedCityIDCache[journeyID] = cityID
     }
 
     private static func normalizedStableCityID(from journey: FriendSharedJourney) -> String? {
@@ -54,7 +113,7 @@ enum FriendJourneyCityIdentity {
     private static func normalizeText(_ value: String) -> String {
         value
             .trimmingCharacters(in: .whitespacesAndNewlines)
-            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "en_US"))
             .lowercased()
     }
 

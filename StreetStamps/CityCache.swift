@@ -738,6 +738,17 @@ final class CityCache: ObservableObject {
         try? Data("ok".utf8).write(to: migrationMarkerV4URL, options: .atomic)
     }
 
+    /// Populate in-memory cities directly without disk I/O.
+    /// Used by FriendMirrorContext to avoid async loading flash.
+    func loadFromMemory(_ cities: [CachedCity]) {
+        var seen = Set<String>()
+        self.cachedCities = cities.filter { city in
+            if seen.contains(city.id) { return false }
+            seen.insert(city.id)
+            return true
+        }
+    }
+
     // MARK: disk
     func loadFromDisk() {
         do {
@@ -1286,7 +1297,7 @@ final class CityCache: ObservableObject {
                 parentRegionKey: c.parentScopeKey,
                 preferredLevel: c.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
                 localizedDisplayNameByLocale: c.localizedDisplayNameByLocale,
-                locale: .current
+                locale: LanguagePreference.shared.displayLocale
             ),
             subtitle: c.countryISO2,
             baseThumbPath: nil,
@@ -1670,7 +1681,7 @@ final class CityCache: ObservableObject {
                 parentRegionKey: c.parentScopeKey,
                 preferredLevel: c.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
                 localizedDisplayNameByLocale: c.localizedDisplayNameByLocale,
-                locale: .current
+                locale: LanguagePreference.shared.displayLocale
             ),
             subtitle: c.countryISO2,
             baseThumbPath: nil,

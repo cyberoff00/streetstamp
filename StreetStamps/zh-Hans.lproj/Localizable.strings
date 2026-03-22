@@ -582,6 +582,8 @@
 "equipment_total_price_format" = "总价 %d";
 "equipment_buy_all_and_apply" = "一键购买并应用";
 "equipment_purchased_and_applied" = "已购买并应用";
+"equipment_coins_label" = "金币";
+"equipment_iap_loading_hint" = "正在加载商品...";
 "settings_private_transfer_row" = "私密数据迁移";
 "settings_subscription_row" = "订阅";
 "settings_sign_in_title" = "登录 Worldo";

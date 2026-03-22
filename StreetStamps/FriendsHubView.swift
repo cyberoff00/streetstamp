@@ -193,8 +193,8 @@ struct FriendsHubView: View {
     @State private var showAuthEntry = false
     @State private var showQRScanner = false
     @State private var pendingFeedRefreshProfiles: [FriendProfileSnapshot]?
-    @State private var feedScrollRestoreState = FriendsFeedScrollRestoreState()
-    @State private var friendsListScrollRestoreState = FriendsListScrollRestoreState()
+    @State private var feedScrollPosition: String?
+    @State private var friendsListScrollPosition: String?
     @State private var didPerformInitialFeedRefresh = false
 
     private var sortedFriends: [FriendProfileSnapshot] {
@@ -257,15 +257,6 @@ struct FriendsHubView: View {
         )
             .map { feedLikeKey(friendID: $0.friendID, journeyID: $0.journeyID) }
             .sorted()
-            .joined(separator: ",")
-    }
-
-    private var allFriendsScrollSignature: String {
-        sortedFriends
-            .map { friend in
-                let lastActive = lastActiveDate(of: friend).timeIntervalSinceReferenceDate
-                return "\(friend.id)|\(lastActive)"
-            }
             .joined(separator: ",")
     }
 
@@ -401,11 +392,6 @@ struct FriendsHubView: View {
                 await refreshRemoteFriends(showUnreadToast: false)
             }
         }
-        .onChange(of: activeRoute) { _, route in
-            guard route == nil else { return }
-            feedScrollRestoreState.prepareRestoreOnReturn()
-            friendsListScrollRestoreState.prepareRestoreOnReturn()
-        }
         .task(id: feedLikeSignature) {
             await loadFeedLikeStatsIfNeeded()
         }
@@ -459,43 +445,62 @@ struct FriendsHubView: View {
                 .padding(.top, 6)
             }
 
-            ScrollViewReader { proxy in
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 16) {
-                        if feedEvents.isEmpty {
-                            emptyState(L10n.t("friends_empty_activity"))
-                        } else {
-                            ForEach(feedEvents) { event in
-                                if let friend = feedProfileByID[event.friendID] {
-                                    FriendActivityCard(
-                                        friend: friend,
-                                        event: event,
-                                        likeCount: likeCountForEvent(event),
-                                        likedByMe: likedByMeForEvent(event),
-                                        likeLoading: likeLoadingForEvent(event),
-                                        likeActionMode: FriendsFeedLikePresentation.actionMode(
+            ScrollView(showsIndicators: false) {
+                LazyVStack(spacing: 16) {
+                    if feedEvents.isEmpty {
+                        emptyState(L10n.t("friends_empty_activity"))
+                    } else {
+                        ForEach(feedEvents) { event in
+                            if let friend = feedProfileByID[event.friendID] {
+                                FriendActivityCard(
+                                    friend: friend,
+                                    event: event,
+                                    likeCount: likeCountForEvent(event),
+                                    likedByMe: likedByMeForEvent(event),
+                                    likeLoading: likeLoadingForEvent(event),
+                                    likeActionMode: FriendsFeedLikePresentation.actionMode(
+                                        currentUserID: currentUserID,
+                                        eventFriendID: event.friendID,
+                                        hasJourney: event.journeyID != nil
+                                    ),
+                                    onLikeTap: {
+                                        guard let journeyID = event.journeyID else { return }
+                                        switch FriendsFeedLikePresentation.actionMode(
                                             currentUserID: currentUserID,
                                             eventFriendID: event.friendID,
-                                            hasJourney: event.journeyID != nil
-                                        ),
-                                        onLikeTap: {
-                                            guard let journeyID = event.journeyID else { return }
-                                            switch FriendsFeedLikePresentation.actionMode(
-                                                currentUserID: currentUserID,
-                                                eventFriendID: event.friendID,
-                                                hasJourney: true
-                                            ) {
-                                            case .toggleLike:
-                                                Task {
-                                                    await toggleFeedLike(friendID: friend.id, journeyID: journeyID)
-                                                }
-                                            case .showLikers:
-                                                presentFeedLikes(friendID: friend.id, journeyID: journeyID, title: event.location.isEmpty ? event.title : event.location)
-                                            case nil:
-                                                break
+                                            hasJourney: true
+                                        ) {
+                                        case .toggleLike:
+                                            Task {
+                                                await toggleFeedLike(friendID: friend.id, journeyID: journeyID)
                                             }
-                                        },
-                                        onOpenProfile: {
+                                        case .showLikers:
+                                            presentFeedLikes(friendID: friend.id, journeyID: journeyID, title: event.location.isEmpty ? event.title : event.location)
+                                        case nil:
+                                            break
+                                        }
+                                    },
+                                    onOpenProfile: {
+                                        if FriendsFeedNavigationPolicy.opensCurrentUserProfile(
+                                            currentUserID: currentUserID,
+                                            targetFriendID: friend.id
+                                        ) {
+                                            activeRoute = .myProfile
+                                        } else {
+                                            activeRoute = .profile(friend.id)
+                                        }
+                                    },
+                                    onOpenEvent: {
+                                        if let jid = event.journeyID {
+                                            if FriendsFeedNavigationPolicy.opensCurrentUserJourneyDetail(
+                                                currentUserID: currentUserID,
+                                                targetFriendID: friend.id
+                                            ) {
+                                                activeRoute = .myJourney(jid)
+                                            } else {
+                                                activeRoute = .journey(friendID: friend.id, snapshot: friend, journeyID: jid)
+                                            }
+                                        } else {
                                             if FriendsFeedNavigationPolicy.opensCurrentUserProfile(
                                                 currentUserID: currentUserID,
                                                 targetFriendID: friend.id
@@ -504,81 +509,11 @@ struct FriendsHubView: View {
                                             } else {
                                                 activeRoute = .profile(friend.id)
                                             }
-                                        },
-                                        onOpenEvent: {
-                                            feedScrollRestoreState.recordOpen(eventID: event.id)
-                                            if let jid = event.journeyID {
-                                                if FriendsFeedNavigationPolicy.opensCurrentUserJourneyDetail(
-                                                    currentUserID: currentUserID,
-                                                    targetFriendID: friend.id
-                                                ) {
-                                                    activeRoute = .myJourney(jid)
-                                                } else {
-                                                    activeRoute = .journey(friendID: friend.id, snapshot: friend, journeyID: jid)
-                                                }
-                                            } else {
-                                                if FriendsFeedNavigationPolicy.opensCurrentUserProfile(
-                                                    currentUserID: currentUserID,
-                                                    targetFriendID: friend.id
-                                                ) {
-                                                    activeRoute = .myProfile
-                                                } else {
-                                                    activeRoute = .profile(friend.id)
-                                                }
-                                            }
                                         }
-                                    )
-                                    .id(event.id)
-                                }
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.top, 12)
-                    .padding(.bottom, 54)
-                }
-                .refreshable {
-                    await refreshRemoteFriends()
-                }
-                .onChange(of: feedScrollRestoreState.pendingRestoreEventID) { _, eventID in
-                    restoreFeedScrollIfNeeded(eventID: eventID, proxy: proxy)
-                }
-                .onChange(of: feedLikeSignature) { _, _ in
-                    restoreFeedScrollIfNeeded(eventID: feedScrollRestoreState.pendingRestoreEventID, proxy: proxy)
-                }
-            }
-        }
-        .background(FigmaTheme.background)
-    }
-
-    private var allFriendsContent: some View {
-        ScrollViewReader { proxy in
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 16) {
-                    if !incomingFriendRequests.isEmpty {
-                        friendRequestSectionTitle(L10n.t("friends_section_pending_approval"))
-                        ForEach(incomingFriendRequests) { req in
-                            friendRequestCard(request: req, isIncoming: true)
-                        }
-                    }
-
-                    if sortedFriends.isEmpty {
-                        if incomingFriendRequests.isEmpty {
-                            emptyState(L10n.t("friends_empty_all"))
-                        }
-                    } else {
-                        ForEach(sortedFriends) { friend in
-                            Button {
-                                friendsListScrollRestoreState.recordOpen(friendID: friend.id)
-                                activeRoute = .profile(friend.id)
-                            } label: {
-                                AllFriendsCard(
-                                    friend: friend,
-                                    subtitleText: FriendListPresencePresentation.subtitle(for: friend)
+                                    }
                                 )
+                                .id(event.id)
                             }
-                            .buttonStyle(.plain)
-                            .id(friend.id)
                         }
                     }
                 }
@@ -586,15 +521,50 @@ struct FriendsHubView: View {
                 .padding(.top, 12)
                 .padding(.bottom, 54)
             }
+            .scrollPosition(id: $feedScrollPosition)
             .refreshable {
                 await refreshRemoteFriends()
             }
-            .onChange(of: friendsListScrollRestoreState.pendingRestoreFriendID) { _, friendID in
-                restoreAllFriendsScrollIfNeeded(friendID: friendID, proxy: proxy)
+        }
+        .background(FigmaTheme.background)
+    }
+
+    private var allFriendsContent: some View {
+        ScrollView(showsIndicators: false) {
+            LazyVStack(spacing: 16) {
+                if !incomingFriendRequests.isEmpty {
+                    friendRequestSectionTitle(L10n.t("friends_section_pending_approval"))
+                    ForEach(incomingFriendRequests) { req in
+                        friendRequestCard(request: req, isIncoming: true)
+                    }
+                }
+
+                if sortedFriends.isEmpty {
+                    if incomingFriendRequests.isEmpty {
+                        emptyState(L10n.t("friends_empty_all"))
+                    }
+                } else {
+                    ForEach(sortedFriends) { friend in
+                        Button {
+                            activeRoute = .profile(friend.id)
+                        } label: {
+                            AllFriendsCard(
+                                friend: friend,
+                                subtitleText: FriendListPresencePresentation.subtitle(for: friend)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .id(friend.id)
+                    }
+                }
             }
-            .onChange(of: allFriendsScrollSignature) { _, _ in
-                restoreAllFriendsScrollIfNeeded(friendID: friendsListScrollRestoreState.pendingRestoreFriendID, proxy: proxy)
-            }
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            .padding(.bottom, 54)
+        }
+        .scrollPosition(id: $friendsListScrollPosition)
+        .refreshable {
+            await refreshRemoteFriends()
         }
         .background(FigmaTheme.background)
     }
@@ -948,10 +918,12 @@ struct FriendsHubView: View {
 
         private func resolvedFriendCityTitle(for journey: FriendSharedJourney, cards: [FriendCityCard]) -> String {
             let cityID = resolvedFriendCityID(for: journey, cards: cards)
-            let cityCard = cards.first(where: { $0.id == cityID })
+            // Use key-derived name as fallback instead of card.name (which is in the friend's locale)
+            let keyName = cityID.split(separator: "|", omittingEmptySubsequences: false).first.map(String.init) ?? ""
+            let fallback = keyName.isEmpty ? (cards.first(where: { $0.id == cityID })?.name ?? journey.title) : keyName
             return CityDisplayResolver.title(
                 for: cityID,
-                fallbackTitle: cityCard?.name ?? journey.title
+                fallbackTitle: fallback
             )
         }
 
@@ -1452,27 +1424,6 @@ struct FriendsHubView: View {
             }
         }
 
-        private func restoreFeedScrollIfNeeded(eventID: String?, proxy: ScrollViewProxy) {
-            guard let eventID else { return }
-            guard feedEvents.contains(where: { $0.id == eventID }) else { return }
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                proxy.scrollTo(eventID, anchor: .top)
-            }
-            feedScrollRestoreState.consumeRestoreRequest()
-        }
-
-        private func restoreAllFriendsScrollIfNeeded(friendID: String?, proxy: ScrollViewProxy) {
-            guard let friendID else { return }
-            guard sortedFriends.contains(where: { $0.id == friendID }) else { return }
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                proxy.scrollTo(friendID, anchor: .top)
-            }
-            friendsListScrollRestoreState.consumeRestoreRequest()
-        }
     }
 
 private struct FriendActivityCard: View {
@@ -2726,6 +2677,19 @@ private final class FriendMirrorContext: ObservableObject {
         return components.joined(separator: "|")
     }
 
+    /// Synchronously populate in-memory stores from snapshot so the first
+    /// frame already has data and avoids the ProgressView flash.
+    func applySync(snapshot: FriendProfileSnapshot) {
+        let sig = Self.signature(for: snapshot)
+        guard sig != lastSignature else { return }
+        lastSignature = sig
+
+        let routes = Self.buildMirroredRoutes(from: snapshot)
+        let cities = Self.buildCities(from: snapshot, mirroredRoutes: routes)
+        journeyStore.loadFromMemory(routes)
+        cityCache.loadFromMemory(cities)
+    }
+
     func apply(snapshot: FriendProfileSnapshot) async {
         let sig = Self.signature(for: snapshot)
         guard sig != lastSignature else { return }
@@ -2779,12 +2743,12 @@ private final class FriendMirrorContext: ObservableObject {
         try? indexStore.replaceIDs(routes.map(\.id))
     }
 
-    nonisolated private static func persistCities(from snapshot: FriendProfileSnapshot, mirroredRoutes: [JourneyRoute], paths: StoragePath) {
+    nonisolated static func buildCities(from snapshot: FriendProfileSnapshot, mirroredRoutes: [JourneyRoute]) -> [CachedCity] {
         let routesByCityID = Dictionary(grouping: mirroredRoutes) {
             ($0.startCityKey ?? $0.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         let deduplicatedCards = Dictionary(grouping: snapshot.unlockedCityCards) { $0.id }.compactMapValues { $0.first }.map { $0.value }
-        let cities: [CachedCity] = deduplicatedCards.map { primaryCard in
+        return deduplicatedCards.map { primaryCard in
             let cityID = primaryCard.id.trimmingCharacters(in: .whitespacesAndNewlines)
             let js = routesByCityID[cityID] ?? []
             let memories = js.reduce(0) { $0 + $1.memories.count }
@@ -2809,6 +2773,10 @@ private final class FriendMirrorContext: ObservableObject {
                 isTemporary: false
             )
         }
+    }
+
+    nonisolated private static func persistCities(from snapshot: FriendProfileSnapshot, mirroredRoutes: [JourneyRoute], paths: StoragePath) {
+        let cities = buildCities(from: snapshot, mirroredRoutes: mirroredRoutes)
         if let data = try? JSONEncoder().encode(cities) {
             try? data.write(to: paths.cityCacheURL, options: .atomic)
         }
@@ -2826,9 +2794,11 @@ private final class FriendMirrorContext: ObservableObject {
         let cityID = FriendJourneyCityIdentity.resolveCityID(for: friendJourney, cards: cards)
         let cityCard = cards.first(where: { $0.id == cityID })
 
+        let keyName = cityID.split(separator: "|", omittingEmptySubsequences: false).first.map(String.init) ?? ""
+        let cityFallback = keyName.isEmpty ? (cityCard?.name ?? friendJourney.title) : keyName
         let cityName = CityDisplayResolver.title(
             for: cityID,
-            fallbackTitle: cityCard?.name ?? friendJourney.title
+            fallbackTitle: cityFallback
         )
 
         let fallbackCoordinate: CoordinateCodable = routeCoords.first ?? CoordinateCodable(lat: 0, lon: 0)
@@ -3017,7 +2987,11 @@ private struct FriendJourneyDetailScreen: View {
         self.friendID = friendID
         self.fallbackSnapshot = fallbackSnapshot
         self.journeyID = journeyID
-        _mirror = StateObject(wrappedValue: FriendMirrorContext(friendID: friendID))
+        let ctx = FriendMirrorContext(friendID: friendID)
+        if let snapshot = fallbackSnapshot {
+            ctx.applySync(snapshot: snapshot)
+        }
+        _mirror = StateObject(wrappedValue: ctx)
     }
 
     var body: some View {
@@ -3080,7 +3054,7 @@ private struct FriendJourneyDetailScreen: View {
     private func resolvedCountryName(for journey: JourneyRoute) -> String {
         let iso = (journey.countryISO2 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard iso.count == 2 else { return L10n.t("unknown_country") }
-        return Locale.current.localizedString(forRegionCode: iso) ?? iso
+        return LanguagePreference.shared.displayLocale.localizedString(forRegionCode: iso) ?? iso
     }
 }
 
@@ -3124,6 +3098,6 @@ private struct SelfJourneyDetailScreen: View {
     private func resolvedCountryName(for journey: JourneyRoute) -> String {
         let iso = (journey.countryISO2 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard iso.count == 2 else { return L10n.t("unknown_country") }
-        return Locale.current.localizedString(forRegionCode: iso) ?? iso
+        return LanguagePreference.shared.displayLocale.localizedString(forRegionCode: iso) ?? iso
     }
 }

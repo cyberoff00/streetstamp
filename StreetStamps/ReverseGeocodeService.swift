@@ -297,8 +297,37 @@ actor ReverseGeocodeService {
     }
 
     /// Optional helper: get cached display title without making a request.
-    func cachedDisplayTitle(cityKey: String, parentRegionKey: String? = nil, locale: Locale = .current) -> String? {
+    func cachedDisplayTitle(cityKey: String, parentRegionKey: String? = nil, locale: Locale = LanguagePreference.shared.displayLocale) -> String? {
         displayCacheByLocaleKey[displayCacheKey(cityKey: cityKey, locale: locale, parentRegionKey: parentRegionKey)]
+    }
+
+    // MARK: - Retry helpers
+
+    func canonicalWithRetry(for location: CLLocation, maxAttempts: Int = 2) async -> CanonicalResult? {
+        for attempt in 0..<maxAttempts {
+            if let result = await canonical(for: location) { return result }
+            guard attempt + 1 < maxAttempts else { break }
+            try? await Task.sleep(nanoseconds: UInt64(minIntervalSeconds * 1_100_000_000))
+        }
+        return nil
+    }
+
+    func localizedHierarchyWithRetry(for location: CLLocation, maxAttempts: Int = 2) async -> CanonicalResult? {
+        for attempt in 0..<maxAttempts {
+            if let result = await localizedHierarchy(for: location) { return result }
+            guard attempt + 1 < maxAttempts else { break }
+            try? await Task.sleep(nanoseconds: UInt64(minIntervalSeconds * 1_100_000_000))
+        }
+        return nil
+    }
+
+    func displayTitleWithRetry(for location: CLLocation, cityKey: String, parentRegionKey: String? = nil, maxAttempts: Int = 2) async -> String? {
+        for attempt in 0..<maxAttempts {
+            if let result = await displayTitle(for: location, cityKey: cityKey, parentRegionKey: parentRegionKey) { return result }
+            guard attempt + 1 < maxAttempts else { break }
+            try? await Task.sleep(nanoseconds: UInt64(minIntervalSeconds * 1_100_000_000))
+        }
+        return nil
     }
 
     // MARK: - Internals

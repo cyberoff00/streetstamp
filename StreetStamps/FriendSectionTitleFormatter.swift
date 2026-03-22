@@ -7,7 +7,7 @@ enum FriendSectionTitleFormatter {
         case journeyDetail
     }
 
-    static func sectionTitle(for section: Section, friendName: String, locale: Locale = .current) -> String {
+    static func sectionTitle(for section: Section, friendName: String, locale: Locale = LanguagePreference.shared.displayLocale) -> String {
         let labelKey: String
         switch section {
         case .cityCards:

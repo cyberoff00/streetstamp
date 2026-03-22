@@ -1845,7 +1845,7 @@ private enum GPXImportService {
                             iso2: result.iso2,
                             fallbackTitle: result.cityName,
                             parentRegionKey: result.parentRegionKey,
-                            locale: .current
+                            locale: LanguagePreference.shared.displayLocale
                         ),
                         iso2: result.iso2
                     )

@@ -94,6 +94,7 @@ struct MainTabView: View {
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var flow: AppFlowCoordinator
     @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
+    @ObservedObject private var featureFlags = FeatureFlagStore.shared
 
     @State private var pendingResumeJourney: JourneyRoute? = nil
     @State private var didPromptResumeThisLaunch: Bool = false
@@ -223,17 +224,19 @@ struct MainTabView: View {
                     Text(L10n.upper("tab_worldo"))
                 }
 
-            NavigationStack {
-                if shouldRenderTab(.friends) {
-                    FriendsHubView()
-                } else {
-                    Color.clear
+            if featureFlags.socialEnabled {
+                NavigationStack {
+                    if shouldRenderTab(.friends) {
+                        FriendsHubView()
+                    } else {
+                        Color.clear
+                    }
                 }
-            }
-            .tag(NavigationTab.friends)
-            .tabItem {
-                MainTabLayout.image(for: .friends)
-                Text(L10n.t("tab_friends"))
+                .tag(NavigationTab.friends)
+                .tabItem {
+                    MainTabLayout.image(for: .friends)
+                    Text(L10n.t("tab_friends"))
+                }
             }
 
             NavigationStack {
@@ -363,13 +366,18 @@ private struct MainSidebarMenuView: View {
     @Binding var isPresented: Bool
     let onSelectDestination: (MainSidebarDestination) -> Void
     
-    private let sidebarItems: [(title: String, icon: String, destination: MainSidebarDestination)] = [
-        (L10n.t("profile_title"), "person", .profile),
-        (L10n.upper("equipment_title"), "tshirt", .equipment),
-        (L10n.t("settings_title"), "gearshape", .settings),
-        (L10n.upper("postcard_nav_title"), "envelope", .postcards),
-        (L10n.upper("profile_invite_friends"), "person.badge.plus", .inviteFriend)
-    ]
+    private var sidebarItems: [(title: String, icon: String, destination: MainSidebarDestination)] {
+        var items: [(title: String, icon: String, destination: MainSidebarDestination)] = [
+            (L10n.t("profile_title"), "person", .profile),
+            (L10n.upper("equipment_title"), "tshirt", .equipment),
+            (L10n.t("settings_title"), "gearshape", .settings),
+        ]
+        if FeatureFlagStore.shared.socialEnabled {
+            items.append((L10n.upper("postcard_nav_title"), "envelope", .postcards))
+            items.append((L10n.upper("profile_invite_friends"), "person.badge.plus", .inviteFriend))
+        }
+        return items
+    }
 
     private var displayName: String {
         let profile = profileName.trimmingCharacters(in: .whitespacesAndNewlines)

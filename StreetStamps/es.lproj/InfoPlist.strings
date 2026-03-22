@@ -7,4 +7,5 @@
 "NSLocationAlwaysAndWhenInUseUsageDescription" = "We use your location to continue tracking your journey in the background.";
 "NSHealthShareUsageDescription" = "Used to read your daily steps and show them in Lifelog.";
 
+"NSMotionUsageDescription" = "Used to detect walking, running, and driving activity to improve journey and Lifelog accuracy.";
 "NSHealthUpdateUsageDescription" = "Used to write Health data to keep workout sessions active for stable background route recording.";

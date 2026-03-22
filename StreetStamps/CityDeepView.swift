@@ -41,6 +41,7 @@ struct CityDeepView: View {
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var cache: CityCache
     @EnvironmentObject private var flow: AppFlowCoordinator
+    @ObservedObject private var languagePreference = LanguagePreference.shared
 
     init(city: City) {
         self.city = city
@@ -106,7 +107,7 @@ struct CityDeepView: View {
 
     private var effectiveCityName: String {
         if let cached = activeCachedCity {
-            return CityPlacemarkResolver.displayTitle(for: cached, locale: .current)
+            return CityPlacemarkResolver.displayTitle(for: cached, locale: LanguagePreference.shared.displayLocale)
         }
         return city.localizedName
     }
@@ -461,6 +462,9 @@ struct CityDeepView: View {
         .onChange(of: locale) { _ in
             refreshDisplayTitleFromCardKey()
         }
+        .onChange(of: languagePreference.currentLanguage) { _ in
+            refreshDisplayTitleFromCardKey()
+        }
         .onChange(of: currentJourneys.count) { _ in
             refreshRegionAndBoundary()
         }
@@ -613,7 +617,14 @@ struct CityDeepView: View {
                 return
             }
 
-            let liveLevels = localized?.availableLevels ?? canonical.availableLevels
+            let displayLocale = LanguagePreference.shared.displayLocale
+            let liveLevels: [CityPlacemarkResolver.CardLevel: String]
+            if let localized {
+                liveLevels = localized.availableLevels
+            } else {
+                let langCode = displayLocale.identifier.lowercased()
+                liveLevels = langCode.hasPrefix("en") ? canonical.availableLevels : [:]
+            }
             let iso = (canonical.iso2 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
             let sourceKey = await MainActor.run { activeCityKey }
             let sourceKeys = await MainActor.run { sourceCityKeys }
@@ -626,7 +637,7 @@ struct CityDeepView: View {
                 storedAvailableLevelNamesRaw: sourceCached?.availableLevelNames,
                 storedLocaleIdentifier: sourceCached?.availableLevelNamesLocaleID,
                 freshlyResolvedLevelNames: liveLevels,
-                locale: .current
+                locale: LanguagePreference.shared.displayLocale
             )
             let selectedNameRaw = sourceDisplayLevels[level] ?? localized?.cityName ?? canonical.availableLevels[level] ?? canonical.cityName
             let selectedName = selectedNameRaw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -646,7 +657,7 @@ struct CityDeepView: View {
                 storedAvailableLevelNamesRaw: targetCached?.availableLevelNames,
                 storedLocaleIdentifier: targetCached?.availableLevelNamesLocaleID,
                 freshlyResolvedLevelNames: liveLevels,
-                locale: .current
+                locale: LanguagePreference.shared.displayLocale
             )
 
             await MainActor.run {
@@ -698,7 +709,7 @@ struct CityDeepView: View {
         if let labels = CityPlacemarkResolver.preferredAvailableLevelNamesForDisplay(
             activeCachedCity?.availableLevelNames,
             storedLocaleIdentifier: activeCachedCity?.availableLevelNamesLocaleID,
-            locale: .current
+            locale: LanguagePreference.shared.displayLocale
         ) {
             let displayLabels = normalizedCityLevelLabels(labels)
             cityLevelOptionLabels = displayLabels
@@ -773,12 +784,20 @@ struct CityDeepView: View {
                     )
                     return
                 }
-                let liveLabels = localized?.availableLevels ?? canonical.availableLevels
+                let displayLocale = LanguagePreference.shared.displayLocale
+                let liveLabels: [CityPlacemarkResolver.CardLevel: String]
+                if let localized {
+                    liveLabels = localized.availableLevels
+                } else {
+                    // canonical is en_US only — use it only when display locale is English
+                    let langCode = displayLocale.identifier.lowercased()
+                    liveLabels = langCode.hasPrefix("en") ? canonical.availableLevels : [:]
+                }
                 let labels = CityPlacemarkResolver.resolvedStableLevelNamesForDisplay(
                     storedAvailableLevelNamesRaw: activeCachedCity?.availableLevelNames,
                     storedLocaleIdentifier: activeCachedCity?.availableLevelNamesLocaleID,
                     freshlyResolvedLevelNames: liveLabels,
-                    locale: .current
+                    locale: displayLocale
                 )
 
                 let ordered: [CityPlacemarkResolver.CardLevel] = [.island, .locality, .subAdmin, .admin, .country]
@@ -989,7 +1008,7 @@ struct CityDeepView: View {
                 parentRegionKey: parentRegionKey,
                 preferredLevel: cityLevelCurrentSelection,
                 localizedDisplayNameByLocale: activeCachedCity?.localizedDisplayNameByLocale,
-                locale: .current
+                locale: LanguagePreference.shared.displayLocale
             )
         }
 
@@ -1003,7 +1022,7 @@ struct CityDeepView: View {
                 parentRegionKey: parentRegionKey,
                 preferredLevel: activeCachedCity.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
                 localizedDisplayNameByLocale: activeCachedCity.localizedDisplayNameByLocale,
-                locale: .current
+                locale: LanguagePreference.shared.displayLocale
             )
         }
 
@@ -1013,7 +1032,7 @@ struct CityDeepView: View {
             fallbackTitle: effectiveCityName,
             parentRegionKey: parentRegionKey,
             preferredLevel: cityLevelCurrentSelection,
-            locale: .current
+            locale: LanguagePreference.shared.displayLocale
         )
         let trimmed = fromKey.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? city.localizedName : trimmed
@@ -1044,7 +1063,7 @@ struct CityDeepView: View {
 
     private func cityName(from cityKey: String) -> String {
         if let cached = cache.cachedCities.first(where: { $0.id == cityKey && !($0.isTemporary ?? false) }) {
-            return CityPlacemarkResolver.displayTitle(for: cached, locale: .current)
+            return CityPlacemarkResolver.displayTitle(for: cached, locale: LanguagePreference.shared.displayLocale)
         }
 
         let fallbackTitle = cityKey.components(separatedBy: "|").first ?? cityKey
@@ -1054,7 +1073,7 @@ struct CityDeepView: View {
             fallbackTitle: fallbackTitle,
             parentRegionKey: cityLevelParentRegionKey ?? activeCachedCity?.parentScopeKey,
             preferredLevel: cityLevelCurrentSelection,
-            locale: .current
+            locale: LanguagePreference.shared.displayLocale
         )
     }
 
@@ -1143,14 +1162,14 @@ struct CityDeepView: View {
             let toName = levelNameForHint(to)
             return String(
                 format: L10n.t("city_level_downgrade_blocked_message_format"),
-                locale: Locale.current,
+                locale: LanguagePreference.shared.displayLocale,
                 fromName,
                 toName
             )
         }
         return String(
             format: L10n.t("city_level_downgrade_blocked_message_format"),
-            locale: Locale.current,
+            locale: LanguagePreference.shared.displayLocale,
             localizedLevelName(for: .locality),
             localizedLevelName(for: .admin)
         )

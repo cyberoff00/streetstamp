@@ -55,6 +55,11 @@ struct BackendRefreshResponse: Codable {
     let accessToken: String
 }
 
+struct BackendLinkEmailPasswordResponse: Codable {
+    let email: String
+    let emailVerificationRequired: Bool
+}
+
 struct BackendMemoryUploadDTO: Codable {
     var id: String
     var title: String
@@ -268,6 +273,7 @@ struct BackendProfileDTO: Codable {
     var loadout: RobotLoadout?
     var handleChangeUsed: Bool?
     var canUpdateHandleOneTime: Bool?
+    var hasEmailPassword: Bool?
     var stats: ProfileStatsSnapshot?
     var journeys: [FriendSharedJourney]
     var unlockedCityCards: [FriendCityCard]
@@ -761,6 +767,12 @@ final class BackendAPIClient {
         let body = try encoder.encode(["idToken": idToken])
         let (data, _) = try await request(path: "/v1/auth/apple", method: "POST", jsonBody: body)
         return try decoder.decode(BackendAuthResponse.self, from: data)
+    }
+
+    func linkEmailPassword(email: String, password: String) async throws -> BackendLinkEmailPasswordResponse {
+        let body = try encoder.encode(["email": email, "password": password])
+        let (data, _) = try await request(path: "/v1/auth/link-email-password", method: "POST", jsonBody: body)
+        return try decoder.decode(BackendLinkEmailPasswordResponse.self, from: data)
     }
 
     func resendVerificationEmail(email: String) async throws {

@@ -113,7 +113,7 @@ struct GlobeViewScreen: View {
             level: levelProgress.level,
             cityCount: cityCount,
             memoryCount: totalMemories,
-            locale: .current
+            locale: LanguagePreference.shared.displayLocale
         )
 
         return HStack(spacing: 14) {

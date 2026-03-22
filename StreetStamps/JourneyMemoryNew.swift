@@ -22,6 +22,7 @@ struct JourneyMemoryMainView: View {
     @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
+    @ObservedObject private var languagePreference = LanguagePreference.shared
     @Environment(\.dismiss) private var dismiss
     @State private var expandedCities: Set<String> = []
     @State private var showFilterPopover = false
@@ -134,9 +135,11 @@ struct JourneyMemoryMainView: View {
 
     /// A stable-ish fingerprint to re-run localization when journey list changes.
     private var localizationFingerprint: String {
-        allMemoryJourneys
+        let lang = languagePreference.currentLanguage ?? "sys"
+        let journeyPart = allMemoryJourneys
             .map { "\($0.id)|\($0.startCityKey ?? $0.cityKey)" }
             .joined(separator: ",")
+        return "\(lang)|\(journeyPart)"
     }
 
     private var cachedCitiesByKey: [String: CachedCity] {
@@ -149,6 +152,7 @@ struct JourneyMemoryMainView: View {
 
     /// Fetch localized city titles for the current locale, keyed by the *start city*.
     private func refreshCityLocalizations() async {
+        await MainActor.run { localizedCityNameByKey = [:] }
         let journeys = allMemoryJourneys
 
         // cityKey -> sample start coordinate
@@ -162,8 +166,7 @@ struct JourneyMemoryMainView: View {
         }
 
         for (key, coord) in coordByKey {
-            // Skip if we already have a localized value for this key.
-            if localizedCityNameByKey[key] != nil { continue }
+            let displayLocale = LanguagePreference.shared.displayLocale
 
             // Check persisted localized name from CachedCity first (no async needed).
             if let cachedCity = cachedCitiesByKey[key] {
@@ -176,7 +179,7 @@ struct JourneyMemoryMainView: View {
                     parentRegionKey: cachedCity.parentScopeKey,
                     preferredLevel: cachedCity.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
                     localizedDisplayNameByLocale: cachedCity.localizedDisplayNameByLocale,
-                    locale: .current
+                    locale: displayLocale
                 )
                 if !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     await MainActor.run { localizedCityNameByKey[key] = title }
@@ -343,7 +346,7 @@ struct JourneyMemoryMainView: View {
 
     
     private func countryName(from iso2: String) -> String {
-        let locale = Locale.current
+        let locale = LanguagePreference.shared.displayLocale
         return locale.localizedString(forRegionCode: iso2) ?? iso2
     }
 
@@ -886,6 +889,7 @@ struct JourneyMemoryDetailView: View {
     // Share / Export
     @State private var shareImage: UIImage? = nil
     @State private var shareItem: ShareImageItem? = nil
+    @State private var routeThumbnail: UIImage? = nil
 
     @State private var showDeleteAllConfirm = false
     @State private var showDeleteJourneyConfirm = false
@@ -1045,6 +1049,9 @@ struct JourneyMemoryDetailView: View {
         // `navigationBarBackButtonHidden(true)` often disables interactive pop.
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
+        .task {
+            await generateRouteThumbnail()
+        }
         .onAppear {
             flow.pushSidebarButtonHidden(token: sidebarHideToken)
             let uid = sessionStore.currentUserID
@@ -1402,36 +1409,28 @@ struct JourneyMemoryDetailView: View {
                 JourneyRouteDetailView(
                     journeyID: journey.id,
                     isReadOnly: readOnly,
-                    headerTitle: journeyDisplayTitle,
+                    headerTitle: cityName,
                     friendLoadout: friendLoadout
                 )
                 .environmentObject(store)
             } label: {
-                HStack(spacing: 14) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(L10n.t("journey_route_title"))
-                            .font(.system(size: 12, weight: .bold))
-                            .tracking(1.2)
-                            .foregroundColor(Color(red: 0.60, green: 0.63, blue: 0.69))
-
-                        Text(journeyDisplayTitle)
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
-                            .lineLimit(2)
+                VStack(spacing: 0) {
+                    // Map thumbnail with route overlay
+                    if let thumb = routeThumbnail {
+                        Image(uiImage: thumb)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(height: 160)
+                            .clipped()
+                    } else {
+                        Rectangle()
+                            .fill(Color(UIColor.systemGray6))
+                            .frame(height: 160)
+                            .overlay {
+                                ProgressView()
+                            }
                     }
-
-                    Spacer()
-
-                    Image(systemName: "map")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(FigmaTheme.primary)
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(Color.black.opacity(0.35))
                 }
-                .padding(14)
-                .background(Color.white)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -1498,13 +1497,10 @@ struct JourneyMemoryDetailView: View {
             } else {
                 if !draftOverallMemory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Text(draftOverallMemory)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(Color(red: 0.48, green: 0.54, blue: 0.62))
+                        .font(.system(size: 14))
+                        .foregroundColor(Color(red: 0.21, green: 0.26, blue: 0.32))
+                        .lineSpacing(8.75)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .frame(minHeight: 52, alignment: .topLeading)
-                        .padding(12)
-                        .background(FigmaTheme.background)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
 

@@ -7,4 +7,5 @@
 "NSLocationAlwaysAndWhenInUseUsageDescription" = "我們需要在背景持續使用你的位置資訊來記錄旅程。";
 "NSHealthShareUsageDescription" = "用於讀取你當天的步數並在 Lifelog 中顯示。";
 
+"NSMotionUsageDescription" = "用於識別步行、跑步和乘車狀態，提升旅程與 Lifelog 記錄準確度。";
 "NSHealthUpdateUsageDescription" = "用於寫入健康資料以維持運動會話，保障背景軌跡記錄穩定。";

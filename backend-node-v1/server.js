@@ -71,6 +71,7 @@ const FIREBASE_BEARER_COMPAT_ENABLED = String(
     : process.env.FIREBASE_BEARER_COMPAT_ENABLED
 ).trim().toLowerCase();
 const WRITE_FREEZE_ENABLED = String(process.env.WRITE_FREEZE_ENABLED || "").trim().toLowerCase();
+const SOCIAL_DISABLED_REGIONS = (process.env.SOCIAL_DISABLED_REGIONS || "CN").trim().toUpperCase().split(",").map(s => s.trim()).filter(Boolean);
 const FIREBASE_PROJECT_ID = (process.env.FIREBASE_PROJECT_ID || "").trim();
 const FIREBASE_SERVICE_ACCOUNT_PATH = (process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.FIREBASE_SERVICE_ACCOUNT_PATH || "").trim();
 const FIREBASE_SERVICE_ACCOUNT_JSON = (process.env.FIREBASE_SERVICE_ACCOUNT_JSON || "").trim();
@@ -594,7 +595,10 @@ async function consumeEmailVerificationToken(rawToken) {
   tokenRecord.usedAt = nowUnix();
   identity.emailVerified = true;
   identity.updatedAt = nowUnix();
-  await saveDB();
+  await persistPG(async () => {
+    await DB.markEmailVerificationUsed(pgPool, tokenRecord.id, tokenRecord.usedAt);
+    await DB.updateAuthIdentity(pgPool, identity.id, { emailVerified: true, updatedAt: identity.updatedAt });
+  });
   return { ok: true, status: 200, email: tokenRecord.email };
 }
 
@@ -740,6 +744,7 @@ function renderPasswordResetHTML({ ok, title, body, deepLink = "" }) {
 function issueEmailVerificationToken(userID, email) {
   const rawToken = randHex(24);
   const tokenID = `evt_${randHex(12)}`;
+  issueEmailVerificationToken._lastID = tokenID;
   db.emailVerificationTokens[tokenID] = {
     id: tokenID,
     userID,
@@ -755,6 +760,7 @@ function issueEmailVerificationToken(userID, email) {
 function issuePasswordResetToken(userID, email) {
   const rawToken = randHex(24);
   const tokenID = `prt_${randHex(12)}`;
+  issuePasswordResetToken._lastID = tokenID;
   db.passwordResetTokens[tokenID] = {
     id: tokenID,
     userID,
@@ -779,6 +785,7 @@ function revokeRefreshTokensForUser(userID) {
 function issueStoredRefreshToken(userID, provider, deviceInfo = null) {
   const rawToken = makeRefreshToken(userID, provider);
   const tokenID = `rft_${randHex(12)}`;
+  issueStoredRefreshToken._lastID = tokenID;
   db.refreshTokens[tokenID] = {
     id: tokenID,
     userID,
@@ -1323,7 +1330,12 @@ async function resolveFirebaseBearerUserID(idToken) {
   changed = upsertFirebaseIdentityIndex(identity, uid) || changed;
 
   if (changed) {
-    await saveDB();
+    await persistPG(async () => {
+      const user = db.users[uid];
+      if (user) await DB.updateUser(pgPool, uid, { email: user.email, provider: user.provider });
+      const fbRec = db.firebaseIdentityIndex?.[identity.uid];
+      if (fbRec) await DB.upsertFirebaseIdentity(pgPool, fbRec);
+    });
   }
 
   return uid;
@@ -2143,7 +2155,12 @@ async function saveDBToRelationalTables(nextDB) {
 async function saveDBToPostgres(nextDB) {
   if (!pgPool) return;
   await ensurePGSchema();
-  await saveDBToRelationalTables(nextDB);
+  // Fast JSON blob fallback — relational tables are written by targeted persistPG/persistPGTx calls.
+  await pgPool.query(
+    `INSERT INTO app_state (key, state) VALUES ('global', $1)
+     ON CONFLICT (key) DO UPDATE SET state = $1`,
+    [JSON.stringify(nextDB)]
+  );
 }
 
 async function loadDB() {
@@ -2181,6 +2198,65 @@ function saveDB() {
     }
   });
   return writeChain;
+}
+
+// ---------------------------------------------------------------------------
+// Targeted incremental persistence helpers
+// ---------------------------------------------------------------------------
+
+async function persistPG(pgAction) {
+  if (pgPool) {
+    await pgAction();
+  } else {
+    await saveDB();
+  }
+}
+
+async function persistPGTx(pgAction) {
+  if (!pgPool) { await saveDB(); return; }
+  const client = await pgPool.connect();
+  try {
+    await client.query("BEGIN");
+    await pgAction(client);
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+async function persistNotificationToPG(ownerID) {
+  if (!pgPool) return;
+  const owner = db.users[ownerID];
+  if (!owner?.notifications?.length) return;
+  const n = owner.notifications[0];
+  await DB.insertNotification(pgPool, {
+    id: n.id, userID: ownerID, type: n.type || "unknown",
+    fromUserID: n.fromUserID || null, fromDisplayName: n.fromDisplayName || null,
+    journeyID: n.journeyID || null, journeyTitle: n.journeyTitle || null,
+    message: n.message || "", read: n.read ?? false,
+    createdAt: n.createdAt || new Date().toISOString(),
+  });
+}
+
+async function persistEmailVerificationTokenToPG(tokenID) {
+  if (!pgPool || !tokenID) return;
+  const t = db.emailVerificationTokens[tokenID];
+  if (t) await DB.insertEmailVerificationToken(pgPool, t);
+}
+
+async function persistPasswordResetTokenToPG(tokenID) {
+  if (!pgPool || !tokenID) return;
+  const t = db.passwordResetTokens[tokenID];
+  if (t) await DB.insertPasswordResetToken(pgPool, t);
+}
+
+async function persistRefreshTokenToPG(tokenID) {
+  if (!pgPool || !tokenID) return;
+  const t = db.refreshTokens[tokenID];
+  if (t) await DB.insertRefreshToken(pgPool, t);
 }
 
 function filterJourneys(journeys, isSelf, isFriend) {
@@ -2685,11 +2761,35 @@ function removeFriendRequestsBetween(userA, userB) {
   }
 }
 
+function collectFriendRequestIDsBetween(userA, userB) {
+  const ids = [];
+  for (const req of allFriendRequests()) {
+    const sameDirection = req.fromUserID === userA && req.toUserID === userB;
+    const reverseDirection = req.fromUserID === userB && req.toUserID === userA;
+    if (sameDirection || reverseDirection) ids.push(req.id);
+  }
+  return ids;
+}
+
 function profileDTOForViewer(target, isSelf, isFriend) {
   const visibility = target.profileVisibility || visibilityFriendsOnly;
   const blocked = !isSelf && visibility === visibilityPrivate;
   const journeys = blocked ? [] : filterJourneys(target.journeys || [], isSelf, isFriend);
-  const cards = blocked ? [] : (isSelf || isFriend ? (target.cityCards || []) : []);
+  let cards = blocked ? [] : (isSelf || isFriend ? (target.cityCards || []) : []);
+
+  // When viewing another user's profile, only include city cards that have
+  // at least one visible journey so deleted/private journeys don't leave
+  // empty ghost city cards.
+  if (!isSelf && cards.length > 0 && journeys.length > 0) {
+    const visibleCityIDs = new Set();
+    for (const j of journeys) {
+      const ck = (j.startCityKey || j.cityKey || "").trim();
+      if (ck) visibleCityIDs.add(ck);
+    }
+    cards = cards.filter((c) => visibleCityIDs.has((c.id || "").trim()));
+  } else if (!isSelf) {
+    cards = [];
+  }
 
   return {
     id: target.id,
@@ -2704,7 +2804,12 @@ function profileDTOForViewer(target, isSelf, isFriend) {
     loadout: normalizeLoadout(target.loadout),
     handleChangeUsed: Boolean(target.handleChangeUsed),
     canUpdateHandleOneTime: !target.handleChangeUsed,
-    stats: profileStatsFrom(target),
+    stats: isSelf ? profileStatsFrom(target) : {
+      totalJourneys: journeys.length,
+      totalDistance: journeys.reduce((acc, j) => acc + Number(j.distance || 0), 0),
+      totalMemories: journeys.reduce((acc, j) => acc + ((j.memories || []).length), 0),
+      totalUnlockedCities: cards.length
+    },
     journeys,
     unlockedCityCards: cards
   };
@@ -2941,6 +3046,15 @@ async function main() {
     }
   }));
 
+  app.get("/v1/feature-flags", (req, res) => {
+    const region = String(req.query.region || req.headers["x-storefront-region"] || "").trim().toUpperCase();
+    const socialEnabled = region ? !SOCIAL_DISABLED_REGIONS.includes(region) : true;
+    res.status(200).json({
+      social: socialEnabled,
+      region: region || null
+    });
+  });
+
   app.post("/v1/auth/register", authRateLimiter, async (req, res) => {
     try {
       const email = String(req.body?.email || "").trim().toLowerCase();
@@ -2965,7 +3079,11 @@ async function main() {
             existingUser.displayName = displayName;
           }
           const verificationToken = issueEmailVerificationToken(existingEmailIdentity.userID, email);
-          await saveDB();
+          await persistPG(async () => {
+            await DB.updateAuthIdentity(pgPool, existingEmailIdentity.id, { passwordHash: existingEmailIdentity.passwordHash, updatedAt: existingEmailIdentity.updatedAt });
+            await DB.updateUser(pgPool, existingEmailIdentity.userID, { displayName: existingUser.displayName });
+            await persistEmailVerificationTokenToPG(issueEmailVerificationToken._lastID);
+          });
           await deliverVerificationEmail(email, verificationToken);
 
           return res.status(200).json({
@@ -3020,7 +3138,11 @@ async function main() {
         updatedAt: createdAt
       };
       const verificationToken = issueEmailVerificationToken(uid, email);
-      await saveDB();
+      await persistPG(async () => {
+        await DB.insertUser(pgPool, db.users[uid]);
+        await DB.insertAuthIdentity(pgPool, db.authIdentities[identityID]);
+        await persistEmailVerificationTokenToPG(issueEmailVerificationToken._lastID);
+      });
       await deliverVerificationEmail(email, verificationToken);
 
       return res.status(200).json({
@@ -3125,7 +3247,9 @@ async function main() {
       }
 
       const token = issueEmailVerificationToken(identity.userID, email);
-      await saveDB();
+      await persistPG(async () => {
+        await persistEmailVerificationTokenToPG(issueEmailVerificationToken._lastID);
+      });
       await deliverVerificationEmail(email, token);
       return res.status(200).json({ ok: true });
     } catch {
@@ -3155,7 +3279,9 @@ async function main() {
           // 升级到bcrypt
           identity.passwordHash = hashPassword(password);
           identity.updatedAt = nowUnix();
-          await saveDB();
+          await persistPG(async () => {
+            await DB.updateAuthIdentity(pgPool, identity.id, { passwordHash: identity.passwordHash, updatedAt: identity.updatedAt });
+          });
         }
       }
 
@@ -3167,7 +3293,9 @@ async function main() {
 
       const accessToken = makeAccessToken(user.id, user.provider || "email");
       const refreshToken = issueStoredRefreshToken(user.id, user.provider || "email");
-      await saveDB();
+      await persistPG(async () => {
+        await persistRefreshTokenToPG(issueStoredRefreshToken._lastID);
+      });
       return res.status(200).json(authSuccessPayload(
         user,
         user.provider || "email",
@@ -3208,7 +3336,9 @@ async function main() {
       if (!record) return res.status(401).json({ message: "refresh token invalid" });
       if (!record.revokedAt) {
         record.revokedAt = nowUnix();
-        await saveDB();
+        await persistPG(async () => {
+          await DB.revokeRefreshToken(pgPool, record.id);
+        });
       }
       return res.status(200).json({ ok: true });
     } catch {
@@ -3227,7 +3357,9 @@ async function main() {
       ));
       if (identity) {
         const token = issuePasswordResetToken(identity.userID, email);
-        await saveDB();
+        await persistPG(async () => {
+          await persistPasswordResetTokenToPG(issuePasswordResetToken._lastID);
+        });
         await deliverPasswordResetEmail(email, token);
       }
       return res.status(200).json({ ok: true });
@@ -3265,7 +3397,12 @@ async function main() {
       if (user) user.passwordHash = nextHash;
       tokenRecord.usedAt = nowUnix();
       revokeRefreshTokensForUser(tokenRecord.userID);
-      await saveDB();
+      await persistPG(async () => {
+        await DB.updateAuthIdentity(pgPool, identity.id, { passwordHash: nextHash, updatedAt: identity.updatedAt });
+        // passwordHash is stored in auth_identities, not users table
+        await DB.markPasswordResetUsed(pgPool, tokenRecord.id, tokenRecord.usedAt);
+        await DB.revokeRefreshTokensForUser(pgPool, tokenRecord.userID);
+      });
       return res.status(200).json({ ok: true });
     } catch {
       return res.status(500).json({ message: "internal error" });
@@ -3349,7 +3486,16 @@ async function main() {
 
       const accessToken = makeAccessToken(uid, "apple");
       const refreshToken = issueStoredRefreshToken(uid, "apple");
-      await saveDB();
+      await persistPG(async () => {
+        const user = db.users[uid];
+        if (user) await DB.updateUser(pgPool, uid, { email: user.email, provider: user.provider });
+        if (modernKey) await DB.setOAuthUser(pgPool, modernKey, uid);
+        const appleIdent = findAuthIdentityByProviderSubject("apple", identity.subject);
+        if (appleIdent) {
+          try { await DB.insertAuthIdentity(pgPool, appleIdent); } catch { await DB.updateAuthIdentity(pgPool, appleIdent.id, { userID: uid, email: appleIdent.email, emailVerified: appleIdent.emailVerified, updatedAt: appleIdent.updatedAt }); }
+        }
+        await persistRefreshTokenToPG(issueStoredRefreshToken._lastID);
+      });
 
       return res.status(200).json(authSuccessPayload(
         user,
@@ -3458,15 +3604,27 @@ async function main() {
         }
       }
 
+      const refreshToken = issueStoredRefreshToken(uid, u.provider);
       if (changed) {
-        await saveDB();
+        await persistPG(async () => {
+          const user = db.users[uid];
+          if (user) {
+            try { await DB.insertUser(pgPool, user); } catch { await DB.updateUser(pgPool, uid, { email: user.email, provider: user.provider }); }
+          }
+          if (modernKey) await DB.setOAuthUser(pgPool, modernKey, uid);
+          await persistRefreshTokenToPG(issueStoredRefreshToken._lastID);
+        });
+      } else {
+        await persistPG(async () => {
+          await persistRefreshTokenToPG(issueStoredRefreshToken._lastID);
+        });
       }
       return res.status(200).json(authSuccessPayload(
         u,
         u.provider,
         u.email || null,
         makeAccessToken(uid, u.provider),
-        makeRefreshToken(uid, u.provider)
+        refreshToken
       ));
     } catch (e) {
       const message = String(e?.message || "").toLowerCase();
@@ -3585,7 +3743,10 @@ async function main() {
         updatedAt: createdAt
       };
       pushFriendRequestNotification(target, me);
-      await saveDB();
+      await persistPG(async () => {
+        await DB.insertFriendRequest(pgPool, db.friendRequestsIndex[reqID]);
+        await persistNotificationToPG(target.id);
+      });
       return res.status(200).json({
         ok: true,
         request: friendRequestDTO(db.friendRequestsIndex[reqID]),
@@ -3611,15 +3772,29 @@ async function main() {
       const fromUser = db.users[pending.fromUserID];
       if (!fromUser) {
         removeFriendRequestByID(requestID);
-        await saveDB();
+        await persistPG(async () => {
+          await DB.deleteFriendRequest(pgPool, requestID);
+        });
         return res.status(404).json({ message: "request sender not found" });
       }
 
+      const deletedRequestIDs = collectFriendRequestIDsBetween(me.id, fromUser.id);
       appendUnique(me.friendIDs, fromUser.id);
       appendUnique(fromUser.friendIDs, me.id);
       removeFriendRequestsBetween(me.id, fromUser.id);
       pushFriendRequestAcceptedNotification(fromUser, me);
-      await saveDB();
+      await persistPGTx(async (client) => {
+        await DB.addFriendship(client, me.id, fromUser.id);
+        for (const rid of deletedRequestIDs) await DB.deleteFriendRequest(client, rid);
+        const n = (fromUser.notifications || [])[0];
+        if (n) await DB.insertNotification(client, {
+          id: n.id, userID: fromUser.id, type: n.type || "unknown",
+          fromUserID: n.fromUserID || null, fromDisplayName: n.fromDisplayName || null,
+          journeyID: n.journeyID || null, journeyTitle: n.journeyTitle || null,
+          message: n.message || "", read: n.read ?? false,
+          createdAt: n.createdAt || new Date().toISOString(),
+        });
+      });
       return res.status(200).json({
         ok: true,
         friend: friendDTOForViewer(fromUser, true),
@@ -3643,7 +3818,9 @@ async function main() {
       if (pending.toUserID !== uid) return res.status(403).json({ message: "forbidden" });
 
       removeFriendRequestByID(requestID);
-      await saveDB();
+      await persistPG(async () => {
+        await DB.deleteFriendRequest(pgPool, requestID);
+      });
       return res.status(200).json({ ok: true, message: "已拒绝好友申请" });
     } catch {
       return res.status(401).json({ message: "unauthorized" });
@@ -3658,11 +3835,15 @@ async function main() {
       const fid = String(req.params.friendID || "").trim();
       if (!fid) return res.status(400).json({ message: "friend id required" });
 
+      const deletedRequestIDs = collectFriendRequestIDsBetween(uid, fid);
       me.friendIDs = removeID(me.friendIDs || [], fid);
       const f = db.users[fid];
       if (f) f.friendIDs = removeID(f.friendIDs || [], uid);
       removeFriendRequestsBetween(uid, fid);
-      await saveDB();
+      await persistPGTx(async (client) => {
+        await DB.removeFriendship(client, uid, fid);
+        for (const rid of deletedRequestIDs) await DB.deleteFriendRequest(client, rid);
+      });
       return res.status(200).json({});
     } catch {
       return res.status(401).json({ message: "unauthorized" });
@@ -3680,7 +3861,11 @@ async function main() {
       const snapshotComplete = parseTruthy(req.body?.snapshotComplete);
       me.journeys = mergeJourneyPayloads(me.journeys || [], journeys, removedJourneyIDs, snapshotComplete, uid);
       me.cityCards = mergeCityCardPayloads(me.cityCards || [], unlockedCityCards, snapshotComplete);
-      await saveDB();
+      await persistPG(async () => {
+        for (const j of journeys) await DB.upsertJourney(pgPool, uid, j);
+        if (removedJourneyIDs.length) await DB.deleteJourneys(pgPool, uid, removedJourneyIDs);
+        await DB.replaceCityCards(pgPool, uid, me.cityCards);
+      });
       return res.status(200).json({ journeys: me.journeys.length, cityCards: me.cityCards.length });
     } catch {
       return res.status(401).json({ message: "unauthorized" });
@@ -3788,7 +3973,10 @@ async function main() {
         if (viewerID !== ownerUserID) {
           pushJourneyLikeNotification(owner, viewer, journey);
         }
-        await saveDB();
+        await persistPG(async () => {
+          await DB.addJourneyLike(pgPool, ownerUserID, journeyID, viewerID);
+          if (viewerID !== ownerUserID) await persistNotificationToPG(ownerUserID);
+        });
       }
 
       return res.status(200).json({
@@ -3817,7 +4005,9 @@ async function main() {
         record.likerIDs = next;
         delete record.likedAtByUserID[viewerID];
         record.updatedAt = new Date().toISOString();
-        await saveDB();
+        await persistPG(async () => {
+          await DB.removeJourneyLike(pgPool, ownerUserID, journeyID, viewerID);
+        });
       }
       return res.status(200).json({
         ownerUserID,
@@ -3929,7 +4119,17 @@ async function main() {
 
       pushPostcardReceivedNotification(target, me, canonicalMessage);
       const saveStartedAt = timingNowNs();
-      await saveDB();
+      await persistPGTx(async (client) => {
+        await DB.insertPostcard(client, canonicalMessage);
+        const n = (target.notifications || [])[0];
+        if (n) await DB.insertNotification(client, {
+          id: n.id, userID: target.id, type: n.type || "unknown",
+          fromUserID: n.fromUserID || null, fromDisplayName: n.fromDisplayName || null,
+          journeyID: n.journeyID || null, journeyTitle: n.journeyTitle || null,
+          message: n.message || "", read: n.read ?? false,
+          createdAt: n.createdAt || new Date().toISOString(),
+        });
+      });
       const saveDurationMs = elapsedMs(saveStartedAt);
 
       logTiming("postcard_send", {
@@ -4011,7 +4211,9 @@ async function main() {
           comment: null,
           reactedAt: null
         };
-        await saveDB();
+        await persistPG(async () => {
+          await DB.upsertPostcardReaction(pgPool, sender.postcardReactions[messageID]);
+        });
       }
 
       return res.status(200).json({ success: true });
@@ -4055,7 +4257,10 @@ async function main() {
       };
 
       pushPostcardReactionNotification(sender, me, postcard, reactionEmoji, comment);
-      await saveDB();
+      await persistPG(async () => {
+        await DB.upsertPostcardReaction(pgPool, sender.postcardReactions[messageID]);
+        await persistNotificationToPG(sender.id);
+      });
 
       return res.status(200).json({
         reaction: sender.postcardReactions[messageID]
@@ -4111,7 +4316,15 @@ async function main() {
         return item;
       });
 
-      if (changed) await saveDB();
+      if (changed) {
+        await persistPG(async () => {
+          if (markAll) {
+            await DB.markAllNotificationsRead(pgPool, uid);
+          } else {
+            await DB.markNotificationsRead(pgPool, uid, ids);
+          }
+        });
+      }
       return res.status(200).json({ ok: true });
     } catch {
       return res.status(401).json({ message: "unauthorized" });
@@ -4142,7 +4355,9 @@ async function main() {
       if (!isFriendOf(viewer, targetID)) return res.status(403).json({ message: "friends only" });
 
       pushProfileStompNotification(target, viewer);
-      await saveDB();
+      await persistPG(async () => {
+        await persistNotificationToPG(targetID);
+      });
       return res.status(200).json({ ok: true, message: `已踩一踩 ${target.displayName} 的主页` });
     } catch {
       return res.status(401).json({ message: "unauthorized" });
@@ -4180,7 +4395,9 @@ async function main() {
       }
 
       me.handleChangeUsed = true;
-      await saveDB();
+      await persistPG(async () => {
+        await DB.updateUser(pgPool, uid, { handle: me.handle, handleChangeUsed: true });
+      });
       return res.status(200).json(profileDTOForViewer(me, true, true));
     } catch {
       return res.status(401).json({ message: "unauthorized" });
@@ -4203,7 +4420,9 @@ async function main() {
       }
 
       me.displayName = nextName;
-      await saveDB();
+      await persistPG(async () => {
+        await DB.updateUser(pgPool, uid, { displayName: nextName });
+      });
       return res.status(200).json(profileDTOForViewer(me, true, true));
     } catch {
       return res.status(401).json({ message: "unauthorized" });
@@ -4218,7 +4437,9 @@ async function main() {
 
       const next = normalizeVisibility(req.body?.profileVisibility);
       me.profileVisibility = next;
-      await saveDB();
+      await persistPG(async () => {
+        await DB.updateUser(pgPool, uid, { profileVisibility: next });
+      });
       return res.status(200).json(profileDTOForViewer(me, true, true));
     } catch {
       return res.status(401).json({ message: "unauthorized" });
@@ -4233,7 +4454,9 @@ async function main() {
 
       const bio = String(req.body?.bio || "").slice(0, 200);
       me.bio = bio;
-      await saveDB();
+      await persistPG(async () => {
+        await DB.updateUser(pgPool, uid, { bio });
+      });
       return res.status(200).json(profileDTOForViewer(me, true, true));
     } catch {
       return res.status(401).json({ message: "unauthorized" });
@@ -4252,7 +4475,9 @@ async function main() {
       }
 
       me.loadout = normalizeLoadout(incoming, me.loadout);
-      await saveDB();
+      await persistPG(async () => {
+        await DB.updateUser(pgPool, uid, { loadout: me.loadout });
+      });
       return res.status(200).json(profileDTOForViewer(me, true, true));
     } catch {
       return res.status(401).json({ message: "unauthorized" });
@@ -4279,7 +4504,9 @@ async function main() {
       me.displayName = nextName;
       me.loadout = normalizeLoadout(incoming, me.loadout);
       me.profileSetupCompleted = true;
-      await saveDB();
+      await persistPG(async () => {
+        await DB.updateUser(pgPool, uid, { displayName: nextName, loadout: me.loadout, profileSetupCompleted: true });
+      });
       return res.status(200).json(profileDTOForViewer(me, true, true));
     } catch {
       return res.status(401).json({ message: "unauthorized" });

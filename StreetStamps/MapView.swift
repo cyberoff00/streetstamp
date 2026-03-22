@@ -398,7 +398,7 @@ struct JourneyRoute: Codable {
             return CityDisplayResolver.title(
                 for: resolvedCityKey,
                 fallbackTitle: label,
-                locale: .current
+                locale: LanguagePreference.shared.displayLocale
             )
         }
         let old = currentCity.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -408,7 +408,7 @@ struct JourneyRoute: Codable {
         return CityDisplayResolver.title(
             for: resolvedCityKey,
             fallbackTitle: old,
-            locale: .current
+            locale: LanguagePreference.shared.displayLocale
         )
     }
 
@@ -606,9 +606,9 @@ enum TravelMode: String, Codable {
 
 struct MapViewRouteRenderStyle {
     struct LayerWidths {
-        let halo: CGFloat
-        let frequency: CGFloat
-        let core: CGFloat
+        let glow: CGFloat
+        let main: CGFloat
+        let highlight: CGFloat
     }
 
     static func altitudeBucket(for altitude: CLLocationDistance) -> Int {
@@ -625,8 +625,8 @@ struct MapViewRouteRenderStyle {
 
     static func coreWidth(forAltitude altitude: CLLocationDistance, mode: TravelMode) -> CGFloat {
         let d = max(500.0, altitude)
-        let t = max(0.60, min(1.30, 1_150.0 / d))
-        var core = 4.9 * t
+        let t = max(0.45, min(1.20, 1_600.0 / d))
+        var core = 6.5 * t
 
         switch mode {
         case .walk, .run: core *= 1.05
@@ -648,18 +648,16 @@ struct MapViewRouteRenderStyle {
         isGap: Bool
     ) -> LayerWidths {
         let base = coreWidth(forAltitude: altitude, mode: mode)
-        let weight = max(0, min(1, repeatWeight))
 
         if isGap {
-            let core = max(1.2, base * 0.64)
-            let halo = max(1.0, core * 1.24)
-            return LayerWidths(halo: halo, frequency: 0, core: core)
+            let main = max(1.2, base * 0.64)
+            return LayerWidths(glow: main * 2.2, main: main, highlight: 0)
         }
 
-        let core = base * 1.02 + weight * 0.10
-        let frequency = min(core * 0.58, base * 0.45 + weight * 0.05)
-        let halo = min(core * 1.32, base * 1.25 + weight * 0.06)
-        return LayerWidths(halo: halo, frequency: frequency, core: core)
+        let main = base * 1.05
+        let glow = main * 2.5
+        let highlight = main * 0.35
+        return LayerWidths(glow: glow, main: main, highlight: highlight)
     }
 }
 
@@ -3339,6 +3337,7 @@ private struct JourneyMKMapView: UIViewRepresentable {
         private var lastSegmentsSignature: String = ""
         private var lastTailSignature: String = ""
         private var lastAltitudeBucket: Int?
+        private var lastAppearance: String?
         private var isProgrammaticRegionChange = false
         private var renderedSegments: [RenderRouteSegment] = []
         private var routeOverlays: [WeightedRoutePolyline] = []
@@ -3599,17 +3598,30 @@ private struct JourneyMKMapView: UIViewRepresentable {
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             guard let poly = overlay as? MKPolyline else { return MKOverlayRenderer(overlay: overlay) }
             let altitude = mapView.camera.altitude
+            let isDark = MapAppearanceSettings.current == .dark
+            let base = MapAppearanceSettings.routeBaseColor
+            let glowTint = MapAppearanceSettings.routeGlowColor
 
             if poly.title == "tail" {
-                let renderer = MKPolylineRenderer(polyline: poly)
-                renderer.strokeColor = MapAppearanceSettings.routeBaseColor.withAlphaComponent(0.86)
-                renderer.lineWidth = max(2.0, min(3.1, MapViewRouteRenderStyle.coreWidth(forAltitude: altitude, mode: parent.travelMode) * 0.82))
-                renderer.lineCap = .round
-                renderer.lineJoin = .round
-                return renderer
+                let tailMain = MKPolylineRenderer(polyline: poly)
+                tailMain.strokeColor = base.withAlphaComponent(0.90)
+                tailMain.lineWidth = max(2.0, min(3.1, MapViewRouteRenderStyle.coreWidth(forAltitude: altitude, mode: parent.travelMode) * 0.82))
+                tailMain.lineCap = .round
+                tailMain.lineJoin = .round
+                if isDark {
+                    let tailGlow = MKPolylineRenderer(polyline: poly)
+                    tailGlow.lineWidth = tailMain.lineWidth * 2.5
+                    tailGlow.lineCap = .round
+                    tailGlow.lineJoin = .round
+                    tailGlow.strokeColor = glowTint.withAlphaComponent(0.18)
+                    let mr = MultiPolylineRenderer(renderers: [tailGlow, tailMain])
+                    mr.glowBlur = 6.0
+                    mr.glowColor = glowTint.withAlphaComponent(0.45).cgColor
+                    return mr
+                }
+                return tailMain
             }
 
-            let base = MapAppearanceSettings.routeBaseColor
             let coreWidth = MapViewRouteRenderStyle.coreWidth(forAltitude: altitude, mode: parent.travelMode)
             guard let styled = poly as? WeightedRoutePolyline else {
                 let renderer = MKPolylineRenderer(polyline: poly)
@@ -3632,31 +3644,39 @@ private struct JourneyMKMapView: UIViewRepresentable {
                 isGap: isGap
             )
 
-            let halo = MKPolylineRenderer(polyline: styled)
-            halo.lineWidth = widths.halo
-            halo.lineCap = CGLineCap.round
-            halo.lineJoin = CGLineJoin.round
-            halo.strokeColor = base.withAlphaComponent(isGap ? 0.06 : 0.09)
+            // Layer 1: Glow
+            let glowLayer = MKPolylineRenderer(polyline: styled)
+            glowLayer.lineWidth = widths.glow
+            glowLayer.lineCap = .round
+            glowLayer.lineJoin = .round
+            glowLayer.strokeColor = glowTint.withAlphaComponent(isGap ? 0.06 : (isDark ? 0.25 : 0.12))
             if isGap {
-                halo.lineDashPattern = RouteRenderStyleTokens.dashLengths.map { NSNumber(value: Double($0)) }
+                glowLayer.lineDashPattern = RouteRenderStyleTokens.dashLengths.map { NSNumber(value: Double($0)) }
             }
 
-            let freq = MKPolylineRenderer(polyline: styled)
-            freq.lineWidth = widths.frequency
-            freq.lineCap = CGLineCap.round
-            freq.lineJoin = CGLineJoin.round
-            freq.strokeColor = base.withAlphaComponent(isGap ? 0 : (0.014 + 0.016 * weight))
-
-            let core = MKPolylineRenderer(polyline: styled)
-            core.lineWidth = widths.core
-            core.lineCap = CGLineCap.round
-            core.lineJoin = CGLineJoin.round
-            core.strokeColor = base.withAlphaComponent(isGap ? 0.56 : 0.97)
+            // Layer 2: Main
+            let mainLayer = MKPolylineRenderer(polyline: styled)
+            mainLayer.lineWidth = widths.main
+            mainLayer.lineCap = .round
+            mainLayer.lineJoin = .round
+            mainLayer.strokeColor = base.withAlphaComponent(isGap ? 0.56 : 1.0)
             if isGap {
-                core.lineDashPattern = RouteRenderStyleTokens.dashLengths.map { NSNumber(value: Double($0)) }
+                mainLayer.lineDashPattern = RouteRenderStyleTokens.dashLengths.map { NSNumber(value: Double($0)) }
             }
 
-            return MultiPolylineRenderer(renderers: [halo, freq, core])
+            // Layer 3: Highlight
+            let highlightLayer = MKPolylineRenderer(polyline: styled)
+            highlightLayer.lineWidth = widths.highlight
+            highlightLayer.lineCap = .round
+            highlightLayer.lineJoin = .round
+            highlightLayer.strokeColor = isGap ? .clear : UIColor.white.withAlphaComponent(isDark ? 0.45 : 0.25)
+
+            let mr = MultiPolylineRenderer(renderers: [glowLayer, mainLayer, highlightLayer])
+            if isDark {
+                mr.glowBlur = 8.0
+                mr.glowColor = glowTint.withAlphaComponent(0.50).cgColor
+            }
+            return mr
         }
 
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
@@ -3737,6 +3757,8 @@ private final class WeightedRoutePolyline: MKPolyline {
 
 private final class MultiPolylineRenderer: MKOverlayRenderer {
     private let renderers: [MKOverlayPathRenderer]
+    var glowBlur: CGFloat = 0
+    var glowColor: CGColor?
 
     init(renderers: [MKOverlayPathRenderer]) {
         self.renderers = renderers
@@ -3744,8 +3766,16 @@ private final class MultiPolylineRenderer: MKOverlayRenderer {
     }
 
     override func draw(_ mapRect: MKMapRect, zoomScale: MKZoomScale, in context: CGContext) {
-        for r in renderers {
-            r.draw(mapRect, zoomScale: zoomScale, in: context)
+        for (i, r) in renderers.enumerated() {
+            if i == 0 && glowBlur > 0, let color = glowColor {
+                context.saveGState()
+                let scaledBlur = glowBlur / zoomScale
+                context.setShadow(offset: .zero, blur: scaledBlur, color: color)
+                r.draw(mapRect, zoomScale: zoomScale, in: context)
+                context.restoreGState()
+            } else {
+                r.draw(mapRect, zoomScale: zoomScale, in: context)
+            }
         }
     }
 }

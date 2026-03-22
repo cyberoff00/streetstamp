@@ -19,7 +19,7 @@ struct ProfileSummaryCardContent: Equatable {
         )
     }
 
-    init(level: Int, cityCount: Int, memoryCount: Int, locale: Locale = .current) {
+    init(level: Int, cityCount: Int, memoryCount: Int, locale: Locale = LanguagePreference.shared.displayLocale) {
         self.level = level
         self.cityCount = cityCount
         self.memoryCount = memoryCount

@@ -220,7 +220,7 @@ enum CityPlacemarkResolver {
         }
 
         return Display(
-            title: normalizeUserFacingTitle(title, iso2: candidates.iso2, level: level, locale: .current),
+            title: normalizeUserFacingTitle(title, iso2: candidates.iso2, level: level, locale: LanguagePreference.shared.displayLocale),
             subtitle: subtitle,
             iso2: candidates.iso2,
             level: level,
@@ -238,7 +238,7 @@ enum CityPlacemarkResolver {
         parentRegionKey: String? = nil,
         preferredLevel: CardLevel? = nil,
         localizedDisplayNameByLocale: [String: String]? = nil,
-        locale: Locale = .current
+        locale: Locale = LanguagePreference.shared.displayLocale
     ) -> String {
         let regionStyledKey = isRegionStyledDisplayKey(cityKey: cityKey, iso2: iso2)
         let chosenLevel = resolvedDisplayLevel(
@@ -355,7 +355,7 @@ enum CityPlacemarkResolver {
         parentRegionKey: String? = nil,
         preferredLevel: CardLevel? = nil,
         localizedDisplayNameByLocale: [String: String]? = nil,
-        locale: Locale = .current
+        locale: Locale = LanguagePreference.shared.displayLocale
     ) -> String {
         let decoded = preferredAvailableLevelNamesForDisplay(
             availableLevelNamesRaw,
@@ -376,7 +376,7 @@ enum CityPlacemarkResolver {
 
     static func displayTitle(
         for cachedCity: CachedCity,
-        locale: Locale = .current,
+        locale: Locale = LanguagePreference.shared.displayLocale,
         preferredLevelOverride: CardLevel? = nil,
         localizedCandidate: String? = nil
     ) -> String {
@@ -635,7 +635,7 @@ enum CityPlacemarkResolver {
     static func preferredAvailableLevelNamesForDisplay(
         _ availableLevelNamesRaw: [String: String]?,
         storedLocaleIdentifier: String? = nil,
-        locale: Locale = .current
+        locale: Locale = LanguagePreference.shared.displayLocale
     ) -> [CardLevel: String]? {
         let decoded = decodeAvailableLevelNames(availableLevelNamesRaw)
         guard !decoded.isEmpty else { return nil }
@@ -663,7 +663,7 @@ enum CityPlacemarkResolver {
         storedAvailableLevelNamesRaw: [String: String]?,
         storedLocaleIdentifier: String?,
         freshlyResolvedLevelNames: [CardLevel: String],
-        locale: Locale = .current
+        locale: Locale = LanguagePreference.shared.displayLocale
     ) -> [CardLevel: String] {
         if let stored = preferredAvailableLevelNamesForDisplay(
             storedAvailableLevelNamesRaw,
@@ -927,7 +927,7 @@ enum JourneyCityNamePresentation {
             for: journey,
             localizedCityNameByKey: localizedCityNameByKey,
             cachedCitiesByKey: [:],
-            locale: .current
+            locale: LanguagePreference.shared.displayLocale
         )
     }
 
@@ -935,7 +935,7 @@ enum JourneyCityNamePresentation {
         for journey: JourneyRoute,
         localizedCityNameByKey: [String: String],
         cachedCitiesByKey: [String: CachedCity],
-        locale: Locale = .current
+        locale: Locale = LanguagePreference.shared.displayLocale
     ) -> String {
         let rawKey = journey.stableCityKey ?? ""
         let key = CityCollectionResolver.resolveCollectionKey(cityKey: rawKey)
@@ -978,7 +978,7 @@ enum CityDisplayTitlePresentation {
         availableLevelNamesRaw: [String: String]? = nil,
         parentRegionKey: String? = nil,
         localizedDisplayNameByLocale: [String: String]? = nil,
-        locale: Locale = .current
+        locale: Locale = LanguagePreference.shared.displayLocale
     ) -> String {
         let trimmedKey = (cityKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if let localized = localizedCityNameByKey[trimmedKey]?.trimmingCharacters(in: .whitespacesAndNewlines),

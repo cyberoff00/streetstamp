@@ -60,7 +60,9 @@ struct EquipmentView: View {
     @State private var feedbackMessage: String?
     @State private var expandedColorCategoryId: String?
 
-    private let itemPrice = 200
+    private func itemPrice(for categoryId: String) -> Int {
+        GearPricingConfig.price(for: categoryId)
+    }
     private let equipmentCategoryTrailingPeekWidth: CGFloat = 28
     private let hairColorOptions = [
         // Classic tones
@@ -146,22 +148,21 @@ struct EquipmentView: View {
         .onChange(of: economy) { _, newValue in
             EquipmentEconomyStore.save(newValue)
         }
-        .confirmationDialog(L10n.t("buy_coins"), isPresented: $showCoinPurchaseDialog, titleVisibility: .visible) {
-            Button(L10n.t("add_200_coins")) { addCoins(200) }
-            Button(L10n.t("add_1000_coins")) { addCoins(1000) }
-            Button(L10n.t("add_5000_coins")) { addCoins(5000) }
-            Button(L10n.t("cancel"), role: .cancel) { }
+        .sheet(isPresented: $showCoinPurchaseDialog) {
+            CoinPurchaseSheet(economy: $economy) {
+                showCoinPurchaseDialog = false
+            }
         }
         .alert(L10n.t("not_enough_coins"), isPresented: $showInsufficientCoinsAlert) {
-            Button(L10n.t("add_1000"), role: .none) {
-                addCoins(1000)
+            Button(L10n.t("buy_coins"), role: .none) {
+                showCoinPurchaseDialog = true
             }
             Button(L10n.t("cancel"), role: .cancel) { }
         } message: {
-            Text(String(format: L10n.t("need_coins_to_unlock"), itemPrice))
+            Text(L10n.t("not_enough_coins"))
         }
         .alert(L10n.t("confirm_purchase"), isPresented: $showPurchaseConfirmAlert) {
-            Button(String(format: L10n.t("buy_n_coins"), itemPrice), role: .none) {
+            Button(String(format: L10n.t("buy_n_coins"), pendingPurchase?.price ?? 0), role: .none) {
                 confirmPendingPurchase()
             }
             Button(L10n.t("cancel"), role: .cancel) {
@@ -527,9 +528,11 @@ struct EquipmentView: View {
                 GridItem(.flexible(), spacing: 10, alignment: .top),
                 GridItem(.flexible(), spacing: 10, alignment: .top)
             ]
+            let price = itemPrice(for: category.id)
             LazyVGrid(columns: columns, spacing: 10) {
                 ForEach(visibleItems) { item in
                     let ownership = ownershipState(category: category, item: item)
+                    let isFree = economy.isFreeItem(categoryId: category.id, itemId: item.id, catalog: store.catalog)
 
                     Button {
                         handleTap(category: category, item: item, ownership: ownership)
@@ -538,7 +541,8 @@ struct EquipmentView: View {
                             imageName: store.imageName(item.images, face: .front),
                             isEquipped: ownership == .equipped,
                             isLocked: ownership == .locked,
-                            price: itemPrice
+                            isFree: isFree,
+                            price: price
                         )
                         .appFullSurfaceTapTarget(.roundedRect(16))
                     }
@@ -598,7 +602,8 @@ struct EquipmentView: View {
             applySelection(category: category, item: item)
             showFeedback(L10n.t("equipment_equipped_feedback"))
         case .locked:
-            if economy.coins < itemPrice {
+            let price = itemPrice(for: category.id)
+            if economy.coins < price {
                 showInsufficientCoinsAlert = true
                 return
             }
@@ -606,16 +611,11 @@ struct EquipmentView: View {
             pendingPurchase = PendingPurchase(
                 categoryId: category.id,
                 itemId: item.id,
-                itemName: L10n.t(item.nameKey)
+                itemName: L10n.t(item.nameKey),
+                price: price
             )
             showPurchaseConfirmAlert = true
         }
-    }
-
-    private func addCoins(_ amount: Int) {
-        guard amount > 0 else { return }
-        economy.coins += amount
-        showFeedback(String(format: L10n.t("equipment_coins_added_format"), amount))
     }
 
     private func showFeedback(_ message: String) {
@@ -631,11 +631,12 @@ struct EquipmentView: View {
 
     private var purchaseConfirmMessage: String {
         guard let pendingPurchase else { return L10n.t("equipment_unlock_prompt") }
-        let remaining = economy.coins - itemPrice
+        let price = pendingPurchase.price
+        let remaining = economy.coins - price
         return String(
             format: L10n.t("equipment_purchase_confirm_message"),
             pendingPurchase.itemName,
-            itemPrice,
+            price,
             economy.coins,
             remaining
         )
@@ -643,7 +644,8 @@ struct EquipmentView: View {
 
     private func confirmPendingPurchase() {
         guard let pendingPurchase else { return }
-        guard economy.coins >= itemPrice else {
+        let price = pendingPurchase.price
+        guard economy.coins >= price else {
             showInsufficientCoinsAlert = true
             self.pendingPurchase = nil
             return
@@ -656,7 +658,7 @@ struct EquipmentView: View {
             return
         }
 
-        economy.coins -= itemPrice
+        economy.coins -= price
         economy.markOwned(categoryId: category.id, itemId: item.id)
         applySelection(category: category, item: item)
         showFeedback(L10n.t("equipment_unlocked_and_equipped"))
@@ -665,7 +667,7 @@ struct EquipmentView: View {
 
     private var pendingTryOnPurchaseCost: Int {
         guard let pendingTryOnPurchase else { return 0 }
-        return pendingTryOnPurchase.missingItems.count * itemPrice
+        return pendingTryOnPurchase.missingItems.reduce(0) { $0 + itemPrice(for: $1.categoryId) }
     }
 
     @ViewBuilder
@@ -942,6 +944,7 @@ private struct PendingPurchase: Equatable {
     let categoryId: String
     let itemId: String
     let itemName: String
+    let price: Int
 }
 
 private struct TryOnMissingItem: Equatable, Hashable {
@@ -1035,6 +1038,7 @@ private struct GearCard: View {
     let imageName: String?
     let isEquipped: Bool
     let isLocked: Bool
+    let isFree: Bool
     let price: Int
 
     var body: some View {
@@ -1083,6 +1087,23 @@ private struct GearCard: View {
                 }
             }
 
+            priceLabel
+                .frame(maxWidth: .infinity, minHeight: 30)
+                .background(Color.white)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 2)
+    }
+
+    @ViewBuilder
+    private var priceLabel: some View {
+        if isFree {
+            EmptyView()
+        } else {
             HStack(spacing: 4) {
                 Image(systemName: "bitcoinsign.circle.fill")
                     .font(.system(size: 12, weight: .semibold))
@@ -1092,138 +1113,6 @@ private struct GearCard: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(FigmaTheme.text)
             }
-            .frame(maxWidth: .infinity, minHeight: 30)
-            .background(Color.white)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.black.opacity(0.06), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 2)
-    }
-}
-
-private struct EquipmentEconomy: Codable, Equatable {
-    var coins: Int
-    var ownedItemsByCategory: [String: [String]]
-
-    static let startingCoins = 600
-
-    static var empty: EquipmentEconomy {
-        EquipmentEconomy(coins: startingCoins, ownedItemsByCategory: [:])
-    }
-
-    mutating func bootstrapIfNeeded(catalog: AvatarCatalog, loadout: RobotLoadout) {
-        if ownedItemsByCategory.isEmpty {
-            ownedItemsByCategory = [:]
-
-            for category in catalog.categories {
-                var seed = Set<String>()
-
-                if let first = category.items.first?.id {
-                    seed.insert(first)
-                }
-                if let equipped = equippedItemId(selectionKey: category.selectionKey, loadout: loadout) {
-                    seed.insert(equipped)
-                }
-                if category.id == "accessory" {
-                    seed.insert("none")
-                }
-
-                ownedItemsByCategory[category.id] = Array(seed)
-            }
-
-            if coins <= 0 {
-                coins = Self.startingCoins
-            }
-        }
-
-        ensureCurrentLoadoutOwned(loadout: loadout)
-    }
-
-    mutating func ensureCurrentLoadoutOwned(loadout: RobotLoadout) {
-        markOwned(categoryId: "hair", itemId: loadout.hairId)
-        markOwned(categoryId: "suit", itemId: "none")
-        markOwned(categoryId: "upper", itemId: "none")
-        markOwned(categoryId: "under", itemId: "none")
-        markOwned(categoryId: "shoes", itemId: "none")
-        if let suitId = loadout.suitId {
-            markOwned(categoryId: "suit", itemId: suitId)
-        }
-        markOwned(categoryId: "upper", itemId: loadout.upperId)
-        markOwned(categoryId: "under", itemId: loadout.underId)
-        if let shoesId = loadout.shoesId {
-            markOwned(categoryId: "shoes", itemId: shoesId)
-        }
-        markOwned(categoryId: "expression", itemId: loadout.expressionId)
-        markOwned(categoryId: "hat", itemId: "none")
-        markOwned(categoryId: "glass", itemId: "none")
-        markOwned(categoryId: "accessory", itemId: "none")
-        if let hatId = loadout.hatId {
-            markOwned(categoryId: "hat", itemId: hatId)
-        }
-        if let glassId = loadout.glassId {
-            markOwned(categoryId: "glass", itemId: glassId)
-        }
-
-        for accessoryId in loadout.accessoryIds {
-            markOwned(categoryId: "accessory", itemId: accessoryId)
-        }
-    }
-
-    func owns(categoryId: String, itemId: String) -> Bool {
-        guard let owned = ownedItemsByCategory[categoryId] else { return false }
-        return owned.contains(itemId)
-    }
-
-    mutating func markOwned(categoryId: String, itemId: String) {
-        var set = Set(ownedItemsByCategory[categoryId] ?? [])
-        set.insert(itemId)
-        ownedItemsByCategory[categoryId] = Array(set)
-    }
-
-    private func equippedItemId(selectionKey: String, loadout: RobotLoadout) -> String? {
-        switch selectionKey {
-        case "hairId":
-            return loadout.hairId
-        case "suitId":
-            return loadout.suitId
-        case "upperId":
-            return loadout.upperId
-        case "underId":
-            return loadout.underId
-        case "hatId":
-            return loadout.hatId
-        case "glassId":
-            return loadout.glassId
-        case "shoesId":
-            return loadout.shoesId
-        case "accessoryId":
-            return loadout.accessoryIds.first
-        case "expressionId":
-            return loadout.expressionId
-        default:
-            return nil
-        }
-    }
-}
-
-private enum EquipmentEconomyStore {
-    private static let key = "equipment.economy.v1"
-
-    static func load() -> EquipmentEconomy {
-        guard
-            let data = UserDefaults.standard.data(forKey: key),
-            let decoded = try? JSONDecoder().decode(EquipmentEconomy.self, from: data)
-        else {
-            return .empty
-        }
-        return decoded
-    }
-
-    static func save(_ economy: EquipmentEconomy) {
-        guard let data = try? JSONEncoder().encode(economy) else { return }
-        UserDefaults.standard.set(data, forKey: key)
     }
 }
