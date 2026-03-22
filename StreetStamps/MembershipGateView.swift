@@ -105,7 +105,7 @@ struct MembershipGateView: View {
             L10n.t("membership_welcome_bonus_title"),
             isPresented: $membership.showWelcomeBonusAlert
         ) {
-            Button(L10n.t("membership_welcome_bonus_ok"), role: .cancel) {}
+            Button(L10n.t("membership_welcome_bonus_ok"), role: .cancel) { dismiss() }
         } message: {
             Text(String(format: L10n.t("membership_welcome_bonus_message"), MembershipTierConfig.premiumWelcomeBonus))
         }
@@ -387,7 +387,10 @@ struct MembershipGateView: View {
         }
         do {
             let success = try await membership.purchase(product)
-            if success { dismiss() }
+            if success {
+                // Don't dismiss here — let the welcome bonus alert show first.
+                // The view will dismiss when the user closes the alert.
+            }
         } catch {
             errorMessage = error.localizedDescription
         }

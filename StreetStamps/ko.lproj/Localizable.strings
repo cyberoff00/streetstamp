@@ -877,8 +877,8 @@
 "membership_restore_purchases" = "구매 복원";
 "membership_auto_renew_note" = "구독은 자동 갱신됩니다. 설정에서 언제든 취소할 수 있습니다.";
 "membership_welcome_bonus_title" = "환영 보너스!";
-"membership_welcome_bonus_message" = "Premium 회원이 된 것을 축하합니다! %d 코인을 획득했습니다!";
-"membership_welcome_bonus_ok" = "좋아요!";
+"membership_welcome_bonus_message" = "%d 코인을 선물했어요! 장비를 사서 나만의 스타일을 꾸며보세요!";
+"membership_welcome_bonus_ok" = "확인";
 "membership_products_unavailable" = "현재 상품을 이용할 수 없습니다. 잠시 후 다시 시도해 주세요.";
 "activity_record_title" = "활동 기록";
 "activity_ring_help" = "바깥: 레벨 진행도 (1km 이상 여정 카운트)\n중간: 기억 수집 (50개당 1바퀴)\n안쪽: 도시 해금 진행도 (10개당 1바퀴)";

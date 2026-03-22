@@ -991,6 +991,6 @@
 "membership_restore_purchases" = "恢复购买";
 "membership_auto_renew_note" = "订阅自动续期，可随时在「设置」中取消。";
 "membership_welcome_bonus_title" = "欢迎奖励！";
-"membership_welcome_bonus_message" = "恭喜成为 Premium 会员！已获得 %d 金币作为欢迎礼物！";
-"membership_welcome_bonus_ok" = "太棒了！";
+"membership_welcome_bonus_message" = "已赠送 %d 金币，快去买装备装扮自己吧！";
+"membership_welcome_bonus_ok" = "知道了";
 "membership_products_unavailable" = "产品暂不可用，请稍后再试。";

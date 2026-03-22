@@ -877,8 +877,8 @@
 "membership_restore_purchases" = "購入を復元";
 "membership_auto_renew_note" = "サブスクリプションは自動更新です。設定からいつでもキャンセルできます。";
 "membership_welcome_bonus_title" = "ウェルカムボーナス！";
-"membership_welcome_bonus_message" = "Premiumメンバーになった記念に %d コインを獲得しました！";
-"membership_welcome_bonus_ok" = "やった！";
+"membership_welcome_bonus_message" = "%d コインをプレゼント！装備を買って自分をカスタマイズしよう！";
+"membership_welcome_bonus_ok" = "了解";
 "membership_products_unavailable" = "現在ご利用いただけません。しばらくしてからお試しください。";
 "activity_record_title" = "アクティビティ記録";
 "activity_ring_help" = "外側：レベル進捗（1km以上の旅がカウント）\n中央：記憶収集（50個で1周）\n内側：都市解放進捗（10都市で1周）";

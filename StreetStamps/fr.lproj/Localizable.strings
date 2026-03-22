@@ -877,8 +877,8 @@
 "membership_restore_purchases" = "Restaurer les achats";
 "membership_auto_renew_note" = "L'abonnement se renouvelle automatiquement. Annulez à tout moment dans les Réglages.";
 "membership_welcome_bonus_title" = "Bonus de bienvenue !";
-"membership_welcome_bonus_message" = "Vous avez gagné %d pièces en cadeau de bienvenue Premium !";
-"membership_welcome_bonus_ok" = "Super !";
+"membership_welcome_bonus_message" = "Vous avez reçu %d pièces ! Allez acheter des équipements pour personnaliser votre style !";
+"membership_welcome_bonus_ok" = "Compris";
 "membership_products_unavailable" = "Produits actuellement indisponibles. Réessayez plus tard.";
 "activity_record_title" = "HISTORIQUE D'ACTIVITÉ";
 "activity_ring_help" = "Extérieur : Progression de niveau (voyages ≥1km comptent)\nMilieu : Collection de souvenirs (50 souvenirs par anneau)\nIntérieur : Progression des villes déverrouillées (10 villes par anneau)";

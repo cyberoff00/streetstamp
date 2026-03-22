@@ -981,8 +981,8 @@
 "membership_restore_purchases" = "Restore Purchases";
 "membership_auto_renew_note" = "Subscription auto-renews. Cancel anytime in Settings.";
 "membership_welcome_bonus_title" = "Welcome Bonus!";
-"membership_welcome_bonus_message" = "You've earned %d coins as a welcome gift for becoming a Premium member!";
-"membership_welcome_bonus_ok" = "Awesome!";
+"membership_welcome_bonus_message" = "You've received %d coins! Go get some gear and customize your look!";
+"membership_welcome_bonus_ok" = "Got it";
 "membership_products_unavailable" = "Products are currently unavailable. Please try again later.";
 
 "friends_activity_record_title" = "ACTIVITY RECORD";

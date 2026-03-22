@@ -17,18 +17,11 @@ struct WeatherOverlayView: View {
 
         ZStack {
             // Atmospheric tint
-            if condition.isRaining {
+            if condition.isRaining || condition.isSnowing {
                 Color.black
                     .opacity(atmosphericDarkening(for: condition))
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
-            }
-
-            // Fog layer (behind rain)
-            if condition == .fog || condition.isRaining {
-                FogOverlayView(
-                    opacity: condition == .fog ? 0.8 : condition.rainIntensity * 0.4
-                )
             }
 
             // Rain layer
@@ -39,13 +32,18 @@ struct WeatherOverlayView: View {
                 )
             }
 
+            // Snow layer
+            if condition.isSnowing {
+                SnowEffectView(
+                    intensity: 0.7,
+                    windAngle: windAngleDegrees(from: weather)
+                )
+            }
+
             // Lightning (thunderstorm only)
             if condition == .thunderstorm {
                 LightningFlashView(active: true)
             }
-
-            // Snow (future — placeholder for extensibility)
-            // if condition.isSnowing { SnowEffectView(...) }
         }
         .animation(.easeInOut(duration: 2.0), value: condition)
         .onAppear {
@@ -68,6 +66,7 @@ struct WeatherOverlayView: View {
         case .rain:         return 0.10
         case .heavyRain:    return 0.15
         case .thunderstorm: return 0.20
+        case .snow:         return 0.05
         default:            return 0.0
         }
     }

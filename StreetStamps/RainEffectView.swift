@@ -238,36 +238,194 @@ struct RainEffectView: View {
     }
 }
 
-// MARK: - Fog/Mist Overlay
+// MARK: - Snow Particle
 
-struct FogOverlayView: View {
-    let opacity: CGFloat // 0...1
+private struct Snowflake {
+    var x: CGFloat       // 0...1 normalized
+    var y: CGFloat       // 0...1 normalized
+    let speed: CGFloat   // fall speed (points/sec)
+    let size: CGFloat    // diameter
+    let opacity: CGFloat
+    let wobblePhase: CGFloat   // unique per flake
+    let wobbleSpeed: CGFloat   // horizontal sway frequency
+    let wobbleAmp: CGFloat     // horizontal sway amplitude
+    let layer: Int       // 0=far, 1=mid, 2=near
+    let rotation: CGFloat
+    let rotationSpeed: CGFloat
+}
+
+// MARK: - Snow Engine
+
+private final class SnowEngine {
+    var flakes: [Snowflake] = []
+    var intensity: CGFloat = 0.5
+    var windOffset: CGFloat = 0
+    var lastUpdate: CFTimeInterval = 0
+
+    private let maxFlakes = 200
+
+    func update(time: CFTimeInterval, size: CGSize) {
+        guard size.width > 0, size.height > 0 else { return }
+
+        let dt: CGFloat
+        if lastUpdate == 0 {
+            dt = 1.0 / 60.0
+        } else {
+            dt = CGFloat(min(time - lastUpdate, 0.05))
+        }
+        lastUpdate = time
+
+        // Update existing flakes
+        flakes = flakes.compactMap { flake in
+            var f = flake
+            f.y += (f.speed * dt) / size.height
+
+            // Gentle horizontal wobble (sinusoidal sway)
+            let wobble = sin(CGFloat(time) * f.wobbleSpeed + f.wobblePhase) * f.wobbleAmp
+            f.x += (wobble * dt + windOffset * dt) / size.width
+
+            if f.y > 1.05 { return nil }
+            if f.x < -0.1 || f.x > 1.1 { return nil }
+            return f
+        }
+
+        // Spawn new flakes
+        let targetCount = Int(CGFloat(maxFlakes) * intensity)
+        let spawnRate = max(1, Int(CGFloat(targetCount) * dt * 2.5))
+        let deficit = targetCount - flakes.count
+        if deficit > 0 {
+            let toSpawn = min(deficit, spawnRate)
+            for _ in 0..<toSpawn {
+                flakes.append(makeRandomFlake())
+            }
+        }
+    }
+
+    private func makeRandomFlake() -> Snowflake {
+        let layer = weightedLayer()
+        let config = layerConfig(layer)
+
+        return Snowflake(
+            x: CGFloat.random(in: -0.05...1.05),
+            y: CGFloat.random(in: -0.2...0.0),
+            speed: CGFloat.random(in: config.speedRange),
+            size: CGFloat.random(in: config.sizeRange),
+            opacity: CGFloat.random(in: config.opacityRange),
+            wobblePhase: CGFloat.random(in: 0...(.pi * 2)),
+            wobbleSpeed: CGFloat.random(in: 1.5...3.5),
+            wobbleAmp: CGFloat.random(in: config.wobbleRange),
+            layer: layer,
+            rotation: CGFloat.random(in: 0...(.pi * 2)),
+            rotationSpeed: CGFloat.random(in: -2...2)
+        )
+    }
+
+    private func weightedLayer() -> Int {
+        let r = CGFloat.random(in: 0...1)
+        if r < 0.3 { return 0 }
+        if r < 0.7 { return 1 }
+        return 2
+    }
+
+    private struct LayerConfig {
+        let speedRange: ClosedRange<CGFloat>
+        let sizeRange: ClosedRange<CGFloat>
+        let opacityRange: ClosedRange<CGFloat>
+        let wobbleRange: ClosedRange<CGFloat>
+    }
+
+    private func layerConfig(_ layer: Int) -> LayerConfig {
+        switch layer {
+        case 0: // far
+            return LayerConfig(
+                speedRange: 25...45,
+                sizeRange: 2...4,
+                opacityRange: 0.15...0.3,
+                wobbleRange: 8...15
+            )
+        case 1: // mid
+            return LayerConfig(
+                speedRange: 40...70,
+                sizeRange: 4...7,
+                opacityRange: 0.3...0.55,
+                wobbleRange: 12...25
+            )
+        default: // near
+            return LayerConfig(
+                speedRange: 60...100,
+                sizeRange: 6...11,
+                opacityRange: 0.5...0.8,
+                wobbleRange: 18...35
+            )
+        }
+    }
+}
+
+// MARK: - Snow Effect View
+
+struct SnowEffectView: View {
+    let intensity: CGFloat  // 0...1
+    let windAngle: CGFloat
+
+    @State private var engine = SnowEngine()
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+        TimelineView(.animation) { timeline in
             Canvas { context, size in
                 let time = timeline.date.timeIntervalSinceReferenceDate
+                engine.intensity = intensity
+                engine.windOffset = sin(windAngle * .pi / 180) * 30
+                engine.update(time: time, size: size)
 
-                // Soft fog patches drifting
-                let patchCount = 6
-                for i in 0..<patchCount {
-                    let seed = Double(i) * 137.5
-                    let phase = time * 0.02 + seed
-                    let x = (sin(phase * 0.7 + seed) * 0.3 + 0.5) * size.width
-                    let y = size.height * (0.5 + Double(i) * 0.08)
-                    let w = size.width * CGFloat.random(in: 0.4...0.8)
-                    let h = size.height * 0.15
+                for flake in engine.flakes {
+                    let x = flake.x * size.width
+                    let y = flake.y * size.height
+                    let r = flake.size / 2.0
 
-                    let rect = CGRect(x: x - w / 2, y: y - h / 2, width: w, height: h)
-                    let patchOpacity = opacity * 0.12 * (1.0 + sin(phase) * 0.3)
-                    context.fill(
-                        Path(ellipseIn: rect),
-                        with: .color(Color.white.opacity(patchOpacity))
+                    // Draw a soft circle snowflake with glow
+                    let center = CGPoint(x: x, y: y)
+
+                    // Outer glow
+                    let glowRect = CGRect(
+                        x: center.x - r * 1.5,
+                        y: center.y - r * 1.5,
+                        width: r * 3,
+                        height: r * 3
                     )
+                    context.fill(
+                        Path(ellipseIn: glowRect),
+                        with: .color(Color.white.opacity(flake.opacity * 0.15))
+                    )
+
+                    // Core snowflake
+                    let coreRect = CGRect(
+                        x: center.x - r,
+                        y: center.y - r,
+                        width: flake.size,
+                        height: flake.size
+                    )
+                    context.fill(
+                        Path(ellipseIn: coreRect),
+                        with: .color(Color.white.opacity(flake.opacity))
+                    )
+
+                    // Bright center dot for near-layer flakes
+                    if flake.layer == 2 {
+                        let dotR = r * 0.4
+                        let dotRect = CGRect(
+                            x: center.x - dotR,
+                            y: center.y - dotR,
+                            width: dotR * 2,
+                            height: dotR * 2
+                        )
+                        context.fill(
+                            Path(ellipseIn: dotRect),
+                            with: .color(Color.white.opacity(min(flake.opacity + 0.2, 1.0)))
+                        )
+                    }
                 }
             }
         }
-        .blur(radius: 40)
         .allowsHitTesting(false)
         .ignoresSafeArea()
     }

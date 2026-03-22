@@ -883,8 +883,8 @@
 "membership_restore_purchases" = "恢復購買";
 "membership_auto_renew_note" = "訂閱自動續期，可隨時在「設定」中取消。";
 "membership_welcome_bonus_title" = "歡迎獎勵！";
-"membership_welcome_bonus_message" = "恭喜成為 Premium 會員！已獲得 %d 金幣作為歡迎禮物！";
-"membership_welcome_bonus_ok" = "太棒了！";
+"membership_welcome_bonus_message" = "已贈送 %d 金幣，快去買裝備裝扮自己吧！";
+"membership_welcome_bonus_ok" = "知道了";
 "membership_products_unavailable" = "產品暫不可用，請稍後再試。";
 "activity_record_title" = "活動記錄";
 "activity_ring_help" = "外圈：等級進度（完成1公里以上的旅程升級）\n中圈：記憶收集進度（每50個記憶滿環）\n內圈：城市解鎖進度（每10個城市滿環）";
