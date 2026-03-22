@@ -906,7 +906,6 @@ struct JourneyMemoryDetailView: View {
     // Visibility
     @State private var activeJourneySheet: JourneyDetailSheetRoutePresentation? = nil
     @State private var pendingVisibility: JourneyVisibility = .private
-    @State private var isSubmittingVisibility = false
     @State private var likesCount: Int = 0
     @State private var likedByMe: Bool = false
     @State private var journeyLikers: [JourneyLiker] = []
@@ -1165,7 +1164,7 @@ struct JourneyMemoryDetailView: View {
                 JourneyVisibilitySheet(
                     journey: currentJourney,
                     pendingVisibility: $pendingVisibility,
-                    isSubmitting: isSubmittingVisibility,
+                    isSubmitting: publishStore.status.isSending,
                     onApply: applyVisibilityChange
                 )
                 .presentationBackground(FigmaTheme.background)
@@ -1230,7 +1229,7 @@ struct JourneyMemoryDetailView: View {
                 }
                 dismiss()
             } label: {
-                Image(systemName: "arrow.left")
+                Image(systemName: "chevron.left")
                     .font(.system(size: 16, weight: .medium))
                 .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
                 .frame(height: 20)
@@ -1859,7 +1858,7 @@ struct JourneyMemoryDetailView: View {
     }
 
     private func applyVisibilityChange() {
-        guard !isSubmittingVisibility else { return }
+        guard !publishStore.status.isSending else { return }
         let target = pendingVisibility
         let journey = currentJourney
         guard target != journey.visibility else {
@@ -1883,26 +1882,15 @@ struct JourneyMemoryDetailView: View {
             updated.sharedAt = Date()
         }
         updated.visibility = target
-        isSubmittingVisibility = true
         store.applyBulkCompletedUpdates([updated])
         activeJourneySheet = nil
 
-        Task {
-            defer {
-                Task { @MainActor in
-                    isSubmittingVisibility = false
-                }
-            }
-
-            guard BackendConfig.isEnabled, let token = sessionStore.currentAccessToken, !token.isEmpty else { return }
-            do {
-                try await JourneyCloudMigrationService.syncJourneyVisibilityChange(
-                    journey: updated,
-                    sessionStore: sessionStore,
-                    cityCache: cityCache
-                )
-            } catch {}
-        }
+        publishStore.publish(
+            journey: updated,
+            sessionStore: sessionStore,
+            cityCache: cityCache,
+            journeyStore: store
+        )
     }
 
     private func loadLikesCount() {
@@ -2464,28 +2452,31 @@ private struct JourneyMemoryDetailExportSnapshotView: View {
     private var headerCard: some View {
         VStack(alignment: .leading, spacing: 18) {
 
-            // Top row: avatar pinned to trailing edge
-            HStack {
+            // Keep the same top spacing as the real page
+            Color.clear.frame(height: 20)
+                .padding(.top, 18)
+
+            // Title + avatar
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(cityName.uppercased())
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.75)
+
+                    Text("\(countryName.uppercased()) • \(journeyDate)")
+                        .font(.system(size: 11, weight: .medium))
+                        .tracking(1.2)
+                        .foregroundColor(Color(red: 0.42, green: 0.45, blue: 0.51))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+
                 Spacer()
-                RobotRendererView(size: 40, face: .front, loadout: loadout)
-                    .frame(width: 40, height: 40)
-            }
-            .padding(.top, 18)
 
-            // Title
-            VStack(alignment: .leading, spacing: 4) {
-                Text(cityName.uppercased())
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.75)
-
-                Text("\(countryName.uppercased()) • \(journeyDate)")
-                    .font(.system(size: 11, weight: .medium))
-                    .tracking(1.2)
-                    .foregroundColor(Color(red: 0.42, green: 0.45, blue: 0.51))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                RobotRendererView(size: 52, face: .front, loadout: loadout)
+                    .frame(width: 52, height: 52)
             }
 
             // Stats

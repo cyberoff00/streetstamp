@@ -381,6 +381,7 @@ struct AccountCenterView: View {
                 sessionStore.hasEmailPassword = hasEP
             }
         } catch {
+            print("[AccountCenter] fetchMyProfile failed: \(error)")
             toast(String(format: L10n.t("account_fetch_profile_failed_format"), error.localizedDescription))
         }
     }

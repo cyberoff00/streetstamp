@@ -285,6 +285,7 @@ struct SettingsView: View {
     @State private var profileVisibility: ProfileVisibility = ProfileSharingSettings.visibility
     @State private var accountMessage = ""
     @State private var showAccountMessage = false
+    @State private var didLoadAccountProfile = false
     @State private var showAuthSheet = false
     @State private var authSheetMode: AuthEntryMode = .signIn
     @State private var showBackgroundModeInfo = false
@@ -395,7 +396,7 @@ struct SettingsView: View {
                 onContinueGuest: { showAuthSheet = false },
                 initialMode: authSheetMode,
                 onAuthenticated: {
-                    Task { await refreshAccountIfPossible() }
+                    Task { await refreshAccountIfPossible(force: true) }
                     showAuthSheet = false
                 }
             )
@@ -548,11 +549,21 @@ struct SettingsView: View {
                     sectionTitle("语言 / Language")
 
                     VStack(spacing: 0) {
-                        languageOption(code: nil, name: "跟随系统")
+                        languageOption(code: nil, name: "跟随系统 / Follow System")
                         Divider().padding(.leading, 16)
                         languageOption(code: "zh-Hans", name: "简体中文")
                         Divider().padding(.leading, 16)
+                        languageOption(code: "zh-Hant", name: "繁體中文")
+                        Divider().padding(.leading, 16)
                         languageOption(code: "en", name: "English")
+                        Divider().padding(.leading, 16)
+                        languageOption(code: "ja", name: "日本語")
+                        Divider().padding(.leading, 16)
+                        languageOption(code: "ko", name: "한국어")
+                        Divider().padding(.leading, 16)
+                        languageOption(code: "fr", name: "Français")
+                        Divider().padding(.leading, 16)
+                        languageOption(code: "es", name: "Español")
                     }
                     .figmaSurfaceCard(radius: 30)
                 }
@@ -798,12 +809,102 @@ struct SettingsView: View {
                             .foregroundColor(FigmaTheme.subtext)
                             .fixedSize(horizontal: false, vertical: true)
 
-                        NavigationLink {
-                            privateTransferView
-                        } label: {
-                            settingsRowLabel(title: L10n.t("settings_private_transfer_row"), icon: "qrcode.viewfinder", iconColor: FigmaTheme.primary)
+                        // Old Device (Export)
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text(L10n.t("settings_transfer_old_device"))
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(FigmaTheme.text.opacity(0.76))
+
+                            Text(privateTransfer.hostingHintText)
+                                .font(.system(size: 13, weight: .regular))
+                                .foregroundColor(FigmaTheme.subtext)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            if let qr = privateTransfer.hostingQRCode {
+                                HStack {
+                                    Spacer()
+                                    Image(uiImage: qr)
+                                        .interpolation(.none)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(width: 220, height: 220)
+                                        .padding(10)
+                                        .background(Color.white)
+                                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                    Spacer()
+                                }
+                            }
+
+                            if privateTransfer.isHosting {
+                                Button {
+                                    privateTransfer.stopHosting()
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "stop.circle")
+                                        Text(L10n.t("settings_transfer_stop_export"))
+                                            .font(.system(size: 15, weight: .semibold))
+                                    }
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 46)
+                                    .background(Color.red.opacity(0.9))
+                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+                            } else {
+                                Button {
+                                    Task {
+                                        await privateTransfer.startHosting(currentUserID: sessionStore.currentUserID)
+                                    }
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "qrcode")
+                                        Text(L10n.t("settings_transfer_generate_qr"))
+                                            .font(.system(size: 15, weight: .semibold))
+                                    }
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 46)
+                                    .background(FigmaTheme.primary)
+                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(privateTransfer.isBusy)
+                                .opacity(privateTransfer.isBusy ? 0.6 : 1)
+                            }
                         }
-                        .buttonStyle(.plain)
+
+                        Divider().padding(.vertical, 4)
+
+                        // New Device (Import)
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text(L10n.t("settings_transfer_new_device"))
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(FigmaTheme.text.opacity(0.76))
+
+                            Text(privateTransfer.importStatusText)
+                                .font(.system(size: 13, weight: .regular))
+                                .foregroundColor(FigmaTheme.subtext)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            Button {
+                                showTransferScanner = true
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "camera.viewfinder")
+                                    Text(L10n.t("settings_transfer_scan_import"))
+                                        .font(.system(size: 15, weight: .semibold))
+                                }
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 46)
+                                .background(FigmaTheme.primary)
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(privateTransfer.isBusy || privateTransfer.isImporting)
+                            .opacity((privateTransfer.isBusy || privateTransfer.isImporting) ? 0.6 : 1)
+                        }
                     }
                     .padding(16)
                     .figmaSurfaceCard(radius: 22)
@@ -845,6 +946,36 @@ struct SettingsView: View {
             .padding(.horizontal, 18)
             .padding(.top, 16)
             .padding(.bottom, 28)
+            .sheet(isPresented: $showTransferScanner) {
+                QRCodeScannerSheet(
+                    onFound: { payload in
+                        showTransferScanner = false
+                        Task {
+                            await privateTransfer.importFromQRCodePayload(
+                                payload,
+                                currentUserID: sessionStore.currentUserID,
+                                journeyStore: journeyStore,
+                                cityCache: cityCache,
+                                lifelogStore: lifelogStore
+                            )
+                        }
+                    },
+                    onCancel: {
+                        showTransferScanner = false
+                    }
+                )
+            }
+            .alert(L10n.t("settings_transfer_alert_title"), isPresented: Binding(
+                get: { privateTransfer.alertMessage != nil },
+                set: { if !$0 { privateTransfer.alertMessage = nil } }
+            )) {
+                Button(L10n.t("ok"), role: .cancel) {}
+            } message: {
+                Text(privateTransfer.alertMessage ?? "")
+            }
+            .onDisappear {
+                privateTransfer.stopHosting()
+            }
         }
     }
 
@@ -1033,153 +1164,6 @@ struct SettingsView: View {
                     }
                 }
             }
-        }
-    }
-
-    private var privateTransferView: some View {
-        SettingsDetailPage(title: L10n.t("settings_device_transfer_title")) {
-            VStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(L10n.t("settings_private_transfer_title"))
-                        .font(.system(size: 20, weight: .bold))
-                        .foregroundColor(FigmaTheme.text)
-
-                    Text(L10n.t("settings_private_transfer_intro"))
-                        .font(.system(size: 14, weight: .regular))
-                        .foregroundColor(FigmaTheme.subtext)
-                }
-                .padding(.bottom, 4)
-
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(L10n.t("settings_transfer_old_device"))
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(FigmaTheme.text.opacity(0.76))
-
-                    Text(privateTransfer.hostingHintText)
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundColor(FigmaTheme.subtext)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if let qr = privateTransfer.hostingQRCode {
-                        HStack {
-                            Spacer()
-                            Image(uiImage: qr)
-                                .interpolation(.none)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 220, height: 220)
-                                .padding(10)
-                                .background(Color.white)
-                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            Spacer()
-                        }
-                    }
-
-                    if privateTransfer.isHosting {
-                        Button {
-                            privateTransfer.stopHosting()
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "stop.circle")
-                                Text(L10n.t("settings_transfer_stop_export"))
-                                    .font(.system(size: 15, weight: .semibold))
-                            }
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 46)
-                            .background(Color.red.opacity(0.9))
-                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        Button {
-                            Task {
-                                await privateTransfer.startHosting(currentUserID: sessionStore.currentUserID)
-                            }
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "qrcode")
-                                Text(L10n.t("settings_transfer_generate_qr"))
-                                    .font(.system(size: 15, weight: .semibold))
-                            }
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 46)
-                            .background(FigmaTheme.primary)
-                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(privateTransfer.isBusy)
-                        .opacity(privateTransfer.isBusy ? 0.6 : 1)
-                    }
-                }
-                .padding(16)
-                .figmaSurfaceCard(radius: 22)
-
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(L10n.t("settings_transfer_new_device"))
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(FigmaTheme.text.opacity(0.76))
-
-                    Text(privateTransfer.importStatusText)
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundColor(FigmaTheme.subtext)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Button {
-                        showTransferScanner = true
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "camera.viewfinder")
-                            Text(L10n.t("settings_transfer_scan_import"))
-                                .font(.system(size: 15, weight: .semibold))
-                        }
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 46)
-                        .background(FigmaTheme.primary)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(privateTransfer.isBusy || privateTransfer.isImporting)
-                    .opacity((privateTransfer.isBusy || privateTransfer.isImporting) ? 0.6 : 1)
-                }
-                .padding(16)
-                .figmaSurfaceCard(radius: 22)
-            }
-            .padding(.horizontal, 18)
-            .padding(.top, 16)
-            .padding(.bottom, 28)
-        }
-        .sheet(isPresented: $showTransferScanner) {
-            QRCodeScannerSheet(
-                onFound: { payload in
-                    showTransferScanner = false
-                    Task {
-                        await privateTransfer.importFromQRCodePayload(
-                            payload,
-                            currentUserID: sessionStore.currentUserID,
-                            journeyStore: journeyStore,
-                            cityCache: cityCache,
-                            lifelogStore: lifelogStore
-                        )
-                    }
-                },
-                onCancel: {
-                    showTransferScanner = false
-                }
-            )
-        }
-        .alert(L10n.t("settings_transfer_alert_title"), isPresented: Binding(
-            get: { privateTransfer.alertMessage != nil },
-            set: { if !$0 { privateTransfer.alertMessage = nil } }
-        )) {
-            Button(L10n.t("ok"), role: .cancel) {}
-        } message: {
-            Text(privateTransfer.alertMessage ?? "")
-        }
-        .onDisappear {
-            privateTransfer.stopHosting()
         }
     }
 
@@ -1526,7 +1510,8 @@ struct SettingsView: View {
         }
     }
 
-    private func refreshAccountIfPossible() async {
+    private func refreshAccountIfPossible(force: Bool = false) async {
+        guard !didLoadAccountProfile || force else { return }
         guard let token = sessionStore.currentAccessToken, !token.isEmpty else {
             displayNameDraft = UserDefaults.standard.string(forKey: "streetstamps.profile.displayName") ?? "Explorer"
             displayNameInput = displayNameDraft
@@ -1536,6 +1521,7 @@ struct SettingsView: View {
         }
         do {
             let me = try await BackendAPIClient.shared.fetchMyProfile(token: token)
+            didLoadAccountProfile = true
             displayNameDraft = me.displayName
             displayNameInput = displayNameDraft
             exclusiveIDDraft = me.resolvedExclusiveID ?? ""
@@ -1546,7 +1532,11 @@ struct SettingsView: View {
             } else {
                 profileVisibility = .friendsOnly
             }
+        } catch is CancellationError {
+            // View disappeared mid-request; silently ignore
         } catch {
+            didLoadAccountProfile = true
+            print("[SettingsView] fetchMyProfile failed: \(error)")
             toastAccount(String(format: L10n.t("account_fetch_profile_failed_format"), error.localizedDescription))
         }
     }

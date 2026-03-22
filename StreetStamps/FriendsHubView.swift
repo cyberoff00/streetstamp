@@ -161,6 +161,7 @@ struct FriendsHubView: View {
     @EnvironmentObject private var journeyStore: JourneyStore
     @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var publishStore: JourneyPublishStore
+    @EnvironmentObject private var notificationStore: SocialNotificationStore
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
 
     @State private var tab: FriendsTopTab = .activity
@@ -175,11 +176,7 @@ struct FriendsHubView: View {
     @State private var feedJourneyLikersLoading = false
     @State private var feedJourneyLikersErrorMessage: String?
     @State private var activeFeedLikesSheet: FeedLikesSheetContext?
-    @State private var socialNotifications: [BackendNotificationItem] = []
-    @State private var unreadSocialCount = 0
     @State private var showSocialNotificationsSheet = false
-    @State private var notificationsLoading = false
-    @State private var lastPromptNotificationID: String?
     @State private var incomingFriendRequests: [BackendFriendRequestDTO] = []
     @State private var outgoingFriendRequests: [BackendFriendRequestDTO] = []
     @State private var requestActionLoadingIDs: Set<String> = []
@@ -396,7 +393,7 @@ struct FriendsHubView: View {
         }
         .onChange(of: sessionStore.currentAccessToken) { _, _ in
             Task {
-                await refreshSocialNotifications(showToastForLatestUnread: false)
+                await notificationStore.refresh(token: sessionStore.currentAccessToken)
                 await refreshFriendRequests()
                 await refreshMyInviteIdentityIfNeeded()
                 await refreshRemoteFriends(showUnreadToast: false)
@@ -424,7 +421,7 @@ struct FriendsHubView: View {
             showPostcardInboxSheet = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .socialNotificationsDidMarkRead)) { notification in
-            applySocialNotificationReadSync(notification)
+            notificationStore.applyReadSync(notification)
         }
     }
 
@@ -669,8 +666,8 @@ struct FriendsHubView: View {
                                 .font(.system(size: 22, weight: .bold))
                                 .foregroundColor(FigmaTheme.text)
 
-                            if unreadSocialCount > 0 {
-                                Text("\(min(unreadSocialCount, 99))")
+                            if notificationStore.unreadCount > 0 {
+                                Text("\(min(notificationStore.unreadCount, 99))")
                                     .font(.system(size: 9, weight: .semibold))
                                     .foregroundColor(.white)
                                     .padding(.horizontal, 5)
@@ -1104,55 +1101,13 @@ struct FriendsHubView: View {
             socialStore.restoreFriendsIfEmpty(previousFriends)
             didPerformInitialFeedRefresh = true
 
-            await refreshSocialNotifications(showToastForLatestUnread: showUnreadToast)
+            await notificationStore.refresh(
+                token: sessionStore.currentAccessToken,
+                showToastCallback: showUnreadToast ? { msg in showFeedToast(msg, duration: 2.2) } : nil
+            )
             await refreshFriendRequests()
         }
 
-        @MainActor
-        private func refreshSocialNotifications(showToastForLatestUnread: Bool) async {
-            guard BackendConfig.isEnabled,
-                  let token = sessionStore.currentAccessToken,
-                  !token.isEmpty else {
-                socialNotifications = []
-                unreadSocialCount = 0
-                return
-            }
-            notificationsLoading = true
-            defer { notificationsLoading = false }
-
-            do {
-                let all = try await BackendAPIClient.shared.fetchNotifications(token: token, unreadOnly: false)
-                PostcardNotificationBridge.shared.surfaceUnreadPostcardNotifications(all)
-                let cutoff = Date().addingTimeInterval(-3 * 24 * 60 * 60)
-                let fetched = all
-                    .filter({ SocialNotificationPolicy.supports(type: $0.type) })
-                    .filter({ $0.createdAt >= cutoff })
-                    .sorted(by: { $0.createdAt > $1.createdAt })
-                var mergedByID: [String: BackendNotificationItem] = [:]
-                for item in socialNotifications where item.createdAt >= cutoff {
-                    mergedByID[item.id] = item
-                }
-                for item in fetched {
-                    mergedByID[item.id] = item
-                }
-                let socialItems = mergedByID.values
-                    .filter { $0.createdAt >= cutoff }
-                    .sorted(by: { $0.createdAt > $1.createdAt })
-                socialNotifications = socialItems
-
-                let unread = socialItems.filter { !$0.read }
-                unreadSocialCount = unread.count
-
-                if showToastForLatestUnread,
-                   let latest = unread.first,
-                   latest.id != lastPromptNotificationID {
-                    showFeedToast(SocialNotificationPresentation.message(for: latest), duration: 2.2)
-                    lastPromptNotificationID = latest.id
-                }
-            } catch {
-                // Keep social feed resilient even if reminder endpoint fails.
-            }
-        }
 
         @MainActor
         private func refreshMyInviteIdentityIfNeeded() async {
@@ -1247,52 +1202,12 @@ struct FriendsHubView: View {
             }
         }
 
-        @MainActor
-        private func markSocialNotificationsRead(ids: [String], markAll: Bool = false) async {
-            guard BackendConfig.isEnabled,
-                  let token = sessionStore.currentAccessToken,
-                  !token.isEmpty else { return }
-            let targetIDs = Array(Set(ids))
-            guard !targetIDs.isEmpty else { return }
-
-            do {
-                try await BackendAPIClient.shared.markNotificationsRead(token: token, ids: targetIDs)
-                socialNotifications = socialNotifications.map { item in
-                    guard targetIDs.contains(item.id) else { return item }
-                    var copy = item
-                    copy.read = true
-                    return copy
-                }
-                unreadSocialCount = socialNotifications.filter { !$0.read }.count
-                SocialNotificationReadSync.post(ids: targetIDs, markAll: markAll)
-            } catch {
-                // Keep feed page responsive even if read-mark fails.
-            }
-        }
-
-        @MainActor
-        private func markSingleSocialNotificationRead(_ id: String) async {
-            guard let item = socialNotifications.first(where: { $0.id == id }), !item.read else { return }
-            await markSocialNotificationsRead(ids: [id])
-        }
-
-        @MainActor
-        private func markAllSocialNotificationsRead() async {
-            let unreadIDs = socialNotifications.filter { !$0.read }.map(\.id)
-            await markSocialNotificationsRead(ids: unreadIDs, markAll: true)
-        }
-
-        private func applySocialNotificationReadSync(_ notification: Notification) {
-            guard let payload = SocialNotificationReadSync.payload(from: notification) else { return }
-            socialNotifications = SocialNotificationReadSync.applying(payload, to: socialNotifications)
-            unreadSocialCount = socialNotifications.filter { !$0.read }.count
-        }
 
         @ViewBuilder
         private var socialNotificationsSheet: some View {
             NavigationStack {
                 Group {
-                    if notificationsLoading && socialNotifications.isEmpty {
+                    if notificationStore.isLoading && notificationStore.notifications.isEmpty {
                         VStack(spacing: 12) {
                             ProgressView()
                             Text(L10n.t("profile_notifications_loading"))
@@ -1300,7 +1215,7 @@ struct FriendsHubView: View {
                                 .foregroundColor(FigmaTheme.subtext)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else if socialNotifications.isEmpty {
+                    } else if notificationStore.notifications.isEmpty {
                         Text(L10n.t("profile_notifications_empty"))
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(FigmaTheme.subtext)
@@ -1308,7 +1223,7 @@ struct FriendsHubView: View {
                     } else {
                         ScrollView(showsIndicators: false) {
                             VStack(spacing: 10) {
-                                ForEach(socialNotifications) { item in
+                                ForEach(notificationStore.notifications) { item in
                                     socialNotificationRow(item)
                                 }
                             }
@@ -1333,7 +1248,7 @@ struct FriendsHubView: View {
                     ) {
                         Button {
                             Task {
-                                await markAllSocialNotificationsRead()
+                                await notificationStore.markAllRead(token: sessionStore.currentAccessToken)
                             }
                         } label: {
                             Image(systemName: "checkmark.circle")
@@ -1347,7 +1262,7 @@ struct FriendsHubView: View {
                 }
                 .toolbar(.hidden, for: .navigationBar)
                 .task {
-                    await refreshSocialNotifications(showToastForLatestUnread: false)
+                    await notificationStore.refresh(token: sessionStore.currentAccessToken)
                 }
             }
         }
@@ -1399,7 +1314,7 @@ struct FriendsHubView: View {
             .shadow(color: Color.black.opacity(0.04), radius: 14, x: 0, y: 5)
             .onTapGesture {
                 Task {
-                    await markSingleSocialNotificationRead(item.id)
+                    await notificationStore.markSingleRead(id: item.id, token: sessionStore.currentAccessToken)
                     if item.type == "postcard_received" || item.type == "postcard_reaction" {
                         showSocialNotificationsSheet = false
                         let box = item.type == "postcard_received" ? "received" : "sent"

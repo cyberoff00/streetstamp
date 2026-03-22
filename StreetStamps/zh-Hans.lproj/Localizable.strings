@@ -443,8 +443,8 @@
 "settings_lifelog_bg_mode_high" = "高精度";
 "settings_lifelog_bg_mode_low" = "低精度";
 "settings_lifelog_bg_mode_title" = "后台记录模式";
-"settings_stationary_reminder_desc" = "当 60 分钟内移动范围小于 100 米时提醒。";
-"settings_stationary_reminder_title" = "久坐提醒";
+"settings_stationary_reminder_desc" = "当 90 分钟内移动范围小于 100 米时提醒。";
+"settings_stationary_reminder_title" = "静止提醒";
 "settings_title" = "设置";
 "settings_voice_broadcast_desc" = "在里程碑播报距离、用时和平均配速。";
 "settings_voice_broadcast_title" = "语音播报";
@@ -913,13 +913,15 @@
 "friend_activity_record_entry" = "活动记录";
 
 "membership_zoom_locked" = "缩放需要 Premium";
+"membership_gate_title" = "解锁 Premium";
+"membership_gate_subtitle" = "解锁全部功能，让每段旅程都更精彩。";
 "membership_gate_friends_limit" = "已达到免费版好友上限。升级 Premium 可添加无限好友。";
 "membership_gate_photos_title" = "更多照片";
 "membership_gate_photos_desc" = "免费版每条记忆最多 6 张照片，升级 Premium 可拍 12 张。";
 "membership_gate_friends_title" = "更多好友";
 "membership_gate_friends_desc" = "免费版最多 5 位好友，升级 Premium 无上限。";
-"membership_gate_globe_title" = "地球仪缩放";
-"membership_gate_globe_desc" = "3D 地球仪的缩放交互是 Premium 专属功能。";
+"membership_gate_globe_title" = "全球视图";
+"membership_gate_globe_desc" = "升级 Premium，解锁完整的 3D 全球视图体验。";
 "membership_gate_republish_title" = "重新发布编辑过的旅程";
 "membership_gate_republish_desc" = "将编辑后的旅程重新发布到公共动态需要 Premium。";
 "membership_gate_postcard_title" = "更多明信片";
@@ -934,7 +936,7 @@
 "membership_gate_map_desc" = "升级 Premium 解锁更多地图外观样式。";
 "membership_benefit_photos" = "每条记忆最多 12 张照片";
 "membership_benefit_friends" = "无限好友";
-"membership_benefit_globe" = "地球仪缩放与交互";
+"membership_benefit_globe" = "完整全球视图体验";
 "membership_benefit_icloud" = "iCloud 同步与恢复";
 "membership_benefit_gpx" = "GPX 导出";
 "membership_benefit_postcard" = "每座城市更多明信片";
@@ -953,7 +955,7 @@
 "membership_compare_photos" = "照片 / 记忆";
 "membership_compare_friends" = "好友";
 "membership_compare_unlimited" = "无限";
-"membership_compare_globe" = "地球仪缩放";
+"membership_compare_globe" = "全球视图";
 "membership_compare_icloud" = "iCloud 同步";
 "membership_compare_gpx" = "GPX 导出";
 "membership_compare_republish" = "重新发布";

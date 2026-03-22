@@ -16,7 +16,8 @@ struct MainView: View {
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var flow: AppFlowCoordinator
     @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
-    
+    @EnvironmentObject private var publishStore: JourneyPublishStore
+
     @Binding var selectedTab: Int
     @StateObject private var tracking = TrackingService.shared
     
@@ -418,25 +419,12 @@ struct MainView: View {
             private func completeJourneyAndSync(journey: JourneyRoute) {
                 ongoingJourney = journey
                 JourneySaveCompletion.persistFinalizedJourney(journey, in: store)
-                triggerAutoCloudSyncAfterSave(savedJourney: journey)
-            }
-
-            private func triggerAutoCloudSyncAfterSave(savedJourney: JourneyRoute) {
-                guard savedJourney.visibility == .public || savedJourney.visibility == .friendsOnly else { return }
-                guard BackendConfig.isEnabled,
-                      sessionStore.currentAccessToken?.isEmpty == false else { return }
-
-                Task {
-                    do {
-                        try await JourneyCloudMigrationService.syncJourneyVisibilityChange(
-                            journey: savedJourney,
-                            sessionStore: sessionStore,
-                            cityCache: cityCache
-                        )
-                    } catch {
-                        print("❌ auto cloud sync after save failed:", error.localizedDescription)
-                    }
-                }
+                publishStore.publish(
+                    journey: journey,
+                    sessionStore: sessionStore,
+                    cityCache: cityCache,
+                    journeyStore: store
+                )
             }
             
 #if DEBUG

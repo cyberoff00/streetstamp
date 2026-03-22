@@ -451,8 +451,8 @@
 "settings_lifelog_bg_mode_low" = "Low Precision";
 "settings_lifelog_bg_mode_title" = "Background Recording Mode";
 "settings_map_appearance_desc" = "Apply to all maps and route rendering";
-"settings_stationary_reminder_desc" = "Alert when movement stays within 100 m for 60 minutes.";
-"settings_stationary_reminder_title" = "Long Stationary Reminder";
+"settings_stationary_reminder_desc" = "Alert when movement stays within 100 m for 90 minutes.";
+"settings_stationary_reminder_title" = "Stillness Reminder";
 "settings_title" = "SETTINGS";
 "settings_voice_broadcast_desc" = "Broadcast distance, elapsed time, and average pace at milestones.";
 "settings_voice_broadcast_title" = "Voice Broadcast";
@@ -903,13 +903,15 @@
 "delete_memory_confirm_message" = "The journey won't be recovered ";
 
 "membership_zoom_locked" = "Zoom requires Premium";
+"membership_gate_title" = "Unlock Premium";
+"membership_gate_subtitle" = "Get the most out of every journey with all features unlocked.";
 "membership_gate_friends_limit" = "You've reached the free plan friend limit. Upgrade to Premium for unlimited friends.";
 "membership_gate_photos_title" = "More Photos";
 "membership_gate_photos_desc" = "Free plan allows up to 6 photos per memory. Upgrade to Premium for 12.";
 "membership_gate_friends_title" = "More Friends";
 "membership_gate_friends_desc" = "Free plan allows up to 5 friends. Upgrade to Premium for unlimited.";
-"membership_gate_globe_title" = "Globe Zoom";
-"membership_gate_globe_desc" = "Pinch to zoom on the 3D globe is a Premium feature.";
+"membership_gate_globe_title" = "Global View";
+"membership_gate_globe_desc" = "Unlock the full interactive 3D globe experience with Premium.";
 "membership_gate_republish_title" = "Republish Edited Journey";
 "membership_gate_republish_desc" = "Republishing edited journeys to the public feed requires Premium.";
 "membership_gate_postcard_title" = "More Postcards";
@@ -924,7 +926,7 @@
 "membership_gate_map_desc" = "Unlock additional map appearance styles with Premium.";
 "membership_benefit_photos" = "Up to 12 photos per memory";
 "membership_benefit_friends" = "Unlimited friends";
-"membership_benefit_globe" = "Globe zoom & interaction";
+"membership_benefit_globe" = "Full global view experience";
 "membership_benefit_icloud" = "iCloud sync & restore";
 "membership_benefit_gpx" = "GPX export";
 "membership_benefit_postcard" = "More postcards per city";
@@ -943,7 +945,7 @@
 "membership_compare_photos" = "Photos / memory";
 "membership_compare_friends" = "Friends";
 "membership_compare_unlimited" = "Unlimited";
-"membership_compare_globe" = "Globe zoom";
+"membership_compare_globe" = "Global view";
 "membership_compare_icloud" = "iCloud sync";
 "membership_compare_gpx" = "GPX export";
 "membership_compare_republish" = "Republish edits";
@@ -959,3 +961,19 @@
 "membership_restore_purchases" = "Restore Purchases";
 "membership_auto_renew_note" = "Subscription auto-renews. Cancel anytime in Settings.";
 "membership_products_unavailable" = "Products are currently unavailable. Please try again later.";
+
+"friends_activity_record_title" = "ACTIVITY RECORD";
+"friends_add_method_exclusive_id" = "Exclusive ID";
+"friends_add_method_invite_code" = "Invite Code";
+"friends_add_method_qr_token" = "QR Code";
+"friends_camera_permission_unavailable" = "Camera permission is unavailable. Please allow access in Settings.";
+"friends_input_exclusive_id_hint" = "Enter friend's exclusive ID (e.g. @alice)";
+"friends_input_invite_code_hint" = "Enter invite code (A1B2C3D4)";
+"friends_input_qr_token_hint" = "Paste QR code token or link";
+"friends_qr_invalid_content" = "Could not recognize the QR code content. Please confirm it is a StreetStamps invite code/link.";
+"friends_qr_recognized" = "Invite information recognized. Tap \"Send Friend Request\" to proceed.";
+"friends_qr_send_request" = "Send Friend Request";
+"friends_qr_sending" = "Sending…";
+"friends_qr_upload_photo" = "Upload QR Code";
+"friends_section_my_friends" = "My Friends";
+"friends_section_pending_approval" = "Pending Approval";

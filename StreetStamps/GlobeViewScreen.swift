@@ -59,26 +59,13 @@ struct GlobeViewScreen: View {
             ShareSheet(activityItems: [item.image])
         }
         .sheet(isPresented: $showMembershipGate) {
-            MembershipGateView(feature: .globeView)
+            MembershipGateView()
         }
-        .overlay(alignment: .topLeading) {
+        .overlay {
             if !membership.isPremium {
-                Button {
-                    showMembershipGate = true
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "lock.fill")
-                            .font(.system(size: 11, weight: .bold))
-                        Text(L10n.t("membership_zoom_locked"))
-                            .font(.system(size: 11, weight: .semibold))
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.black.opacity(0.55), in: Capsule())
-                }
-                .padding(.top, 68)
-                .padding(.leading, 20)
+                // Transparent pinch catcher — intercepts zoom attempts for free users.
+                // Does not block single-finger gestures (pan/rotate pass through).
+                PinchGateCatcher { showMembershipGate = true }
             }
         }
         .overlay {
@@ -328,6 +315,52 @@ struct GlobeViewScreen: View {
         let renderer = UIGraphicsImageRenderer(bounds: window.bounds)
         return renderer.image { _ in
             window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+    }
+}
+
+// MARK: - Pinch Gate Catcher
+
+/// Transparent overlay that detects 2-finger pinch gestures and fires a callback.
+/// Single-finger pan/rotate pass through unaffected.
+private struct PinchGateCatcher: UIViewRepresentable {
+    let onPinch: () -> Void
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+        let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePinch(_:)))
+        pinch.cancelsTouchesInView = false
+        view.addGestureRecognizer(pinch)
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        context.coordinator.onPinch = onPinch
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(onPinch: onPinch) }
+
+    final class Coordinator: NSObject {
+        var onPinch: () -> Void
+        private var fired = false
+
+        init(onPinch: @escaping () -> Void) { self.onPinch = onPinch }
+
+        @objc func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+            switch gesture.state {
+            case .began:
+                fired = false
+            case .changed:
+                if !fired {
+                    fired = true
+                    onPinch()
+                }
+            case .ended, .cancelled, .failed:
+                fired = false
+            default:
+                break
+            }
         }
     }
 }

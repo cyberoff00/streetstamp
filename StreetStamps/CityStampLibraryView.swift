@@ -879,7 +879,14 @@ final class CityThumbnailLoader: ObservableObject {
             countryISO2: city.countryISO2,
             anchor: city.anchor ?? city.journeys.first?.allCLCoords.first
         )
-        guard let img = Self.makeSnapshot(city: city, appearanceRaw: appearanceRaw, fetchedBoundary: fetchedBoundary) else { return }
+        let img: UIImage
+        if let snapshot = Self.makeSnapshot(city: city, appearanceRaw: appearanceRaw, fetchedBoundary: fetchedBoundary) {
+            img = snapshot
+        } else if let fallback = await Self.makeFallbackSnapshot(city: city, appearanceRaw: appearanceRaw) {
+            img = fallback
+        } else {
+            return
+        }
 
         CityImageMemoryCache.shared.set(img, forKey: key)
         renderCacheStore.save(img, forKey: key)
@@ -1153,6 +1160,47 @@ final class CityThumbnailLoader: ObservableObject {
                 snapshot.image.draw(at: .zero)
                 CityDeepRenderEngine.drawStyledSegments(styledSegments, snapshot: snapshot, context: renderer.cgContext, appearanceRaw: appearanceRaw)
             }
+        }
+        _ = sem.wait(timeout: .now() + 15)
+        return out
+    }
+
+    /// Fallback: forward-geocode the city name from the city key to get a center,
+    /// then render a plain map tile without routes.
+    private static func makeFallbackSnapshot(city: City, appearanceRaw: String) async -> UIImage? {
+        let parts = city.id.split(separator: "|")
+        guard parts.count >= 2 else { return nil }
+        let cityName = String(parts[0])
+        let countryISO2 = String(parts[1])
+
+        let center: CLLocationCoordinate2D? = await withCheckedContinuation { cont in
+            let geocoder = CLGeocoder()
+            geocoder.geocodeAddressString("\(cityName), \(countryISO2)") { placemarks, _ in
+                cont.resume(returning: placemarks?.first?.location?.coordinate)
+            }
+        }
+
+        guard let center, CLLocationCoordinate2DIsValid(center) else { return nil }
+
+        let mappedCenter = MapCoordAdapter.forMapKit(center, countryISO2: countryISO2, cityKey: city.id)
+        let region = MKCoordinateRegion(center: mappedCenter, span: MKCoordinateSpan(latitudeDelta: 0.18, longitudeDelta: 0.18))
+        guard let clamped = clampedRegion(region) else { return nil }
+
+        let options = MKMapSnapshotter.Options()
+        options.region = clamped
+        options.size = CGSize(width: 480, height: 320)
+        options.scale = 2
+        options.mapType = mapType(for: appearanceRaw)
+        options.traitCollection = UITraitCollection(userInterfaceStyle: interfaceStyle(for: appearanceRaw))
+        options.showsBuildings = false
+        options.showsPointsOfInterest = false
+
+        let sem = DispatchSemaphore(value: 0)
+        var out: UIImage?
+        MKMapSnapshotter(options: options).start(with: .global(qos: .userInitiated)) { snapshot, _ in
+            defer { sem.signal() }
+            guard let snapshot else { return }
+            out = snapshot.image
         }
         _ = sem.wait(timeout: .now() + 15)
         return out

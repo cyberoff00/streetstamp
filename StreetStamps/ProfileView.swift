@@ -18,6 +18,7 @@ struct ProfileView: View {
     @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var socialStore: SocialGraphStore
+    @EnvironmentObject private var notificationStore: SocialNotificationStore
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
 
     @State private var loadout: RobotLoadout
@@ -28,12 +29,8 @@ struct ProfileView: View {
     @State private var toastText = ""
     @State private var showToast = false
     @State private var showLevelHelpBubble = false
-    @State private var socialNotifications: [BackendNotificationItem] = []
-    @State private var unreadSocialCount = 0
     @State private var showNotificationsSheet = false
-    @State private var notificationsLoading = false
     @State private var showPostcardInboxFromNotification = false
-    @State private var lastPromptNotificationID: String?
     @State private var postcardInboxIntent = PostcardInboxIntent(box: "received", messageID: nil)
     @State private var showInviteFriendSheet = false
     @State private var myExclusiveID = ""
@@ -144,15 +141,15 @@ struct ProfileView: View {
                 scheduleLoadoutSync(pendingLocalLoadout)
             }
             await refreshDisplayNameIfNeeded()
-            await refreshSocialNotifications(showToastForLatestUnread: true)
+            await notificationStore.refresh(token: sessionStore.currentAccessToken, showToastCallback: { msg in showToastMessage(msg) })
         }
         .onReceive(Timer.publish(every: 25, on: .main, in: .common).autoconnect()) { _ in
-            Task { await refreshSocialNotifications(showToastForLatestUnread: true) }
+            Task { await notificationStore.refresh(token: sessionStore.currentAccessToken, showToastCallback: { msg in showToastMessage(msg) }) }
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             Task {
-                await refreshSocialNotifications(showToastForLatestUnread: true)
+                await notificationStore.refresh(token: sessionStore.currentAccessToken, showToastCallback: { msg in showToastMessage(msg) })
             }
         }
         .onChange(of: sessionStore.currentAccessToken) { _, _ in
@@ -163,7 +160,7 @@ struct ProfileView: View {
                     scheduleLoadoutSync(pendingLocalLoadout)
                 }
                 await refreshDisplayNameIfNeeded()
-                await refreshSocialNotifications(showToastForLatestUnread: false)
+                await notificationStore.refresh(token: sessionStore.currentAccessToken)
             }
         }
         .onChange(of: sessionStore.currentUserID) { _, _ in
@@ -176,7 +173,7 @@ struct ProfileView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .socialNotificationsDidMarkRead)) { notification in
-            applySocialNotificationReadSync(notification)
+            notificationStore.applyReadSync(notification)
         }
     }
     
@@ -244,7 +241,7 @@ struct ProfileView: View {
                 }
                 .frame(height: 252)
 
-                if ProfileHeaderPresentation.showsNotificationCloud(notificationCount: socialNotifications.count) {
+                if ProfileHeaderPresentation.showsNotificationCloud(notificationCount: notificationStore.notifications.count) {
                     Button {
                         showNotificationsSheet = true
                     } label: {
@@ -257,8 +254,8 @@ struct ProfileView: View {
                                 .clipShape(Circle())
                                 .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
 
-                            if unreadSocialCount > 0 {
-                                Text("\(min(unreadSocialCount, 99))")
+                            if notificationStore.unreadCount > 0 {
+                                Text("\(min(notificationStore.unreadCount, 99))")
                                     .font(.system(size: 10, weight: .semibold))
                                     .foregroundColor(.white)
                                     .padding(.horizontal, 5)
@@ -551,7 +548,7 @@ struct ProfileView: View {
     private var socialNotificationsSheet: some View {
         NavigationStack {
             Group {
-                if notificationsLoading && socialNotifications.isEmpty {
+                if notificationStore.isLoading && notificationStore.notifications.isEmpty {
                     VStack(spacing: 12) {
                         ProgressView()
                         Text(L10n.t("profile_notifications_loading"))
@@ -559,7 +556,7 @@ struct ProfileView: View {
                             .foregroundColor(FigmaTheme.subtext)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if socialNotifications.isEmpty {
+                } else if notificationStore.notifications.isEmpty {
                     Text(L10n.t("profile_notifications_empty"))
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(FigmaTheme.subtext)
@@ -567,7 +564,7 @@ struct ProfileView: View {
                 } else {
                     ScrollView(showsIndicators: false) {
                         VStack(spacing: 10) {
-                            ForEach(socialNotifications) { item in
+                            ForEach(notificationStore.notifications) { item in
                                 socialNotificationRow(item)
                             }
                         }
@@ -592,7 +589,7 @@ struct ProfileView: View {
                 ) {
                     Button {
                         Task {
-                            await markSocialNotificationsReadIfNeeded()
+                            await notificationStore.markAllRead(token: sessionStore.currentAccessToken)
                         }
                     } label: {
                         Image(systemName: "checkmark.circle")
@@ -606,7 +603,7 @@ struct ProfileView: View {
             }
             .toolbar(.hidden, for: .navigationBar)
             .task {
-                await refreshSocialNotifications(showToastForLatestUnread: false)
+                await notificationStore.refresh(token: sessionStore.currentAccessToken)
             }
         }
     }
@@ -658,7 +655,7 @@ struct ProfileView: View {
         .shadow(color: Color.black.opacity(0.04), radius: 14, x: 0, y: 5)
         .onTapGesture {
             Task {
-                await markSingleSocialNotificationRead(item.id)
+                await notificationStore.markSingleRead(id: item.id, token: sessionStore.currentAccessToken)
                 if item.type == "postcard_received" || item.type == "postcard_reaction" {
                     let box = item.type == "postcard_received" ? "received" : "sent"
                     postcardInboxIntent = PostcardInboxIntent(box: box, messageID: item.postcardMessageID)
@@ -844,92 +841,6 @@ struct ProfileView: View {
         }
     }
 
-    @MainActor
-    private func refreshSocialNotifications(showToastForLatestUnread: Bool) async {
-        guard BackendConfig.isEnabled,
-              let token = sessionStore.currentAccessToken,
-              !token.isEmpty else {
-            socialNotifications = []
-            unreadSocialCount = 0
-            return
-        }
-        notificationsLoading = true
-        defer { notificationsLoading = false }
-
-        do {
-            let all = try await BackendAPIClient.shared.fetchNotifications(token: token, unreadOnly: false)
-            PostcardNotificationBridge.shared.surfaceUnreadPostcardNotifications(all)
-            let socialItems = all
-                .filter { SocialNotificationPolicy.supports(type: $0.type) }
-                .sorted(by: { $0.createdAt > $1.createdAt })
-            socialNotifications = socialItems
-
-            let unread = socialItems.filter { !$0.read }
-            unreadSocialCount = unread.count
-
-            if showToastForLatestUnread,
-               let latest = unread.first,
-               latest.id != lastPromptNotificationID {
-                showToastMessage(SocialNotificationPresentation.message(for: latest))
-                lastPromptNotificationID = latest.id
-            }
-        } catch {
-            // Keep profile view responsive even if notification poll fails.
-        }
-    }
-
-    @MainActor
-    private func markSocialNotificationsReadIfNeeded() async {
-        guard BackendConfig.isEnabled,
-              let token = sessionStore.currentAccessToken,
-              !token.isEmpty else { return }
-        let unreadIDs = socialNotifications
-            .filter { !$0.read }
-            .map(\.id)
-        guard !unreadIDs.isEmpty else { return }
-
-        do {
-            try await BackendAPIClient.shared.markNotificationsRead(token: token, ids: unreadIDs)
-            socialNotifications = socialNotifications.map { item in
-                guard unreadIDs.contains(item.id) else { return item }
-                var copy = item
-                copy.read = true
-                return copy
-            }
-            unreadSocialCount = 0
-            SocialNotificationReadSync.post(ids: unreadIDs, markAll: true)
-        } catch {
-            // Keep sheet usable even if mark-read fails.
-        }
-    }
-
-    @MainActor
-    private func markSingleSocialNotificationRead(_ id: String) async {
-        guard socialNotifications.contains(where: { $0.id == id && !$0.read }) else { return }
-        guard BackendConfig.isEnabled,
-              let token = sessionStore.currentAccessToken,
-              !token.isEmpty else { return }
-
-        do {
-            try await BackendAPIClient.shared.markNotificationsRead(token: token, ids: [id])
-            socialNotifications = socialNotifications.map { item in
-                guard item.id == id else { return item }
-                var copy = item
-                copy.read = true
-                return copy
-            }
-            unreadSocialCount = socialNotifications.filter { !$0.read }.count
-            SocialNotificationReadSync.post(ids: [id], markAll: false)
-        } catch {
-            // Keep sheet usable even if mark-read fails.
-        }
-    }
-
-    private func applySocialNotificationReadSync(_ notification: Notification) {
-        guard let payload = SocialNotificationReadSync.payload(from: notification) else { return }
-        socialNotifications = SocialNotificationReadSync.applying(payload, to: socialNotifications)
-        unreadSocialCount = socialNotifications.filter { !$0.read }.count
-    }
 
     private func relativeTimeText(_ date: Date) -> String {
         let formatter = RelativeDateTimeFormatter()

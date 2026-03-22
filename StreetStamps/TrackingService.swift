@@ -266,6 +266,11 @@ final class TrackingService: ObservableObject {
         pendingAutoEndedNotice = nil
     }
 
+    /// Called when a stale ongoing journey is finalized externally (e.g. on app launch).
+    func setAutoEndedNotice(_ notice: AutoEndedJourneyNotice) {
+        pendingAutoEndedNotice = notice
+    }
+
     private struct DeferredWeakDriftJump {
         let anchor: CLLocation
         let candidate: CLLocation

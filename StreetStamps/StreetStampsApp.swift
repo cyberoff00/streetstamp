@@ -79,6 +79,7 @@ struct StreetStampsApp: App {
     @StateObject private var deepLinkStore = AppDeepLinkStore()
     @StateObject private var onboardingGuide = OnboardingGuideStore()
     @StateObject private var publishStore = JourneyPublishStore()
+    @StateObject private var notificationStore = SocialNotificationStore()
     @State private var journeyDeletionSyncFailureStore = JourneyDeletionSyncFailureStore()
     @State private var showAuthEntry = false
     @State private var showSplash = true
@@ -208,10 +209,10 @@ struct StreetStampsApp: App {
                     lifelogStore: lStore,
                     source: .resumeDeclined
                 ) { updated in
-                    TrackingService.shared.pendingAutoEndedNotice = TrackingService.AutoEndedJourneyNotice(
+                    TrackingService.shared.setAutoEndedNotice(TrackingService.AutoEndedJourneyNotice(
                         journeyID: updated.id,
                         endedAt: updated.endTime ?? Date()
-                    )
+                    ))
                 }
             }
         }
@@ -292,6 +293,7 @@ struct StreetStampsApp: App {
             .environmentObject(deepLinkStore)
             .environmentObject(onboardingGuide)
             .environmentObject(publishStore)
+            .environmentObject(notificationStore)
     }
 
     private var appContentWithPresentation: some View {

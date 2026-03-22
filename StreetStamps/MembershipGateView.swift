@@ -2,14 +2,15 @@
 //  MembershipGateView.swift
 //  StreetStamps
 //
-//  Reusable paywall prompt shown when a free user hits a premium-only feature.
-//  Usage: .sheet(isPresented: $showGate) { MembershipGateView(feature: .globeView) }
+//  Unified subscription paywall.
+//  Shows a polished, single-design gate regardless of which feature triggered it.
+//  Usage: .sheet(isPresented: $showGate) { MembershipGateView() }
 //
 
 import SwiftUI
 import StoreKit
 
-// MARK: - Gated Feature Descriptor
+// MARK: - Gated Feature Descriptor (kept for call-site compatibility)
 
 enum MembershipGatedFeature: Identifiable {
     case journeyPhotos
@@ -35,241 +36,310 @@ enum MembershipGatedFeature: Identifiable {
         case .mapAppearance:    return "mapAppearance"
         }
     }
-
-    var iconName: String {
-        switch self {
-        case .journeyPhotos:    return "photo.on.rectangle.angled"
-        case .friends:          return "person.2.fill"
-        case .globeView:        return "globe.americas.fill"
-        case .republishJourney: return "arrow.triangle.2.circlepath"
-        case .postcardLimit:    return "envelope.fill"
-        case .coinBoost:        return "bitcoinsign.circle.fill"
-        case .iCloudSync:       return "icloud.fill"
-        case .gpxExport:        return "square.and.arrow.up.fill"
-        case .mapAppearance:    return "paintpalette.fill"
-        }
-    }
-
-    var titleKey: String {
-        switch self {
-        case .journeyPhotos:    return "membership_gate_photos_title"
-        case .friends:          return "membership_gate_friends_title"
-        case .globeView:        return "membership_gate_globe_title"
-        case .republishJourney: return "membership_gate_republish_title"
-        case .postcardLimit:    return "membership_gate_postcard_title"
-        case .coinBoost:        return "membership_gate_coin_title"
-        case .iCloudSync:       return "membership_gate_icloud_title"
-        case .gpxExport:        return "membership_gate_gpx_title"
-        case .mapAppearance:    return "membership_gate_map_title"
-        }
-    }
-
-    var descriptionKey: String {
-        switch self {
-        case .journeyPhotos:    return "membership_gate_photos_desc"
-        case .friends:          return "membership_gate_friends_desc"
-        case .globeView:        return "membership_gate_globe_desc"
-        case .republishJourney: return "membership_gate_republish_desc"
-        case .postcardLimit:    return "membership_gate_postcard_desc"
-        case .coinBoost:        return "membership_gate_coin_desc"
-        case .iCloudSync:       return "membership_gate_icloud_desc"
-        case .gpxExport:        return "membership_gate_gpx_desc"
-        case .mapAppearance:    return "membership_gate_map_desc"
-        }
-    }
 }
 
-// MARK: - Gate View
+// MARK: - Unified Gate View
 
 struct MembershipGateView: View {
-    let feature: MembershipGatedFeature
+    /// Optional — kept for backward compatibility. The gate always shows the
+    /// same unified design regardless of which feature triggered it.
+    var feature: MembershipGatedFeature? = nil
+
     @Environment(\.dismiss) private var dismiss
     @StateObject private var membership = MembershipStore.shared
     @State private var products: [Product] = []
     @State private var isPurchasing = false
     @State private var errorMessage: String?
     @State private var productsLoadFinished = false
+    @State private var selectedProductID: String?
+
+    private var sortedProducts: [Product] {
+        products.sorted { $0.price < $1.price }
+    }
+
+    // MARK: - Colors (warm earth-tone gradient, inspired by the app's secondary palette)
+
+    private let heroGradient = LinearGradient(
+        colors: [
+            Color(red: 82.0/255, green: 183.0/255, blue: 136.0/255),   // #52B788 primary
+            Color(red: 116.0/255, green: 198.0/255, blue: 157.0/255),  // #74C69D accent
+            Color(red: 212.0/255, green: 165.0/255, blue: 116.0/255)   // #D4A574 secondary
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
 
     var body: some View {
         VStack(spacing: 0) {
             // Drag indicator
-            RoundedRectangle(cornerRadius: 2.5)
-                .fill(Color.gray.opacity(0.35))
-                .frame(width: 36, height: 5)
-                .padding(.top, 10)
-                .padding(.bottom, 20)
+            Capsule()
+                .fill(Color.black.opacity(0.12))
+                .frame(width: 40, height: 5)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
 
-            ScrollView {
-                VStack(spacing: 24) {
-                    featureHero
-                    benefitsList
-                    pricingSection
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 0) {
+                    heroSection
+                    benefitsGrid
+                        .padding(.top, 28)
+                    planCards
+                        .padding(.top, 24)
+                    subscribeButton
+                        .padding(.top, 20)
+                    footer
+                        .padding(.top, 16)
                 }
                 .padding(.horizontal, 24)
-                .padding(.bottom, 40)
+                .padding(.bottom, 48)
             }
         }
         .background(FigmaTheme.background.ignoresSafeArea())
         .task {
             await loadProducts()
+            if selectedProductID == nil, let first = sortedProducts.first {
+                selectedProductID = first.id
+            }
         }
     }
 
     // MARK: - Hero
 
-    private var featureHero: some View {
+    private var heroSection: some View {
         VStack(spacing: 16) {
             ZStack {
+                // Soft gradient circle
                 Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [FigmaTheme.primary.opacity(0.25), FigmaTheme.accent.opacity(0.12)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 80, height: 80)
+                    .fill(heroGradient.opacity(0.18))
+                    .frame(width: 96, height: 96)
+                    .blur(radius: 2)
 
-                Image(systemName: feature.iconName)
-                    .font(.system(size: 32, weight: .bold))
-                    .foregroundColor(FigmaTheme.primary)
+                Circle()
+                    .fill(heroGradient.opacity(0.35))
+                    .frame(width: 72, height: 72)
+
+                Image(systemName: "crown.fill")
+                    .font(.system(size: 30, weight: .bold))
+                    .foregroundStyle(heroGradient)
             }
+            .padding(.top, 16)
 
-            Text(L10n.t(feature.titleKey))
-                .font(.system(size: 22, weight: .bold, design: .rounded))
+            Text(L10n.t("membership_gate_title"))
+                .font(.system(size: 26, weight: .black, design: .rounded))
                 .foregroundColor(FigmaTheme.text)
                 .multilineTextAlignment(.center)
 
-            Text(L10n.t(feature.descriptionKey))
+            Text(L10n.t("membership_gate_subtitle"))
                 .font(.system(size: 15))
                 .foregroundColor(FigmaTheme.subtext)
                 .multilineTextAlignment(.center)
-                .lineSpacing(3)
-        }
-        .padding(.top, 8)
-    }
-
-    // MARK: - Benefits List
-
-    private var benefitsList: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            benefitRow(icon: "photo.on.rectangle.angled", textKey: "membership_benefit_photos")
-            benefitRow(icon: "person.2.fill", textKey: "membership_benefit_friends")
-            benefitRow(icon: "globe.americas.fill", textKey: "membership_benefit_globe")
-            benefitRow(icon: "icloud.fill", textKey: "membership_benefit_icloud")
-            benefitRow(icon: "square.and.arrow.up.fill", textKey: "membership_benefit_gpx")
-            benefitRow(icon: "envelope.fill", textKey: "membership_benefit_postcard")
-            benefitRow(icon: "paintpalette.fill", textKey: "membership_benefit_map")
-            benefitRow(icon: "bitcoinsign.circle.fill", textKey: "membership_benefit_coins")
-        }
-        .padding(18)
-        .background(FigmaTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(FigmaTheme.border, lineWidth: 1)
-        )
-    }
-
-    private func benefitRow(icon: String, textKey: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(FigmaTheme.primary)
-                .frame(width: 24)
-
-            Text(L10n.t(textKey))
-                .font(.system(size: 14))
-                .foregroundColor(FigmaTheme.text)
+                .lineSpacing(4)
+                .padding(.horizontal, 8)
         }
     }
 
-    // MARK: - Pricing
+    // MARK: - Benefits Grid (2 columns)
 
-    private var pricingSection: some View {
-        VStack(spacing: 12) {
+    private var benefitsGrid: some View {
+        let items: [(icon: String, key: String)] = [
+            ("globe.americas.fill", "membership_benefit_globe"),
+            ("photo.on.rectangle.angled", "membership_benefit_photos"),
+            ("person.2.fill", "membership_benefit_friends"),
+            ("icloud.fill", "membership_benefit_icloud"),
+            ("envelope.fill", "membership_benefit_postcard"),
+            ("paintpalette.fill", "membership_benefit_map"),
+            ("square.and.arrow.up.fill", "membership_benefit_gpx"),
+            ("bitcoinsign.circle.fill", "membership_benefit_coins"),
+        ]
+
+        return LazyVGrid(
+            columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
+            spacing: 10
+        ) {
+            ForEach(items, id: \.key) { item in
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(FigmaTheme.primary)
+                        .frame(width: 18, height: 18)
+                        .background(FigmaTheme.primary.opacity(0.12))
+                        .clipShape(Circle())
+
+                    Text(L10n.t(item.key))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(FigmaTheme.text)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.vertical, 8)
+                .padding(.horizontal, 10)
+                .background(FigmaTheme.card)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(FigmaTheme.border, lineWidth: 1)
+                )
+            }
+        }
+    }
+
+    // MARK: - Plan Cards
+
+    private var planCards: some View {
+        VStack(spacing: 10) {
             if !products.isEmpty {
-                ForEach(products, id: \.id) { product in
-                    Button {
-                        Task { await purchaseProduct(product) }
-                    } label: {
-                        pricingButtonLabel(
-                            name: product.displayName,
-                            period: product.subscription.map { subscriptionPeriodText($0.subscriptionPeriod) },
-                            price: product.displayPrice
-                        )
-                    }
-                    .disabled(isPurchasing)
-                    .opacity(isPurchasing ? 0.6 : 1.0)
+                ForEach(sortedProducts, id: \.id) { product in
+                    planCard(
+                        id: product.id,
+                        name: product.displayName,
+                        period: product.subscription.map { periodText($0.subscriptionPeriod) },
+                        price: product.displayPrice,
+                        isYearly: product.id == MembershipStore.yearlyProductID
+                    )
                 }
             } else if productsLoadFinished {
-                Button {
-                    Task { await purchaseByID(MembershipStore.subscriptionProductID) }
-                } label: {
-                    pricingButtonLabel(
-                        name: L10n.t("membership_plan_monthly"),
-                        period: L10n.t("membership_period_monthly"),
-                        price: "$2.99"
-                    )
-                }
-                .disabled(isPurchasing)
-                .opacity(isPurchasing ? 0.6 : 1.0)
-
-                Button {
-                    Task { await purchaseByID(MembershipStore.yearlyProductID) }
-                } label: {
-                    pricingButtonLabel(
-                        name: L10n.t("membership_plan_yearly"),
-                        period: L10n.t("membership_period_yearly"),
-                        price: "$19.99"
-                    )
-                }
-                .disabled(isPurchasing)
-                .opacity(isPurchasing ? 0.6 : 1.0)
+                planCard(
+                    id: MembershipStore.subscriptionProductID,
+                    name: L10n.t("membership_plan_monthly"),
+                    period: L10n.t("membership_period_monthly"),
+                    price: "$2.99",
+                    isYearly: false
+                )
+                planCard(
+                    id: MembershipStore.yearlyProductID,
+                    name: L10n.t("membership_plan_yearly"),
+                    period: L10n.t("membership_period_yearly"),
+                    price: "$19.99",
+                    isYearly: true
+                )
             } else {
                 ProgressView()
-                    .padding(.vertical, 12)
+                    .tint(FigmaTheme.primary)
+                    .padding(.vertical, 16)
             }
+        }
+    }
+
+    private func planCard(id: String, name: String, period: String?, price: String, isYearly: Bool) -> some View {
+        let selected = selectedProductID == id
+
+        return Button {
+            selectedProductID = id
+        } label: {
+            HStack(spacing: 14) {
+                // Radio dot
+                ZStack {
+                    Circle()
+                        .stroke(selected ? FigmaTheme.primary : Color.black.opacity(0.15), lineWidth: 2)
+                        .frame(width: 20, height: 20)
+                    if selected {
+                        Circle()
+                            .fill(FigmaTheme.primary)
+                            .frame(width: 11, height: 11)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(name)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(FigmaTheme.text)
+
+                        if isYearly {
+                            Text(L10n.t("membership_save_badge"))
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(FigmaTheme.secondary)
+                                .clipShape(Capsule())
+                        }
+                    }
+                    if let period {
+                        Text(period)
+                            .font(.system(size: 11))
+                            .foregroundColor(FigmaTheme.subtext)
+                    }
+                }
+
+                Spacer()
+
+                Text(price)
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundColor(selected ? FigmaTheme.primary : FigmaTheme.text)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 13)
+            .background(FigmaTheme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(selected ? FigmaTheme.primary : FigmaTheme.border,
+                            lineWidth: selected ? 2 : 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Subscribe Button
+
+    private var subscribeButton: some View {
+        VStack(spacing: 10) {
+            Button {
+                Task { await performPurchase() }
+            } label: {
+                HStack(spacing: 8) {
+                    if isPurchasing {
+                        ProgressView()
+                            .tint(.white)
+                    }
+                    Text(L10n.t("membership_subscribe_button"))
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.white)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 15)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(heroGradient)
+                )
+            }
+            .disabled(isPurchasing || selectedProductID == nil)
+            .opacity(isPurchasing ? 0.7 : 1.0)
+            .buttonStyle(.plain)
 
             if let error = errorMessage {
                 Text(error)
-                    .font(.system(size: 13))
+                    .font(.system(size: 12))
                     .foregroundColor(.red)
                     .multilineTextAlignment(.center)
             }
-
-            Button {
-                Task { try? await AppStore.sync() }
-            } label: {
-                Text(L10n.t("membership_restore_purchases"))
-                    .font(.system(size: 14))
-                    .foregroundColor(FigmaTheme.subtext)
-            }
-            .padding(.top, 4)
         }
     }
 
-    private func pricingButtonLabel(name: String, period: String?, price: String) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(name)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.white)
-                if let period {
-                    Text(period)
-                        .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.8))
+    // MARK: - Footer
+
+    private var footer: some View {
+        VStack(spacing: 6) {
+            Button {
+                Task {
+                    try? await AppStore.sync()
+                    await membership.refreshEntitlement()
                 }
+            } label: {
+                Text(L10n.t("membership_restore_purchases"))
+                    .font(.system(size: 13))
+                    .foregroundColor(FigmaTheme.subtext)
             }
-            Spacer()
-            Text(price)
-                .font(.system(size: 18, weight: .bold))
-                .foregroundColor(.white)
+
+            Text(L10n.t("membership_auto_renew_note"))
+                .font(.system(size: 10))
+                .foregroundColor(FigmaTheme.subtext.opacity(0.6))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 20)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
-        .background(FigmaTheme.primary)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     // MARK: - Actions
@@ -282,15 +352,23 @@ struct MembershipGateView: View {
         do {
             let loaded = try await Product.products(for: ids)
             products = loaded.sorted { $0.price < $1.price }
+            if selectedProductID == nil, let first = sortedProducts.first {
+                selectedProductID = first.id
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
         productsLoadFinished = true
+        if selectedProductID == nil {
+            selectedProductID = MembershipStore.subscriptionProductID
+        }
     }
 
-    private func purchaseByID(_ productID: String) async {
+    private func performPurchase() async {
+        guard let productID = selectedProductID else { return }
         isPurchasing = true
         errorMessage = nil
+
         if products.isEmpty {
             await loadProducts()
         }
@@ -299,24 +377,16 @@ struct MembershipGateView: View {
             isPurchasing = false
             return
         }
-        await purchaseProduct(product)
-    }
-
-    private func purchaseProduct(_ product: Product) async {
-        isPurchasing = true
-        errorMessage = nil
         do {
             let success = try await membership.purchase(product)
-            if success {
-                dismiss()
-            }
+            if success { dismiss() }
         } catch {
             errorMessage = error.localizedDescription
         }
         isPurchasing = false
     }
 
-    private func subscriptionPeriodText(_ period: Product.SubscriptionPeriod) -> String {
+    private func periodText(_ period: Product.SubscriptionPeriod) -> String {
         switch period.unit {
         case .month: return period.value == 1 ? L10n.t("membership_period_monthly") : "\(period.value) months"
         case .year:  return period.value == 1 ? L10n.t("membership_period_yearly") : "\(period.value) years"
