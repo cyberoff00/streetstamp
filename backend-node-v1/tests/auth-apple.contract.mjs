@@ -66,7 +66,6 @@ async function run() {
       KEEP1111: "u_existing_email"
     },
     oauthIndex: {},
-    firebaseIdentityIndex: {},
     authIdentities: {
       "aid_existing_email": {
         id: "aid_existing_email",

@@ -133,6 +133,7 @@ struct CityStampLibraryView: View {
         }
         .onChange(of: languagePreference.currentLanguage) { _ in
             guard store.hasLoaded else { return }
+            cache.refreshAllResolvedDisplayNames()
             vm.load(journeyStore: store, cityCache: cache)
         }
         .onReceive(cache.$cachedCities) { nextCities in

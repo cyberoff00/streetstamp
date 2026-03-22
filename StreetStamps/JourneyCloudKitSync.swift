@@ -21,8 +21,7 @@ actor JourneyCloudKitSync {
     }
 
     func ensureZone() async throws {
-        let zone = CKRecordZone(zoneID: zoneID)
-        _ = try await database.save(zone)
+        try await CloudKitZoneCache.shared.ensureZone(zoneID, in: database)
     }
 
     func uploadJourney(_ journey: JourneyRoute) async throws {
@@ -35,7 +34,7 @@ actor JourneyCloudKitSync {
         record[modifiedAtField] = Date() as CKRecordValue
         record[isDeletedField] = 0 as CKRecordValue
 
-        _ = try await database.save(record)
+        try await cloudKitSaveRecord(record, in: database)
     }
 
     func downloadJourneys(modifiedAfter: Date?) async throws -> [JourneyRoute] {
@@ -47,15 +46,19 @@ actor JourneyCloudKitSync {
     }
 
     func downloadSnapshots(modifiedAfter: Date?) async throws -> [JourneyCloudSnapshot] {
-        var predicate: NSPredicate
+        let predicate: NSPredicate
         if let date = modifiedAfter {
             predicate = NSPredicate(format: "\(modifiedAtField) > %@", date as NSDate)
         } else {
             predicate = NSPredicate(value: true)
         }
 
-        let query = CKQuery(recordType: CloudKitRecordType.journey, predicate: predicate)
-        let records = try await database.records(matching: query, inZoneWith: zoneID)
+        let records = try await cloudKitQueryAll(
+            recordType: CloudKitRecordType.journey,
+            predicate: predicate,
+            zoneID: zoneID,
+            in: database
+        )
 
         var snapshots: [JourneyCloudSnapshot] = []
         for record in records {
@@ -87,6 +90,6 @@ actor JourneyCloudKitSync {
         record[modifiedAtField] = Date() as CKRecordValue
         record[isDeletedField] = 1 as CKRecordValue
         record[dataField] = nil
-        _ = try await database.save(record)
+        try await cloudKitSaveRecord(record, in: database)
     }
 }

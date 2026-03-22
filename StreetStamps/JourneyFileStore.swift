@@ -141,25 +141,31 @@ final class JourneysFileStore {
             out = b
         }
 
-        // Apply deltas (if any)
+        // Apply deltas (if any). Delta corruption must NOT prevent loading
+        // the journey — losing the meta (endTime, memories, city) is far worse
+        // than losing some trailing coordinates.
         if fm.fileExists(atPath: deltaURL.path) {
-            let raw = try String(contentsOf: deltaURL, encoding: .utf8)
-            let lines = raw.split(separator: "\n")
+            do {
+                let raw = try String(contentsOf: deltaURL, encoding: .utf8)
+                let lines = raw.split(separator: "\n")
 
-            if !lines.isEmpty {
-                let decoder = JSONDecoder()
-                for line in lines {
-                    guard !line.isEmpty else { continue }
-                    if let data = line.data(using: .utf8),
-                       let chunk = try? decoder.decode([CoordinateCodable].self, from: data) {
-                        for c in chunk {
-                            if let last = out.coordinates.last, last.lat == c.lat, last.lon == c.lon {
-                                continue
+                if !lines.isEmpty {
+                    let decoder = JSONDecoder()
+                    for line in lines {
+                        guard !line.isEmpty else { continue }
+                        if let data = line.data(using: .utf8),
+                           let chunk = try? decoder.decode([CoordinateCodable].self, from: data) {
+                            for c in chunk {
+                                if let last = out.coordinates.last, last.lat == c.lat, last.lon == c.lon {
+                                    continue
+                                }
+                                out.coordinates.append(c)
                             }
-                            out.coordinates.append(c)
                         }
                     }
                 }
+            } catch {
+                print("⚠️ journey delta read failed for \(id), using meta-only: \(error)")
             }
         }
 

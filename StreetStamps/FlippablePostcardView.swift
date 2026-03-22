@@ -41,26 +41,26 @@ struct FlippablePostcardView: View {
 
     var body: some View {
         ZStack {
-            if showFrontFace {
-                PostcardFrontFaceView(
-                    cityName: cityName,
-                    nickname: nickname,
-                    photoSource: photoSource,
-                    avatarLoadout: avatarLoadout,
-                    cornerRadius: cornerRadius,
-                    showOverlays: showFrontOverlays
-                )
-            } else {
-                PostcardBackFaceView(
-                    cityName: cityName,
-                    nickname: nickname,
-                    messageText: messageText,
-                    avatarLoadout: avatarLoadout,
-                    sentDate: sentDate,
-                    cornerRadius: cornerRadius
-                )
-                .rotation3DEffect(.degrees(180), axis: (x: 0, y: 1, z: 0))
-            }
+            PostcardFrontFaceView(
+                cityName: cityName,
+                nickname: nickname,
+                photoSource: photoSource,
+                avatarLoadout: avatarLoadout,
+                cornerRadius: cornerRadius,
+                showOverlays: showFrontOverlays
+            )
+            .opacity(showFrontFace ? 1 : 0)
+
+            PostcardBackFaceView(
+                cityName: cityName,
+                nickname: nickname,
+                messageText: messageText,
+                avatarLoadout: avatarLoadout,
+                sentDate: sentDate,
+                cornerRadius: cornerRadius
+            )
+            .rotation3DEffect(.degrees(180), axis: (x: 0, y: 1, z: 0))
+            .opacity(showFrontFace ? 0 : 1)
         }
         .rotation3DEffect(.degrees(isFront ? 0 : 180), axis: (x: 0, y: 1, z: 0), perspective: 0.58)
         .animation(.easeInOut(duration: flipDuration), value: isFront)

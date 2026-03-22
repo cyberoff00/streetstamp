@@ -173,7 +173,9 @@ struct MapboxGlobeView: View {
 
             // gestures
             holder.mapView.gestures.options.rotateEnabled = true
-            holder.mapView.gestures.options.pinchEnabled = true
+            let canZoom = MembershipStore.shared.globeViewEnabled
+            holder.mapView.gestures.options.pinchEnabled = canZoom
+            holder.mapView.gestures.options.doubleTapToZoomInEnabled = canZoom
             holder.mapView.gestures.options.panEnabled = true
 
             addFallbackBackground()

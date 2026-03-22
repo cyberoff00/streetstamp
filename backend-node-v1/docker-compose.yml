@@ -49,7 +49,6 @@ services:
       RESEND_API_BASE: "${RESEND_API_BASE:-https://api.resend.com}"
       SES_FROM_EMAIL: "${SES_FROM_EMAIL:-}"
       APPLE_AUDIENCES: "${APPLE_AUDIENCES:-com.claire.streetstamps}"
-      FIREBASE_AUTH_ENABLED: "${FIREBASE_AUTH_ENABLED:-0}"
       R2_ACCOUNT_ID: "${R2_ACCOUNT_ID:-}"
       R2_ACCESS_KEY_ID: "${R2_ACCESS_KEY_ID:-}"
       R2_SECRET_ACCESS_KEY: "${R2_SECRET_ACCESS_KEY:-}"

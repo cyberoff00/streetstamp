@@ -634,6 +634,7 @@ final class CityCache: ObservableObject {
     private var migrationMarkerV2URL: URL
     private var migrationMarkerV3URL: URL
     private var migrationMarkerV4URL: URL
+    private var migrationMarkerV6URL: URL
     private var paths: StoragePath
     private var membershipIndex = CityMembershipIndex()
     private var cancellables: Set<AnyCancellable> = []
@@ -647,6 +648,7 @@ final class CityCache: ObservableObject {
         self.migrationMarkerV2URL = paths.migrationMarkerV2_thumbnailPaths
         self.migrationMarkerV3URL = paths.migrationMarkerV3_intercityToStartingCity
         self.migrationMarkerV4URL = paths.migrationMarkerV4_removeLegacyThumbnails
+        self.migrationMarkerV6URL = paths.migrationMarkerV6_autoLevelRekey
         self.paths = paths
         loadFromDisk()
         loadMembershipIndexFromDisk()
@@ -682,6 +684,7 @@ final class CityCache: ObservableObject {
         self.migrationMarkerV2URL = paths.migrationMarkerV2_thumbnailPaths
         self.migrationMarkerV3URL = paths.migrationMarkerV3_intercityToStartingCity
         self.migrationMarkerV4URL = paths.migrationMarkerV4_removeLegacyThumbnails
+        self.migrationMarkerV6URL = paths.migrationMarkerV6_autoLevelRekey
 
         loadFromDisk()
         loadMembershipIndexFromDisk()
@@ -699,6 +702,7 @@ final class CityCache: ObservableObject {
         guard membershipIndex.entries.isEmpty || !hasRebuiltForCurrentLoadedState else { return }
         hasRebuiltForCurrentLoadedState = true
         rebuildFromJourneyStore()
+        migrateJourneyKeysToAutoLevelIfNeeded()
     }
     
     /// Migrate thumbnail paths from absolute paths to relative paths (filenames only).
@@ -767,6 +771,82 @@ final class CityCache: ObservableObject {
         }
         saveToDisk()
         try? Data("ok".utf8).write(to: migrationMarkerV4URL, options: .atomic)
+    }
+
+    /// V6 migration: re-geocode all completed journeys and re-key them using
+    /// automatic `decideLevel` rules (no user preference). Runs once in background.
+    private func migrateJourneyKeysToAutoLevelIfNeeded() {
+        let fm = FileManager.default
+        guard !fm.fileExists(atPath: migrationMarkerV6URL.path) else { return }
+
+        let journeys = journeyStore.journeys.filter { $0.isCompleted }
+        guard !journeys.isEmpty else {
+            try? Data("ok".utf8).write(to: migrationMarkerV6URL, options: .atomic)
+            return
+        }
+
+        let markerURL = migrationMarkerV6URL
+        let fixedLocale = Locale(identifier: "en_US")
+
+        Task.detached(priority: .utility) { [weak self] in
+            var updatedJourneys: [(id: String, newKey: String, newName: String, iso2: String?)] = []
+
+            // Process journeys sequentially with rate limiting to avoid geocoder throttle
+            for journey in journeys {
+                guard let startCoord = journey.coordinates.first?.cl,
+                      CLLocationCoordinate2DIsValid(startCoord) else { continue }
+
+                let currentKey = journey.stableCityKey ?? ""
+                guard !currentKey.isEmpty else { continue }
+
+                let location = CLLocation(latitude: startCoord.latitude, longitude: startCoord.longitude)
+                let result: (key: String, name: String, iso2: String?)? = await withCheckedContinuation { cont in
+                    CLGeocoder().reverseGeocodeLocation(location, preferredLocale: fixedLocale) { placemarks, error in
+                        guard let pm = placemarks?.first, error == nil else {
+                            cont.resume(returning: nil)
+                            return
+                        }
+                        let canonical = CityPlacemarkResolver.resolveCanonical(from: pm)
+                        cont.resume(returning: (canonical.cityKey, canonical.city, canonical.iso2))
+                    }
+                }
+
+                guard let result else {
+                    // Geocode failed — skip this journey, will retry next launch
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    continue
+                }
+
+                let newKey = result.key.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !newKey.isEmpty, newKey != currentKey {
+                    updatedJourneys.append((id: journey.id, newKey: newKey, newName: result.name, iso2: result.iso2))
+                }
+
+                // Rate limit: 1.5s between geocode requests
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+            }
+
+            await MainActor.run {
+                guard let self else { return }
+
+                if !updatedJourneys.isEmpty {
+                    for update in updatedJourneys {
+                        guard var journey = self.journeyStore.journeys.first(where: { $0.id == update.id }) else { continue }
+                        journey.startCityKey = update.newKey
+                        journey.cityKey = update.newKey
+                        journey.canonicalCity = CityPlacemarkResolver.stableCityName(from: update.newKey, fallback: update.newName)
+                        if let iso2 = update.iso2 {
+                            journey.countryISO2 = iso2
+                        }
+                        self.journeyStore.upsertSnapshotThrottled(journey, coordCount: journey.coordinates.count)
+                    }
+                    self.journeyStore.flushPersist()
+                    self.rebuildFromJourneyStore()
+                }
+
+                try? Data("ok".utf8).write(to: markerURL, options: .atomic)
+            }
+        }
     }
 
     /// Populate in-memory cities directly without disk I/O.
@@ -955,7 +1035,7 @@ final class CityCache: ObservableObject {
                 thumbnailBasePath: cachedCities[targetIdx].thumbnailBasePath,
                 thumbnailRoutePath: cachedCities[targetIdx].thumbnailRoutePath,
                 identityLevelRaw: cachedCities[targetIdx].identityLevelRaw,
-                selectedDisplayLevelRaw: cachedCities[targetIdx].selectedDisplayLevelRaw,
+                selectedDisplayLevelRaw: nil,
                 parentScopeKey: cachedCities[targetIdx].parentScopeKey,
                 availableLevelNames: cachedCities[targetIdx].availableLevelNames,
                 availableLevelNamesLocaleID: cachedCities[targetIdx].availableLevelNamesLocaleID,
@@ -1003,25 +1083,10 @@ final class CityCache: ObservableObject {
         parentRegionKey: String?,
         availableLevels: [CityPlacemarkResolver.CardLevel: String]?,
         availableLevelsLocaleIdentifier: String? = nil,
-        anchor: CLLocationCoordinate2D?,
-        force: Bool
+        anchor: CLLocationCoordinate2D?
     ) {
         guard let idx = cachedCities.firstIndex(where: { $0.id == cityKey }) else { return }
 
-        CityLocalizationDebugLogger.log(
-            "reserveProfileWrite",
-            CityLocalizationDebugTrace.reserveProfileWrite(
-                cityKey: cityKey,
-                locale: LanguagePreference.shared.displayLocale,
-                level: level,
-                parentRegionKey: parentRegionKey,
-                availableLevels: availableLevels
-            )
-        )
-
-        if let level, (force || cachedCities[idx].selectedDisplayLevelRaw == nil) {
-            cachedCities[idx].selectedDisplayLevelRaw = level.rawValue
-        }
         if let parentRegionKey, !parentRegionKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             cachedCities[idx].parentScopeKey = parentRegionKey
         }
@@ -1224,7 +1289,7 @@ final class CityCache: ObservableObject {
             thumbnailBasePath: previous?.thumbnailBasePath,
             thumbnailRoutePath: previous?.thumbnailRoutePath,
             identityLevelRaw: previous?.identityLevelRaw,
-            selectedDisplayLevelRaw: previous?.selectedDisplayLevelRaw,
+            selectedDisplayLevelRaw: nil,
             parentScopeKey: previous?.parentScopeKey,
             availableLevelNames: previous?.availableLevelNames,
             availableLevelNamesLocaleID: previous?.availableLevelNamesLocaleID,
@@ -1437,8 +1502,7 @@ final class CityCache: ObservableObject {
             parentRegionKey: reserveParentRegionKey,
             availableLevels: reserveAvailableLevels,
             availableLevelsLocaleIdentifier: reserveAvailableLevelsLocaleIdentifier,
-            anchor: reserveAnchor,
-            force: false
+            anchor: reserveAnchor
         )
         generateRouteThumbnail(cityKey: key)
         setPendingUnlockIfNeeded(cityKey: key, existedBefore: existedBefore)

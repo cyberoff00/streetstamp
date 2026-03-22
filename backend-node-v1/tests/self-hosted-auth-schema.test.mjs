@@ -14,7 +14,6 @@ function makeLegacyState() {
     emailIndex: {},
     inviteIndex: {},
     oauthIndex: {},
-    firebaseIdentityIndex: {},
     handleIndex: {},
     likesIndex: {},
     friendRequestsIndex: {},

@@ -224,12 +224,47 @@ final class TrackingService: ObservableObject {
     private var accumulatedPausedDuration: TimeInterval = 0
     private var currentPauseStartedAt: Date?
 
-    // MARK: - Long stationary reminder (1h / 100m start-end displacement)
+    // MARK: - Stationary auto-end (1.5h / 100m displacement)
+    //
+    // Phase 1: after 1.5h of <100m displacement → send reminder notification,
+    //           then repeat every 30 min.
+    // Phase 2: if user taps "Continue" → reset to Phase 0.
+    //          If user does nothing for another 1.5h → auto-end the journey
+    //          as a private trip and publish `pendingAutoEndedNotice` for the UI.
 
     private var longStationaryAnchorLocation: CLLocation?
     private var longStationaryAnchorTime: Date?
-    private let longStationaryWindow: TimeInterval = 60 * 60
+    private let longStationaryWindow: TimeInterval = 90 * 60          // 1.5 h
     private let longStationaryThresholdMeters: Double = 100
+    private let longStationaryReminderInterval: TimeInterval = 30 * 60 // 30 min
+    private var longStationaryFirstTriggeredAt: Date?
+    private var longStationaryLastReminderAt: Date?
+    private let longStationaryAutoEndGrace: TimeInterval = 90 * 60    // 1.5 h after first trigger
+
+    /// Set to true when the user explicitly chose "Continue" from a notification.
+    /// Resets the stationary window.
+    private var userConfirmedContinue: Bool = false
+
+    /// Published so MainTabView / MainView can show a banner.
+    @Published private(set) var pendingAutoEndedNotice: AutoEndedJourneyNotice?
+
+    struct AutoEndedJourneyNotice: Equatable {
+        let journeyID: String
+        let endedAt: Date
+    }
+
+    /// Called from notification action handler when user taps "Continue".
+    func userDidConfirmContinueTracking() {
+        userConfirmedContinue = true
+        longStationaryFirstTriggeredAt = nil
+        longStationaryLastReminderAt = nil
+        resetLongStationaryReminderState()
+    }
+
+    /// Called from UI after the auto-ended banner is shown/dismissed.
+    func clearAutoEndedNotice() {
+        pendingAutoEndedNotice = nil
+    }
 
     private struct DeferredWeakDriftJump {
         let anchor: CLLocation
@@ -240,6 +275,8 @@ final class TrackingService: ObservableObject {
         let interruptedAt: Date
     }
     private let longStationaryNotificationID = "streetstamps.long_stationary_reminder"
+    private let longStationaryContinueActionID = "LONG_STATIONARY_CONTINUE"
+    private let longStationaryCategoryID = "LONG_STATIONARY_CATEGORY"
     private let longStationaryNotificationPermissionAskedKey = "streetstamps.long_stationary_reminder.notification_asked.v1"
     private var recentSignalInterruption: SignalInterruptionCandidate?
 
@@ -1270,6 +1307,9 @@ final class TrackingService: ObservableObject {
     private func resetLongStationaryReminderState() {
         longStationaryAnchorLocation = nil
         longStationaryAnchorTime = nil
+        longStationaryFirstTriggeredAt = nil
+        longStationaryLastReminderAt = nil
+        userConfirmedContinue = false
     }
 
     private func requestLongStationaryNotificationPermissionIfNeeded() {
@@ -1278,6 +1318,20 @@ final class TrackingService: ObservableObject {
         guard !defaults.bool(forKey: longStationaryNotificationPermissionAskedKey) else { return }
         defaults.set(true, forKey: longStationaryNotificationPermissionAskedKey)
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+
+        // Register the "Continue" action category so users can tap Continue
+        // directly from the notification.
+        let continueAction = UNNotificationAction(
+            identifier: longStationaryContinueActionID,
+            title: L10n.t("long_stationary_continue_action"),
+            options: [.foreground]
+        )
+        let category = UNNotificationCategory(
+            identifier: longStationaryCategoryID,
+            actions: [continueAction],
+            intentIdentifiers: []
+        )
+        UNUserNotificationCenter.current().setNotificationCategories([category])
     }
 
     private func evaluateLongStationaryReminder(with location: CLLocation) {
@@ -1286,6 +1340,14 @@ final class TrackingService: ObservableObject {
             return
         }
         guard location.horizontalAccuracy >= 0, location.horizontalAccuracy <= 120 else { return }
+
+        // If user just tapped "Continue", start fresh.
+        if userConfirmedContinue {
+            userConfirmedContinue = false
+            longStationaryAnchorLocation = location
+            longStationaryAnchorTime = location.timestamp
+            return
+        }
 
         if longStationaryAnchorLocation == nil || longStationaryAnchorTime == nil {
             longStationaryAnchorLocation = location
@@ -1301,20 +1363,56 @@ final class TrackingService: ObservableObject {
         }
 
         let elapsed = location.timestamp.timeIntervalSince(anchorTime)
+        let displacement = location.distance(from: anchor)
+
+        // User moved > threshold → reset everything.
+        if displacement > longStationaryThresholdMeters {
+            longStationaryAnchorLocation = location
+            longStationaryAnchorTime = location.timestamp
+            longStationaryFirstTriggeredAt = nil
+            longStationaryLastReminderAt = nil
+            return
+        }
+
+        // Not yet reached the initial 1.5h window.
         if elapsed < longStationaryWindow { return }
 
-        let startToEnd = location.distance(from: anchor)
-        if startToEnd <= longStationaryThresholdMeters {
+        let now = Date()
+
+        // First trigger.
+        if longStationaryFirstTriggeredAt == nil {
+            longStationaryFirstTriggeredAt = now
+            longStationaryLastReminderAt = now
+            scheduleLongStationaryReminderNotification()
+            // Slide anchor forward for the next displacement check.
+            longStationaryAnchorLocation = location
+            longStationaryAnchorTime = location.timestamp
+            return
+        }
+
+        // Auto-end: if the first trigger was > grace period ago and user never
+        // tapped "Continue", auto-end the journey.
+        if let firstTrigger = longStationaryFirstTriggeredAt,
+           now.timeIntervalSince(firstTrigger) >= longStationaryAutoEndGrace {
+            requestAutoEndJourney()
+            return
+        }
+
+        // Repeat reminder every 30 min.
+        if let lastReminder = longStationaryLastReminderAt,
+           now.timeIntervalSince(lastReminder) >= longStationaryReminderInterval {
+            longStationaryLastReminderAt = now
             scheduleLongStationaryReminderNotification()
         }
 
-        // Whether reminded or not, restart a new 1-hour window from current point.
+        // Slide anchor forward.
         longStationaryAnchorLocation = location
         longStationaryAnchorTime = location.timestamp
     }
 
     private func scheduleLongStationaryReminderNotification() {
         let center = UNUserNotificationCenter.current()
+        let categoryID = longStationaryCategoryID
         center.getNotificationSettings { [longStationaryNotificationID] settings in
             guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { return }
 
@@ -1322,6 +1420,7 @@ final class TrackingService: ObservableObject {
             content.title = L10n.t("long_stationary_reminder_title")
             content.body = L10n.t("long_stationary_reminder_body")
             content.sound = .default
+            content.categoryIdentifier = categoryID
 
             let request = UNNotificationRequest(
                 identifier: longStationaryNotificationID,
@@ -1329,6 +1428,39 @@ final class TrackingService: ObservableObject {
                 trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
             )
             center.removePendingNotificationRequests(withIdentifiers: [longStationaryNotificationID])
+            center.add(request)
+        }
+    }
+
+    /// Auto-end the journey when the user has been stationary too long with
+    /// no response to reminders. The journey is saved as a private trip.
+    /// `onAutoEnd` is set by the app at startup to wire in JourneyStore/CityCache.
+    var onAutoEnd: (() -> Void)?
+
+    private func requestAutoEndJourney() {
+        guard isTracking else { return }
+        stopJourney()
+        pendingAutoEndedNotice = AutoEndedJourneyNotice(
+            journeyID: "", // filled by the caller via onAutoEnd
+            endedAt: Date()
+        )
+        onAutoEnd?()
+        scheduleAutoEndNotification()
+    }
+
+    private func scheduleAutoEndNotification() {
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+            guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { return }
+            let content = UNMutableNotificationContent()
+            content.title = L10n.t("auto_end_notification_title")
+            content.body = L10n.t("auto_end_notification_body")
+            content.sound = .default
+            let request = UNNotificationRequest(
+                identifier: "streetstamps.auto_end_notice",
+                content: content,
+                trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+            )
             center.add(request)
         }
     }

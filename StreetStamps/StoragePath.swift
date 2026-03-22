@@ -82,6 +82,8 @@ struct StoragePath: Sendable {
     var migrationMarkerV4_removeLegacyThumbnails: URL { userRoot.appendingPathComponent(".migrated_v4_remove_legacy_thumbnails", isDirectory: false) }
     /// Marker file for lifelog split migration (legacy -> passive + bak).
     var migrationMarkerV5_lifelogPassiveSplit: URL { userRoot.appendingPathComponent(".migrated_v5_lifelog_passive_split", isDirectory: false) }
+    /// Marker file for re-keying journeys to auto-level (removing user level preference).
+    var migrationMarkerV6_autoLevelRekey: URL { userRoot.appendingPathComponent(".migrated_v6_auto_level_rekey", isDirectory: false) }
 
     // MARK: - Ensure directories exist
 

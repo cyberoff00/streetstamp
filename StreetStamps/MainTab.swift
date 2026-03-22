@@ -98,6 +98,8 @@ struct MainTabView: View {
 
     @State private var pendingResumeJourney: JourneyRoute? = nil
     @State private var didPromptResumeThisLaunch: Bool = false
+    @ObservedObject private var tracking = TrackingService.shared
+    @State private var showAutoEndedAlert: Bool = false
 
     var body: some View {
         tabContent
@@ -183,6 +185,18 @@ struct MainTabView: View {
             }
         } message: {
             Text(L10n.t("resume_prompt_message"))
+        }
+        .alert(L10n.t("auto_end_alert_title"), isPresented: $showAutoEndedAlert) {
+            Button(L10n.t("ok"), role: .cancel) {
+                tracking.clearAutoEndedNotice()
+            }
+        } message: {
+            Text(L10n.t("auto_end_alert_message"))
+        }
+        .onChange(of: tracking.pendingAutoEndedNotice) { notice in
+            if notice != nil {
+                showAutoEndedAlert = true
+            }
         }
     }
 

@@ -21,18 +21,21 @@ struct AccountCenterView: View {
     @State private var showLogoutConfirmation = false
     @State private var showAuthSheet = false
     @State private var authSheetMode: AuthEntryMode = .signIn
+    @State private var showLinkEmailSheet = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            topBar
-
-            ScrollView(showsIndicators: false) {
+        ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 18) {
                     sectionTitle(L10n.t("account_section_account"))
                     accountPanel
 
                     sectionTitle(L10n.t("account_section_visibility"))
                     visibilityPanel
+
+                    if sessionStore.isLoggedIn && !sessionStore.hasEmailPassword {
+                        sectionTitle(L10n.t("account_section_security"))
+                        linkEmailPanel
+                    }
 
                     if sessionStore.isLoggedIn {
                         sectionTitle(L10n.t("account_section_actions"))
@@ -47,9 +50,23 @@ struct AccountCenterView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
                 .padding(.bottom, 24)
-            }
         }
         .background(FigmaTheme.background.ignoresSafeArea())
+        .safeAreaInset(edge: .top, spacing: 0) {
+            UnifiedNavigationHeader(
+                chrome: NavigationChrome(
+                    title: L10n.t("account_center_title"),
+                    leadingAccessory: .back,
+                    titleLevel: .secondary
+                ),
+                horizontalPadding: 18,
+                topPadding: 8,
+                bottomPadding: 12,
+                onLeadingTap: { dismiss() }
+            ) {
+                Color.clear
+            }
+        }
         .background(SwipeBackEnabler())
         .navigationBarBackButtonHidden(true)
         .navigationBarHidden(true)
@@ -85,50 +102,11 @@ struct AccountCenterView: View {
             )
             .environmentObject(sessionStore)
         }
-    }
-
-    private var topBar: some View {
-        HStack(spacing: 8) {
-            Button {
-                dismiss()
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 18, weight: .medium))
-                    Text(L10n.t("back"))
-                        .font(.system(size: 14, weight: .semibold))
-                }
-                .foregroundColor(FigmaTheme.text)
-                .appFullSurfaceTapTarget(.rectangle)
+        .sheet(isPresented: $showLinkEmailSheet) {
+            NavigationStack {
+                LinkEmailPasswordView()
+                    .environmentObject(sessionStore)
             }
-            .buttonStyle(.plain)
-
-            Spacer()
-
-            Text(L10n.t("account_center_title"))
-                .font(.system(size: 24, weight: .bold))
-                .foregroundColor(FigmaTheme.text)
-
-            Spacer()
-
-            Button {
-                dismiss()
-            } label: {
-                Text(L10n.t("done"))
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(FigmaTheme.primary)
-                    .appFullSurfaceTapTarget(.rectangle)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 10)
-        .background(Color.white.opacity(0.92))
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Color.black.opacity(0.08))
-                .frame(height: 1)
         }
     }
 
@@ -271,6 +249,20 @@ struct AccountCenterView: View {
         .cardStyle()
     }
 
+    private var linkEmailPanel: some View {
+        VStack(spacing: 0) {
+            infoRow(
+                icon: "envelope.badge.shield.half.filled",
+                title: L10n.t("link_email_panel_title"),
+                subtitle: L10n.t("link_email_panel_subtitle"),
+                iconColor: .orange
+            ) {
+                showLinkEmailSheet = true
+            }
+        }
+        .cardStyle()
+    }
+
     private var logoutPanel: some View {
         VStack(spacing: 0) {
             infoRow(
@@ -384,6 +376,9 @@ struct AccountCenterView: View {
             if let pv = me.profileVisibility {
                 profileVisibility = pv
                 ProfileSharingSettings.visibility = pv
+            }
+            if let hasEP = me.hasEmailPassword {
+                sessionStore.hasEmailPassword = hasEP
             }
         } catch {
             toast(String(format: L10n.t("account_fetch_profile_failed_format"), error.localizedDescription))

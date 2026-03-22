@@ -88,7 +88,6 @@ async function run() {
     emailIndex: {},
     inviteIndex: {},
     oauthIndex: {},
-    firebaseIdentityIndex: {},
     authIdentities: {},
     emailVerificationTokens: {},
     passwordResetTokens: {},

@@ -205,7 +205,7 @@ final class CityLibraryVM: ObservableObject {
             availableLevelNamesRaw: city.availableLevelNames,
             storedAvailableLevelNamesLocaleID: city.availableLevelNamesLocaleID,
             parentRegionKey: city.parentScopeKey,
-            preferredLevel: city.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
+            preferredLevel: nil,
             localizedDisplayNameByLocale: localizedMap,
             locale: locale
         )

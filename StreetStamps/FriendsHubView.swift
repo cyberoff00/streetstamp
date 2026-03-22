@@ -160,6 +160,7 @@ struct FriendsHubView: View {
     @EnvironmentObject private var flow: AppFlowCoordinator
     @EnvironmentObject private var journeyStore: JourneyStore
     @EnvironmentObject private var cityCache: CityCache
+    @EnvironmentObject private var publishStore: JourneyPublishStore
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
 
     @State private var tab: FriendsTopTab = .activity
@@ -196,6 +197,7 @@ struct FriendsHubView: View {
     @State private var feedScrollPosition: String?
     @State private var friendsListScrollPosition: String?
     @State private var didPerformInitialFeedRefresh = false
+    @State private var showMembershipGate: MembershipGatedFeature? = nil
 
     private var sortedFriends: [FriendProfileSnapshot] {
         socialStore.friends.sorted { lhs, rhs in
@@ -273,6 +275,11 @@ struct FriendsHubView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            if publishStore.status != .idle {
+                JourneyPublishBanner()
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .padding(.top, 8)
+            }
             if sessionStore.isLoggedIn {
                 tabSwitcher
 
@@ -306,6 +313,9 @@ struct FriendsHubView: View {
             }
             .environmentObject(socialStore)
             .environmentObject(sessionStore)
+        }
+        .sheet(item: $showMembershipGate) { feature in
+            MembershipGateView(feature: feature)
         }
         .sheet(isPresented: $showInviteFriendSheet) {
             InviteFriendSheet(
@@ -918,9 +928,7 @@ struct FriendsHubView: View {
 
         private func resolvedFriendCityTitle(for journey: FriendSharedJourney, cards: [FriendCityCard]) -> String {
             let cityID = resolvedFriendCityID(for: journey, cards: cards)
-            // Use key-derived name as fallback instead of card.name (which is in the friend's locale)
-            let keyName = cityID.split(separator: "|", omittingEmptySubsequences: false).first.map(String.init) ?? ""
-            let fallback = keyName.isEmpty ? (cards.first(where: { $0.id == cityID })?.name ?? journey.title) : keyName
+            let fallback = cards.first(where: { $0.id == cityID })?.name ?? journey.title
             return CityDisplayResolver.title(
                 for: cityID,
                 fallbackTitle: fallback
@@ -1198,6 +1206,11 @@ struct FriendsHubView: View {
                   let token = sessionStore.currentAccessToken,
                   !token.isEmpty else {
                 showFeedToast(L10n.t("please_sign_in_to_access_your_account"), duration: 2.0)
+                return
+            }
+            let maxFriends = MembershipStore.shared.maxFriends
+            if socialStore.friends.count >= maxFriends {
+                showMembershipGate = .friends
                 return
             }
             guard !requestActionLoadingIDs.contains(requestID) else { return }
@@ -2856,7 +2869,8 @@ private final class FriendMirrorContext: ObservableObject {
             sharedAt: friendJourney.sharedAt,
             customTitle: friendJourney.title,
             activityTag: friendJourney.activityTag,
-            overallMemory: friendJourney.overallMemory
+            overallMemory: friendJourney.overallMemory,
+            overallMemoryRemoteImageURLs: friendJourney.overallMemoryImageURLs
         )
     }
 

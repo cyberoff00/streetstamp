@@ -72,7 +72,7 @@ enum JourneyCloudMigrationService {
 
         let cards = snapshot.cards
             .filter { !($0.isTemporary ?? false) }
-            .map { FriendCityCard(id: $0.id, name: $0.name, countryISO2: $0.countryISO2) }
+            .map { FriendCityCard(id: $0.id, name: $0.resolvedDisplayName ?? $0.name, countryISO2: $0.countryISO2) }
 
         let removedJourneyIDs = try await removedRemoteJourneyIDsIfNeeded(
             token: token,
@@ -115,7 +115,7 @@ enum JourneyCloudMigrationService {
         )
         let cards = cachedCities
             .filter { !($0.isTemporary ?? false) }
-            .map { FriendCityCard(id: $0.id, name: $0.name, countryISO2: $0.countryISO2) }
+            .map { FriendCityCard(id: $0.id, name: $0.resolvedDisplayName ?? $0.name, countryISO2: $0.countryISO2) }
 
         return JourneyIncrementalSyncPlan(
             payload: BackendMigrationRequest(
@@ -166,7 +166,7 @@ enum JourneyCloudMigrationService {
 
         let cards = snapshot.cards
             .filter { !($0.isTemporary ?? false) }
-            .map { FriendCityCard(id: $0.id, name: $0.name, countryISO2: $0.countryISO2) }
+            .map { FriendCityCard(id: $0.id, name: $0.resolvedDisplayName ?? $0.name, countryISO2: $0.countryISO2) }
 
         let payload: BackendMigrationRequest
         if journey.visibility == .public || journey.visibility == .friendsOnly {
@@ -213,7 +213,7 @@ enum JourneyCloudMigrationService {
 
         let cards = snapshot.cards
             .filter { !($0.isTemporary ?? false) }
-            .map { FriendCityCard(id: $0.id, name: $0.name, countryISO2: $0.countryISO2) }
+            .map { FriendCityCard(id: $0.id, name: $0.resolvedDisplayName ?? $0.name, countryISO2: $0.countryISO2) }
 
         let payload = makeJourneyRemovalPayload(
             journeyID: journeyID,
@@ -283,6 +283,14 @@ enum JourneyCloudMigrationService {
                 uploadedMediaCount += uploadedURLs.count
             }
 
+            let overallImageURLs = try await uploadMemoryImagesIfNeeded(
+                imagePaths: route.overallMemoryImagePaths,
+                userID: userID,
+                token: token,
+                mediaUploader: mediaUploader
+            )
+            uploadedMediaCount += overallImageURLs.count
+
             out.append(
                 BackendJourneyUploadDTO(
                     id: route.id,
@@ -290,6 +298,7 @@ enum JourneyCloudMigrationService {
                     cityID: FriendJourneyCityIdentity.stableCityID(from: route),
                     activityTag: route.activityTag,
                     overallMemory: route.overallMemory,
+                    overallMemoryImageURLs: overallImageURLs,
                     distance: route.distance,
                     startTime: route.startTime,
                     endTime: route.endTime,
@@ -441,7 +450,8 @@ enum JourneyCloudMigrationService {
             sharedAt: journey.sharedAt,
             customTitle: journey.title,
             activityTag: journey.activityTag,
-            overallMemory: journey.overallMemory
+            overallMemory: journey.overallMemory,
+            overallMemoryRemoteImageURLs: journey.overallMemoryImageURLs
         )
     }
 

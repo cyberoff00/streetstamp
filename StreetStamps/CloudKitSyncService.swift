@@ -19,9 +19,11 @@ enum CloudKitRecordType {
 struct CloudKitRestoreResult {
     var restoredJourneyCount: Int = 0
     var restoredLifelogCount: Int = 0
+    var restoredSettingsCount: Int = 0
+    var restoredPhotoCount: Int = 0
 
     var totalCount: Int {
-        restoredJourneyCount + restoredLifelogCount
+        restoredJourneyCount + restoredLifelogCount + restoredSettingsCount + restoredPhotoCount
     }
 }
 
@@ -32,6 +34,7 @@ actor CloudKitSyncService {
     private static let lastJourneySyncAtKeyPrefix = "streetstamps.cloudkit.journey.last_sync."
     private static let lastLifelogSyncAtKeyPrefix = "streetstamps.cloudkit.lifelog.last_sync."
     private static let lastMoodSyncAtKeyPrefix = "streetstamps.cloudkit.lifelog_mood.last_sync."
+    private static let lastPhotoSyncAtKeyPrefix = "streetstamps.cloudkit.photo.last_sync."
     private static let statusKeyPrefix = "streetstamps.icloud.sync.status."
     private static let statusAtKeyPrefix = "streetstamps.icloud.sync.status_at."
 
@@ -72,12 +75,18 @@ actor CloudKitSyncService {
         try await settingsSync.ensureZone()
     }
 
-    func syncJourneyUpsert(_ journey: JourneyRoute) async {
+    // MARK: - Per-Entity Sync Hooks
+
+    func syncJourneyUpsert(_ journey: JourneyRoute, localUserID: String? = nil) async {
         guard AppSettings.isICloudSyncEnabled else { return }
         guard await isAvailable() else { return }
         do {
             try await journeySync.ensureZone()
             try await journeySync.uploadJourney(journey)
+
+            if let userID = localUserID {
+                try await uploadPhotosForJourney(journey, localUserID: userID)
+            }
         } catch {
             print("☁️ incremental journey upsert failed:", error)
         }
@@ -94,8 +103,11 @@ actor CloudKitSyncService {
         }
     }
 
+    // MARK: - Batch Sync
+
     func syncCurrentState(
         userID: String,
+        localUserID: String? = nil,
         journeyStore: JourneyStore,
         lifelogStore: LifelogStore,
         reason: String,
@@ -109,13 +121,17 @@ actor CloudKitSyncService {
             try await ensureZones()
             let didUploadJourneys = try await uploadJourneySnapshot(
                 journeyStore: journeyStore,
-                forceFull: forceFullJourneyUpload
+                forceFull: forceFullJourneyUpload,
+                localUserID: localUserID
             )
             let didUploadLifelog = try await uploadLifelogSnapshot(
                 lifelogStore: lifelogStore,
                 forceFull: forceFullLifelogUpload
             )
-            guard didUploadJourneys || didUploadLifelog || forceFullJourneyUpload || forceFullLifelogUpload else {
+            let didUploadSettings = try await uploadSettingsSnapshot()
+
+            guard didUploadJourneys || didUploadLifelog || didUploadSettings
+                || forceFullJourneyUpload || forceFullLifelogUpload else {
                 return
             }
             writeStatus(userID: userID, status: "upload_success")
@@ -125,6 +141,8 @@ actor CloudKitSyncService {
             writeStatus(userID: userID, status: "upload_failed")
         }
     }
+
+    // MARK: - Journey Restore
 
     func restoreJourneySnapshot(
         into journeyStore: JourneyStore,
@@ -162,6 +180,8 @@ actor CloudKitSyncService {
             return 0
         }
     }
+
+    // MARK: - Lifelog Sync & Restore
 
     func syncLifelogSnapshot(_ lifelogStore: LifelogStore) async {
         guard AppSettings.isICloudSyncEnabled else { return }
@@ -229,11 +249,32 @@ actor CloudKitSyncService {
         }
     }
 
+    // MARK: - Settings Restore
+
+    func restoreSettingsSnapshot() async -> Int {
+        guard AppSettings.isICloudSyncEnabled else { return 0 }
+        guard await isAvailable() else { return 0 }
+        do {
+            try await settingsSync.ensureZone()
+            guard let restored = try await settingsSync.downloadSettings() else { return 0 }
+            for (key, value) in restored {
+                defaults.set(value, forKey: key)
+            }
+            return restored.count
+        } catch {
+            print("☁️ restore settings failed:", error)
+            return 0
+        }
+    }
+
+    // MARK: - Full Restore
+
     func restoreAllData(
         into journeyStore: JourneyStore,
         lifelogStore: LifelogStore,
         cityCache: CityCache? = nil,
         userID: String,
+        localUserID: String? = nil,
         forceFull: Bool = false,
         writeManualStatus: Bool = false
     ) async -> CloudKitRestoreResult {
@@ -255,9 +296,17 @@ actor CloudKitSyncService {
             userID: userID,
             forceFull: forceFull
         )
+        let restoredSettingsCount = await restoreSettingsSnapshot()
+        let restoredPhotoCount = await restorePhotos(
+            localUserID: localUserID ?? userID,
+            forceFull: forceFull
+        )
+
         let result = CloudKitRestoreResult(
             restoredJourneyCount: restoredJourneyCount,
-            restoredLifelogCount: restoredLifelogCount
+            restoredLifelogCount: restoredLifelogCount,
+            restoredSettingsCount: restoredSettingsCount,
+            restoredPhotoCount: restoredPhotoCount
         )
 
         await MainActor.run {
@@ -287,6 +336,8 @@ actor CloudKitSyncService {
         cityCache?.rebuildFromJourneyStore()
     }
 
+    // MARK: - Full Bidirectional Sync
+
     func syncAll(journeyStore: JourneyStore, lifelogStore: LifelogStore, paths: StoragePath) async throws {
         guard await isAvailable() else { return }
         try await ensureZones()
@@ -295,16 +346,48 @@ actor CloudKitSyncService {
         await uploadAll(journeyStore: journeyStore, lifelogStore: lifelogStore, paths: paths)
     }
 
+    private func downloadAll(journeyStore: JourneyStore, lifelogStore: LifelogStore, paths: StoragePath) async {
+        _ = await restoreJourneySnapshot(into: journeyStore, userID: paths.userID)
+        _ = await restoreLifelogSnapshot(into: lifelogStore, userID: paths.userID)
+        _ = await restoreSettingsSnapshot()
+        _ = await restorePhotos(localUserID: paths.userID, forceFull: false)
+    }
+
+    private func uploadAll(journeyStore: JourneyStore, lifelogStore: LifelogStore, paths: StoragePath) async {
+        do {
+            _ = try await uploadJourneySnapshot(journeyStore: journeyStore, forceFull: true, localUserID: paths.userID)
+            _ = try await uploadLifelogSnapshot(lifelogStore: lifelogStore, forceFull: true)
+            _ = try await uploadSettingsSnapshot()
+        } catch {
+            print("☁️ uploadAll failed:", error)
+        }
+    }
+
+    // MARK: - Upload Internals
+
     private func uploadJourneySnapshot(
         journeyStore: JourneyStore,
-        forceFull: Bool
+        forceFull: Bool,
+        localUserID: String? = nil
     ) async throws -> Bool {
+        // Journey incremental sync is handled per-entity via syncJourneyUpsert hooks.
+        // Full snapshot upload is only for manual catch-up or initial sync.
         guard forceFull else { return false }
         let journeys = await MainActor.run { journeyStore.journeys }
         guard !journeys.isEmpty else { return false }
         try await journeySync.ensureZone()
+
+        // Pre-fetch already-uploaded photo filenames to skip redundant uploads.
+        var alreadyUploaded: Set<String>?
+        if localUserID != nil {
+            alreadyUploaded = try? await photoSync.fetchUploadedFilenames()
+        }
+
         for route in journeys {
             try await journeySync.uploadJourney(route)
+            if let userID = localUserID {
+                try await uploadPhotosForJourney(route, localUserID: userID, alreadyUploaded: alreadyUploaded)
+            }
         }
         return true
     }
@@ -347,14 +430,89 @@ actor CloudKitSyncService {
         return true
     }
 
-    private func downloadAll(journeyStore: JourneyStore, lifelogStore: LifelogStore, paths: StoragePath) async {
-        // Download journeys, lifelog, photos, settings
-        // Merge with local data
+    private func uploadSettingsSnapshot() async throws -> Bool {
+        try await settingsSync.ensureZone()
+        let syncable = SettingsCloudKitSync.syncableKeys
+        let snapshot = syncable.reduce(into: [String: Any]()) { partial, key in
+            if let value = defaults.object(forKey: key) {
+                partial[key] = value
+            }
+        }
+        guard !snapshot.isEmpty else { return false }
+        try await settingsSync.uploadSettings(snapshot)
+        return true
     }
 
-    private func uploadAll(journeyStore: JourneyStore, lifelogStore: LifelogStore, paths: StoragePath) async {
-        // Upload changed data
+    // MARK: - Photo Sync
+
+    private func uploadPhotosForJourney(
+        _ journey: JourneyRoute,
+        localUserID: String,
+        alreadyUploaded: Set<String>? = nil
+    ) async throws {
+        let photosDir = StoragePath(userID: localUserID).photosDir
+        let filenames = Self.allPhotoFilenames(from: journey)
+        guard !filenames.isEmpty else { return }
+        try await photoSync.ensureZone()
+        for filename in filenames {
+            if let existing = alreadyUploaded, existing.contains(filename) { continue }
+            let url = photosDir.appendingPathComponent(filename, isDirectory: false)
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            try await photoSync.uploadPhoto(
+                filename: filename,
+                imageURL: url,
+                journeyID: journey.id
+            )
+        }
     }
+
+    private func restorePhotos(localUserID: String, forceFull: Bool) async -> Int {
+        do {
+            try await photoSync.ensureZone()
+            let markerKey = Self.lastPhotoSyncAtKey(for: localUserID)
+            let modifiedAfter = forceFull ? nil : (defaults.object(forKey: markerKey) as? Date)
+            let photosDir = StoragePath(userID: localUserID).photosDir
+            try FileManager.default.createDirectory(at: photosDir, withIntermediateDirectories: true)
+            var wrote = 0
+            var newestDate: Date?
+            try await photoSync.enumerateSnapshots(modifiedAfter: modifiedAfter) { snapshot in
+                if let d = newestDate {
+                    if snapshot.modifiedAt > d { newestDate = snapshot.modifiedAt }
+                } else {
+                    newestDate = snapshot.modifiedAt
+                }
+                guard !snapshot.isDeleted, let data = snapshot.data else { return }
+                let dest = photosDir.appendingPathComponent(snapshot.photoID, isDirectory: false)
+                if !forceFull && FileManager.default.fileExists(atPath: dest.path) { return }
+                try data.write(to: dest, options: .atomic)
+                wrote += 1
+            }
+            if let newest = newestDate {
+                defaults.set(newest, forKey: markerKey)
+            }
+            return wrote
+        } catch {
+            print("☁️ restore photos failed:", error)
+            return 0
+        }
+    }
+
+    nonisolated private static func allPhotoFilenames(from journey: JourneyRoute) -> [String] {
+        var names: [String] = []
+        for memory in journey.memories {
+            for path in memory.imagePaths {
+                let cleaned = path.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !cleaned.isEmpty { names.append(cleaned) }
+            }
+        }
+        for path in journey.overallMemoryImagePaths {
+            let cleaned = path.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cleaned.isEmpty { names.append(cleaned) }
+        }
+        return names
+    }
+
+    // MARK: - Status Helpers
 
     nonisolated static func statusKey(for userID: String) -> String {
         "\(statusKeyPrefix)\(userID)"
@@ -374,6 +532,10 @@ actor CloudKitSyncService {
 
     nonisolated private static func lastMoodSyncAtKey(for userID: String) -> String {
         "\(lastMoodSyncAtKeyPrefix)\(userID)"
+    }
+
+    nonisolated private static func lastPhotoSyncAtKey(for userID: String) -> String {
+        "\(lastPhotoSyncAtKeyPrefix)\(userID)"
     }
 
     private func writeStatus(userID: String, status: String) {

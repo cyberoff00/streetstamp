@@ -25,6 +25,7 @@ struct GlobeViewScreen: View {
     @EnvironmentObject private var trackTileStore: TrackTileStore
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
     @ObservedObject private var globeRefreshCoordinator = GlobeRefreshCoordinator.shared
+    @ObservedObject private var membership = MembershipStore.shared
 
     @State private var dummyPresented: Bool = true
     @State private var shareItem: GlobeShareImageItem? = nil
@@ -33,6 +34,7 @@ struct GlobeViewScreen: View {
     @State private var isPreparingData = false
     @State private var refreshGate = GlobeRefreshGate()
     @State private var didRequestInitialRefresh = false
+    @State private var showMembershipGate = false
 
     var body: some View {
         ZStack {
@@ -55,6 +57,29 @@ struct GlobeViewScreen: View {
         }
         .sheet(item: $shareItem) { item in
             ShareSheet(activityItems: [item.image])
+        }
+        .sheet(isPresented: $showMembershipGate) {
+            MembershipGateView(feature: .globeView)
+        }
+        .overlay(alignment: .topLeading) {
+            if !membership.isPremium {
+                Button {
+                    showMembershipGate = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 11, weight: .bold))
+                        Text(L10n.t("membership_zoom_locked"))
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.black.opacity(0.55), in: Capsule())
+                }
+                .padding(.top, 68)
+                .padding(.leading, 20)
+            }
         }
         .overlay {
             if isPreparingData {

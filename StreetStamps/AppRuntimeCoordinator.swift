@@ -41,7 +41,8 @@ enum AppJourneySyncCoordinator {
         JourneyStore.SyncHooks(
             upsertCompletedJourney: { route in
                 Task {
-                    await CloudKitSyncService.shared.syncJourneyUpsert(route)
+                    let localUserID = await MainActor.run { sessionStore.activeLocalProfileID }
+                    await CloudKitSyncService.shared.syncJourneyUpsert(route, localUserID: localUserID)
                 }
             },
             deleteJourney: { journeyID in

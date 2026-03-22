@@ -94,6 +94,8 @@ final class PostcardNotificationBridge {
 }
 
 final class AppNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    private static let lastUploadedTokenKey = "streetstamps.apns.last_uploaded_token"
+
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
@@ -101,6 +103,61 @@ final class AppNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         UNUserNotificationCenter.current().delegate = self
         return true
     }
+
+    // MARK: - Remote Notification Registration
+
+    /// Call this after the user logs in or the app becomes active with a valid session.
+    static func registerForRemoteNotificationsIfAuthorized() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            guard settings.authorizationStatus == .authorized ||
+                  settings.authorizationStatus == .provisional else { return }
+            DispatchQueue.main.async {
+                UIApplication.shared.registerForRemoteNotifications()
+            }
+        }
+    }
+
+    private static let pendingTokenKey = "streetstamps.apns.pending_device_token"
+
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        let hex = deviceToken.map { String(format: "%02x", $0) }.joined()
+        UserDefaults.standard.set(hex, forKey: Self.pendingTokenKey)
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        print("[APNs] registration failed: \(error.localizedDescription)")
+    }
+
+    /// Call this whenever an access token becomes available (login, app activate, etc.)
+    static func uploadPendingPushTokenIfNeeded(accessToken: String?) {
+        let defaults = UserDefaults.standard
+        guard let hex = defaults.string(forKey: pendingTokenKey), !hex.isEmpty else { return }
+        // Already uploaded this exact token
+        if defaults.string(forKey: lastUploadedTokenKey) == hex { return }
+        guard BackendConfig.isEnabled, let accessToken, !accessToken.isEmpty else { return }
+
+        Task {
+            do {
+                try await BackendAPIClient.shared.registerPushToken(token: accessToken, pushToken: hex)
+                defaults.set(hex, forKey: lastUploadedTokenKey)
+            } catch {
+                print("[APNs] token upload failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Clear cached token on logout so the next login re-uploads.
+    static func clearCachedPushToken() {
+        UserDefaults.standard.removeObject(forKey: lastUploadedTokenKey)
+    }
+
+    // MARK: - UNUserNotificationCenterDelegate
 
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
@@ -111,6 +168,14 @@ final class AppNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNoti
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        // Handle "Continue" action from stationary reminder notification.
+        if response.actionIdentifier == "LONG_STATIONARY_CONTINUE" {
+            await MainActor.run {
+                TrackingService.shared.userDidConfirmContinueTracking()
+            }
+            return
+        }
+
         guard let url = await MainActor.run(
             resultType: URL?.self,
             body: {

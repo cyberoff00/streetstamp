@@ -3,9 +3,11 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import jwt from "jsonwebtoken";
 
 const SERVER_DIR = process.cwd();
 const PORT = 18157;
+const TEST_JWT_SECRET = "test-secret-postcard-reaction-32chars!!";
 
 function makeUser(id, overrides = {}) {
   return {
@@ -73,8 +75,8 @@ async function stopServer(child) {
 async function run() {
   const senderID = "u_postcard_sender";
   const receiverID = "u_postcard_receiver";
-  const senderToken = "firebase-postcard-sender-token";
-  const receiverToken = "firebase-postcard-receiver-token";
+  const senderToken = jwt.sign({ uid: senderID, typ: "access", prv: "email", sid: "s1" }, TEST_JWT_SECRET, { expiresIn: "1h" });
+  const receiverToken = jwt.sign({ uid: receiverID, typ: "access", prv: "email", sid: "s2" }, TEST_JWT_SECRET, { expiresIn: "1h" });
 
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "postcard-received-reaction-"));
   const dataFile = path.join(tmp, "data.json");
@@ -82,13 +84,13 @@ async function run() {
   const db = {
     users: {
       [senderID]: makeUser(senderID, {
-        provider: "google",
+        provider: "email",
         email: "sender@test.dev",
         displayName: "Sender",
         friendIDs: [receiverID]
       }),
       [receiverID]: makeUser(receiverID, {
-        provider: "password",
+        provider: "email",
         email: "receiver@test.dev",
         displayName: "Receiver",
         friendIDs: [senderID]
@@ -100,7 +102,6 @@ async function run() {
     },
     inviteIndex: {},
     oauthIndex: {},
-    firebaseIdentityIndex: {},
     handleIndex: {},
     likesIndex: {},
     friendRequestsIndex: {},
@@ -108,21 +109,6 @@ async function run() {
   };
   await fs.writeFile(dataFile, JSON.stringify(db, null, 2), "utf8");
   await fs.mkdir(mediaDir, { recursive: true });
-
-  const fixtures = {
-    [senderToken]: {
-      uid: "firebase-postcard-sender",
-      email: "sender@test.dev",
-      email_verified: true,
-      firebase: { sign_in_provider: "google.com" }
-    },
-    [receiverToken]: {
-      uid: "firebase-postcard-receiver",
-      email: "receiver@test.dev",
-      email_verified: true,
-      firebase: { sign_in_provider: "password" }
-    }
-  };
 
   const child = spawn("node", ["server.js"], {
     cwd: SERVER_DIR,
@@ -133,11 +119,7 @@ async function run() {
       MEDIA_DIR: mediaDir,
       MEDIA_PUBLIC_BASE: `http://127.0.0.1:${PORT}`,
       DATABASE_URL: "",
-      FIREBASE_AUTH_ENABLED: "1",
-      FIREBASE_PROJECT_ID: "streetstamps-firebase-tests",
-      FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({ project_id: "streetstamps-firebase-tests" }),
-      FIREBASE_LEGACY_APP_USER_ID: "u_legacy_preserved",
-      TEST_FIREBASE_AUTH_FIXTURES: JSON.stringify(fixtures)
+      JWT_SECRET: TEST_JWT_SECRET
     },
     stdio: ["ignore", "pipe", "pipe"]
   });

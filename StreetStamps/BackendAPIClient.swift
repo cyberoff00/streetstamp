@@ -14,6 +14,7 @@ struct BackendAuthResponse: Codable {
     let accessToken: String
     let refreshToken: String
     let needsProfileSetup: Bool
+    let hasEmailPassword: Bool?
 
     init(
         userId: String,
@@ -21,7 +22,8 @@ struct BackendAuthResponse: Codable {
         email: String?,
         accessToken: String,
         refreshToken: String,
-        needsProfileSetup: Bool = false
+        needsProfileSetup: Bool = false,
+        hasEmailPassword: Bool? = nil
     ) {
         self.userId = userId
         self.provider = provider
@@ -29,6 +31,7 @@ struct BackendAuthResponse: Codable {
         self.accessToken = accessToken
         self.refreshToken = refreshToken
         self.needsProfileSetup = needsProfileSetup
+        self.hasEmailPassword = hasEmailPassword
     }
 }
 
@@ -77,6 +80,7 @@ struct BackendJourneyUploadDTO: Codable {
     var cityID: String?
     var activityTag: String?
     var overallMemory: String?
+    var overallMemoryImageURLs: [String]
     var distance: Double
     var startTime: Date?
     var endTime: Date?
@@ -1045,6 +1049,11 @@ final class BackendAPIClient {
         let body = try encoder.encode(req)
         let (data, _) = try await request(path: "/v1/postcards/\(messageID)/react", method: "POST", token: token, jsonBody: body)
         return try decoder.decode(PostcardReactionResponse.self, from: data)
+    }
+
+    func registerPushToken(token: String, pushToken: String, platform: String = "ios") async throws {
+        let body = try encoder.encode(["token": pushToken, "platform": platform])
+        _ = try await request(path: "/v1/push-token", method: "PUT", token: token, jsonBody: body)
     }
 }
 

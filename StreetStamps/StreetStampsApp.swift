@@ -78,6 +78,7 @@ struct StreetStampsApp: App {
     @StateObject private var flow = AppFlowCoordinator.shared
     @StateObject private var deepLinkStore = AppDeepLinkStore()
     @StateObject private var onboardingGuide = OnboardingGuideStore()
+    @StateObject private var publishStore = JourneyPublishStore()
     @State private var journeyDeletionSyncFailureStore = JourneyDeletionSyncFailureStore()
     @State private var showAuthEntry = false
     @State private var showSplash = true
@@ -163,7 +164,8 @@ struct StreetStampsApp: App {
         JourneyStore.SyncHooks(
             upsertCompletedJourney: { route in
                 Task {
-                    await CloudKitSyncService.shared.syncJourneyUpsert(route)
+                    let localUserID = await MainActor.run { sessionStore.activeLocalProfileID }
+                    await CloudKitSyncService.shared.syncJourneyUpsert(route, localUserID: localUserID)
                 }
             },
             deleteJourney: { journeyID in
@@ -185,6 +187,34 @@ struct StreetStampsApp: App {
                 }
             }
         )
+    }
+
+    @MainActor
+    private func setupAutoEndHandler() {
+        let store = journeyStore
+        let cache = cityCache
+        let lStore = lifelogStore
+        TrackingService.shared.onAutoEnd = { [weak store, weak cache, weak lStore] in
+            Task { @MainActor in
+                guard let store, let cache, let lStore else { return }
+                guard let ongoing = store.latestOngoing ?? store.journeys.first(where: { $0.endTime == nil }) else { return }
+                var ended = ongoing
+                ended.endTime = Date()
+                ended.isTooShort = true // treat as private/stationary trip
+                JourneyFinalizer.finalize(
+                    route: ended,
+                    journeyStore: store,
+                    cityCache: cache,
+                    lifelogStore: lStore,
+                    source: .resumeDeclined
+                ) { updated in
+                    TrackingService.shared.pendingAutoEndedNotice = TrackingService.AutoEndedJourneyNotice(
+                        journeyID: updated.id,
+                        endedAt: updated.endTime ?? Date()
+                    )
+                }
+            }
+        }
     }
 
     @MainActor
@@ -261,6 +291,7 @@ struct StreetStampsApp: App {
             .environmentObject(flow)
             .environmentObject(deepLinkStore)
             .environmentObject(onboardingGuide)
+            .environmentObject(publishStore)
     }
 
     private var appContentWithPresentation: some View {
@@ -326,6 +357,12 @@ struct StreetStampsApp: App {
                     paths: StoragePath(userID: startupUserID)
                 )
                 await journeyStore.loadAsync()
+                // Clean up Live Activities left over from a previous process
+                // if there is no ongoing journey to resume.
+                if !journeyStore.journeys.contains(where: { $0.endTime == nil }) {
+                    LiveActivityManager.shared.endAllStaleActivities()
+                }
+                setupAutoEndHandler()
                 await lifelogStore.loadAsync()
                 let journeysSnapshot = journeyStore.journeys
                 let cachedCitiesSnapshot = cityCache.cachedCities
@@ -381,6 +418,7 @@ struct StreetStampsApp: App {
                 profileSwitchTask = Task {
                     UserScopedProfileStateStore.switchActiveUser(from: oldUserID, to: uid)
                     CityLevelPreferenceStore.shared.setCurrentUserID(uid)
+                    CityLevelPreferenceStore.shared.clearAll()
                     let paths = StoragePath(userID: uid)
                     await sessionStore.bootstrapFileSystemAsync()
                     await LifelogMigrationService.migrateLegacyLifelogIfNeededAsync(paths: paths)
@@ -456,6 +494,12 @@ struct StreetStampsApp: App {
                     applyIdleLocationPolicy(requestSingleRefreshWhenIdle: true)
                     syncMotionActivityPolicy()
                     scheduleTrackTileRebuild(delay: 0.10, force: false)
+                    if sessionStore.isLoggedIn {
+                        AppNotificationDelegate.registerForRemoteNotificationsIfAuthorized()
+                        AppNotificationDelegate.uploadPendingPushTokenIfNeeded(
+                            accessToken: sessionStore.currentAccessToken
+                        )
+                    }
                 }
             }
             .onChange(of: journeyStore.trackTileRevision) { _, _ in

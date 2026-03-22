@@ -103,7 +103,6 @@ async function startServer(db) {
       MEDIA_DIR: mediaDir,
       MEDIA_PUBLIC_BASE: `http://127.0.0.1:${port}`,
       DATABASE_URL: "",
-      FIREBASE_AUTH_ENABLED: "0"
     },
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -139,7 +138,6 @@ test("profile loadout patch preserves hat and glass selections", async () => {
     emailIndex: { [`${userID}@example.com`]: userID },
     inviteIndex: {},
     oauthIndex: {},
-    firebaseIdentityIndex: {},
     handleIndex: { [userID.slice(0, 24)]: userID },
     likesIndex: {},
     friendRequestsIndex: {},

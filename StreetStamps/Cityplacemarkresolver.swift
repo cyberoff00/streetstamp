@@ -130,8 +130,7 @@ enum CityPlacemarkResolver {
 
     static func resolveCanonical(from pm: CLPlacemark, preferredISO2: String? = nil) -> Canonical {
         let candidates = makeLevelCandidates(from: pm, preferredISO2: preferredISO2)
-        let preferred = CityLevelPreferenceStore.shared.preferredLevel(for: candidates.parentRegionKey)
-        let level = decideLevel(candidates: candidates, preferred: preferred)
+        let level = decideLevel(candidates: candidates, preferred: nil)
         let name = canonicalName(level: level, candidates: candidates)
 
         return Canonical(
@@ -165,8 +164,7 @@ enum CityPlacemarkResolver {
 
     static func resolveDisplay(from pm: CLPlacemark, preferredISO2: String? = nil) -> Display {
         let candidates = makeLevelCandidates(from: pm, preferredISO2: preferredISO2)
-        let preferred = CityLevelPreferenceStore.shared.preferredLevel(for: candidates.parentRegionKey)
-        let level = decideLevel(candidates: candidates, preferred: preferred)
+        let level = decideLevel(candidates: candidates, preferred: nil)
         let useRegionInsteadOfCountry = isRegionStyledISO(candidates.iso2)
 
         var title: String = L10n.t("unknown")
@@ -389,6 +387,10 @@ enum CityPlacemarkResolver {
             }
         }
 
+        let identityLevel = preferredLevelOverride
+            ?? cachedCity.identityLevelRaw.flatMap { CardLevel(rawValue: $0) }
+            ?? inferIdentityLevel(cityKey: cachedCity.id, iso2: cachedCity.countryISO2)
+
         return displayTitle(
             cityKey: cachedCity.id,
             iso2: cachedCity.countryISO2,
@@ -396,7 +398,7 @@ enum CityPlacemarkResolver {
             availableLevelNamesRaw: cachedCity.availableLevelNames,
             storedAvailableLevelNamesLocaleID: cachedCity.availableLevelNamesLocaleID,
             parentRegionKey: cachedCity.parentScopeKey,
-            preferredLevel: preferredLevelOverride ?? cachedCity.selectedDisplayLevelRaw.flatMap { CardLevel(rawValue: $0) },
+            preferredLevel: identityLevel,
             localizedDisplayNameByLocale: localizedMap,
             locale: locale
         )
@@ -427,7 +429,7 @@ enum CityPlacemarkResolver {
         canonicalResult: ReverseGeocodeService.CanonicalResult
     ) -> String {
         stableCityKey(
-            selectedLevel: CityLevelPreferenceStore.shared.preferredLevel(for: canonicalResult.parentRegionKey),
+            selectedLevel: nil,
             canonicalAvailableLevels: canonicalResult.availableLevels,
             fallbackCityKey: canonicalResult.cityKey,
             iso2: canonicalResult.iso2
@@ -475,6 +477,24 @@ enum CityPlacemarkResolver {
         }
 
         return nil
+    }
+
+    /// Infer identity level from city key + ISO2 using country-specific strategies,
+    /// without requiring a placemark. Used as fallback when `identityLevelRaw` is nil.
+    static func inferIdentityLevel(cityKey: String, iso2: String?) -> CardLevel {
+        guard let iso2 = iso2?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+              !iso2.isEmpty else {
+            return .locality
+        }
+        if strategyCountry.contains(iso2) { return .country }
+        let cityName = cityKey.components(separatedBy: "|").first?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if iso2 == "CN", isChineseMunicipality(cityName) { return .admin }
+        if iso2 == "JP", cityName.contains("Tokyo") { return .admin }
+        if iso2 == "KR", cityName.contains("Seoul") || cityName.contains("Busan") { return .admin }
+        if iso2 == "TH", cityName.contains("Bangkok") { return .admin }
+        if strategySubAdmin.contains(iso2) { return .subAdmin }
+        return .locality
     }
 
     private static let strategyCountry: Set<String> = ["SG", "HK", "MO", "TW", "MC", "VA", "LI", "AD", "LU", "MT", "BH", "SC", "MV", "SM"]
@@ -707,23 +727,20 @@ enum CityPlacemarkResolver {
         parentRegionKey: String?,
         preferredLevel: CardLevel?
     ) -> CardLevel? {
-        let effectivePreferred = preferredLevel ?? CityLevelPreferenceStore.shared.preferredLevel(for: parentRegionKey)
-        if let effectivePreferred,
-           let title = availableLevelNames?[effectivePreferred]?.trimmingCharacters(in: .whitespacesAndNewlines),
+        if let preferredLevel,
+           let title = availableLevelNames?[preferredLevel]?.trimmingCharacters(in: .whitespacesAndNewlines),
            !title.isEmpty {
-            return effectivePreferred
-        }
-        if let matched = identityLevel(cityKey: cityKey, availableLevelNames: availableLevelNames) {
-            return matched
+            return preferredLevel
         }
 
-        if let availableLevelNames {
-            for level in [CardLevel.admin, .subAdmin, .locality, .country] {
-                let title = availableLevelNames[level]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                if !title.isEmpty {
-                    return level
-                }
-            }
+        // Use country-strategy rules to infer the correct level from cityKey + iso2.
+        // This is locale-independent and matches the level that decideLevel() would pick.
+        let iso2 = cityKey.components(separatedBy: "|").dropFirst().first
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
+        let inferred = inferIdentityLevel(cityKey: cityKey, iso2: iso2)
+        if let title = availableLevelNames?[inferred]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !title.isEmpty {
+            return inferred
         }
 
         return nil

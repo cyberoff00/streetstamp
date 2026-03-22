@@ -45,7 +45,9 @@ final class UserSessionStore: ObservableObject {
     @Published private(set) var activeLocalProfileID: String
     @Published private(set) var reauthenticationPromptVersion: Int = 0
     @Published private(set) var requiresProfileSetup: Bool
-    @Published var hasEmailPassword: Bool = false
+    @Published var hasEmailPassword: Bool = false {
+        didSet { UserDefaults.standard.set(hasEmailPassword, forKey: Self.hasEmailPasswordKey) }
+    }
 
     private static let guestIDKey = "streetstamps.guest_id.v1"
     private static let activeLocalProfileIDKey = "streetstamps.active_local_profile_id.v1"
@@ -55,6 +57,7 @@ final class UserSessionStore: ObservableObject {
     private static let legacyGuestBindingsKey = "streetstamps.legacy_guest_bindings.v1"
     private static let guestAccountBindingsKey = "streetstamps.guest_account_bindings.v1"
     private static let autoRecoveredGuestSourcesKey = "streetstamps.auto_recovered_guest_sources.v1"
+    private static let hasEmailPasswordKey = "streetstamps.has_email_password.v1"
 
     init() {
         let guestID = Self.loadOrCreateGuestID()
@@ -63,6 +66,7 @@ final class UserSessionStore: ObservableObject {
         self.pendingMigrationFromGuestUserID = savedPending
         self.firebaseAccountState = Self.loadFirebaseAccountState()
         self.requiresProfileSetup = false
+        self.hasEmailPassword = UserDefaults.standard.bool(forKey: Self.hasEmailPasswordKey)
 
         if let data = UserDefaults.standard.data(forKey: Self.sessionDataKey),
            let restored = try? JSONDecoder().decode(Session.self, from: data) {
@@ -260,6 +264,7 @@ final class UserSessionStore: ObservableObject {
             UserScopedProfileStateStore.clearProfileSetupPending(for: auth.userId)
         }
         requiresProfileSetup = auth.needsProfileSetup
+        hasEmailPassword = auth.hasEmailPassword ?? false
         bindGuestToAccount(guestID: guestID, accountUserID: auth.userId)
         persistSession()
         persistFirebaseAccountState()
@@ -386,8 +391,10 @@ final class UserSessionStore: ObservableObject {
         session = .guest(guestID: guestID)
         firebaseAccountState = nil
         requiresProfileSetup = false
+        hasEmailPassword = false
         persistSession()
         persistFirebaseAccountState()
+        AppNotificationDelegate.clearCachedPushToken()
         if requireReauthenticationPrompt {
             reauthenticationPromptVersion &+= 1
         }

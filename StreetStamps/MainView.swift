@@ -36,7 +36,8 @@ struct MainView: View {
     @State private var ripplePhase = false
     
     @StateObject private var cityLoc = CityLocationManager()
-    
+    @State private var showLinkEmailPrompt = false
+
 #if DEBUG
     @State private var showDebugPanel = false
 #endif
@@ -216,6 +217,13 @@ struct MainView: View {
             guard hasOngoingJourney, ongoingJourney.endTime == nil else { return }
             endUnfinishedJourneyAndShare()
         }
+        .sheet(isPresented: $showLinkEmailPrompt) {
+            NavigationStack {
+                LinkEmailPasswordView()
+                    .environmentObject(sessionStore)
+            }
+        }
+        .onAppear { checkLinkEmailPrompt() }
 #if DEBUG
         .sheet(isPresented: $showDebugPanel) {
             DebugLocationPanel(
@@ -232,6 +240,20 @@ struct MainView: View {
 #endif
     }
     
+    // MARK: - Link Email Prompt
+
+    private func checkLinkEmailPrompt() {
+        guard sessionStore.isLoggedIn,
+              !sessionStore.hasEmailPassword,
+              LinkEmailPromptPolicy.shouldShow()
+        else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            guard sessionStore.isLoggedIn, !sessionStore.hasEmailPassword else { return }
+            showLinkEmailPrompt = true
+            LinkEmailPromptPolicy.recordDismissal()
+        }
+    }
+
     // MARK: - UI Components
 
     private var isGuideStartStep: Bool {

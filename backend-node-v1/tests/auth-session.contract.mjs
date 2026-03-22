@@ -104,7 +104,6 @@ async function run() {
     },
     inviteIndex: {},
     oauthIndex: {},
-    firebaseIdentityIndex: {},
     authIdentities: {
       aid_legacy_profile: {
         id: "aid_legacy_profile",

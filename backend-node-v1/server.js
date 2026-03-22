@@ -19,6 +19,7 @@ const { createRemoteJWKSet, jwtVerify } = require("jose");
 const { canSendPostcard } = require("./postcard-rules");
 const bcrypt = require("bcrypt");
 const DB = require("./db-relational");
+const APNs = require("./apns");
 
 const PORT = Number(process.env.PORT || 18080);
 const JWT_SECRET = (process.env.JWT_SECRET || "change-me-in-production").trim();
@@ -64,19 +65,8 @@ const R2_PUBLIC_BASE = (process.env.R2_PUBLIC_BASE || "").trim();
 const GOOGLE_CLIENT_ID = (process.env.GOOGLE_CLIENT_ID || "").trim();
 const APPLE_AUDIENCES = (process.env.APPLE_AUDIENCES || process.env.APPLE_BUNDLE_ID || "").trim();
 const APPSTORE_FALLBACK_URL = (process.env.APPSTORE_FALLBACK_URL || "https://apps.apple.com/us/search?term=StreetStamps").trim();
-const FIREBASE_AUTH_ENABLED = String(process.env.FIREBASE_AUTH_ENABLED || "").trim().toLowerCase();
-const FIREBASE_BEARER_COMPAT_ENABLED = String(
-  process.env.FIREBASE_BEARER_COMPAT_ENABLED == null
-    ? "true"
-    : process.env.FIREBASE_BEARER_COMPAT_ENABLED
-).trim().toLowerCase();
 const WRITE_FREEZE_ENABLED = String(process.env.WRITE_FREEZE_ENABLED || "").trim().toLowerCase();
 const SOCIAL_DISABLED_REGIONS = (process.env.SOCIAL_DISABLED_REGIONS || "CN").trim().toUpperCase().split(",").map(s => s.trim()).filter(Boolean);
-const FIREBASE_PROJECT_ID = (process.env.FIREBASE_PROJECT_ID || "").trim();
-const FIREBASE_SERVICE_ACCOUNT_PATH = (process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.FIREBASE_SERVICE_ACCOUNT_PATH || "").trim();
-const FIREBASE_SERVICE_ACCOUNT_JSON = (process.env.FIREBASE_SERVICE_ACCOUNT_JSON || "").trim();
-const FIREBASE_LEGACY_EMAIL = normalizeEmail(process.env.FIREBASE_LEGACY_EMAIL || "yinterestingy@gmail.com");
-const FIREBASE_LEGACY_APP_USER_ID = (process.env.FIREBASE_LEGACY_APP_USER_ID || "").trim();
 const LEGACY_EMAIL_REVERIFY_EMAIL = normalizeEmail(process.env.LEGACY_EMAIL_REVERIFY_EMAIL || "yinterestingy@163.com");
 
 const visibilityPrivate = "private";
@@ -158,28 +148,9 @@ try {
 } catch {
   appleOAuthFixtures = {};
 }
-const rawFirebaseFixtures = process.env.TEST_FIREBASE_AUTH_FIXTURES || "{}";
-let firebaseAuthFixtures = {};
-try {
-  firebaseAuthFixtures = JSON.parse(rawFirebaseFixtures);
-} catch {
-  firebaseAuthFixtures = {};
-}
-let firebaseAdminAuthPromise = null;
-
 function normalizeEmail(raw) {
   const email = String(raw || "").trim().toLowerCase();
   return email.includes("@") ? email : "";
-}
-
-function firebaseAuthEnabled() {
-  return FIREBASE_AUTH_ENABLED === "1" || FIREBASE_AUTH_ENABLED === "true" || FIREBASE_AUTH_ENABLED === "yes";
-}
-
-function firebaseBearerCompatEnabled() {
-  return FIREBASE_BEARER_COMPAT_ENABLED === "1"
-    || FIREBASE_BEARER_COMPAT_ENABLED === "true"
-    || FIREBASE_BEARER_COMPAT_ENABLED === "yes";
 }
 
 function writeFreezeEnabled() {
@@ -265,23 +236,6 @@ function refreshRateLimitKey(req) {
   return `${ip}:${fingerprint}`;
 }
 
-function firebaseAuthConfigError() {
-  if (!firebaseAuthEnabled()) return "";
-  if (!FIREBASE_PROJECT_ID) {
-    return "firebase auth enabled but FIREBASE_PROJECT_ID is missing";
-  }
-  if (!FIREBASE_SERVICE_ACCOUNT_PATH && !FIREBASE_SERVICE_ACCOUNT_JSON) {
-    return "firebase auth enabled but GOOGLE_APPLICATION_CREDENTIALS or FIREBASE_SERVICE_ACCOUNT_JSON is missing";
-  }
-  if (!FIREBASE_LEGACY_EMAIL) {
-    return "firebase auth enabled but FIREBASE_LEGACY_EMAIL is missing";
-  }
-  if (!FIREBASE_LEGACY_APP_USER_ID) {
-    return "firebase auth enabled but FIREBASE_LEGACY_APP_USER_ID is missing";
-  }
-  return "";
-}
-
 function weakJWTSecretConfigured() {
   if (!JWT_SECRET) return true;
   const normalized = JWT_SECRET.trim().toLowerCase();
@@ -301,88 +255,6 @@ function productionConfigError() {
     return "CORS_ALLOWED_ORIGINS must be configured in production";
   }
   return "";
-}
-
-function firebaseFixturePayload(idToken) {
-  const token = String(idToken || "").trim();
-  if (!token) return null;
-  const payload = firebaseAuthFixtures[token];
-  return payload && typeof payload === "object" ? payload : null;
-}
-
-async function firebaseAdminAuth() {
-  if (firebaseAdminAuthPromise) return firebaseAdminAuthPromise;
-  firebaseAdminAuthPromise = (async () => {
-    let initializeApp;
-    let getApps;
-    let cert;
-    let applicationDefault;
-    let getAuth;
-    try {
-      ({ initializeApp, getApps, cert, applicationDefault } = require("firebase-admin/app"));
-      ({ getAuth } = require("firebase-admin/auth"));
-    } catch {
-      throw new Error("firebase-admin not installed");
-    }
-
-    if (!getApps().length) {
-      const options = { projectId: FIREBASE_PROJECT_ID };
-      if (FIREBASE_SERVICE_ACCOUNT_JSON) {
-        options.credential = cert(JSON.parse(FIREBASE_SERVICE_ACCOUNT_JSON));
-      } else {
-        if (FIREBASE_SERVICE_ACCOUNT_PATH && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-          process.env.GOOGLE_APPLICATION_CREDENTIALS = FIREBASE_SERVICE_ACCOUNT_PATH;
-        }
-        options.credential = applicationDefault();
-      }
-      initializeApp(options);
-    }
-
-    return getAuth();
-  })();
-  return firebaseAdminAuthPromise;
-}
-
-function firebaseIdentityFromClaims(rawClaims) {
-  const claims = rawClaims && typeof rawClaims === "object" ? rawClaims : {};
-  const uid = String(claims.uid || claims.user_id || claims.sub || "").trim();
-  if (!uid) throw new Error("invalid firebase token uid");
-
-  const providerCandidates = [];
-  if (typeof claims.firebase?.sign_in_provider === "string") {
-    providerCandidates.push(claims.firebase.sign_in_provider);
-  }
-  if (typeof claims.provider_id === "string") {
-    providerCandidates.push(claims.provider_id);
-  }
-  if (Array.isArray(claims.providers)) {
-    providerCandidates.push(...claims.providers);
-  }
-
-  return {
-    uid,
-    email: normalizeEmail(claims.email),
-    emailVerified: parseTruthy(claims.email_verified),
-    providers: Array.from(new Set(
-      providerCandidates
-        .map((value) => String(value || "").trim())
-        .filter(Boolean)
-    ))
-  };
-}
-
-async function verifyFirebaseIdentityToken(idToken) {
-  const fixture = firebaseFixturePayload(idToken);
-  if (fixture) {
-    return firebaseIdentityFromClaims(fixture);
-  }
-  if (!firebaseAuthEnabled()) {
-    throw new Error("firebase auth disabled");
-  }
-
-  const auth = await firebaseAdminAuth();
-  const decoded = await auth.verifyIdToken(String(idToken || "").trim());
-  return firebaseIdentityFromClaims(decoded);
 }
 
 function escapeHTML(raw) {
@@ -836,6 +708,13 @@ function findEmailPasswordIdentity(email) {
   )) || null;
 }
 
+function userHasEmailPassword(userID) {
+  if (!userID) return false;
+  return Object.values(db.authIdentities || {}).some((item) => (
+    item.provider === "email_password" && item.userID === userID
+  ));
+}
+
 function canRecoverLegacyEmailRegistration(email) {
   const normalized = normalizeEmail(email);
   if (!normalized || normalized !== LEGACY_EMAIL_REVERIFY_EMAIL) return false;
@@ -1099,7 +978,8 @@ function authSuccessPayload(user, provider, email, accessToken, refreshToken) {
     email: email || null,
     accessToken,
     refreshToken,
-    needsProfileSetup: !resolvedProfileSetupCompleted(user, true)
+    needsProfileSetup: !resolvedProfileSetupCompleted(user, true),
+    hasEmailPassword: userHasEmailPassword(user.id)
   };
 }
 
@@ -1229,126 +1109,8 @@ function removeID(ids, id) {
   return ids.filter((x) => x !== id);
 }
 
-function appProviderFromFirebaseProviders(providers) {
-  const items = Array.isArray(providers) ? providers : [];
-  if (items.includes("password")) return "email";
-  if (items.includes("google.com")) return "google";
-  if (items.includes("apple.com")) return "apple";
-  return "firebase";
-}
-
-function createFirebaseBackedUser(identity) {
-  const uid = `u_${randHex(12)}`;
-  const invite = genInviteCode();
-  db.users[uid] = {
-    id: uid,
-    provider: appProviderFromFirebaseProviders(identity.providers),
-    email: identity.email || null,
-    passwordHash: null,
-    inviteCode: invite,
-    handle: null,
-    handleChangeUsed: false,
-    profileVisibility: visibilityFriendsOnly,
-    displayName: "Explorer",
-    profileSetupCompleted: false,
-    bio: "Travel Enthusiastic",
-    loadout: defaultLoadout(),
-    journeys: [],
-    cityCards: [],
-    friendIDs: [],
-    notifications: [],
-    sentPostcards: [],
-    receivedPostcards: [],
-    createdAt: nowUnix()
-  };
-  setUserHandle(uid, null, { strict: false });
-  db.inviteIndex[invite] = uid;
-  return uid;
-}
-
-function upsertFirebaseIdentityIndex(identity, appUserId) {
-  const now = new Date().toISOString();
-  const existing = db.firebaseIdentityIndex?.[identity.uid];
-  const next = {
-    firebaseUid: identity.uid,
-    appUserId,
-    email: identity.email || null,
-    emailVerified: Boolean(identity.emailVerified),
-    providers: Array.isArray(identity.providers) ? identity.providers : [],
-    createdAt: existing?.createdAt || now,
-    lastLoginAt: now
-  };
-  const prevSerialized = JSON.stringify(existing || null);
-  const nextSerialized = JSON.stringify(next);
-  if (!db.firebaseIdentityIndex || typeof db.firebaseIdentityIndex !== "object") {
-    db.firebaseIdentityIndex = {};
-  }
-  db.firebaseIdentityIndex[identity.uid] = next;
-  return prevSerialized !== nextSerialized;
-}
-
-function syncFirebaseIdentityEmail(identity, uid) {
-  if (!identity.email || !identity.emailVerified) return false;
-  const user = db.users[uid];
-  if (!user) return false;
-
-  const currentEmailUID = existingUserID(db.emailIndex[identity.email]);
-  let changed = false;
-  if ((!currentEmailUID || currentEmailUID === uid) && user.email !== identity.email) {
-    user.email = identity.email;
-    changed = true;
-  }
-  if ((!currentEmailUID || currentEmailUID === uid) && db.emailIndex[identity.email] !== uid) {
-    db.emailIndex[identity.email] = uid;
-    changed = true;
-  }
-  return changed;
-}
-
-async function resolveFirebaseBearerUserID(idToken) {
-  const identity = await verifyFirebaseIdentityToken(idToken);
-  let uid = existingUserID(db.firebaseIdentityIndex?.[identity.uid]?.appUserId);
-  let changed = false;
-
-  if (!uid && identity.email && identity.emailVerified && identity.email === FIREBASE_LEGACY_EMAIL) {
-    uid = existingUserID(FIREBASE_LEGACY_APP_USER_ID);
-    if (!uid) {
-      throw new Error("preserved legacy app user missing");
-    }
-  }
-
-  if (!uid && identity.email && identity.emailVerified) {
-    uid = existingUserID(db.emailIndex[identity.email]);
-  }
-
-  if (!uid) {
-    uid = createFirebaseBackedUser(identity);
-    changed = true;
-  }
-
-  changed = syncFirebaseIdentityEmail(identity, uid) || changed;
-  changed = upsertFirebaseIdentityIndex(identity, uid) || changed;
-
-  if (changed) {
-    await persistPG(async () => {
-      const user = db.users[uid];
-      if (user) await DB.updateUser(pgPool, uid, { email: user.email, provider: user.provider });
-      const fbRec = db.firebaseIdentityIndex?.[identity.uid];
-      if (fbRec) await DB.upsertFirebaseIdentity(pgPool, fbRec);
-    });
-  }
-
-  return uid;
-}
-
-async function resolveBearerUserID(token) {
-  try {
-    return parseLegacyAccessToken(token);
-  } catch {}
-  if (!firebaseBearerCompatEnabled()) {
-    throw new Error("firebase bearer auth disabled");
-  }
-  return resolveFirebaseBearerUserID(token);
+function resolveBearerUserID(token) {
+  return parseLegacyAccessToken(token);
 }
 
 function defaultLoadout() {
@@ -1528,7 +1290,6 @@ function emptyDB() {
     emailIndex: {},
     inviteIndex: {},
     oauthIndex: {},
-    firebaseIdentityIndex: {},
     authIdentities: {},
     emailVerificationTokens: {},
     passwordResetTokens: {},
@@ -1546,7 +1307,6 @@ function normalizeDBShape(parsed) {
     emailIndex: parsed?.emailIndex || {},
     inviteIndex: parsed?.inviteIndex || {},
     oauthIndex: parsed?.oauthIndex || {},
-    firebaseIdentityIndex: parsed?.firebaseIdentityIndex || {},
     authIdentities: parsed?.authIdentities || {},
     emailVerificationTokens: parsed?.emailVerificationTokens || {},
     passwordResetTokens: parsed?.passwordResetTokens || {},
@@ -1565,7 +1325,6 @@ function hasPersistedData(parsed) {
     "emailIndex",
     "inviteIndex",
     "oauthIndex",
-    "firebaseIdentityIndex",
     "authIdentities",
     "emailVerificationTokens",
     "passwordResetTokens",
@@ -1727,20 +1486,6 @@ async function loadDBFromRelationalTables() {
   const { rows: oauthRows } = await pgPool.query("SELECT * FROM oauth_index");
   for (const row of oauthRows) {
     loaded.oauthIndex[row.oauth_key] = row.user_id;
-  }
-
-  // Firebase identities
-  const { rows: fbRows } = await pgPool.query("SELECT * FROM firebase_identities");
-  for (const row of fbRows) {
-    loaded.firebaseIdentityIndex[row.firebase_uid] = {
-      firebaseUid: row.firebase_uid,
-      appUserId: row.app_user_id,
-      email: row.email,
-      emailVerified: row.email_verified,
-      providers: row.providers || [],
-      createdAt: row.created_at,
-      lastLoginAt: row.last_login_at,
-    };
   }
 
   // Email verification tokens
@@ -2023,28 +1768,6 @@ async function saveDBToRelationalTables(nextDB) {
         `INSERT INTO oauth_index (oauth_key, user_id) VALUES ($1, $2)
          ON CONFLICT (oauth_key) DO UPDATE SET user_id = EXCLUDED.user_id`,
         [key, userID]
-      );
-    }
-
-    // Firebase identities
-    for (const [fbUID, record] of Object.entries(nextDB.firebaseIdentityIndex || {})) {
-      if (!record || !record.appUserId) continue;
-      await client.query(
-        `INSERT INTO firebase_identities (firebase_uid, app_user_id, email,
-          email_verified, providers, created_at, last_login_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)
-         ON CONFLICT (firebase_uid) DO UPDATE SET
-           app_user_id = EXCLUDED.app_user_id,
-           email = EXCLUDED.email,
-           email_verified = EXCLUDED.email_verified,
-           providers = EXCLUDED.providers,
-           last_login_at = EXCLUDED.last_login_at`,
-        [
-          fbUID, record.appUserId, record.email || null,
-          record.emailVerified ?? false,
-          JSON.stringify(record.providers || []),
-          record.createdAt || 0, record.lastLoginAt || 0,
-        ]
       );
     }
 
@@ -2580,6 +2303,10 @@ function pushJourneyLikeNotification(owner, fromUser, journey) {
   if (owner.notifications.length > 400) {
     owner.notifications = owner.notifications.slice(0, 400);
   }
+  fireRemotePush(owner.id, {
+    title: fromUser.displayName,
+    body: `liked your journey "${journey.title}"`
+  });
 }
 
 function pushProfileStompNotification(owner, fromUser) {
@@ -2598,6 +2325,10 @@ function pushProfileStompNotification(owner, fromUser) {
   if (owner.notifications.length > 400) {
     owner.notifications = owner.notifications.slice(0, 400);
   }
+  fireRemotePush(owner.id, {
+    title: "StreetStamps",
+    body: `${fromUser.displayName}在你的沙发上坐了一坐`
+  });
 }
 
 function pushFriendRequestNotification(owner, fromUser) {
@@ -2616,6 +2347,10 @@ function pushFriendRequestNotification(owner, fromUser) {
   if (owner.notifications.length > 400) {
     owner.notifications = owner.notifications.slice(0, 400);
   }
+  fireRemotePush(owner.id, {
+    title: "StreetStamps",
+    body: `${fromUser.displayName} 向你发送了好友申请`
+  });
 }
 
 function pushFriendRequestAcceptedNotification(owner, fromUser) {
@@ -2634,6 +2369,10 @@ function pushFriendRequestAcceptedNotification(owner, fromUser) {
   if (owner.notifications.length > 400) {
     owner.notifications = owner.notifications.slice(0, 400);
   }
+  fireRemotePush(owner.id, {
+    title: "StreetStamps",
+    body: `${fromUser.displayName} 通过了你的好友申请`
+  });
 }
 
 function pushPostcardReceivedNotification(owner, fromUser, postcard) {
@@ -2657,6 +2396,10 @@ function pushPostcardReceivedNotification(owner, fromUser, postcard) {
   if (owner.notifications.length > 400) {
     owner.notifications = owner.notifications.slice(0, 400);
   }
+  fireRemotePush(owner.id, {
+    title: fromUser.displayName,
+    body: `给你寄来了一张来自 ${postcard.cityName || postcard.cityID} 的明信片`
+  }, { type: "postcard_received", postcardMessageID: postcard.messageID });
 }
 
 function pushPostcardReactionNotification(owner, fromUser, postcard, reactionEmoji, comment) {
@@ -2687,6 +2430,32 @@ function pushPostcardReactionNotification(owner, fromUser, postcard, reactionEmo
   if (owner.notifications.length > 400) {
     owner.notifications = owner.notifications.slice(0, 400);
   }
+  fireRemotePush(owner.id, {
+    title: fromUser.displayName,
+    body: message
+  });
+}
+
+/**
+ * Fire an APNs remote push to a user (non-blocking, best-effort).
+ * @param {string} ownerID - target user ID
+ * @param {{ title: string, body: string }} alert
+ * @param {object} [data] - optional custom data payload
+ */
+function fireRemotePush(ownerID, alert, data) {
+  if (!APNs.isConfigured() || !pgPool) return;
+  // Run async in background — never block the HTTP response
+  (async () => {
+    try {
+      const tokens = await DB.getPushTokens(pgPool, ownerID);
+      if (!tokens.length) return;
+      await APNs.sendToUser(tokens, alert, data, async (invalidToken) => {
+        await DB.deletePushToken(pgPool, ownerID, invalidToken);
+      });
+    } catch (err) {
+      console.error(`[APNs] fireRemotePush error for ${ownerID}:`, err.message);
+    }
+  })();
 }
 
 function isFriendOf(viewer, targetID) {
@@ -2804,6 +2573,7 @@ function profileDTOForViewer(target, isSelf, isFriend) {
     loadout: normalizeLoadout(target.loadout),
     handleChangeUsed: Boolean(target.handleChangeUsed),
     canUpdateHandleOneTime: !target.handleChangeUsed,
+    hasEmailPassword: isSelf ? userHasEmailPassword(target.id) : undefined,
     stats: isSelf ? profileStatsFrom(target) : {
       totalJourneys: journeys.length,
       totalDistance: journeys.reduce((acc, j) => acc + Number(j.distance || 0), 0),
@@ -2841,10 +2611,6 @@ async function main() {
   const prodConfigError = productionConfigError();
   if (prodConfigError) {
     throw new Error(prodConfigError);
-  }
-  const firebaseConfigError = firebaseAuthConfigError();
-  if (firebaseConfigError) {
-    throw new Error(firebaseConfigError);
   }
   db = await loadDB();
   console.log(`[streetstamps-node-v1] storage=${pgPool ? "postgresql-relational" : "file"}`);
@@ -2916,13 +2682,13 @@ async function main() {
     limit: `${Number.isFinite(JSON_BODY_LIMIT_MB) && JSON_BODY_LIMIT_MB > 0 ? JSON_BODY_LIMIT_MB : 6}mb`
   }));
   app.use("/media", express.static(MEDIA_DIR));
-  app.use(async (req, _res, next) => {
+  app.use((req, _res, next) => {
     const header = String(req.headers.authorization || "");
     if (!header.startsWith("Bearer ")) {
       return next();
     }
     try {
-      req.authUserID = await resolveBearerUserID(header.slice(7).trim());
+      req.authUserID = resolveBearerUserID(header.slice(7).trim());
     } catch (error) {
       req.authError = error;
     }
@@ -3031,9 +2797,7 @@ async function main() {
     storage: pgPool ? "postgresql" : "file",
     cors: corsConfigured() ? "allowlist" : "open",
     auth: {
-      businessBearer: firebaseBearerCompatEnabled() ? "backend_or_firebase_compat" : "backend_jwt_only",
-      firebaseBearerCompat: firebaseBearerCompatEnabled(),
-      firebaseAdminConfigured: firebaseAuthEnabled()
+      businessBearer: "backend_jwt_only"
     },
     maintenance: {
       writeFrozen: writeFreezeEnabled()
@@ -3508,6 +3272,68 @@ async function main() {
       const message = String(e?.message || "").toLowerCase();
       if (message.includes("token") || message.includes("jwt") || message.includes("audience") || message.includes("issuer")) {
         return res.status(401).json({ message: "invalid apple token" });
+      }
+      return res.status(500).json({ message: "internal error" });
+    }
+  });
+
+  app.post("/v1/auth/link-email-password", authRateLimiter, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const user = db.users[uid];
+      if (!user) return res.status(404).json({ message: "account not found" });
+
+      const email = normalizeEmail(req.body?.email);
+      const password = String(req.body?.password || "");
+      if (!email || !email.includes("@")) return res.status(400).json({ message: "invalid email" });
+      if (!isStrongPassword(password)) {
+        return res.status(400).json({ message: "password must be at least 8 characters and include a letter, number, and special character" });
+      }
+
+      if (userHasEmailPassword(uid)) {
+        return res.status(409).json({ message: "email password already linked" });
+      }
+
+      const existingEmailIdentity = findEmailPasswordIdentity(email);
+      if (existingEmailIdentity && existingEmailIdentity.userID !== uid) {
+        return res.status(409).json({ message: "email already in use by another account" });
+      }
+
+      const passwordHash = hashPassword(password);
+      const now = nowUnix();
+      const identityID = `aid_${randHex(12)}`;
+      db.authIdentities[identityID] = {
+        id: identityID,
+        userID: uid,
+        provider: "email_password",
+        providerSubject: email,
+        email,
+        emailVerified: false,
+        passwordHash,
+        createdAt: now,
+        updatedAt: now
+      };
+
+      if (!user.email) user.email = email;
+      if (!db.emailIndex[email]) db.emailIndex[email] = uid;
+
+      const verificationToken = issueEmailVerificationToken(uid, email);
+      await persistPG(async () => {
+        await DB.insertAuthIdentity(pgPool, db.authIdentities[identityID]);
+        await DB.updateUser(pgPool, uid, { email: user.email });
+        await persistEmailVerificationTokenToPG(issueEmailVerificationToken._lastID);
+      });
+      await saveDB();
+      await deliverVerificationEmail(email, verificationToken);
+
+      return res.status(200).json({
+        ok: true,
+        email,
+        emailVerificationRequired: true
+      });
+    } catch (e) {
+      if (e?.message === "missing bearer" || e?.message === "invalid token") {
+        return res.status(401).json({ message: "unauthorized" });
       }
       return res.status(500).json({ message: "internal error" });
     }
@@ -4325,6 +4151,34 @@ async function main() {
           }
         });
       }
+      return res.status(200).json({ ok: true });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  // ---- Push Token Registration ----
+  app.put("/v1/push-token", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = db.users[uid];
+      if (!me) return res.status(404).json({ message: "user not found" });
+      const token = String(req.body?.token || "").trim();
+      const platform = String(req.body?.platform || "ios").trim();
+      if (!token) return res.status(400).json({ message: "token required" });
+      await DB.upsertPushToken(pgPool, uid, token, platform);
+      return res.status(200).json({ ok: true });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.delete("/v1/push-token", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const token = String(req.body?.token || "").trim();
+      if (!token) return res.status(400).json({ message: "token required" });
+      await DB.deletePushToken(pgPool, uid, token);
       return res.status(200).json({ ok: true });
     } catch {
       return res.status(401).json({ message: "unauthorized" });

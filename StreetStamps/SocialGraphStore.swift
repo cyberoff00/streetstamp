@@ -96,6 +96,7 @@ struct FriendSharedJourney: Identifiable, Codable, Hashable {
     var cityID: String?
     var activityTag: String?
     var overallMemory: String?
+    var overallMemoryImageURLs: [String]
     var distance: Double
     var startTime: Date?
     var endTime: Date?
@@ -105,7 +106,7 @@ struct FriendSharedJourney: Identifiable, Codable, Hashable {
     var memories: [FriendSharedMemory]
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, cityID, cityId, activityTag, overallMemory, distance, startTime, endTime, visibility, sharedAt, routeCoordinates, coordinates, memories
+        case id, title, cityID, cityId, activityTag, overallMemory, overallMemoryImageURLs, distance, startTime, endTime, visibility, sharedAt, routeCoordinates, coordinates, memories
     }
 
     init(
@@ -114,6 +115,7 @@ struct FriendSharedJourney: Identifiable, Codable, Hashable {
         cityID: String? = nil,
         activityTag: String?,
         overallMemory: String?,
+        overallMemoryImageURLs: [String] = [],
         distance: Double,
         startTime: Date?,
         endTime: Date?,
@@ -127,6 +129,7 @@ struct FriendSharedJourney: Identifiable, Codable, Hashable {
         self.cityID = cityID
         self.activityTag = activityTag
         self.overallMemory = overallMemory
+        self.overallMemoryImageURLs = overallMemoryImageURLs
         self.distance = distance
         self.startTime = startTime
         self.endTime = endTime
@@ -145,6 +148,7 @@ struct FriendSharedJourney: Identifiable, Codable, Hashable {
             ?? (try? c.decode(String.self, forKey: .cityId))
         activityTag = try? c.decode(String.self, forKey: .activityTag)
         overallMemory = try? c.decode(String.self, forKey: .overallMemory)
+        overallMemoryImageURLs = (try? c.decode([String].self, forKey: .overallMemoryImageURLs)) ?? []
         distance = (try? c.decode(Double.self, forKey: .distance)) ?? 0
         startTime = try? c.decode(Date.self, forKey: .startTime)
         endTime = try? c.decode(Date.self, forKey: .endTime)
@@ -164,6 +168,7 @@ struct FriendSharedJourney: Identifiable, Codable, Hashable {
         try c.encodeIfPresent(cityID, forKey: .cityID)
         try c.encodeIfPresent(activityTag, forKey: .activityTag)
         try c.encodeIfPresent(overallMemory, forKey: .overallMemory)
+        if !overallMemoryImageURLs.isEmpty { try c.encode(overallMemoryImageURLs, forKey: .overallMemoryImageURLs) }
         try c.encode(distance, forKey: .distance)
         try c.encodeIfPresent(startTime, forKey: .startTime)
         try c.encodeIfPresent(endTime, forKey: .endTime)
@@ -264,6 +269,7 @@ extension FriendSharedJourney {
             cityID: FriendJourneyCityIdentity.stableCityID(from: route),
             activityTag: route.activityTag,
             overallMemory: route.overallMemory,
+            overallMemoryImageURLs: route.overallMemoryRemoteImageURLs,
             distance: route.distance,
             startTime: route.startTime,
             endTime: route.endTime,
@@ -309,6 +315,11 @@ final class SocialGraphStore: ObservableObject {
         handle rawHandle: String? = nil,
         accessToken: String?
     ) async throws {
+        let maxFriends = await MembershipStore.shared.maxFriends
+        if friends.count >= maxFriends {
+            throw BackendAPIError.server(L10n.t("membership_gate_friends_limit"))
+        }
+
         let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedCode = normalizedInviteCode(rawCode)
         let normalizedHandleRaw = String(rawHandle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)

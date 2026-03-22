@@ -68,16 +68,6 @@ enum RouteRenderingPipeline {
             .distance(from: CLLocation(latitude: b.latitude, longitude: b.longitude))
     }
 
-    /// Flight-like only when points are extremely sparse AND the overall movement span is large.
-    /// Tightened to <= 3 points to avoid compressing real sparse GPS routes (bus/train with poor signal).
-    private static func isFlightLike(_ coords: [CLLocationCoordinate2D]) -> Bool {
-        guard let first = coords.first, let last = coords.last else { return false }
-        let spanMeters = distanceMeters(first, last)
-        let sparsePoints = coords.count <= 3
-        let largeSpan = spanMeters >= 120_000
-        return sparsePoints && largeSpan
-    }
-
     /// Build solid/dashed segments based on distance only (time isn't always available for cached routes).
     private static func segmentByDistance(coords: [CLLocationCoordinate2D], gapDistanceMeters: Double) -> [RenderRouteSegment] {
         guard coords.count >= 2 else {
@@ -119,21 +109,9 @@ enum RouteRenderingPipeline {
         let clean = input.coordsWGS84.filter { $0.isValid }
         guard clean.count >= 1 else { return ([], false) }
 
-        let flightLike = isFlightLike(clean)
-        let drawWGS: [CLLocationCoordinate2D] = {
-            if flightLike, let a = clean.first, let b = clean.last, clean.count >= 2 {
-                return [a, b]
-            }
-            return clean
-        }()
-
-        // Segment in WGS space.
-        var segs = segmentByDistance(coords: drawWGS, gapDistanceMeters: input.gapDistanceMeters)
-
-        // If we intentionally collapsed to 2 points, force dashed so it reads as "flight" everywhere.
-        if flightLike, segs.count == 1 {
-            segs = [RenderRouteSegment(id: segs[0].id, style: .dashed, coords: segs[0].coords)]
-        }
+        // Gap detection in segmentByDistance already renders long gaps as dashed.
+        // No need for special "flight-like" compression — all surfaces use the same logic.
+        let segs = segmentByDistance(coords: clean, gapDistanceMeters: input.gapDistanceMeters)
 
         // Adapt coordinates per surface.
         let adapted: [RenderRouteSegment] = segs.map { seg in
@@ -148,7 +126,7 @@ enum RouteRenderingPipeline {
             return RenderRouteSegment(id: seg.id, style: seg.style, coords: adaptedCoords)
         }
 
-        return (adapted, flightLike)
+        return (adapted, false)
     }
 }
 
@@ -193,7 +171,7 @@ enum RouteSnapshotDrawer {
             let glowWidth: CGFloat = mainWidth * (isGap ? 2.2 : 2.5)
 
             // dash setup
-            let dashPattern: [CGFloat]? = isGap ? (isFlightLike ? RouteRenderStyleTokens.flightDashLengths : RouteRenderStyleTokens.dashLengths) : nil
+            let dashPattern: [CGFloat]? = isGap ? RouteRenderStyleTokens.dashLengths : nil
 
             // 1) Glow with shadow blur
             ctx.saveGState()

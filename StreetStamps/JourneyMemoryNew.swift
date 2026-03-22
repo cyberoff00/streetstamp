@@ -14,6 +14,16 @@ import UIKit
 import CoreLocation
 import MapKit
 
+// MARK: - Route Thumbnail Cache
+
+private final class RouteThumbnailCache {
+    static let shared = RouteThumbnailCache()
+    private let cache = NSCache<NSString, UIImage>()
+    init() { cache.countLimit = 60 }
+    func get(_ journeyID: String) -> UIImage? { cache.object(forKey: journeyID as NSString) }
+    func set(_ image: UIImage, for journeyID: String) { cache.setObject(image, forKey: journeyID as NSString) }
+}
+
 // =======================================================
 // MARK: - Main Journey Memory View (Screen 1 & 2)
 // =======================================================
@@ -904,6 +914,8 @@ struct JourneyMemoryDetailView: View {
     @State private var likersErrorMessage: String? = nil
     @State private var showMessage = false
     @State private var messageText = ""
+    @State private var showMembershipGate: MembershipGatedFeature? = nil
+    @ObservedObject private var membership = MembershipStore.shared
 
     init(
         journey: JourneyRoute,
@@ -1043,7 +1055,11 @@ struct JourneyMemoryDetailView: View {
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
         .task {
-            await generateRouteThumbnail()
+            if let cached = RouteThumbnailCache.shared.get(journey.id) {
+                routeThumbnail = cached
+            } else {
+                await generateRouteThumbnail()
+            }
         }
         .onAppear {
             flow.pushSidebarButtonHidden(token: sidebarHideToken)
@@ -1139,6 +1155,9 @@ struct JourneyMemoryDetailView: View {
         }
         .sheet(item: $shareItem) { item in
             ActivityView(activityItems: [item.image])
+        }
+        .sheet(item: $showMembershipGate) { feature in
+            MembershipGateView(feature: feature)
         }
         .sheet(item: $activeJourneySheet) { route in
             switch route {
@@ -1385,7 +1404,7 @@ struct JourneyMemoryDetailView: View {
                     EditableMemoryTimelineItem(
                         memory: $draftMemories[index],
                         userID: sessionStore.currentUserID,
-                        maxPhotos: 3,
+                        maxPhotos: membership.maxJourneyPhotos,
                         focusedMemoryID: $focusedMemoryID,
                         onOpenCamera: { openCamera(for: index) },
                         onOpenPhotoLibrary: { openPhotoLibrary(for: index) }
@@ -1471,8 +1490,8 @@ struct JourneyMemoryDetailView: View {
                             .background(Color.black.opacity(0.05))
                             .clipShape(Circle())
                     }
-                    .disabled(draftOverallMemoryImagePaths.count >= 3)
-                    .opacity(draftOverallMemoryImagePaths.count >= 3 ? 0.35 : 1.0)
+                    .disabled(draftOverallMemoryImagePaths.count >= photoLimit)
+                    .opacity(draftOverallMemoryImagePaths.count >= photoLimit ? 0.35 : 1.0)
 
                     Button {
                         openPhotoLibraryForOverallMemory()
@@ -1484,10 +1503,10 @@ struct JourneyMemoryDetailView: View {
                             .background(Color.black.opacity(0.05))
                             .clipShape(Circle())
                     }
-                    .disabled(draftOverallMemoryImagePaths.count >= 3)
-                    .opacity(draftOverallMemoryImagePaths.count >= 3 ? 0.35 : 1.0)
+                    .disabled(draftOverallMemoryImagePaths.count >= photoLimit)
+                    .opacity(draftOverallMemoryImagePaths.count >= photoLimit ? 0.35 : 1.0)
 
-                    Text(String(format: L10n.t("photo_count"), draftOverallMemoryImagePaths.count, 3))
+                    Text(String(format: L10n.t("photo_count"), draftOverallMemoryImagePaths.count, photoLimit))
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(.gray)
 
@@ -1510,10 +1529,10 @@ struct JourneyMemoryDetailView: View {
                 }
             }
 
-            if !isEditing && !journey.overallMemoryImagePaths.isEmpty {
+            if !isEditing && (!journey.overallMemoryImagePaths.isEmpty || !journey.overallMemoryRemoteImageURLs.isEmpty) {
                 MemoryImagesView(
                     imagePaths: journey.overallMemoryImagePaths,
-                    remoteImageURLs: [],
+                    remoteImageURLs: journey.overallMemoryRemoteImageURLs,
                     userID: sessionStore.currentUserID
                 )
             }
@@ -1570,6 +1589,10 @@ struct JourneyMemoryDetailView: View {
 
     @MainActor
     private func saveEditingAndRepublish() {
+        guard membership.canRepublishEditedJourney else {
+            showMembershipGate = .republishJourney
+            return
+        }
         saveEditing()
         guard let updated = store.journeys.first(where: { $0.id == journey.id }) else { return }
         publishStore.publish(
@@ -1625,15 +1648,17 @@ struct JourneyMemoryDetailView: View {
     }
 
     // MARK: - Photo add helpers (edit mode)
+    private var photoLimit: Int { membership.maxJourneyPhotos }
+
     private func remainingPhotoSlotsForActiveTarget() -> Int {
         switch activePhotoTarget {
         case .overallMemory:
-            return 3 - draftOverallMemoryImagePaths.count
+            return photoLimit - draftOverallMemoryImagePaths.count
         case .memory(let idx):
-            guard draftMemories.indices.contains(idx) else { return 3 }
-            return 3 - draftMemories[idx].imagePaths.count
+            guard draftMemories.indices.contains(idx) else { return photoLimit }
+            return photoLimit - draftMemories[idx].imagePaths.count
         case nil:
-            return 3
+            return photoLimit
         }
     }
 
@@ -1661,12 +1686,12 @@ struct JourneyMemoryDetailView: View {
         guard let target = activePhotoTarget else { return }
         switch target {
         case .overallMemory:
-            guard draftOverallMemoryImagePaths.count < 3 else { return }
+            guard draftOverallMemoryImagePaths.count < photoLimit else { return }
             if let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) {
                 draftOverallMemoryImagePaths.append(filename)
             }
         case .memory(let idx):
-            guard draftMemories.indices.contains(idx), draftMemories[idx].imagePaths.count < 3 else { return }
+            guard draftMemories.indices.contains(idx), draftMemories[idx].imagePaths.count < photoLimit else { return }
             if let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) {
                 draftMemories[idx].imagePaths.append(filename)
             }
@@ -1678,7 +1703,7 @@ struct JourneyMemoryDetailView: View {
         switch target {
         case .overallMemory:
             for image in images {
-                if draftOverallMemoryImagePaths.count >= 3 { break }
+                if draftOverallMemoryImagePaths.count >= photoLimit { break }
                 if let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) {
                     draftOverallMemoryImagePaths.append(filename)
                 }
@@ -1686,7 +1711,7 @@ struct JourneyMemoryDetailView: View {
         case .memory(let idx):
             guard draftMemories.indices.contains(idx) else { return }
             for image in images {
-                if draftMemories[idx].imagePaths.count >= 3 { break }
+                if draftMemories[idx].imagePaths.count >= photoLimit { break }
                 if let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) {
                     draftMemories[idx].imagePaths.append(filename)
                 }
@@ -1732,7 +1757,9 @@ struct JourneyMemoryDetailView: View {
             journeyDate: journeyDate,
             distanceText: distanceText,
             durationText: durationText,
-            userID: sessionStore.currentUserID
+            userID: sessionStore.currentUserID,
+            routeThumbnail: routeThumbnail,
+            loadout: AvatarLoadoutStore.load()
         )
         .frame(width: exportWidth)
         .fixedSize(horizontal: false, vertical: true)
@@ -1773,10 +1800,14 @@ struct JourneyMemoryDetailView: View {
         let region = MKCoordinateRegion(center: center, span: span)
 
         let snapshotSize = CGSize(width: 400, height: 200)
+        let appearance = MapAppearanceSettings.current
+        let isDark = appearance == .dark
         let options = MKMapSnapshotter.Options()
         options.region = region
         options.size = snapshotSize
         options.scale = UIScreen.main.scale
+        options.mapType = MapAppearanceSettings.mapType(for: appearance)
+        options.traitCollection = UITraitCollection(userInterfaceStyle: MapAppearanceSettings.interfaceStyle(for: appearance))
 
         do {
             let snap = try await MKMapSnapshotter(options: options).start()
@@ -1787,11 +1818,14 @@ struct JourneyMemoryDetailView: View {
                     isFlightLike: built.isFlightLike,
                     snapshot: snap,
                     ctx: renderer.cgContext,
-                    coreColor: UIColor(red: 0.20, green: 0.40, blue: 0.95, alpha: 1.0),
-                    stroke: .init(coreWidth: 3.0)
+                    coreColor: MapAppearanceSettings.routeCoreColorForSnapshot(for: appearance),
+                    stroke: .init(coreWidth: 3.0),
+                    glowColor: MapAppearanceSettings.routeGlowColor(for: appearance),
+                    isDarkMap: isDark
                 )
             }
             self.routeThumbnail = img
+            RouteThumbnailCache.shared.set(img, for: journey.id)
         } catch {
             print("Route thumbnail snapshot error:", error)
         }
@@ -2378,6 +2412,8 @@ private struct JourneyMemoryDetailExportSnapshotView: View {
     let distanceText: String
     let durationText: String
     let userID: String
+    let routeThumbnail: UIImage?
+    let loadout: RobotLoadout
 
     private var sortedMemories: [JourneyMemory] {
         memories.sorted(by: { $0.timestamp < $1.timestamp })
@@ -2396,6 +2432,20 @@ private struct JourneyMemoryDetailExportSnapshotView: View {
 
             VStack(alignment: .leading, spacing: 24) {
                 headerCard
+                if let thumb = routeThumbnail {
+                    Image(uiImage: thumb)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 160)
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .stroke(Color(red: 0.90, green: 0.91, blue: 0.92), lineWidth: 1)
+                        )
+                        .padding(.horizontal, 32)
+                }
                 if presentation.shouldShowOverallMemory {
                     overallMemorySection
                 }
@@ -2414,48 +2464,28 @@ private struct JourneyMemoryDetailExportSnapshotView: View {
     private var headerCard: some View {
         VStack(alignment: .leading, spacing: 18) {
 
-            // Keep the same top spacing as the real page but hide the BACK control
-            HStack(spacing: 0) {
-                Image(systemName: "arrow.left")
-                    .font(.system(size: 16, weight: .medium))
+            // Top row: avatar pinned to trailing edge
+            HStack {
+                Spacer()
+                RobotRendererView(size: 40, face: .front, loadout: loadout)
+                    .frame(width: 40, height: 40)
             }
-            .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
-            .frame(height: 20)
-            .opacity(0)               // hidden in export
             .padding(.top, 18)
 
-            // Title + (hidden) actions area
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(cityName.uppercased())
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
+            // Title
+            VStack(alignment: .leading, spacing: 4) {
+                Text(cityName.uppercased())
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.75)
 
-                    Text("\(countryName.uppercased()) • \(journeyDate)")
-                        .font(.system(size: 11, weight: .medium))
-                        .tracking(1.2)
-                        .foregroundColor(Color(red: 0.42, green: 0.45, blue: 0.51))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                }
-
-                Spacer()
-
-                // Reserve the same space as buttons but hide them
-                HStack(spacing: 6) {
-                    Image(systemName: "square.and.pencil")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.black)
-                        .frame(width: 36, height: 36)
-
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundColor(.black)
-                        .frame(width: 36, height: 36)
-                }
-                .opacity(0)
+                Text("\(countryName.uppercased()) • \(journeyDate)")
+                    .font(.system(size: 11, weight: .medium))
+                    .tracking(1.2)
+                    .foregroundColor(Color(red: 0.42, green: 0.45, blue: 0.51))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
 
             // Stats

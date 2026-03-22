@@ -21,7 +21,7 @@ struct SettingsAccountCardPresentation: Equatable {
 }
 
 enum SettingsAccountPresentation {
-    static let serviceActionTitles = [L10n.t("settings_private_transfer_row"), L10n.t("settings_subscription_row")]
+    static let serviceActionTitles = [L10n.t("settings_data_migration_row"), L10n.t("settings_subscription_row")]
 
     static func card(
         isLoggedIn: Bool,
@@ -263,6 +263,7 @@ struct SettingsView: View {
     @AppStorage(AppSettings.lifelogBackgroundModeKey) private var lifelogBackgroundModeRaw = LifelogBackgroundMode.defaultMode.rawValue
     @AppStorage(AppSettings.iCloudSyncEnabledKey) private var iCloudSyncEnabled = true
 
+    @State private var systemNotificationEnabled = true
     @State private var showComingSoon = false
     @State private var comingSoonTitle = ""
     @State private var showGPXImporter = false
@@ -292,6 +293,7 @@ struct SettingsView: View {
     @State var isRepairingData = false
     @State var repairMessage = ""
     @State var showRepairMessage = false
+    @State private var showMembershipGate: MembershipGatedFeature? = nil
 
     private var appearance: MapAppearanceStyle {
         get { MapAppearanceStyle(rawValue: mapAppearanceRaw) ?? .dark }
@@ -385,6 +387,9 @@ struct SettingsView: View {
         .sheet(isPresented: $showDisplayNameEditor) {
             displayNameEditorSheet
         }
+        .sheet(item: $showMembershipGate) { feature in
+            MembershipGateView(feature: feature)
+        }
         .sheet(isPresented: $showAuthSheet) {
             AuthEntryView(
                 onContinueGuest: { showAuthSheet = false },
@@ -434,8 +439,13 @@ struct SettingsView: View {
                 isOn: Binding(
                     get: { appearance == .dark },
                     set: { newValue in
-                        appearance = newValue ? .dark : .light
-                        MapAppearanceSettings.apply(newValue ? .dark : .light)
+                        let targetStyle: MapAppearanceStyle = newValue ? .dark : .light
+                        if MembershipStore.shared.isMapAppearanceLocked(targetStyle) {
+                            showMembershipGate = .mapAppearance
+                            return
+                        }
+                        appearance = targetStyle
+                        MapAppearanceSettings.apply(targetStyle)
                         cityCache.refreshThumbnailsForCurrentMapAppearance()
                     }
                 )
@@ -580,6 +590,8 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     sectionTitle(L10n.t("settings_notifications_title"))
 
+                    systemNotificationRow
+
                     VStack(alignment: .leading, spacing: 14) {
                         HStack(alignment: .top, spacing: 10) {
                             VStack(alignment: .leading, spacing: 4) {
@@ -646,6 +658,57 @@ struct SettingsView: View {
             .padding(.horizontal, 18)
             .padding(.top, 16)
             .padding(.bottom, 28)
+            .onAppear { refreshSystemNotificationStatus() }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+                refreshSystemNotificationStatus()
+            }
+        }
+    }
+
+    private var systemNotificationRow: some View {
+        Button {
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(url)
+            }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "bell.fill")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(systemNotificationEnabled ? FigmaTheme.primary : FigmaTheme.subtext)
+                    .frame(width: 20)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L10n.t("settings_system_notification_title"))
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(FigmaTheme.text)
+
+                    Text(systemNotificationEnabled
+                         ? L10n.t("settings_system_notification_on")
+                         : L10n.t("settings_system_notification_off"))
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundColor(systemNotificationEnabled ? FigmaTheme.primary : .orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "arrow.up.forward.app")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(FigmaTheme.subtext)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 18)
+            .figmaSurfaceCard(radius: 30)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func refreshSystemNotificationStatus() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            DispatchQueue.main.async {
+                systemNotificationEnabled = (settings.authorizationStatus == .authorized
+                                             || settings.authorizationStatus == .provisional)
+            }
         }
     }
 
@@ -704,35 +767,84 @@ struct SettingsView: View {
 
             VStack(spacing: 10) {
                 NavigationLink {
-                    privateTransferView
+                    dataMigrationView
                 } label: {
-                    settingsRowLabel(title: L10n.t("settings_private_transfer_row"), icon: "qrcode.viewfinder", iconColor: FigmaTheme.primary)
+                    settingsRowLabel(title: L10n.t("settings_data_migration_row"), icon: "externaldrive.badge.icloud", iconColor: FigmaTheme.primary)
                 }
                 .buttonStyle(.plain)
 
-                toggleRowCard(
-                    presentation: SettingsRowPresentation(
-                        title: L10n.t("settings_icloud_sync_title"),
-                        subtitle: iCloudSyncSubtitle,
-                        icon: "icloud",
-                        iconColor: FigmaTheme.primary,
-                        textStyle: .supporting
-                    ),
-                    isOn: $iCloudSyncEnabled
-                )
+                NavigationLink {
+                    MembershipSubscriptionView()
+                        .environmentObject(MembershipStore.shared)
+                } label: {
+                    settingsRowLabel(title: L10n.t("settings_subscription_row"), icon: "creditcard", iconColor: FigmaTheme.primary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
 
-                settingsRow(
-                    title: L10n.t("settings_restore_from_icloud"),
-                    icon: "icloud.and.arrow.down",
-                    iconColor: FigmaTheme.secondary
-                ) {
-                    Task { await restoreFromICloudManually() }
+    private var dataMigrationView: some View {
+        SettingsDetailPage(title: L10n.t("settings_data_migration_row")) {
+            VStack(alignment: .leading, spacing: 24) {
+
+                // MARK: - Device Transfer Section
+                VStack(alignment: .leading, spacing: 10) {
+                    sectionTitle(L10n.t("settings_migration_device_section"))
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(L10n.t("settings_migration_device_desc"))
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundColor(FigmaTheme.subtext)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        NavigationLink {
+                            privateTransferView
+                        } label: {
+                            settingsRowLabel(title: L10n.t("settings_private_transfer_row"), icon: "qrcode.viewfinder", iconColor: FigmaTheme.primary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(16)
+                    .figmaSurfaceCard(radius: 22)
                 }
 
-                settingsRow(title: L10n.t("settings_subscription_row"), icon: "creditcard", iconColor: FigmaTheme.primary) {
-                    showPlaceholder("Subscription")
+                // MARK: - iCloud Section
+                VStack(alignment: .leading, spacing: 10) {
+                    sectionTitle(L10n.t("settings_migration_icloud_section"))
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(L10n.t("settings_migration_icloud_desc"))
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundColor(FigmaTheme.subtext)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        toggleRowCard(
+                            presentation: SettingsRowPresentation(
+                                title: L10n.t("settings_icloud_sync_title"),
+                                subtitle: iCloudSyncSubtitle,
+                                icon: "icloud",
+                                iconColor: FigmaTheme.primary,
+                                textStyle: .supporting
+                            ),
+                            isOn: $iCloudSyncEnabled
+                        )
+
+                        settingsRow(
+                            title: L10n.t("settings_restore_from_icloud"),
+                            icon: "icloud.and.arrow.down",
+                            iconColor: FigmaTheme.secondary
+                        ) {
+                            Task { await restoreFromICloudManually() }
+                        }
+                    }
+                    .padding(16)
+                    .figmaSurfaceCard(radius: 22)
                 }
             }
+            .padding(.horizontal, 18)
+            .padding(.top, 16)
+            .padding(.bottom, 28)
         }
     }
 
@@ -1334,6 +1446,11 @@ struct SettingsView: View {
     }
 
     private func handleICloudSyncToggleChanged(enabled: Bool) async {
+        if enabled && !MembershipStore.shared.iCloudSyncEnabled {
+            iCloudSyncEnabled = false
+            showMembershipGate = .iCloudSync
+            return
+        }
         if enabled {
             journeyStore.flushPersist()
             lifelogStore.flushPersistNow()
@@ -1341,6 +1458,7 @@ struct SettingsView: View {
             let accountID = sessionStore.accountUserID ?? localUserID
             await CloudKitSyncService.shared.syncCurrentState(
                 userID: accountID,
+                localUserID: localUserID,
                 journeyStore: journeyStore,
                 lifelogStore: lifelogStore,
                 reason: "settings_toggle_on",
@@ -1367,6 +1485,7 @@ struct SettingsView: View {
             lifelogStore: lifelogStore,
             cityCache: cityCache,
             userID: accountID,
+            localUserID: localUserID,
             forceFull: true,
             writeManualStatus: true
         )
@@ -2277,6 +2396,17 @@ private final class PrivateDataTransferManager: ObservableObject {
         guard wroteFiles > 0 else {
             throw PrivateTransferError.importSourceNotFound
         }
+
+        // If the archive contains the legacy lifelog filename, rename it to
+        // the current filename so GuestDataRecoveryService can find it.
+        let legacyLifelog = sourcePaths.lifelogLegacyRouteURL
+        let currentLifelog = sourcePaths.lifelogRouteURL
+        if legacyLifelog != currentLifelog,
+           fm.fileExists(atPath: legacyLifelog.path),
+           !fm.fileExists(atPath: currentLifelog.path) {
+            try? fm.moveItem(at: legacyLifelog, to: currentLifelog)
+        }
+
         return try GuestDataRecoveryService.recover(
             from: importSourceID,
             to: currentUserID,
@@ -2306,9 +2436,10 @@ private final class PrivateDataTransferManager: ObservableObject {
     nonisolated private static func buildPrivateExportPlan(from sourceRoot: URL, fileManager fm: FileManager) throws -> (allowedRelativePaths: [String], summary: PrivateExportSummary) {
         let journeysDir = sourceRoot.appendingPathComponent("Journeys", isDirectory: true)
         let photosDir = sourceRoot.appendingPathComponent("Photos", isDirectory: true)
-        let lifelogURL = sourceRoot
-            .appendingPathComponent("Caches", isDirectory: true)
-            .appendingPathComponent("lifelog_route.json", isDirectory: false)
+        let cachesRoot = sourceRoot.appendingPathComponent("Caches", isDirectory: true)
+        let lifelogCurrentURL = cachesRoot.appendingPathComponent("lifelog_passive_route.json", isDirectory: false)
+        let lifelogLegacyURL = cachesRoot.appendingPathComponent("lifelog_route.json", isDirectory: false)
+        let moodURL = cachesRoot.appendingPathComponent("lifelog_mood.json", isDirectory: false)
 
         var journeyIDs = Set<String>()
         var memoryPhotoNames = Set<String>()
@@ -2361,9 +2492,15 @@ private final class PrivateDataTransferManager: ObservableObject {
         }
 
         var includesLifelog = false
-        if fm.fileExists(atPath: lifelogURL.path) {
+        if fm.fileExists(atPath: lifelogCurrentURL.path) {
+            allowedRelativePaths.insert("Caches/lifelog_passive_route.json")
+            includesLifelog = true
+        } else if fm.fileExists(atPath: lifelogLegacyURL.path) {
             allowedRelativePaths.insert("Caches/lifelog_route.json")
             includesLifelog = true
+        }
+        if fm.fileExists(atPath: moodURL.path) {
+            allowedRelativePaths.insert("Caches/lifelog_mood.json")
         }
 
         let sortedPaths = allowedRelativePaths

@@ -38,10 +38,35 @@ final class LiveActivityManager: ObservableObject {
     }
     
     // MARK: - Public API
-    
+
     /// 检查设备是否支持 Live Activity
     var isLiveActivitySupported: Bool {
         ActivityAuthorizationInfo().areActivitiesEnabled
+    }
+
+    /// End all Live Activities left over from a previous process (e.g. app was killed).
+    /// Call this on cold start when there is no ongoing journey to resume.
+    func endAllStaleActivities() {
+        guard isLiveActivitySupported else { return }
+        Task {
+            for activity in Activity<TrackingActivityAttributes>.activities {
+                let finalState = TrackingActivityAttributes.ContentState(
+                    distanceMeters: 0,
+                    elapsedSeconds: 0,
+                    isTracking: false,
+                    isPaused: false,
+                    memoriesCount: 0
+                )
+                await activity.end(
+                    ActivityContent(state: finalState, staleDate: nil),
+                    dismissalPolicy: .immediate
+                )
+            }
+            currentActivity = nil
+            trackingStartTime = nil
+            accumulatedPausedDuration = 0
+            currentPauseStartedAt = nil
+        }
     }
     
     /// 开始 Live Activity

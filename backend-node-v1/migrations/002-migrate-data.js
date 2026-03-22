@@ -231,31 +231,6 @@ async function migrate() {
     }
   }
 
-  // ---- 4. firebase_identities ----
-  for (const [fbUID, record] of Object.entries(db.firebaseIdentityIndex || {})) {
-    if (!record || !record.appUserId) continue;
-    try {
-      await pool.query(
-        `INSERT INTO firebase_identities (firebase_uid, app_user_id, email,
-          email_verified, providers, created_at, last_login_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)
-         ON CONFLICT DO NOTHING`,
-        [
-          fbUID,
-          record.appUserId,
-          record.email || null,
-          record.emailVerified ?? false,
-          record.providers ? JSON.stringify(record.providers) : null,
-          record.createdAt || 0,
-          record.lastLoginAt || 0,
-        ]
-      );
-      count("firebase_identities");
-    } catch (e) {
-      console.warn(`[migrate] skipping firebase_identity ${fbUID}: ${e.message}`);
-    }
-  }
-
   // ---- 5. email_verification_tokens ----
   for (const [tid, token] of Object.entries(db.emailVerificationTokens || {})) {
     if (!token || !token.userID) continue;
@@ -445,7 +420,7 @@ async function migrate() {
 
   // Verify
   const tables = [
-    "users", "auth_identities", "oauth_index", "firebase_identities",
+    "users", "auth_identities", "oauth_index",
     "email_verification_tokens", "password_reset_tokens", "refresh_tokens",
     "friendships", "friend_requests", "journeys", "city_cards",
     "journey_likes", "notifications", "postcards", "postcard_reactions",

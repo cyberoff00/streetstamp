@@ -14,7 +14,6 @@ function emptyState() {
     emailIndex: {},
     inviteIndex: {},
     oauthIndex: {},
-    firebaseIdentityIndex: {},
     authIdentities: {},
     emailVerificationTokens: {},
     passwordResetTokens: {},

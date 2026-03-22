@@ -26,6 +26,7 @@ struct PostcardPreviewView: View {
     @State private var saveToastText: String?
     @State private var downsampledImage: UIImage?
     @State private var sidebarHideToken = "\(PostcardSidebarVisibilityScope.preview.token)-\(UUID().uuidString)"
+    @State private var showMembershipGate = false
 
     var body: some View {
         VStack(spacing: 20) {

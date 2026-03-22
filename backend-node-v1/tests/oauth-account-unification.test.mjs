@@ -66,7 +66,6 @@ function makeDB(overrides = {}) {
     emailIndex: {},
     inviteIndex: {},
     oauthIndex: {},
-    firebaseIdentityIndex: {},
     handleIndex: {},
     likesIndex: {},
     friendRequestsIndex: {},

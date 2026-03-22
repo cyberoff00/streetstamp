@@ -9,7 +9,6 @@ TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 REMOTE_RELEASE_DIR="${BACKUP_ROOT}/release/${TIMESTAMP}"
 REMOTE_DB_BACKUP="${BACKUP_ROOT}/db/${TIMESTAMP}.sql"
 EXPECTED_AUTH_MODE="${EXPECTED_AUTH_MODE:-backend_jwt_only}"
-EXPECTED_FIREBASE_COMPAT="${EXPECTED_FIREBASE_COMPAT:-false}"
 EXPECTED_WRITE_FROZEN="${EXPECTED_WRITE_FROZEN:-false}"
 LOCAL_GIT_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 LOCAL_GIT_TREE_STATE="clean"
@@ -95,14 +94,12 @@ ssh -o StrictHostKeyChecking=no "$SERVER_HOST" "\
   set -euo pipefail; \
   cd '${REMOTE_DIR}'; \
   chmod +x check_auth_mode.sh readonly_prod_check.sh; \
-  grep -q '^FIREBASE_BEARER_COMPAT_ENABLED=' .env || echo 'FIREBASE_BEARER_COMPAT_ENABLED=false' >> .env; \
   grep -q '^WRITE_FREEZE_ENABLED=' .env || echo 'WRITE_FREEZE_ENABLED=false' >> .env; \
   docker compose up -d --build api; \
   sleep 8; \
   curl -fsS http://127.0.0.1:18080/v1/health >/dev/null; \
   BASE_URL=http://127.0.0.1:18080 \
   EXPECTED_AUTH_MODE='${EXPECTED_AUTH_MODE}' \
-  EXPECTED_FIREBASE_COMPAT='${EXPECTED_FIREBASE_COMPAT}' \
   EXPECTED_WRITE_FROZEN='${EXPECTED_WRITE_FROZEN}' \
   bash ./readonly_prod_check.sh; \
   printf 'commit=%s\ntree_state=%s\nstatus_lines=%s\ndeployed_at_utc=%s\nremote_dir=%s\n' \

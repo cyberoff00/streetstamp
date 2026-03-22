@@ -243,4 +243,18 @@ CREATE TABLE IF NOT EXISTS postcard_reactions (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pcr_postcard_user
   ON postcard_reactions(postcard_message_id, from_user_id);
 
+-- ============================================================
+-- 16. push_tokens (APNs device tokens)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS push_tokens (
+  user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token       TEXT NOT NULL,
+  platform    TEXT NOT NULL DEFAULT 'ios',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, token)
+);
+
+CREATE INDEX IF NOT EXISTS idx_push_tokens_user ON push_tokens(user_id);
+
 COMMIT;

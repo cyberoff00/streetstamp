@@ -21,8 +21,7 @@ actor LifelogMoodCloudKitSync {
     }
 
     func ensureZone() async throws {
-        let zone = CKRecordZone(zoneID: zoneID)
-        _ = try await database.save(zone)
+        try await CloudKitZoneCache.shared.ensureZone(zoneID, in: database)
     }
 
     func uploadMood(dayKey: String, mood: String) async throws {
@@ -32,7 +31,7 @@ actor LifelogMoodCloudKitSync {
         record[moodField] = mood as CKRecordValue
         record[modifiedAtField] = Date() as CKRecordValue
         record[isDeletedField] = 0 as CKRecordValue
-        _ = try await database.save(record)
+        try await cloudKitSaveRecord(record, in: database)
     }
 
     func uploadMoods(_ moods: [String: String]) async throws {
@@ -42,15 +41,19 @@ actor LifelogMoodCloudKitSync {
     }
 
     func downloadSnapshots(modifiedAfter: Date? = nil) async throws -> [LifelogMoodCloudSnapshot] {
-        var predicate: NSPredicate
+        let predicate: NSPredicate
         if let date = modifiedAfter {
             predicate = NSPredicate(format: "\(modifiedAtField) > %@", date as NSDate)
         } else {
             predicate = NSPredicate(value: true)
         }
 
-        let query = CKQuery(recordType: CloudKitRecordType.lifelogMood, predicate: predicate)
-        let records = try await database.records(matching: query, inZoneWith: zoneID)
+        let records = try await cloudKitQueryAll(
+            recordType: CloudKitRecordType.lifelogMood,
+            predicate: predicate,
+            zoneID: zoneID,
+            in: database
+        )
 
         var snapshots: [LifelogMoodCloudSnapshot] = []
         for record in records {
@@ -74,6 +77,6 @@ actor LifelogMoodCloudKitSync {
         record[modifiedAtField] = Date() as CKRecordValue
         record[isDeletedField] = 1 as CKRecordValue
         record[moodField] = nil
-        _ = try await database.save(record)
+        try await cloudKitSaveRecord(record, in: database)
     }
 }

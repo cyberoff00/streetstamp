@@ -535,6 +535,10 @@ final class JourneyStore: ObservableObject {
         out.reserveCapacity(journeys.reduce(0) { $0 + $1.displayRouteCoordinates.count })
 
         for journey in journeys {
+            // Ongoing journeys (endTime == nil) must NOT enter the tile system.
+            // They have no valid time range, so all coords collapse to startTime
+            // causing massive data to pile on one day and crash lifelog rendering.
+            guard journey.endTime != nil else { continue }
             let coords = journey.displayRouteCoordinates
             guard !coords.isEmpty else { continue }
             guard let (start, end) = Self.resolveRenderRange(for: journey) else { continue }

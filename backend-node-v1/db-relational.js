@@ -286,51 +286,6 @@ async function transferOAuthEntries(pool, fromUID, toUID) {
 }
 
 // ============================================================
-// Firebase Identities
-// ============================================================
-
-async function getFirebaseIdentity(pool, firebaseUID) {
-  const { rows } = await pool.query(
-    "SELECT * FROM firebase_identities WHERE firebase_uid = $1",
-    [firebaseUID]
-  );
-  if (!rows[0]) return null;
-  const r = rows[0];
-  return {
-    firebaseUid: r.firebase_uid,
-    appUserId: r.app_user_id,
-    email: r.email,
-    emailVerified: r.email_verified,
-    providers: r.providers || [],
-    createdAt: r.created_at,
-    lastLoginAt: r.last_login_at,
-  };
-}
-
-async function upsertFirebaseIdentity(pool, record) {
-  await pool.query(
-    `INSERT INTO firebase_identities (firebase_uid, app_user_id, email,
-      email_verified, providers, created_at, last_login_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)
-     ON CONFLICT (firebase_uid) DO UPDATE SET
-       app_user_id = EXCLUDED.app_user_id,
-       email = EXCLUDED.email,
-       email_verified = EXCLUDED.email_verified,
-       providers = EXCLUDED.providers,
-       last_login_at = EXCLUDED.last_login_at`,
-    [
-      record.firebaseUid,
-      record.appUserId,
-      record.email || null,
-      record.emailVerified ?? false,
-      JSON.stringify(record.providers || []),
-      record.createdAt,
-      record.lastLoginAt,
-    ]
-  );
-}
-
-// ============================================================
 // Email Verification Tokens
 // ============================================================
 
@@ -880,6 +835,34 @@ async function upsertPostcardReaction(pool, reaction) {
 }
 
 // ============================================================
+// Push Tokens
+// ============================================================
+
+async function upsertPushToken(pool, userID, token, platform = "ios") {
+  await pool.query(
+    `INSERT INTO push_tokens (user_id, token, platform, updated_at)
+     VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (user_id, token) DO UPDATE SET updated_at = NOW()`,
+    [userID, token, platform]
+  );
+}
+
+async function deletePushToken(pool, userID, token) {
+  await pool.query(
+    "DELETE FROM push_tokens WHERE user_id = $1 AND token = $2",
+    [userID, token]
+  );
+}
+
+async function getPushTokens(pool, userID) {
+  const { rows } = await pool.query(
+    "SELECT token, platform FROM push_tokens WHERE user_id = $1",
+    [userID]
+  );
+  return rows;
+}
+
+// ============================================================
 // Schema Init
 // ============================================================
 
@@ -924,10 +907,6 @@ module.exports = {
   getOAuthUser,
   setOAuthUser,
   transferOAuthEntries,
-
-  // Firebase
-  getFirebaseIdentity,
-  upsertFirebaseIdentity,
 
   // Email Verification
   insertEmailVerificationToken,
@@ -994,6 +973,11 @@ module.exports = {
   // Postcard Reactions
   getPostcardReaction,
   upsertPostcardReaction,
+
+  // Push Tokens
+  upsertPushToken,
+  deletePushToken,
+  getPushTokens,
 
   // Schema
   ensureSchema,

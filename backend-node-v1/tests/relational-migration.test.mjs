@@ -39,8 +39,6 @@ async function withServer(fn) {
       MEDIA_DIR: mediaDir,
       TEST_EMAIL_OUTBOX_FILE: emailOutbox,
       CORS_ALLOWED_ORIGINS: "",
-      FIREBASE_AUTH_ENABLED: "0",
-      FIREBASE_BEARER_COMPAT_ENABLED: "false",
       WRITE_FREEZE_ENABLED: "false",
     },
     stdio: ["pipe", "pipe", "pipe"],

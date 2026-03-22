@@ -365,7 +365,8 @@ final class LifelogStore: ObservableObject {
         var out = base
         let decoder = JSONDecoder()
         let lines = raw.split(separator: "\n")
-        for line in lines {
+        var lastLineCorrupt = false
+        for (i, line) in lines.enumerated() {
             guard !line.isEmpty else { continue }
             guard let lineData = line.data(using: .utf8) else { continue }
 
@@ -377,9 +378,26 @@ final class LifelogStore: ObservableObject {
                 let fallbackTS = out.last?.timestamp ?? fallbackTimestamp
                 let chunk = coords.map { LifelogTrackPoint($0, timestamp: fallbackTS) }
                 appendDeltaChunk(chunk, into: &out)
+                continue
+            }
+            // Only the last line can be a crash-truncated partial write; earlier bad lines are truly corrupt.
+            if i == lines.count - 1 {
+                lastLineCorrupt = true
+                print("⚠️ lifelog delta: truncating corrupt last line (\(line.prefix(60))…)")
             }
         }
+        // Repair: rewrite the delta file without the corrupt trailing line.
+        if lastLineCorrupt {
+            repairDeltaFile(deltaURL, validLineCount: lines.count - 1, lines: lines)
+        }
         return out
+    }
+
+    private nonisolated static func repairDeltaFile(_ url: URL, validLineCount: Int, lines: [Substring]) {
+        let valid = lines.prefix(validLineCount).joined(separator: "\n")
+        guard var data = valid.data(using: .utf8) else { return }
+        if !data.isEmpty { data.append(0x0A) }
+        try? data.write(to: url, options: .atomic)
     }
 
     private nonisolated static func appendDeltaChunk(_ chunk: [LifelogTrackPoint], into out: inout [LifelogTrackPoint]) {
@@ -1039,19 +1057,17 @@ final class LifelogStore: ObservableObject {
         let baseDir = target.deletingLastPathComponent()
         let chunk = appended
         DispatchQueue.global(qos: .utility).async {
-            let fm = FileManager.default
             do {
-                try fm.createDirectory(at: baseDir, withIntermediateDirectories: true)
-                var newLine = try JSONEncoder().encode(chunk)
-                newLine.append(0x0A)
-                if fm.fileExists(atPath: target.path) {
-                    var existing = try Data(contentsOf: target)
-                    existing.append(newLine)
-                    let tmp = target.appendingPathExtension("tmp")
-                    try existing.write(to: tmp, options: .atomic)
-                    _ = try fm.replaceItemAt(target, withItemAt: tmp)
+                try FileManager.default.createDirectory(at: baseDir, withIntermediateDirectories: true)
+                var data = try JSONEncoder().encode(chunk)
+                data.append(0x0A)
+                if FileManager.default.fileExists(atPath: target.path) {
+                    let handle = try FileHandle(forWritingTo: target)
+                    handle.seekToEndOfFile()
+                    handle.write(data)
+                    handle.closeFile()
                 } else {
-                    try newLine.write(to: target, options: .atomic)
+                    try data.write(to: target, options: .atomic)
                 }
             } catch {
                 print("❌ lifelog delta append failed:", error)

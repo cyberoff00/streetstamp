@@ -312,6 +312,7 @@ struct JourneyRoute: Codable {
     var activityTag: String? = nil
     var overallMemory: String? = nil
     var overallMemoryImagePaths: [String] = []
+    var overallMemoryRemoteImageURLs: [String] = []
 
     // ✅ 加回普通 init，修复 “Missing argument for 'from'”
     init(
@@ -344,7 +345,8 @@ struct JourneyRoute: Codable {
         customTitle: String? = nil,
         activityTag: String? = nil,
         overallMemory: String? = nil,
-        overallMemoryImagePaths: [String] = []
+        overallMemoryImagePaths: [String] = [],
+        overallMemoryRemoteImageURLs: [String] = []
     ) {
         self.id = id
         self.startTime = startTime
@@ -376,6 +378,7 @@ struct JourneyRoute: Codable {
         self.activityTag = activityTag
         self.overallMemory = overallMemory
         self.overallMemoryImagePaths = overallMemoryImagePaths
+        self.overallMemoryRemoteImageURLs = overallMemoryRemoteImageURLs
     }
 
     var isCompleted: Bool { endTime != nil && startTime != nil }
@@ -807,6 +810,7 @@ struct MapView: View {
 
     @State private var showMemoryEditor = false
     @State private var showFinishConfirm = false
+    @State private var showFinishPendingMemoryWarning = false
     @State private var showExitWarning = false
     @State private var showModeSelector = false
     @State private var exitToastMessage: String = ""
@@ -974,6 +978,12 @@ struct MapView: View {
         } message: {
             Text(L10n.t("finish_confirm_message"))
         }
+        .alert(L10n.t("finish_pending_memory_title"), isPresented: $showFinishPendingMemoryWarning) {
+            Button(L10n.t("finish_pending_memory_finish_now"), role: .destructive) { finishJourney() }
+            Button(L10n.t("finish_pending_memory_wait_gps"), role: .cancel) {}
+        } message: {
+            Text(L10n.t("finish_pending_memory_message"))
+        }
         .onAppear {
             onAppearSetup()
             groupedMemoriesCache = computeGroupedMemories()
@@ -1003,6 +1013,9 @@ struct MapView: View {
             }
             if shouldResolveStartCity() {
                 reverseGeocodeAndSetRouteCity(loc.coordinate)
+            }
+            if journeyRoute.endTime == nil {
+                tryBackfillPendingMemories(with: loc)
             }
         }
         // ✅ 监听从锁屏 Widget 触发的"添加记忆"操作
@@ -1219,7 +1232,7 @@ struct MapView: View {
             }
             .buttonStyle(.plain)
 
-            Button { showFinishConfirm = true } label: {
+            Button { handleFinishTapped() } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark")
                         .font(.system(size: 18, weight: .bold))
@@ -1565,6 +1578,49 @@ struct MapView: View {
         let lonDelta = min(max(rawLon, minSpan), maxSpan)
 
         mapController.setRegion(.init(center: center, span: .init(latitudeDelta: latDelta, longitudeDelta: lonDelta)))
+    }
+
+    private func handleFinishTapped() {
+        let hasPendingMemories = journeyRoute.memories.contains { $0.locationStatus == .pending }
+        if hasPendingMemories {
+            showFinishPendingMemoryWarning = true
+        } else {
+            showFinishConfirm = true
+        }
+    }
+
+    private func tryBackfillPendingMemories(with location: CLLocation) {
+        let pendingIndices = journeyRoute.memories.enumerated().compactMap { (i, m) in
+            m.locationStatus == .pending ? i : nil
+        }
+        guard !pendingIndices.isEmpty else { return }
+
+        var changed = false
+        for idx in pendingIndices {
+            let memory = journeyRoute.memories[idx]
+            let resolution = JourneyMemoryLocationResolver.resolve(
+                memoryTimestamp: memory.timestamp,
+                liveLocation: location,
+                lastKnownLocation: tracking.latestReliableLocationForMemories,
+                recordedLocations: tracking.recordedLocationsForMemories
+            )
+            guard resolution.status != .pending else { continue }
+
+            journeyRoute.memories[idx].coordinate = resolution.coordinate
+            journeyRoute.memories[idx].locationStatus = resolution.status
+            journeyRoute.memories[idx].locationSource = resolution.source
+            assignCityToMemory(
+                memoryID: journeyRoute.memories[idx].id,
+                coordinate: CLLocationCoordinate2D(
+                    latitude: resolution.coordinate.0,
+                    longitude: resolution.coordinate.1
+                )
+            )
+            changed = true
+        }
+        if changed {
+            persistSnapshot(.memoryAdded)
+        }
     }
 
     private func finishJourney() {
@@ -2258,7 +2314,7 @@ struct MemoryEditorSheet: View {
     @State private var initialNotes: String
     @State private var initialImagePaths: [String]
     @State private var initialMirrorSelfie: Bool
-    private let maxPhotos = 3
+    private var maxPhotos: Int { MembershipStore.shared.maxJourneyPhotos }
 
     private func hideKeyboard() {
         endEditingGlobal()
