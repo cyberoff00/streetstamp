@@ -23,17 +23,35 @@ pass "core app files exist"
 node --check backend-node-v1/server.js >/dev/null
 pass "backend-node-v1/server.js syntax ok"
 
+[[ -f "backend-node-v1/.env.production.example" ]] || fail "missing backend-node-v1/.env.production.example"
+pass "production env example exists"
+
 if [[ -f "GoogleService-Info.plist" ]]; then
   pass "GoogleService-Info.plist exists"
 else
   warn "GoogleService-Info.plist missing (Google login may fail)"
 fi
 
-if rg -n "R2_PUBLIC_BASE:\s*\"\"" backend-node-v1/docker-compose.yml >/dev/null 2>&1; then
-  warn "R2_PUBLIC_BASE empty in backend-node-v1/docker-compose.yml"
+if rg -n 'JWT_SECRET:\s*"\$\{JWT_SECRET:-change-me\}"' backend-node-v1/docker-compose.yml >/dev/null 2>&1; then
+  warn "docker-compose.yml still has a development JWT fallback; production must override JWT_SECRET"
 else
-  pass "R2_PUBLIC_BASE appears configured in backend-node-v1/docker-compose.yml"
+  pass "docker-compose.yml does not expose dev JWT fallback"
 fi
+
+if rg -n 'CORS_ALLOWED_ORIGINS' backend-node-v1/docker-compose.yml >/dev/null 2>&1; then
+  pass "docker-compose.yml exposes configurable CORS allowlist"
+else
+  warn "docker-compose.yml missing CORS_ALLOWED_ORIGINS"
+fi
+
+if rg -n 'MEDIA_UPLOAD_MAX_BYTES|JSON_BODY_LIMIT_MB|AUTH_RATE_LIMIT_MAX' backend-node-v1/docker-compose.yml >/dev/null 2>&1; then
+  pass "docker-compose.yml exposes request hardening knobs"
+else
+  warn "docker-compose.yml missing request hardening knobs"
+fi
+
+[[ -f "docs/ops/nginx-streetstamps.conf" ]] || warn "missing Nginx production template"
+[[ -f "scripts/readonly_prod_check.sh" ]] || warn "missing read-only production check script"
 
 if rg -n "GoogleSignIn" StreetStamps.xcodeproj/project.pbxproj >/dev/null 2>&1; then
   pass "GoogleSignIn linkage found in project"

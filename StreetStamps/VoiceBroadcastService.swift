@@ -46,8 +46,8 @@ final class VoiceBroadcastService {
 
     private func handleDistanceUpdate(_ totalDistance: Double) {
         guard tracking.isTracking, !tracking.isPaused else { return }
+        guard tracking.trackingMode == .sport else { return }
         guard AppSettings.isVoiceBroadcastEnabled else { return }
-        guard UIApplication.shared.applicationState == .active else { return }
         guard let start = journeyStartAt else { return }
 
         let intervalKM = max(1, AppSettings.voiceBroadcastIntervalKM)
@@ -69,15 +69,26 @@ final class VoiceBroadcastService {
             paceText = "--"
         }
 
-        let message = "\(milestoneKM) kilometers completed. Elapsed \(elapsedMinutes) minutes. Average pace \(paceText) minutes per kilometer."
+        let message = String(format: L10n.t("voice_broadcast_milestone"), milestoneKM, elapsedMinutes, paceText)
         speak(message)
     }
 
     private func speak(_ text: String) {
+        activateBackgroundSpeechAudioSessionIfNeeded()
         let utterance = AVSpeechUtterance(string: text)
         utterance.rate = 0.48
         utterance.voice = AVSpeechSynthesisVoice(language: Locale.current.language.languageCode?.identifier == "zh" ? "zh-CN" : "en-US")
         utterance.volume = 0.95
         synthesizer.speak(utterance)
+    }
+
+    private func activateBackgroundSpeechAudioSessionIfNeeded() {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers, .mixWithOthers])
+            try session.setActive(true, options: [])
+        } catch {
+            print("VoiceBroadcastService audio session activate failed: \(error.localizedDescription)")
+        }
     }
 }

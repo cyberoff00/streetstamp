@@ -14,9 +14,18 @@
 		C1A100012F30000100AA0001 /* StreetStampsWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = C1A100012F30000100AA0005 /* StreetStampsWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		CD3F63C12F47C9BD003DACD7 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = CD3F63C02F47C9BD003DACD7 /* GoogleService-Info.plist */; };
 		CD3F63C22F47D201003DACD7 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = CD3F63C32F47D201003DACD7 /* GoogleSignIn */; };
+		F9A100012F5A100000000001 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = F9A100022F5A100000000001 /* FirebaseAuth */; };
+		F9A100032F5A100000000001 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = F9A100042F5A100000000001 /* FirebaseCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		A7A100102F70000100AA0001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B5F75DAE2F0D641D00FEF837 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B5F75DB52F0D641D00FEF837;
+			remoteInfo = StreetStamps;
+		};
 		B53E1F892F24FA2D00055ED1 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = B5F75DAE2F0D641D00FEF837 /* Project object */;
@@ -69,6 +78,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A7A100112F70000100AA0001 /* StreetStampsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = StreetStampsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B53E1F782F24FA2C00055ED1 /* TrackingWidgeExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TrackingWidgeExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		B53E1F792F24FA2C00055ED1 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		B53E1F7B2F24FA2C00055ED1 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
@@ -79,23 +89,22 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		B53E1F902F24FA2D00055ED1 /* Exceptions for "TrackingWidge" folder in "TrackingWidgeExtension" target */ = {
+		A1B2C3D42F64000100AA0001 /* Exceptions for "TrackingWidge" folder in "TrackingWidgeExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
-				StreetStampsWidgets/.entitlements,
 				StreetStampsWidgets/Info.plist,
 			);
 			target = B53E1F772F24FA2C00055ED1 /* TrackingWidgeExtension */;
 		};
-		B5F75DC32F0D642100FEF837 /* Exceptions for "StreetStamps" folder in "StreetStamps" target */ = {
+		A1B2C3D42F64000100AA0002 /* Exceptions for "StreetStamps" folder in "StreetStamps" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
 			target = B5F75DB52F0D641D00FEF837 /* StreetStamps */;
 		};
-		C1A100012F30000100AA0006 /* Exceptions for "StreetStampsWatch" folder in "StreetStampsWatch" target */ = {
+		A1B2C3D42F64000100AA0003 /* Exceptions for "StreetStampsWatch" folder in "StreetStampsWatch" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
@@ -104,22 +113,16 @@
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
-/* Begin PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
-		B53E1FAB2F250A3000055ED1 /* Exceptions for "TrackingWidge" folder in "Compile Sources" phase from "StreetStamps" target */ = {
-			isa = PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet;
-			buildPhase = B5F75DB22F0D641D00FEF837 /* Sources */;
-			membershipExceptions = (
-				StreetStampsWidgets/.entitlements,
-			);
-		};
-/* End PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		A7A100122F70000100AA0001 /* StreetStampsTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = StreetStampsTests;
+			sourceTree = "<group>";
+		};
 		B53E1F7D2F24FA2C00055ED1 /* TrackingWidge */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				B53E1FAB2F250A3000055ED1 /* Exceptions for "TrackingWidge" folder in "Compile Sources" phase from "StreetStamps" target */,
-				B53E1F902F24FA2D00055ED1 /* Exceptions for "TrackingWidge" folder in "TrackingWidgeExtension" target */,
+				A1B2C3D42F64000100AA0001 /* Exceptions for "TrackingWidge" folder in "TrackingWidgeExtension" target */,
 			);
 			path = TrackingWidge;
 			sourceTree = "<group>";
@@ -127,7 +130,7 @@
 		B5F75DB82F0D641D00FEF837 /* StreetStamps */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				B5F75DC32F0D642100FEF837 /* Exceptions for "StreetStamps" folder in "StreetStamps" target */,
+				A1B2C3D42F64000100AA0002 /* Exceptions for "StreetStamps" folder in "StreetStamps" target */,
 			);
 			path = StreetStamps;
 			sourceTree = "<group>";
@@ -135,7 +138,7 @@
 		C1A100012F30000100AA0007 /* StreetStampsWatch */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				C1A100012F30000100AA0006 /* Exceptions for "StreetStampsWatch" folder in "StreetStampsWatch" target */,
+				A1B2C3D42F64000100AA0003 /* Exceptions for "StreetStampsWatch" folder in "StreetStampsWatch" target */,
 			);
 			path = StreetStampsWatch;
 			sourceTree = "<group>";
@@ -143,6 +146,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		A7A100132F70000100AA0001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B53E1F752F24FA2C00055ED1 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -156,6 +166,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F9A100032F5A100000000001 /* FirebaseCore in Frameworks */,
+				F9A100012F5A100000000001 /* FirebaseAuth in Frameworks */,
 				CD3F63C22F47D201003DACD7 /* GoogleSignIn in Frameworks */,
 				B5C3188A2F14F27E00397BE9 /* MapboxMaps in Frameworks */,
 			);
@@ -184,6 +196,7 @@
 			isa = PBXGroup;
 			children = (
 				B5F75DB82F0D641D00FEF837 /* StreetStamps */,
+				A7A100122F70000100AA0001 /* StreetStampsTests */,
 				C1A100012F30000100AA0007 /* StreetStampsWatch */,
 				B53E1F7D2F24FA2C00055ED1 /* TrackingWidge */,
 				B5C3186F2F14F17000397BE9 /* Frameworks */,
@@ -197,6 +210,7 @@
 			isa = PBXGroup;
 			children = (
 				B5F75DB62F0D641D00FEF837 /* StreetStamps.app */,
+				A7A100112F70000100AA0001 /* StreetStampsTests.xctest */,
 				C1A100012F30000100AA0005 /* StreetStampsWatch.app */,
 				B53E1F782F24FA2C00055ED1 /* TrackingWidgeExtension.appex */,
 			);
@@ -206,6 +220,29 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		A7A100142F70000100AA0001 /* StreetStampsTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A7A1001B2F70000100AA0001 /* Build configuration list for PBXNativeTarget "StreetStampsTests" */;
+			buildPhases = (
+				A7A100152F70000100AA0001 /* Sources */,
+				A7A100132F70000100AA0001 /* Frameworks */,
+				A7A100162F70000100AA0001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A7A100172F70000100AA0001 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				A7A100122F70000100AA0001 /* StreetStampsTests */,
+			);
+			name = StreetStampsTests;
+			packageProductDependencies = (
+			);
+			productName = StreetStampsTests;
+			productReference = A7A100112F70000100AA0001 /* StreetStampsTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		B53E1F772F24FA2C00055ED1 /* TrackingWidgeExtension */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = B53E1F8F2F24FA2D00055ED1 /* Build configuration list for PBXNativeTarget "TrackingWidgeExtension" */;
@@ -238,6 +275,7 @@
 				C1A100012F30000100AA0004 /* Embed Watch Content */,
 				B53E1F8C2F24FA2D00055ED1 /* Embed Foundation Extensions */,
 				B53E1FA52F2505A200055ED1 /* Embed App Extensions */,
+				B5F75E202F0D641D00FEF837 /* Copy Localization Resources */,
 			);
 			buildRules = (
 			);
@@ -252,6 +290,8 @@
 			packageProductDependencies = (
 				B5C318892F14F27E00397BE9 /* MapboxMaps */,
 				CD3F63C32F47D201003DACD7 /* GoogleSignIn */,
+				F9A100022F5A100000000001 /* FirebaseAuth */,
+				F9A100042F5A100000000001 /* FirebaseCore */,
 			);
 			productName = StreetStamps;
 			productReference = B5F75DB62F0D641D00FEF837 /* StreetStamps.app */;
@@ -289,6 +329,10 @@
 				LastSwiftUpdateCheck = 2620;
 				LastUpgradeCheck = 2620;
 				TargetAttributes = {
+					A7A100142F70000100AA0001 = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = B5F75DB52F0D641D00FEF837;
+					};
 					B53E1F772F24FA2C00055ED1 = {
 						CreatedOnToolsVersion = 26.2;
 					};
@@ -327,6 +371,7 @@
 			projectRoot = "";
 			targets = (
 				B5F75DB52F0D641D00FEF837 /* StreetStamps */,
+				A7A100142F70000100AA0001 /* StreetStampsTests */,
 				C1A100012F30000100AA000B /* StreetStampsWatch */,
 				B53E1F772F24FA2C00055ED1 /* TrackingWidgeExtension */,
 			);
@@ -334,6 +379,13 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		A7A100162F70000100AA0001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B53E1F762F24FA2C00055ED1 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -358,7 +410,35 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		B5F75E202F0D641D00FEF837 /* Copy Localization Resources */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Copy Localization Resources";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -eu\nSRC_DIR=\"${SRCROOT}/StreetStamps\"\nDST_DIR=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\nfor lproj in \"${SRC_DIR}\"/*.lproj; do\n  [ -d \"${lproj}\" ] || continue\n  lang=\"$(basename \"${lproj}\")\"\n  mkdir -p \"${DST_DIR}/${lang}\"\n  if [ -f \"${lproj}/Localizable.strings\" ]; then\n    cp \"${lproj}/Localizable.strings\" \"${DST_DIR}/${lang}/Localizable.strings\"\n  fi\n  if [ -f \"${lproj}/InfoPlist.strings\" ]; then\n    cp \"${lproj}/InfoPlist.strings\" \"${DST_DIR}/${lang}/InfoPlist.strings\"\n  fi\ndone\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
+		A7A100152F70000100AA0001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B53E1F742F24FA2C00055ED1 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -383,6 +463,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		A7A100172F70000100AA0001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B5F75DB52F0D641D00FEF837 /* StreetStamps */;
+			targetProxy = A7A100102F70000100AA0001 /* PBXContainerItemProxy */;
+		};
 		B53E1F8A2F24FA2D00055ED1 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = B53E1F772F24FA2C00055ED1 /* TrackingWidgeExtension */;
@@ -396,6 +481,53 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		A7A100182F70000100AA0001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = XNPB3GQ7SF;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.claire.streetstamps.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/StreetStamps.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/StreetStamps";
+			};
+			name = Debug;
+		};
+		A7A100192F70000100AA0001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = XNPB3GQ7SF;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.claire.streetstamps.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/StreetStamps.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/StreetStamps";
+			};
+			name = Release;
+		};
 		B53E1F8D2F24FA2D00055ED1 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -404,7 +536,7 @@
 				CODE_SIGN_ENTITLEMENTS = TrackingWidgeExtension.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 11;
 				DEVELOPMENT_TEAM = XNPB3GQ7SF;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TrackingWidge/Info.plist;
@@ -437,7 +569,7 @@
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
 				CODE_SIGN_ENTITLEMENTS = TrackingWidgeExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 11;
 				DEVELOPMENT_TEAM = XNPB3GQ7SF;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TrackingWidge/Info.plist;
@@ -469,7 +601,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = StreetStamps/StreetStampsDebug.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 11;
 				DEVELOPMENT_TEAM = XNPB3GQ7SF;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -511,7 +643,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = StreetStamps/StreetStamps.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 11;
 				DEVELOPMENT_TEAM = XNPB3GQ7SF;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -600,7 +732,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
-				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = NO;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -658,7 +790,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
-				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = NO;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
@@ -672,7 +804,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = StreetStampsWatch/StreetStampsWatch.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 11;
 				DEVELOPMENT_TEAM = XNPB3GQ7SF;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = StreetStampsWatch/Info.plist;
@@ -688,7 +820,7 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 4;
-				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+				WATCHOS_DEPLOYMENT_TARGET = 10.6;
 			};
 			name = Debug;
 		};
@@ -697,7 +829,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = StreetStampsWatch/StreetStampsWatch.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 11;
 				DEVELOPMENT_TEAM = XNPB3GQ7SF;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = StreetStampsWatch/Info.plist;
@@ -713,13 +845,22 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 4;
-				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+				WATCHOS_DEPLOYMENT_TARGET = 10.6;
 			};
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		A7A1001B2F70000100AA0001 /* Build configuration list for PBXNativeTarget "StreetStampsTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A7A100182F70000100AA0001 /* Debug */,
+				A7A100192F70000100AA0001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		B53E1F8F2F24FA2D00055ED1 /* Build configuration list for PBXNativeTarget "TrackingWidgeExtension" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -795,6 +936,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = CD3F63BD2F47C725003DACD7 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
 			productName = GoogleSignIn;
+		};
+		F9A100022F5A100000000001 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CD3F64AD2F47D024003DACD7 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		F9A100042F5A100000000001 /* FirebaseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CD3F64AD2F47D024003DACD7 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCore;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -1,0 +1,938 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		B53E1F7A2F24FA2C00055ED1 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B53E1F792F24FA2C00055ED1 /* WidgetKit.framework */; };
+		B53E1F7C2F24FA2C00055ED1 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B53E1F7B2F24FA2C00055ED1 /* SwiftUI.framework */; };
+		B53E1FAE2F250BB600055ED1 /* TrackingWidgeExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = B53E1F782F24FA2C00055ED1 /* TrackingWidgeExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		B5C3188A2F14F27E00397BE9 /* MapboxMaps in Frameworks */ = {isa = PBXBuildFile; productRef = B5C318892F14F27E00397BE9 /* MapboxMaps */; };
+		C1A100012F30000100AA0001 /* StreetStampsWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = C1A100012F30000100AA0005 /* StreetStampsWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		CD3F63C12F47C9BD003DACD7 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = CD3F63C02F47C9BD003DACD7 /* GoogleService-Info.plist */; };
+		CD3F63C22F47D201003DACD7 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = CD3F63C32F47D201003DACD7 /* GoogleSignIn */; };
+		F9A100012F5A100000000001 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = F9A100022F5A100000000001 /* FirebaseAuth */; };
+		F9A100032F5A100000000001 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = F9A100042F5A100000000001 /* FirebaseCore */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		A7A100102F70000100AA0001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B5F75DAE2F0D641D00FEF837 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B5F75DB52F0D641D00FEF837;
+			remoteInfo = StreetStamps;
+		};
+		B53E1F892F24FA2D00055ED1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B5F75DAE2F0D641D00FEF837 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B53E1F772F24FA2C00055ED1;
+			remoteInfo = TrackingWidgeExtension;
+		};
+		C1A100012F30000100AA0002 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B5F75DAE2F0D641D00FEF837 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C1A100012F30000100AA000B;
+			remoteInfo = StreetStampsWatch;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		B53E1F8C2F24FA2D00055ED1 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B53E1FA52F2505A200055ED1 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				B53E1FAE2F250BB600055ED1 /* TrackingWidgeExtension.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C1A100012F30000100AA0004 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 16;
+			files = (
+				C1A100012F30000100AA0001 /* StreetStampsWatch.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		A7A100112F70000100AA0001 /* StreetStampsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = StreetStampsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B53E1F782F24FA2C00055ED1 /* TrackingWidgeExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TrackingWidgeExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		B53E1F792F24FA2C00055ED1 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		B53E1F7B2F24FA2C00055ED1 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		B53E1FAD2F250B4A00055ED1 /* TrackingWidgeExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TrackingWidgeExtension.entitlements; sourceTree = "<group>"; };
+		B5F75DB62F0D641D00FEF837 /* StreetStamps.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = StreetStamps.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C1A100012F30000100AA0005 /* StreetStampsWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = StreetStampsWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CD3F63C02F47C9BD003DACD7 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		A1B2C3D42F64000100AA0001 /* Exceptions for "TrackingWidge" folder in "TrackingWidgeExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+				StreetStampsWidgets/Info.plist,
+			);
+			target = B53E1F772F24FA2C00055ED1 /* TrackingWidgeExtension */;
+		};
+		A1B2C3D42F64000100AA0002 /* Exceptions for "StreetStamps" folder in "StreetStamps" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = B5F75DB52F0D641D00FEF837 /* StreetStamps */;
+		};
+		A1B2C3D42F64000100AA0003 /* Exceptions for "StreetStampsWatch" folder in "StreetStampsWatch" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = C1A100012F30000100AA000B /* StreetStampsWatch */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		A7A100122F70000100AA0001 /* StreetStampsTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = StreetStampsTests;
+			sourceTree = "<group>";
+		};
+		B53E1F7D2F24FA2C00055ED1 /* TrackingWidge */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A1B2C3D42F64000100AA0001 /* Exceptions for "TrackingWidge" folder in "TrackingWidgeExtension" target */,
+			);
+			path = TrackingWidge;
+			sourceTree = "<group>";
+		};
+		B5F75DB82F0D641D00FEF837 /* StreetStamps */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A1B2C3D42F64000100AA0002 /* Exceptions for "StreetStamps" folder in "StreetStamps" target */,
+			);
+			path = StreetStamps;
+			sourceTree = "<group>";
+		};
+		C1A100012F30000100AA0007 /* StreetStampsWatch */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A1B2C3D42F64000100AA0003 /* Exceptions for "StreetStampsWatch" folder in "StreetStampsWatch" target */,
+			);
+			path = StreetStampsWatch;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A7A100132F70000100AA0001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B53E1F752F24FA2C00055ED1 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B53E1F7C2F24FA2C00055ED1 /* SwiftUI.framework in Frameworks */,
+				B53E1F7A2F24FA2C00055ED1 /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B5F75DB32F0D641D00FEF837 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F9A100032F5A100000000001 /* FirebaseCore in Frameworks */,
+				F9A100012F5A100000000001 /* FirebaseAuth in Frameworks */,
+				CD3F63C22F47D201003DACD7 /* GoogleSignIn in Frameworks */,
+				B5C3188A2F14F27E00397BE9 /* MapboxMaps in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C1A100012F30000100AA0008 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		B5C3186F2F14F17000397BE9 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				B53E1F792F24FA2C00055ED1 /* WidgetKit.framework */,
+				B53E1F7B2F24FA2C00055ED1 /* SwiftUI.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		B5F75DAD2F0D641D00FEF837 = {
+			isa = PBXGroup;
+			children = (
+				B5F75DB82F0D641D00FEF837 /* StreetStamps */,
+				A7A100122F70000100AA0001 /* StreetStampsTests */,
+				C1A100012F30000100AA0007 /* StreetStampsWatch */,
+				B53E1F7D2F24FA2C00055ED1 /* TrackingWidge */,
+				B5C3186F2F14F17000397BE9 /* Frameworks */,
+				B5F75DB72F0D641D00FEF837 /* Products */,
+				B53E1FAD2F250B4A00055ED1 /* TrackingWidgeExtension.entitlements */,
+				CD3F63C02F47C9BD003DACD7 /* GoogleService-Info.plist */,
+			);
+			sourceTree = "<group>";
+		};
+		B5F75DB72F0D641D00FEF837 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				B5F75DB62F0D641D00FEF837 /* StreetStamps.app */,
+				A7A100112F70000100AA0001 /* StreetStampsTests.xctest */,
+				C1A100012F30000100AA0005 /* StreetStampsWatch.app */,
+				B53E1F782F24FA2C00055ED1 /* TrackingWidgeExtension.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A7A100142F70000100AA0001 /* StreetStampsTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A7A1001B2F70000100AA0001 /* Build configuration list for PBXNativeTarget "StreetStampsTests" */;
+			buildPhases = (
+				A7A100152F70000100AA0001 /* Sources */,
+				A7A100132F70000100AA0001 /* Frameworks */,
+				A7A100162F70000100AA0001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A7A100172F70000100AA0001 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				A7A100122F70000100AA0001 /* StreetStampsTests */,
+			);
+			name = StreetStampsTests;
+			packageProductDependencies = (
+			);
+			productName = StreetStampsTests;
+			productReference = A7A100112F70000100AA0001 /* StreetStampsTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		B53E1F772F24FA2C00055ED1 /* TrackingWidgeExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B53E1F8F2F24FA2D00055ED1 /* Build configuration list for PBXNativeTarget "TrackingWidgeExtension" */;
+			buildPhases = (
+				B53E1F742F24FA2C00055ED1 /* Sources */,
+				B53E1F752F24FA2C00055ED1 /* Frameworks */,
+				B53E1F762F24FA2C00055ED1 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				B53E1F7D2F24FA2C00055ED1 /* TrackingWidge */,
+			);
+			name = TrackingWidgeExtension;
+			packageProductDependencies = (
+			);
+			productName = TrackingWidgeExtension;
+			productReference = B53E1F782F24FA2C00055ED1 /* TrackingWidgeExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		B5F75DB52F0D641D00FEF837 /* StreetStamps */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B5F75DC42F0D642100FEF837 /* Build configuration list for PBXNativeTarget "StreetStamps" */;
+			buildPhases = (
+				B5F75DB22F0D641D00FEF837 /* Sources */,
+				B5F75DB32F0D641D00FEF837 /* Frameworks */,
+				B5F75DB42F0D641D00FEF837 /* Resources */,
+				C1A100012F30000100AA0004 /* Embed Watch Content */,
+				B53E1F8C2F24FA2D00055ED1 /* Embed Foundation Extensions */,
+				B53E1FA52F2505A200055ED1 /* Embed App Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				C1A100012F30000100AA0003 /* PBXTargetDependency */,
+				B53E1F8A2F24FA2D00055ED1 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				B5F75DB82F0D641D00FEF837 /* StreetStamps */,
+			);
+			name = StreetStamps;
+			packageProductDependencies = (
+				B5C318892F14F27E00397BE9 /* MapboxMaps */,
+				CD3F63C32F47D201003DACD7 /* GoogleSignIn */,
+				F9A100022F5A100000000001 /* FirebaseAuth */,
+				F9A100042F5A100000000001 /* FirebaseCore */,
+			);
+			productName = StreetStamps;
+			productReference = B5F75DB62F0D641D00FEF837 /* StreetStamps.app */;
+			productType = "com.apple.product-type.application";
+		};
+		C1A100012F30000100AA000B /* StreetStampsWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C1A100012F30000100AA000E /* Build configuration list for PBXNativeTarget "StreetStampsWatch" */;
+			buildPhases = (
+				C1A100012F30000100AA000A /* Sources */,
+				C1A100012F30000100AA0008 /* Frameworks */,
+				C1A100012F30000100AA0009 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				C1A100012F30000100AA0007 /* StreetStampsWatch */,
+			);
+			name = StreetStampsWatch;
+			packageProductDependencies = (
+			);
+			productName = StreetStampsWatch;
+			productReference = C1A100012F30000100AA0005 /* StreetStampsWatch.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		B5F75DAE2F0D641D00FEF837 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2620;
+				LastUpgradeCheck = 2620;
+				TargetAttributes = {
+					A7A100142F70000100AA0001 = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = B5F75DB52F0D641D00FEF837;
+					};
+					B53E1F772F24FA2C00055ED1 = {
+						CreatedOnToolsVersion = 26.2;
+					};
+					B5F75DB52F0D641D00FEF837 = {
+						CreatedOnToolsVersion = 26.2;
+					};
+					C1A100012F30000100AA000B = {
+						CreatedOnToolsVersion = 26.2;
+					};
+				};
+			};
+			buildConfigurationList = B5F75DB12F0D641D00FEF837 /* Build configuration list for PBXProject "StreetStamps" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+				es,
+				fr,
+				ja,
+				ko,
+				"zh-Hans",
+				"zh-hant",
+				"zh-Hant",
+				"en 2",
+				"es 2",
+				"fr 2",
+				"ja 2",
+				"ko 2",
+				"zh-Hans 2",
+				"zh-Hant 2",
+			);
+			mainGroup = B5F75DAD2F0D641D00FEF837;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				B5C3186E2F14F07C00397BE9 /* XCRemoteSwiftPackageReference "mapbox-maps-ios" */,
+				CD3F63BD2F47C725003DACD7 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+				CD3F64AD2F47D024003DACD7 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = B5F75DB72F0D641D00FEF837 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				B5F75DB52F0D641D00FEF837 /* StreetStamps */,
+				A7A100142F70000100AA0001 /* StreetStampsTests */,
+				C1A100012F30000100AA000B /* StreetStampsWatch */,
+				B53E1F772F24FA2C00055ED1 /* TrackingWidgeExtension */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A7A100162F70000100AA0001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B53E1F762F24FA2C00055ED1 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B5F75DB42F0D641D00FEF837 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CD3F63C12F47C9BD003DACD7 /* GoogleService-Info.plist in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C1A100012F30000100AA0009 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A7A100152F70000100AA0001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B53E1F742F24FA2C00055ED1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B5F75DB22F0D641D00FEF837 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C1A100012F30000100AA000A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A7A100172F70000100AA0001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B5F75DB52F0D641D00FEF837 /* StreetStamps */;
+			targetProxy = A7A100102F70000100AA0001 /* PBXContainerItemProxy */;
+		};
+		B53E1F8A2F24FA2D00055ED1 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B53E1F772F24FA2C00055ED1 /* TrackingWidgeExtension */;
+			targetProxy = B53E1F892F24FA2D00055ED1 /* PBXContainerItemProxy */;
+		};
+		C1A100012F30000100AA0003 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C1A100012F30000100AA000B /* StreetStampsWatch */;
+			targetProxy = C1A100012F30000100AA0002 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		A7A100182F70000100AA0001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = XNPB3GQ7SF;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.claire.streetstamps.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/StreetStamps.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/StreetStamps";
+			};
+			name = Debug;
+		};
+		A7A100192F70000100AA0001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = XNPB3GQ7SF;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.claire.streetstamps.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/StreetStamps.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/StreetStamps";
+			};
+			name = Release;
+		};
+		B53E1F8D2F24FA2D00055ED1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = TrackingWidgeExtension.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 6;
+				DEVELOPMENT_TEAM = XNPB3GQ7SF;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = TrackingWidge/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = TrackingWidge;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.claire.streetstamps.TrackingWidge;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B53E1F8E2F24FA2D00055ED1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = TrackingWidgeExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 6;
+				DEVELOPMENT_TEAM = XNPB3GQ7SF;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = TrackingWidge/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = TrackingWidge;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.claire.streetstamps.TrackingWidge;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		B5F75DC52F0D642100FEF837 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = StreetStamps/StreetStampsDebug.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 6;
+				DEVELOPMENT_TEAM = XNPB3GQ7SF;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = StreetStamps/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Streetstamp;
+				INFOPLIST_KEY_NSCameraUsageDescription = "我们需要访问您的摄像头来拍摄旅程照片";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "我们需要您的位置来持续追踪您的旅程";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "我们需要您的位置来追踪您的旅程";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "我们需要保存旅程照片到您的相册";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "选择照片添加到你的记忆";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.claire.streetstamps;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B5F75DC62F0D642100FEF837 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = StreetStamps/StreetStamps.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 6;
+				DEVELOPMENT_TEAM = XNPB3GQ7SF;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = StreetStamps/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Streetstamp;
+				INFOPLIST_KEY_NSCameraUsageDescription = "我们需要访问您的摄像头来拍摄旅程照片";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "我们需要您的位置来持续追踪您的旅程";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "我们需要您的位置来追踪您的旅程";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "我们需要保存旅程照片到您的相册";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "选择照片添加到你的记忆";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.claire.streetstamps;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		B5F75DC72F0D642100FEF837 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = Z7Y27XH2B3;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		B5F75DC82F0D642100FEF837 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = Z7Y27XH2B3;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		C1A100012F30000100AA000C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = StreetStampsWatch/StreetStampsWatch.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 6;
+				DEVELOPMENT_TEAM = XNPB3GQ7SF;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = StreetStampsWatch/Info.plist;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.claire.streetstamps.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.6;
+			};
+			name = Debug;
+		};
+		C1A100012F30000100AA000D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = StreetStampsWatch/StreetStampsWatch.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 6;
+				DEVELOPMENT_TEAM = XNPB3GQ7SF;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = StreetStampsWatch/Info.plist;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.claire.streetstamps.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.6;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A7A1001B2F70000100AA0001 /* Build configuration list for PBXNativeTarget "StreetStampsTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A7A100182F70000100AA0001 /* Debug */,
+				A7A100192F70000100AA0001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B53E1F8F2F24FA2D00055ED1 /* Build configuration list for PBXNativeTarget "TrackingWidgeExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B53E1F8D2F24FA2D00055ED1 /* Debug */,
+				B53E1F8E2F24FA2D00055ED1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B5F75DB12F0D641D00FEF837 /* Build configuration list for PBXProject "StreetStamps" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B5F75DC72F0D642100FEF837 /* Debug */,
+				B5F75DC82F0D642100FEF837 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B5F75DC42F0D642100FEF837 /* Build configuration list for PBXNativeTarget "StreetStamps" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B5F75DC52F0D642100FEF837 /* Debug */,
+				B5F75DC62F0D642100FEF837 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C1A100012F30000100AA000E /* Build configuration list for PBXNativeTarget "StreetStampsWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C1A100012F30000100AA000C /* Debug */,
+				C1A100012F30000100AA000D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		B5C3186E2F14F07C00397BE9 /* XCRemoteSwiftPackageReference "mapbox-maps-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mapbox/mapbox-maps-ios.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 10.0.0;
+			};
+		};
+		CD3F63BD2F47C725003DACD7 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.1.0;
+			};
+		};
+		CD3F64AD2F47D024003DACD7 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.9.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		B5C318892F14F27E00397BE9 /* MapboxMaps */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B5C3186E2F14F07C00397BE9 /* XCRemoteSwiftPackageReference "mapbox-maps-ios" */;
+			productName = MapboxMaps;
+		};
+		CD3F63C32F47D201003DACD7 /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CD3F63BD2F47C725003DACD7 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
+		F9A100022F5A100000000001 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CD3F64AD2F47D024003DACD7 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		F9A100042F5A100000000001 /* FirebaseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CD3F64AD2F47D024003DACD7 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = B5F75DAE2F0D641D00FEF837 /* Project object */;
+}

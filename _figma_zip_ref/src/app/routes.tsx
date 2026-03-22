@@ -1,49 +1,48 @@
 import { createBrowserRouter } from "react-router";
-import { Home } from "./pages/Home";
-import { Tracking } from "./pages/Tracking";
-import { Memories } from "./pages/Memories";
-import { Cities } from "./pages/Cities";
-import { Profile } from "./pages/Profile";
-import { Equipment } from "./pages/Equipment";
-import { About } from "./pages/About";
-import { Privacy } from "./pages/Privacy";
-import { Settings } from "./pages/Settings";
 
 export const router = createBrowserRouter([
   {
     path: "/",
-    Component: Home,
+    lazy: async () => ({ Component: (await import("./pages/Home")).Home }),
   },
   {
     path: "/tracking",
-    Component: Tracking,
+    lazy: async () => ({ Component: (await import("./pages/Tracking")).Tracking }),
+  },
+  {
+    path: "/friends",
+    lazy: async () => ({ Component: (await import("./pages/Friends")).Friends }),
+  },
+  {
+    path: "/lifelog",
+    lazy: async () => ({ Component: (await import("./pages/Lifelog")).Lifelog }),
   },
   {
     path: "/memories",
-    Component: Memories,
+    lazy: async () => ({ Component: (await import("./pages/Memories")).Memories }),
   },
   {
     path: "/cities",
-    Component: Cities,
+    lazy: async () => ({ Component: (await import("./pages/Cities")).Cities }),
   },
   {
     path: "/profile",
-    Component: Profile,
+    lazy: async () => ({ Component: (await import("./pages/Profile")).Profile }),
   },
   {
     path: "/equipment",
-    Component: Equipment,
+    lazy: async () => ({ Component: (await import("./pages/Equipment")).Equipment }),
   },
   {
     path: "/settings",
-    Component: Settings,
+    lazy: async () => ({ Component: (await import("./pages/Settings")).Settings }),
   },
   {
     path: "/about",
-    Component: About,
+    lazy: async () => ({ Component: (await import("./pages/About")).About }),
   },
   {
     path: "/privacy",
-    Component: Privacy,
+    lazy: async () => ({ Component: (await import("./pages/Privacy")).Privacy }),
   },
 ]);

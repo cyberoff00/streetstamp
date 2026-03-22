@@ -3,6 +3,7 @@ import Combine
 
 extension Notification.Name {
     static let journeyStoreDidDiscardJourneys = Notification.Name("journeyStoreDidDiscardJourneys")
+    static let journeyStoreTrackTilesDidChange = Notification.Name("journeyStoreTrackTilesDidChange")
 }
 
 /// Stores the ordered list of journey IDs.
@@ -29,6 +30,25 @@ final class JourneysIndexStore {
         return try JSONDecoder().decode([String].self, from: data)
     }
 
+    func loadJourneyIDsAsync() async -> [String] {
+        let fileURL = url
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                    continuation.resume(returning: [])
+                    return
+                }
+                do {
+                    let data = try Data(contentsOf: fileURL)
+                    let ids = try JSONDecoder().decode([String].self, from: data)
+                    continuation.resume(returning: ids)
+                } catch {
+                    continuation.resume(returning: [])
+                }
+            }
+        }
+    }
+
     func replaceIDs(_ ids: [String]) throws {
         try ensureBaseDir()
         let data = try JSONEncoder().encode(ids)
@@ -53,17 +73,31 @@ final class JourneysIndexStore {
 
 @MainActor
 final class JourneyStore: ObservableObject {
+    struct SyncHooks {
+        var upsertCompletedJourney: ((JourneyRoute) -> Void)?
+        var deleteJourney: ((String) -> Void)?
+
+        static let disabled = SyncHooks(
+            upsertCompletedJourney: nil,
+            deleteJourney: nil
+        )
+    }
+
     @Published private(set) var journeys: [JourneyRoute] = []
     @Published var latestOngoing: JourneyRoute? = nil
     @Published private(set) var hasLoaded: Bool = false
+    @Published private(set) var isLoading: Bool = false
+    @Published private(set) var trackTileRevision: Int = 0
+    var syncHooks: SyncHooks = .disabled
 
-    private let fileStore: JourneysFileStore
-    private let indexStore: JourneysIndexStore
+    private var fileStore: JourneysFileStore
+    private var indexStore: JourneysIndexStore
+    private var userID: String
 
     private let ioQueue = DispatchQueue(label: "ss.journeys.store", qos: .utility)
 
     // =======================================================
-    // MARK: - Persistence (2-min delta + lightweight meta)
+    // MARK: - Persistence (mode-driven delta + lightweight meta)
     // =======================================================
 
     /// Track which journey the persistence counters belong to.
@@ -73,10 +107,8 @@ final class JourneyStore: ObservableObject {
     private var lastSeenCoordCount: Int = 0
 
     /// Delta persistence: append-only coordinate chunks while tracking.
-    /// Coordinate writes happen at most every 2 minutes (unless forced by finish/background).
     private var lastDeltaPersistCoordCount: Int = 0
     private var lastDeltaPersistAt: Date = .distantPast
-    private let deltaPersistMinInterval: TimeInterval = 120.0
 
     /// Debounced persistence for small metadata-only snapshots (memories/cityKey/etc),
     /// used when coordCount did NOT change (e.g. user edited a memory).
@@ -84,27 +116,74 @@ final class JourneyStore: ObservableObject {
     private let metaPersistDebounce: TimeInterval = 0.6
 
     init(paths: StoragePath) {
+        self.userID = paths.userID
         self.fileStore = JourneysFileStore(baseURL: paths.journeysDir)
         self.indexStore = JourneysIndexStore(baseURL: paths.journeysDir)
     }
 
+    func rebind(paths: StoragePath) {
+        pendingMetaPersist?.cancel()
+        pendingMetaPersist = nil
+        currentPersistJourneyId = nil
+        lastSeenCoordCount = 0
+        lastDeltaPersistCoordCount = 0
+        lastDeltaPersistAt = .distantPast
+        latestOngoing = nil
+        journeys = []
+        hasLoaded = false
+        trackTileRevision = 0
+
+        userID = paths.userID
+        fileStore = JourneysFileStore(baseURL: paths.journeysDir)
+        indexStore = JourneysIndexStore(baseURL: paths.journeysDir)
+        bumpTrackTileRevision()
+    }
+
+    /// Populate in-memory journeys directly without disk I/O.
+    /// Used by FriendMirrorContext to avoid async loading flash.
+    func loadFromMemory(_ routes: [JourneyRoute]) {
+        self.journeys = routes
+        self.latestOngoing = nil
+        self.hasLoaded = true
+        self.bumpTrackTileRevision()
+    }
+
     /// Load journeys from file-backed store.
     func load() {
-        let ids = (try? indexStore.loadJourneyIDs()) ?? []
+        Task {
+            await self.loadAsync()
+        }
+    }
+
+    func loadAsync() async {
+        guard !isLoading else { return }
+        self.isLoading = true
+        defer { self.isLoading = false }
+
+        var ids = await indexStore.loadJourneyIDsAsync()
+
+        // Recover orphaned journey files not listed in index (e.g. crash between file write and index update).
+        let orphanIDs = fileStore.scanOrphanedIDs(knownIDs: Set(ids))
+        if !orphanIDs.isEmpty {
+            ids = orphanIDs + ids
+            try? indexStore.replaceIDs(ids)
+            print("⚠️ recovered \(orphanIDs.count) orphaned journey(s)")
+        }
+
         guard !ids.isEmpty else {
             self.journeys = []
             self.latestOngoing = nil
             self.hasLoaded = true
+            self.bumpTrackTileRevision()
             return
         }
-        Task {
-            let loaded = await fileStore.loadJourneys(ids: ids)
-            self.journeys = loaded
+        let loaded = await fileStore.loadJourneys(ids: ids)
+        self.journeys = loaded
 
-            // Best-effort: restore "ongoing" journey pointer after a cold start.
-            self.latestOngoing = loaded.first(where: { $0.endTime == nil })
-            self.hasLoaded = true
-        }
+        // Best-effort: restore "ongoing" journey pointer after a cold start.
+        self.latestOngoing = loaded.first(where: { $0.endTime == nil })
+        self.hasLoaded = true
+        self.bumpTrackTileRevision()
     }
 
     /// Update in-memory list and schedule persistence.
@@ -125,6 +204,7 @@ final class JourneyStore: ObservableObject {
         } else {
             self.journeys.insert(j, at: 0)
         }
+        bumpTrackTileRevision()
 
         // 2) reset counters if we switched to a different journey id
         if currentPersistJourneyId != j.id {
@@ -139,6 +219,7 @@ final class JourneyStore: ObservableObject {
         let now = Date()
         let coordChanged = (coordCount != lastSeenCoordCount)
         lastSeenCoordCount = coordCount
+        let persistInterval = effectiveDeltaPersistInterval(for: j)
 
         // Completed journey: always finalize immediately (overwrite full file and clean up any delta/meta).
         if j.endTime != nil {
@@ -157,8 +238,8 @@ final class JourneyStore: ObservableObject {
             scheduleMetaPersist(journey: j)
         }
 
-        // Coordinate delta: write at most every 2 minutes.
-        if now.timeIntervalSince(lastDeltaPersistAt) >= deltaPersistMinInterval {
+        // Coordinate delta: write using the active tracking mode cadence.
+        if now.timeIntervalSince(lastDeltaPersistAt) >= persistInterval {
             flushPersist(journey: j, force: false)
         }
     }
@@ -179,6 +260,7 @@ final class JourneyStore: ObservableObject {
     /// without relying on debounced meta persistence.
     func flushPersist(journey: JourneyRoute) {
         flushPersist(journey: journey, force: true)
+        syncCompletedJourneyIfNeeded(journey)
     }
 
     private func scheduleMetaPersist(journey: JourneyRoute) {
@@ -210,16 +292,19 @@ final class JourneyStore: ObservableObject {
 
         var snapshot = journey
         snapshot.ensureThumbnail(maxPoints: 280)
+        let config = effectiveConfig(for: snapshot)
+        let persistInterval = effectiveDeltaPersistInterval(for: snapshot)
 
         let now = Date()
         let startIdx = min(lastDeltaPersistCoordCount, snapshot.coordinates.count)
         let endIdx = snapshot.coordinates.count
-        let newCoords = (startIdx < endIdx) ? Array(snapshot.coordinates[startIdx..<endIdx]) : []
+        let rawNewCoords = (startIdx < endIdx) ? Array(snapshot.coordinates[startIdx..<endIdx]) : []
+        let newCoords = downsampleDeltaCoordsIfNeeded(rawNewCoords, config: config)
 
         let shouldWriteDelta =
             snapshot.endTime == nil &&
             !newCoords.isEmpty &&
-            (force || now.timeIntervalSince(lastDeltaPersistAt) >= deltaPersistMinInterval)
+            (force || now.timeIntervalSince(lastDeltaPersistAt) >= persistInterval)
 
         if shouldWriteDelta {
             lastDeltaPersistCoordCount = endIdx
@@ -229,16 +314,16 @@ final class JourneyStore: ObservableObject {
         ioQueue.async { [weak self] in
             guard let self else { return }
             do {
+                // Index first: an indexed ID whose file doesn't exist yet is safely skipped on load.
+                // A file without an index entry is an orphan that the user never sees.
+                try self.indexStore.upsertIDFirst(snapshot.id)
+
                 if snapshot.endTime != nil {
-                    // Completed (or edited completed): overwrite full snapshot and clean delta/meta.
                     try self.fileStore.finalizeJourney(snapshot)
-                    try self.indexStore.upsertIDFirst(snapshot.id)
                     return
                 }
 
-                // Ongoing: always keep a lightweight meta snapshot fresh (no huge coordinate rewrite).
                 try self.fileStore.saveMetaSnapshot(snapshot)
-                try self.indexStore.upsertIDFirst(snapshot.id)
 
                 if shouldWriteDelta {
                     try self.fileStore.appendDelta(journeyId: snapshot.id, newCoords: newCoords)
@@ -249,6 +334,51 @@ final class JourneyStore: ObservableObject {
         }
     }
 
+    private func effectiveConfig(for journey: JourneyRoute) -> TrackingModeConfig {
+        TrackingModeConfig.config(for: journey.trackingMode)
+    }
+
+    private func effectiveDeltaPersistInterval(for journey: JourneyRoute) -> TimeInterval {
+        let config = effectiveConfig(for: journey)
+        return max(15, config.deltaPersistInterval)
+    }
+
+    private func downsampleDeltaCoordsIfNeeded(_ coords: [CoordinateCodable], config: TrackingModeConfig) -> [CoordinateCodable] {
+        guard config.enableStorageDownsample else { return coords }
+        guard coords.count > 2 else { return coords }
+
+        let perHour = max(30, config.storageMaxPointsPerHour)
+        let interval = max(15, config.deltaPersistInterval)
+        let budgetPerFlush = max(2, Int((Double(perHour) * interval / 3600.0).rounded(.up)))
+        guard coords.count > budgetPerFlush else { return coords }
+
+        return evenlySample(coords, maxPoints: budgetPerFlush)
+    }
+
+    private func evenlySample(_ coords: [CoordinateCodable], maxPoints: Int) -> [CoordinateCodable] {
+        guard maxPoints >= 2 else { return Array(coords.prefix(1)) }
+        guard coords.count > maxPoints else { return coords }
+
+        let n = coords.count
+        let m = maxPoints
+        var out: [CoordinateCodable] = []
+        out.reserveCapacity(m)
+
+        for i in 0..<m {
+            let t = Double(i) / Double(m - 1)
+            let idx = Int((t * Double(n - 1)).rounded(.toNearestOrAwayFromZero))
+            out.append(coords[min(max(idx, 0), n - 1)])
+        }
+
+        var compact: [CoordinateCodable] = []
+        compact.reserveCapacity(out.count)
+        for c in out {
+            if let last = compact.last, last.lat == c.lat, last.lon == c.lon { continue }
+            compact.append(c)
+        }
+        return compact
+    }
+
     /// Persist a completed journey immediately and ensure list order is updated.
     /// (Legacy call sites; prefer JourneyFinalizer + flushPersist)
     func addCompletedJourney(_ journey: JourneyRoute) {
@@ -257,7 +387,10 @@ final class JourneyStore: ObservableObject {
         } else {
             journeys.insert(journey, at: 0)
         }
+        bumpTrackTileRevision()
+        GlobeRefreshCoordinator.shared.requestRefresh(reason: .journeySaved)
         flushPersist(journey: journey, force: true)
+        syncCompletedJourneyIfNeeded(journey)
     }
 
     /// Apply many completed-journey updates in one pass to avoid UI stalls.
@@ -273,6 +406,10 @@ final class JourneyStore: ObservableObject {
         }
 
         let snapshots = journeys
+        bumpTrackTileRevision()
+        updates
+            .filter { $0.endTime != nil }
+            .forEach(syncCompletedJourneyIfNeeded)
 
         ioQueue.async { [weak self] in
             guard let self else { return }
@@ -315,12 +452,15 @@ final class JourneyStore: ObservableObject {
             lastDeltaPersistCoordCount = 0
             lastDeltaPersistAt = .distantPast
         }
+        bumpTrackTileRevision()
 
         NotificationCenter.default.post(
             name: .journeyStoreDidDiscardJourneys,
             object: self,
             userInfo: ["ids": uniqueIDs]
         )
+        DeletedJourneyStore.record(uniqueIDs, userID: userID)
+        uniqueIDs.forEach { syncHooks.deleteJourney?($0) }
 
         ioQueue.async { [weak self] in
             guard let self else { return }
@@ -333,6 +473,116 @@ final class JourneyStore: ObservableObject {
                 print("❌ discard journeys failed:", error)
             }
         }
+    }
+
+    func mergeCloudSnapshots(upserts: [JourneyRoute], deletedIDs: [String]) {
+        let deletedSet = Set(deletedIDs.filter { !$0.isEmpty })
+        if !deletedSet.isEmpty {
+            journeys.removeAll(where: { deletedSet.contains($0.id) })
+            if let ongoingID = latestOngoing?.id, deletedSet.contains(ongoingID) {
+                latestOngoing = nil
+            }
+        }
+
+        for route in upserts {
+            if let index = journeys.firstIndex(where: { $0.id == route.id }) {
+                journeys[index] = route
+            } else {
+                journeys.insert(route, at: 0)
+            }
+        }
+
+        guard !upserts.isEmpty || !deletedSet.isEmpty else { return }
+
+        let snapshots = journeys
+        bumpTrackTileRevision()
+
+        ioQueue.async { [weak self] in
+            guard let self else { return }
+            do {
+                // Index first: ensures no journey file becomes an invisible orphan on crash.
+                try self.indexStore.replaceIDs(snapshots.map(\.id))
+                for id in deletedSet {
+                    try? self.fileStore.deleteJourney(id: id)
+                }
+                for route in upserts {
+                    try self.fileStore.finalizeJourney(route)
+                }
+            } catch {
+                print("❌ merge cloud snapshots failed:", error)
+            }
+        }
+    }
+
+    private func syncCompletedJourneyIfNeeded(_ journey: JourneyRoute) {
+        guard journey.endTime != nil else { return }
+        syncHooks.upsertCompletedJourney?(journey)
+    }
+
+    func trackRenderEvents() -> [TrackRenderEvent] {
+        Self.makeTrackRenderEvents(from: journeys)
+    }
+
+    func trackRenderEventsAsync() async -> [TrackRenderEvent] {
+        let snapshot = journeys
+        return await Task.detached(priority: .utility) {
+            Self.makeTrackRenderEvents(from: snapshot)
+        }.value
+    }
+
+    private nonisolated static func makeTrackRenderEvents(from journeys: [JourneyRoute]) -> [TrackRenderEvent] {
+        var out: [TrackRenderEvent] = []
+        out.reserveCapacity(journeys.reduce(0) { $0 + $1.displayRouteCoordinates.count })
+
+        for journey in journeys {
+            // Ongoing journeys (endTime == nil) must NOT enter the tile system.
+            // They have no valid time range, so all coords collapse to startTime
+            // causing massive data to pile on one day and crash lifelog rendering.
+            guard journey.endTime != nil else { continue }
+            let coords = journey.displayRouteCoordinates
+            guard !coords.isEmpty else { continue }
+            guard let (start, end) = Self.resolveRenderRange(for: journey) else { continue }
+            let span = max(0, end.timeIntervalSince(start))
+            let denom = max(1, coords.count - 1)
+
+            for (index, coord) in coords.enumerated() {
+                let ts = start.addingTimeInterval(span * Double(index) / Double(denom))
+                out.append(
+                    TrackRenderEvent(
+                        sourceType: .journey,
+                        timestamp: ts,
+                        coordinate: coord
+                    )
+                )
+            }
+        }
+        return out
+    }
+
+    nonisolated static func resolveRenderRange(for journey: JourneyRoute) -> (Date, Date)? {
+        if let start = journey.startTime, let end = journey.endTime {
+            return start <= end ? (start, end) : (end, start)
+        }
+        if let start = journey.startTime {
+            return (start, start)
+        }
+        if let end = journey.endTime {
+            return (end, end)
+        }
+        if let earliest = journey.memories.map(\.timestamp).min(),
+           let latest = journey.memories.map(\.timestamp).max() {
+            return earliest <= latest ? (earliest, latest) : (latest, earliest)
+        }
+        return nil
+    }
+
+    private func bumpTrackTileRevision() {
+        trackTileRevision &+= 1
+        NotificationCenter.default.post(
+            name: .journeyStoreTrackTilesDidChange,
+            object: self,
+            userInfo: ["revision": trackTileRevision]
+        )
     }
 }
 

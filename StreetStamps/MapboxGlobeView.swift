@@ -8,9 +8,20 @@ typealias MBMapView = MapboxMaps.MapView
 
 private final class GlobeMapViewHolder: ObservableObject {
     let mapView: MBMapView
+    @Published var styleLoadRevision: Int = 0
+    var renderPayload = GlobeRenderPayload()
     init() {
         self.mapView = MBMapView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
     }
+
+    func syncRenderPayload(journeys: [JourneyRoute], cachedCities: [CachedCity]) {
+        renderPayload = GlobeRenderPayload(journeys: journeys, cachedCities: cachedCities)
+    }
+}
+
+struct GlobeRenderPayload {
+    var journeys: [JourneyRoute] = []
+    var cachedCities: [CachedCity] = []
 }
 
 // MARK: - MapboxGlobeView (FULL, no city boundary)
@@ -23,6 +34,7 @@ private final class GlobeMapViewHolder: ObservableObject {
 struct MapboxGlobeView: View {
     @Binding var isPresented: Bool
     let journeys: [JourneyRoute]
+    var visitedCountryISO2Override: [String]? = nil
     var showsCloseButton: Bool = true
 
     @StateObject private var mapHolder = GlobeMapViewHolder()
@@ -30,13 +42,10 @@ struct MapboxGlobeView: View {
 
     @EnvironmentObject private var cityCache: CityCache
 
-    /// 0...1 → map to Mapbox zoom
-    /// default far view: 0
-    @State private var zoom01: Double = 0.0
-
     // ====== IDs ======
     private let countriesSourceId = "ss-countries-source"
     private let countriesLayerId  = "ss-countries-fill"
+    private let countriesBorderLayerId = "ss-countries-border"
 
     private let footprintsSourceId = "ss-footprints-source"
     private let footprintsLayerId  = "ss-footprints-heat"
@@ -51,6 +60,29 @@ struct MapboxGlobeView: View {
     private let citiesGlowLayerId  = "ss-cities-glow"
     private let citiesLayerId      = "ss-cities-symbol"
     private let cityIconId         = "ss-city-pin"
+    private var renderInputSignature: String { "\(journeysRefreshToken)||\(cityRefreshToken)" }
+
+    private var journeysRefreshToken: String {
+        journeys.map {
+            let end = $0.endTime?.timeIntervalSince1970 ?? 0
+            let iso = ($0.countryISO2 ?? "").uppercased()
+            return "\($0.id)|\(Int(end))|\($0.coordinates.count)|\($0.thumbnailCoordinates.count)|\(iso)|\($0.distance)"
+        }
+        .joined(separator: "||")
+    }
+
+    private var cityRefreshToken: String {
+        cityCache.cachedCities
+            .sorted { $0.id < $1.id }
+            .map { city in
+                let anchorLat = city.anchor?.lat ?? 0
+                let anchorLon = city.anchor?.lon ?? 0
+                let iso = (city.countryISO2 ?? "").uppercased()
+                let isTemporary = city.isTemporary == true ? "1" : "0"
+                return "\(city.id)|\(iso)|\(isTemporary)|\(anchorLat)|\(anchorLon)"
+            }
+            .joined(separator: "||")
+    }
 
     var body: some View {
         ZStack {
@@ -61,14 +93,20 @@ struct MapboxGlobeView: View {
                     didSetup = true
                     setup()
                 }
-                .onChange(of: journeys.count) { newCount in
-                    print("📍 onChange: journeys.count changed to \(newCount)")
+                .task(id: renderInputSignature) {
+                    print("🔵 [Globe] task renderInputSignature: \(renderInputSignature.prefix(80))...")
+                    mapHolder.syncRenderPayload(
+                        journeys: journeys,
+                        cachedCities: cityCache.cachedCities
+                    )
                     refreshData()
                     updateCountryGlow()
                 }
-                .onChange(of: cityCache.cachedCities.count) { _ in
-                    print("📍 onChange: cachedCities.count changed")
+                .onChange(of: mapHolder.styleLoadRevision) { rev in
+                    print("🔵 [Globe] onChange styleLoadRevision: \(rev)")
                     refreshData()
+                    updateCountryGlow()
+                    flyToJourneysIfPossible()
                 }
 
             // Top bar
@@ -103,23 +141,6 @@ struct MapboxGlobeView: View {
                 Spacer()
             }
 
-            // Bottom zoom slider
-            VStack {
-                Spacer()
-                HStack(spacing: 10) {
-                    Image(systemName: "minus.magnifyingglass")
-                        .foregroundColor(.white.opacity(0.7))
-
-                    Slider(value: $zoom01, in: 0...1) { _ in
-                        applyZoom(animated: true)
-                    }
-
-                    Image(systemName: "plus.magnifyingglass")
-                        .foregroundColor(.white.opacity(0.7))
-                }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 18)
-            }
         }
         .background(Color.black)
     }
@@ -136,35 +157,35 @@ struct MapboxGlobeView: View {
             print("✅ styleLoaded")
         }
 
+        let holder = mapHolder
         mapView.mapboxMap.loadStyleURI(.dark) { _ in
             // far view camera (globe)
-            mapView.mapboxMap.setCamera(
+            holder.mapView.mapboxMap.setCamera(
                 to: CameraOptions(center: CLLocationCoordinate2D(latitude: 20, longitude: 0), zoom: 1.1)
             )
 
             // globe projection (enable if available)
             do {
-                try mapView.mapboxMap.style.setProjection(StyleProjection(name: .globe))
+                try holder.mapView.mapboxMap.style.setProjection(StyleProjection(name: .globe))
             } catch {
                 print("⚠️ projection not available:", error)
             }
 
             // gestures
-            mapView.gestures.options.rotateEnabled = true
-            mapView.gestures.options.pinchEnabled = true
-            mapView.gestures.options.panEnabled = true
+            holder.mapView.gestures.options.rotateEnabled = true
+            let canZoom = MembershipStore.shared.globeViewEnabled
+            holder.mapView.gestures.options.pinchEnabled = canZoom
+            holder.mapView.gestures.options.doubleTapToZoomInEnabled = canZoom
+            holder.mapView.gestures.options.panEnabled = true
 
             addFallbackBackground()
-
             addSourcesAndLayers()
-            refreshData()
-            updateCountryGlow()
 
-            // default far zoom (zoom01 = 0)
-            applyZoom(animated: false)
-
-            // if has data, fly to bounds (still keep far feel)
-            flyToJourneysIfPossible()
+            // Signal style readiness via reference type — onChange will
+            // call refreshData() with the CURRENT (non-captured) journeys.
+            DispatchQueue.main.async {
+                holder.styleLoadRevision += 1
+            }
         }
     }
 
@@ -236,15 +257,40 @@ struct MapboxGlobeView: View {
             fill.fillColor = .constant(StyleColor(.cyan))
             fill.fillOpacity = .expression(Exp(.interpolate) {
                 Exp(.linear); Exp(.zoom)
-                0;  0.22
-                2;  0.18
-                6;  0.10
-                10; 0.06
-                14; 0.05
+                0;  0.30
+                2;  0.28
+                6;  0.26
+                10; 0.24
+                14; 0.22
             })
             fill.fillOutlineColor = .constant(StyleColor(UIColor.cyan.withAlphaComponent(0.45)))
 
             try? style.addLayer(fill)
+        }
+
+        // --- Country boundary stroke (always visible) ---
+        if !style.layerExists(withId: countriesBorderLayerId) {
+            var border = LineLayer(id: countriesBorderLayerId)
+            border.source = countriesSourceId
+            border.sourceLayer = "country_boundaries"
+            border.lineColor = .constant(StyleColor(UIColor.cyan.withAlphaComponent(0.95)))
+            border.lineCap = .constant(.round)
+            border.lineJoin = .constant(.round)
+            border.lineOpacity = .expression(Exp(.interpolate) {
+                Exp(.linear); Exp(.zoom)
+                0;  0.85
+                2;  0.82
+                8;  0.80
+                14; 0.78
+            })
+            border.lineWidth = .expression(Exp(.interpolate) {
+                Exp(.linear); Exp(.zoom)
+                0;  0.8
+                3;  1.0
+                8;  1.5
+                14; 2.2
+            })
+            try? style.addLayer(border)
         }
 
         // --- Footprints heatmap (region highlight: light red; never disappears) ---
@@ -287,73 +333,6 @@ struct MapboxGlobeView: View {
             })
 
             try? style.addLayer(heat)
-        }
-
-        
-        // --- Cities glow + pin (visible only at far zoom; zoom in fades out) ---
-        if !style.layerExists(withId: citiesGlowLayerId) {
-            var glow = CircleLayer(id: citiesGlowLayerId)
-            glow.source = citiesSourceId
-
-            glow.circleColor = .constant(StyleColor(UIColor.cyan))
-            glow.circleBlur  = .expression(Exp(.interpolate) {
-                Exp(.linear); Exp(.zoom)
-                1.0; 0.95
-                4.0; 0.85
-                6.0; 0.75
-            })
-            glow.circleRadius = .expression(Exp(.interpolate) {
-                Exp(.linear); Exp(.zoom)
-                1.0; 10
-                3.0; 14
-                5.5; 18
-                6.2; 18
-            })
-            glow.circleOpacity = .expression(Exp(.interpolate) {
-                Exp(.linear); Exp(.zoom)
-                1.0; 0.35
-                4.5; 0.24
-                5.8; 0.12
-                6.2; 0.00
-            })
-
-            try? style.addLayer(glow)
-        }
-
-        if !style.layerExists(withId: citiesLayerId) {
-            var sym = SymbolLayer(id: citiesLayerId)
-            sym.source = citiesSourceId
-
-            sym.iconImage = .constant(.name(cityIconId))
-            sym.iconAllowOverlap = .constant(true)
-            sym.iconIgnorePlacement = .constant(true)
-
-            sym.iconSize = .expression(Exp(.interpolate) {
-                Exp(.linear); Exp(.zoom)
-                1.0; 0.85
-                3.0; 0.80
-                5.5; 0.72
-                6.2; 0.65
-            })
-
-            sym.iconOpacity = .expression(Exp(.interpolate) {
-                Exp(.linear); Exp(.zoom)
-                1.0; 0.95
-                4.8; 0.75
-                5.9; 0.30
-                6.2; 0.00
-            })
-
-            sym.iconHaloColor = .constant(StyleColor(UIColor.cyan.withAlphaComponent(0.9)))
-            sym.iconHaloWidth = .expression(Exp(.interpolate) {
-                Exp(.linear); Exp(.zoom)
-                1.0; 1.6
-                5.5; 1.2
-                6.2; 0.0
-            })
-            sym.iconHaloBlur = .constant(0.8)
-
-            try? style.addLayer(sym)
         }
 
         // --- Routes glow (far zoom MUST be visible) ---
@@ -490,7 +469,7 @@ struct MapboxGlobeView: View {
         if !style.layerExists(withId: routesLayerId) {
             var line = LineLayer(id: routesLayerId)
             line.source = routesSourceId
-            line.minZoom = 1.8
+            line.minZoom = 1.0
 
             // Solid routes only (exclude flight dashed)
             line.filter = Exp(.eq) { Exp(.get) { "isFlight" }; false }
@@ -522,69 +501,126 @@ struct MapboxGlobeView: View {
 
             try? style.addLayer(line)
         }
+
+        // --- Cities glow + pin (always visible, and kept above routes) ---
+        if !style.layerExists(withId: citiesGlowLayerId) {
+            var glow = CircleLayer(id: citiesGlowLayerId)
+            glow.source = citiesSourceId
+
+            glow.circleColor = .constant(StyleColor(UIColor.cyan))
+            glow.circleBlur  = .expression(Exp(.interpolate) {
+                Exp(.linear); Exp(.zoom)
+                1.0; 0.95
+                4.0; 0.88
+                8.0; 0.82
+                14.0; 0.76
+            })
+            glow.circleRadius = .expression(Exp(.interpolate) {
+                Exp(.linear); Exp(.zoom)
+                1.0; 10
+                3.0; 14
+                8.0; 17
+                14.0; 19
+            })
+            glow.circleOpacity = .expression(Exp(.interpolate) {
+                Exp(.linear); Exp(.zoom)
+                1.0; 0.36
+                5.0; 0.34
+                10.0; 0.32
+                14.0; 0.30
+            })
+
+            try? style.addLayer(glow)
+        }
+
+        if !style.layerExists(withId: citiesLayerId) {
+            var sym = SymbolLayer(id: citiesLayerId)
+            sym.source = citiesSourceId
+
+            sym.iconImage = .constant(.name(cityIconId))
+            sym.iconAllowOverlap = .constant(true)
+            sym.iconIgnorePlacement = .constant(true)
+
+            sym.iconSize = .expression(Exp(.interpolate) {
+                Exp(.linear); Exp(.zoom)
+                1.0; 0.85
+                3.0; 0.82
+                8.0; 0.76
+                14.0; 0.72
+            })
+
+            sym.iconOpacity = .expression(Exp(.interpolate) {
+                Exp(.linear); Exp(.zoom)
+                1.0; 0.95
+                8.0; 0.92
+                14.0; 0.90
+            })
+
+            sym.iconHaloColor = .constant(StyleColor(UIColor.cyan.withAlphaComponent(0.9)))
+            sym.iconHaloWidth = .expression(Exp(.interpolate) {
+                Exp(.linear); Exp(.zoom)
+                1.0; 1.6
+                8.0; 1.4
+                14.0; 1.3
+            })
+            sym.iconHaloBlur = .constant(0.8)
+
+            try? style.addLayer(sym)
+        }
     }
 
     // MARK: - Country Filter (iso2)
 
     private func updateCountryGlow() {
-        let iso2 = visitedISO2FromJourneys(journeys)
+        let overrideISO2 = (visitedCountryISO2Override ?? [])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
+            .filter { $0.count == 2 }
+        let iso2 = overrideISO2.isEmpty ? visitedISO2FromJourneys(journeys) : overrideISO2
 
         let style = mapView.mapboxMap.style
         guard style.layerExists(withId: countriesLayerId) else { return }
 
-        let disputedFalse = MapboxMaps.Expression(
-            operator: .eq,
-            arguments: [
-                .expression(.init(operator: .get, arguments: [.string("disputed")])),
-                .string("false")
-            ]
-        )
-
-        let worldviewOK = MapboxMaps.Expression(
-            operator: .any,
-            arguments: [
-                .expression(
-                    MapboxMaps.Expression(operator: .eq, arguments: [
-                        .expression(MapboxMaps.Expression(operator: .get, arguments: [.string("worldview")])),
-                        .string("all")
-                    ])
-                ),
-                .expression(
-                    MapboxMaps.Expression(operator: .eq, arguments: [
-                        .expression(MapboxMaps.Expression(operator: .get, arguments: [.string("worldview")])),
-                        .string("CN")
-                    ])
-                )
-            ]
-        )
-
-        let isoGet = MapboxMaps.Expression(operator: .get, arguments: [.string("iso_3166_1")])
-
-        let isoMatch: MapboxMaps.Expression = {
-            guard !iso2.isEmpty else {
-                return MapboxMaps.Expression(operator: .literal, arguments: [.boolean(false)])
-            }
-            var args: [MapboxMaps.Expression.Argument] = [.expression(isoGet)]
-            for code in iso2 {
-                args.append(.string(code))
-                args.append(.boolean(true))
-            }
-            args.append(.boolean(false))
-            return MapboxMaps.Expression(operator: .match, arguments: args)
-        }()
-
-        let filterExpr = MapboxMaps.Expression(
-            operator: .all,
-            arguments: [
-                .expression(disputedFalse),
-                .expression(worldviewOK),
-                .expression(isoMatch)
-            ]
-        )
-
         do {
+            let worldview = resolvedWorldviewCode()
+            let disputedGet = MapboxMaps.Expression(operator: .get, arguments: [.string("disputed")])
+            let worldviewGet = MapboxMaps.Expression(operator: .get, arguments: [.string("worldview")])
+
+            let disputedFalse = MapboxMaps.Expression(
+                operator: .eq,
+                arguments: [.expression(disputedGet), .string("false")]
+            )
+            let worldviewFilter = MapboxMaps.Expression(
+                operator: .any,
+                arguments: [
+                    .expression(MapboxMaps.Expression(operator: .eq, arguments: [.string("all"), .expression(worldviewGet)])),
+                    .expression(MapboxMaps.Expression(operator: .inExpression, arguments: [.string(worldview), .expression(worldviewGet)]))
+                ]
+            )
+
+            var allFilters: [MapboxMaps.Expression.Argument] = [
+                .expression(disputedFalse),
+                .expression(worldviewFilter)
+            ]
+            let isoGet = MapboxMaps.Expression(operator: .get, arguments: [.string("iso_3166_1")])
+            if !iso2.isEmpty {
+                var args: [MapboxMaps.Expression.Argument] = [.expression(isoGet)]
+                for code in iso2 {
+                    args.append(.string(code))
+                    args.append(.boolean(true))
+                }
+                args.append(.boolean(false))
+                let isoMatch = MapboxMaps.Expression(operator: .match, arguments: args)
+                allFilters.append(.expression(isoMatch))
+            }
+            let filterExpr = MapboxMaps.Expression(operator: .all, arguments: allFilters)
+
             try style.updateLayer(withId: countriesLayerId, type: FillLayer.self) { layer in
                 layer.filter = filterExpr
+            }
+            if style.layerExists(withId: countriesBorderLayerId) {
+                try style.updateLayer(withId: countriesBorderLayerId, type: LineLayer.self) { layer in
+                    layer.filter = filterExpr
+                }
             }
         } catch {
             print("⚠️ updateCountryGlow failed:", error)
@@ -598,23 +634,55 @@ struct MapboxGlobeView: View {
                iso.count == 2 {
                 set.insert(iso)
             }
+            if let iso = isoFromCityKey(j.startCityKey) {
+                set.insert(iso)
+            }
+            if let iso = isoFromCityKey(j.cityKey) {
+                set.insert(iso)
+            }
+            if let iso = isoFromCityKey(j.endCityKey) {
+                set.insert(iso)
+            }
+        }
+        for city in cityCache.cachedCities where city.isTemporary != true {
+            if let iso = city.countryISO2?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+               iso.count == 2 {
+                set.insert(iso)
+            }
         }
         return Array(set).sorted()
+    }
+
+    private func resolvedWorldviewCode() -> String {
+        let supported: Set<String> = ["AR", "CN", "IN", "JP", "MA", "RS", "RU", "TR", "US"]
+        let region = Locale.current.region?.identifier.uppercased() ?? "US"
+        return supported.contains(region) ? region : "US"
+    }
+
+    private func isoFromCityKey(_ cityKey: String?) -> String? {
+        guard let cityKey else { return nil }
+        let parts = cityKey.split(separator: "|", omittingEmptySubsequences: false)
+        guard let raw = parts.last else { return nil }
+        let iso = String(raw).trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return iso.count == 2 ? iso : nil
     }
 
     // MARK: - Data
 
     private func refreshData() {
-        guard mapView.mapboxMap.style.sourceExists(withId: footprintsSourceId),
-              mapView.mapboxMap.style.sourceExists(withId: citiesSourceId) else { return }
+        guard mapHolder.styleLoadRevision > 0,
+              mapView.mapboxMap.style.sourceExists(withId: footprintsSourceId),
+              mapView.mapboxMap.style.sourceExists(withId: citiesSourceId) else {
+            print("🔴 [Globe] refreshData SKIPPED: styleRev=\(mapHolder.styleLoadRevision) footprintsSrc=\(mapView.mapboxMap.style.sourceExists(withId: footprintsSourceId)) citiesSrc=\(mapView.mapboxMap.style.sourceExists(withId: citiesSourceId))")
+            return
+        }
 
-        let footprintsFC = makeFootprintsFC(journeys: journeys)
-        let routesFC = makeRoutesFC(journeys: journeys)
-        let citiesFC = makeCitiesFC(from: cityCache.cachedCities)
+        let payload = mapHolder.renderPayload
+        let footprintsFC = makeFootprintsFC(journeys: payload.journeys)
+        let routesFC = makeRoutesFC(journeys: payload.journeys)
+        let citiesFC = makeCitiesFC(from: payload.cachedCities)
 
-        print("✅ footprints:", footprintsFC.features.count,
-              "routes:", routesFC.features.count,
-              "cities:", citiesFC.features.count)
+        print("🟢 [Globe] refreshData: journeys=\(payload.journeys.count) footprints=\(footprintsFC.features.count) routes=\(routesFC.features.count) cities=\(citiesFC.features.count)")
 
         updateGeoJSONSource(id: footprintsSourceId, fc: footprintsFC)
         updateGeoJSONSource(id: routesSourceId, fc: routesFC)
@@ -662,38 +730,7 @@ struct MapboxGlobeView: View {
         return Turf.FeatureCollection(features: feats)
     }
 
-    // MARK: - Route helpers (avoid "teleport" lines)
-
-    private func haversineKm(_ a: CLLocationCoordinate2D, _ b: CLLocationCoordinate2D) -> Double {
-        let R = 6371.0
-        let dLat = (b.latitude - a.latitude) * .pi / 180
-        let dLon = (b.longitude - a.longitude) * .pi / 180
-        let lat1 = a.latitude * .pi / 180
-        let lat2 = b.latitude * .pi / 180
-        let x = sin(dLat / 2) * sin(dLat / 2) + cos(lat1) * cos(lat2) * sin(dLon / 2) * sin(dLon / 2)
-        let c = 2 * atan2(sqrt(x), sqrt(1 - x))
-        return R * c
-    }
-
-    private func splitByJumps(_ coords: [CLLocationCoordinate2D], maxStepKm: Double) -> [[CLLocationCoordinate2D]] {
-        guard coords.count >= 2 else { return [] }
-        var parts: [[CLLocationCoordinate2D]] = []
-        var cur: [CLLocationCoordinate2D] = [coords[0]]
-
-        for i in 1..<coords.count {
-            let prev = coords[i - 1]
-            let now = coords[i]
-            if haversineKm(prev, now) > maxStepKm {
-                if cur.count >= 2 { parts.append(cur) }
-                cur = [now]
-            } else {
-                cur.append(now)
-            }
-        }
-
-        if cur.count >= 2 { parts.append(cur) }
-        return parts
-    }
+    // MARK: - Route helpers
 
     private func routeSignature(_ coords: [CLLocationCoordinate2D]) -> String {
         guard let first = coords.first, let last = coords.last else { return UUID().uuidString }
@@ -726,44 +763,61 @@ struct MapboxGlobeView: View {
         return Double(sorted[max(0, min(sorted.count - 1, index))])
     }
 
-    
-    private func isLikelyFlightRoute(_ j: JourneyRoute, coords: [CLLocationCoordinate2D]) -> Bool {
-        // If the route has different start/end city keys, treat it as flight.
-        // (Distance can be 0 or noisy depending on how the journey was recorded.)
-        let distKm = max(0, j.distance / 1000.0)
+    private func greatCircleArc(_ start: CLLocationCoordinate2D, _ end: CLLocationCoordinate2D, points: Int = 32) -> [CLLocationCoordinate2D] {
+        let total = max(2, points)
 
-        if let s = j.startCityKey, let e = j.endCityKey,
-           !s.isEmpty, !e.isEmpty, s != e {
-            return true
+        func toVec(_ c: CLLocationCoordinate2D) -> (Double, Double, Double) {
+            let lat = c.latitude * .pi / 180
+            let lon = c.longitude * .pi / 180
+            let x = cos(lat) * cos(lon)
+            let y = cos(lat) * sin(lon)
+            let z = sin(lat)
+            return (x, y, z)
         }
 
-        // Heuristics: long distance + sparse points (common for flights)
-        if distKm >= 500, coords.count <= 25 {
-            return true
+        func toCoord(_ v: (Double, Double, Double)) -> CLLocationCoordinate2D {
+            let lon = atan2(v.1, v.0)
+            let hyp = sqrt(v.0 * v.0 + v.1 * v.1)
+            let lat = atan2(v.2, hyp)
+            return CLLocationCoordinate2D(latitude: lat * 180 / .pi, longitude: lon * 180 / .pi)
         }
 
-        // Heuristics: large step jumps inside points (teleport-like sampling)
-        if coords.count >= 2, distKm >= 300 {
-            var maxStep = 0.0
-            for i in 1..<coords.count {
-                maxStep = max(maxStep, haversineKm(coords[i - 1], coords[i]))
-            }
-            if maxStep >= 120 { // 120km jump between adjacent samples
-                return true
-            }
+        let a = toVec(start)
+        let b = toVec(end)
+        let dotRaw = a.0 * b.0 + a.1 * b.1 + a.2 * b.2
+        let dot = min(1.0, max(-1.0, dotRaw))
+        let omega = acos(dot)
+
+        if omega < 1e-6 {
+            return [start, end]
         }
 
-        return false
+        var out: [CLLocationCoordinate2D] = []
+        out.reserveCapacity(total)
+        for idx in 0..<total {
+            let t = Double(idx) / Double(total - 1)
+            let sinOmega = sin(omega)
+            let s0 = sin((1 - t) * omega) / sinOmega
+            let s1 = sin(t * omega) / sinOmega
+            let v = (
+                s0 * a.0 + s1 * b.0,
+                s0 * a.1 + s1 * b.1,
+                s0 * a.2 + s1 * b.2
+            )
+            out.append(toCoord(v))
+        }
+        return out
     }
 
 private func makeRoutesFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
         var feats: [Turf.Feature] = []
         var seen = Set<String>()
-        var nonFlightCounts: [String: Int] = [:]
+        var solidCounts: [String: Int] = [:]
 
         struct PendingRouteFeature {
             let line: Turf.LineString
             let journeyId: String
+            let isDashed: Bool
             let isFlight: Bool
             let distanceKm: Double
             let memoryCount: Double
@@ -777,37 +831,45 @@ private func makeRoutesFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
             guard !seen.contains(j.id) else { continue }
             seen.insert(j.id)
 
-            let src = (j.thumbnailCoordinates.isEmpty ? j.coordinates : j.thumbnailCoordinates)
+            let src = (!j.coordinates.isEmpty ? j.coordinates : j.thumbnailCoordinates)
             guard src.count >= 2 else { continue }
 
             let coords = src.map { CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon) }
-            let isFlight = isLikelyFlightRoute(j, coords: coords)
+            let built = RouteRenderingPipeline.buildSegments(
+                .init(
+                    coordsWGS84: coords,
+                    applyGCJForChina: false,
+                    gapDistanceMeters: 2_200,
+                    countryISO2: j.countryISO2,
+                    cityKey: j.startCityKey ?? j.cityKey
+                ),
+                surface: .canvas
+            )
 
-            // ✅ Flight: only start→end, dashed layer will render it.
-            if isFlight, let a = coords.first, let b = coords.last {
+            for seg in built.segments where seg.coords.count >= 2 {
+                let isDashed = seg.style == .dashed
+                let isFlight = built.isFlightLike && isDashed
+                // On globe, keep dashed rendering only for intentional flight-like routes.
+                if isDashed && !isFlight { continue }
+                let lineCoords: [CLLocationCoordinate2D]
+                if built.isFlightLike, isDashed, let a = seg.coords.first, let b = seg.coords.last {
+                    lineCoords = greatCircleArc(a, b)
+                } else {
+                    lineCoords = seg.coords
+                }
+                guard lineCoords.count >= 2 else { continue }
+
+                let sig: String? = isDashed ? nil : routeSignature(lineCoords)
+                if let sig {
+                    solidCounts[sig, default: 0] += 1
+                }
+
                 pending.append(
                     PendingRouteFeature(
-                        line: Turf.LineString([a, b]),
+                        line: Turf.LineString(lineCoords),
                         journeyId: j.id,
-                        isFlight: true,
-                        distanceKm: max(0, j.distance / 1000.0),
-                        memoryCount: Double(j.memories.count),
-                        signature: nil
-                    )
-                )
-                continue
-            }
-
-            // ✅ Non-flight: split away "teleport" jumps so we don't draw weird stray lines.
-            let parts = splitByJumps(coords, maxStepKm: 180) // tweak if needed
-            for p in parts {
-                let sig = routeSignature(p)
-                nonFlightCounts[sig, default: 0] += 1
-                pending.append(
-                    PendingRouteFeature(
-                        line: Turf.LineString(p),
-                        journeyId: j.id,
-                        isFlight: false,
+                        isDashed: isDashed,
+                        isFlight: isFlight,
                         distanceKm: max(0, j.distance / 1000.0),
                         memoryCount: Double(j.memories.count),
                         signature: sig
@@ -816,12 +878,12 @@ private func makeRoutesFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
             }
         }
 
-        let p95 = max(1.0, quantile(Array(nonFlightCounts.values), p: 0.95))
+        let p95 = max(1.0, quantile(Array(solidCounts.values), p: 0.95))
 
         for item in pending {
             let repeatWeight: Double = {
-                guard let sig = item.signature else { return 0.12 }
-                let n = Double(nonFlightCounts[sig, default: 1])
+                guard let sig = item.signature else { return 0.40 }
+                let n = Double(solidCounts[sig, default: 1])
                 return min(1.0, log(1.0 + n) / log(1.0 + p95))
             }()
 
@@ -856,28 +918,13 @@ private func makeRoutesFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
             var f = Turf.Feature(geometry: .point(p))
             f.properties = [
                 "cityId": .string(c.id),
-                "name": .string(c.name),
+                "name": .string(c.displayTitle),
                 "iso2": .string(c.countryISO2 ?? "")
             ]
             feats.append(f)
         }
 
         return Turf.FeatureCollection(features: feats)
-    }
-
-
-
-    // MARK: - Zoom
-
-    private func applyZoom(animated: Bool) {
-        let z = 1.1 + zoom01 * 12.0
-        let opts = CameraOptions(zoom: z)
-
-        if animated {
-            mapView.camera.ease(to: opts, duration: 0.18)
-        } else {
-            mapView.mapboxMap.setCamera(to: opts)
-        }
     }
 
     // MARK: - Fit camera to journeys
@@ -894,8 +941,8 @@ private func makeRoutesFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
         }
 
         var all: [CLLocationCoordinate2D] = []
-        for j in journeys {
-            let src = (j.thumbnailCoordinates.isEmpty ? j.coordinates : j.thumbnailCoordinates)
+        for j in mapHolder.renderPayload.journeys {
+            let src = (!j.coordinates.isEmpty ? j.coordinates : j.thumbnailCoordinates)
             all.append(contentsOf: src.map { CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon) })
         }
         guard !all.isEmpty else { return }

@@ -1,0 +1,184 @@
+import XCTest
+@testable import StreetStamps
+
+final class BackendAPIClientAuthErrorTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        BackendConfig.baseURLString = "https://example.com"
+        BackendAPIClient.shared.resetTestingTransport()
+    }
+
+    override func tearDown() {
+        BackendAPIClient.shared.resetTestingTransport()
+        super.tearDown()
+    }
+
+    func test_login401PreservesServerMessage() async throws {
+        BackendAPIClient.shared.installTestingTransport { request in
+            XCTAssertEqual(request.url?.path, "/v1/auth/login")
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 401,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            let body = #"{"message":"wrong email or password"}"#.data(using: .utf8)!
+            return (body, response)
+        }
+
+        do {
+            _ = try await BackendAPIClient.shared.login(email: "test@example.com", password: "wrong")
+            XCTFail("Expected login to throw")
+        } catch let error as BackendAPIError {
+            guard case let .server(message) = error else {
+                return XCTFail("Expected server error, got \(error)")
+            }
+            XCTAssertEqual(message, "wrong email or password")
+        }
+    }
+
+    func test_protectedRequest401StillMapsToUnauthorized() async throws {
+        BackendAPIClient.shared.installTestingTransport { request in
+            XCTAssertEqual(request.url?.path, "/v1/friends")
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 401,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            let body = #"{"message":"unauthorized"}"#.data(using: .utf8)!
+            return (body, response)
+        }
+
+        do {
+            _ = try await BackendAPIClient.shared.fetchFriends(token: "expired-token")
+            XCTFail("Expected fetchFriends to throw")
+        } catch let error as BackendAPIError {
+            guard case .unauthorized = error else {
+                return XCTFail("Expected unauthorized error, got \(error)")
+            }
+        }
+    }
+
+    func test_postcardQuotaConflictPreservesServerCode() async throws {
+        BackendAPIClient.shared.installTestingTransport { request in
+            XCTAssertEqual(request.url?.path, "/v1/postcards/send")
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 409,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            let body = #"{"code":"city_friend_quota_exceeded","message":"postcard quota exceeded"}"#.data(using: .utf8)!
+            return (body, response)
+        }
+
+        do {
+            _ = try await BackendAPIClient.shared.sendPostcard(
+                token: "test-token",
+                req: SendPostcardRequest(
+                    clientDraftID: "draft-1",
+                    toUserID: "friend-1",
+                    cityID: "paris",
+                    cityJourneyCount: 1,
+                    cityName: "Paris",
+                    messageText: "hello",
+                    photoURL: "https://example.com/p.jpg",
+                    allowedCityIDs: ["paris"]
+                )
+            )
+            XCTFail("Expected postcard send to throw")
+        } catch let error as BackendAPIError {
+            guard case let .serverCode(code, message) = error else {
+                return XCTFail("Expected serverCode error, got \(error)")
+            }
+            XCTAssertEqual(code, "city_friend_quota_exceeded")
+            XCTAssertEqual(message, "postcard quota exceeded")
+        }
+    }
+
+    func test_loginSuccessDecodesNeedsProfileSetupFlag() async throws {
+        BackendAPIClient.shared.installTestingTransport { request in
+            XCTAssertEqual(request.url?.path, "/v1/auth/login")
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            let body = #"{"userId":"user-1","provider":"email","email":"user-1@example.com","accessToken":"access-1","refreshToken":"refresh-1","needsProfileSetup":true}"#
+                .data(using: .utf8)!
+            return (body, response)
+        }
+
+        let auth = try await BackendAPIClient.shared.login(email: "user-1@example.com", password: "Password1!")
+
+        XCTAssertEqual(auth.userId, "user-1")
+        XCTAssertEqual(auth.email, "user-1@example.com")
+        XCTAssertTrue(auth.needsProfileSetup)
+    }
+
+    @MainActor
+    func test_refreshFailureEntersBackoffAndAvoidsImmediateRepeatRefresh() async throws {
+        let session = UserSessionStore()
+        BackendAPIClient.shared.bindSessionStore(session)
+        session.applyAuth(
+            BackendAuthResponse(
+                userId: "user-1",
+                provider: "email",
+                email: "user-1@example.com",
+                accessToken: "expired-access-token",
+                refreshToken: "refresh-token-1",
+                needsProfileSetup: false
+            )
+        )
+
+        var refreshAttempts = 0
+        BackendAPIClient.shared.installTestingTransport { request in
+            let path = request.url?.path ?? ""
+            let responseURL = try XCTUnwrap(request.url)
+            if path == "/v1/auth/refresh" {
+                refreshAttempts += 1
+                let response = HTTPURLResponse(
+                    url: responseURL,
+                    statusCode: 401,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!
+                let body = #"{"message":"refresh token invalid"}"#.data(using: .utf8)!
+                return (body, response)
+            }
+
+            let response = HTTPURLResponse(
+                url: responseURL,
+                statusCode: 401,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            let body = #"{"message":"unauthorized"}"#.data(using: .utf8)!
+            return (body, response)
+        }
+
+        do {
+            _ = try await BackendAPIClient.shared.fetchFriends(token: "expired-access-token")
+            XCTFail("Expected first protected call to throw")
+        } catch {
+            // expected
+        }
+
+        do {
+            _ = try await BackendAPIClient.shared.fetchFriends(token: "expired-access-token")
+            XCTFail("Expected second protected call to throw")
+        } catch {
+            // expected
+        }
+
+        XCTAssertFalse(session.isLoggedIn)
+        XCTAssertEqual(session.reauthenticationPromptVersion, 1)
+        XCTAssertEqual(
+            refreshAttempts,
+            1,
+            "refresh should be backoff-protected after invalid refresh token"
+        )
+    }
+}

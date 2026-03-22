@@ -1,9 +1,15 @@
 import Foundation
 import GoogleSignIn
 import UIKit
+#if canImport(FirebaseAuth)
+import FirebaseAuth
+#endif
 
 enum GoogleSignInService {
-    static func signIn(presentingViewController: UIViewController? = nil) async throws -> String {
+    static func signIn(presentingViewController: UIViewController? = nil) async throws -> FirebaseAuthenticatedSession {
+        if let issue = BackendConfig.firebaseSetupIssue() {
+            throw BackendAPIError.server(issue)
+        }
         let clientID = BackendConfig.googleIOSClientID
         if !clientID.isEmpty {
             GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: clientID)
@@ -18,7 +24,14 @@ enum GoogleSignInService {
         guard let idToken = result.user.idToken?.tokenString, !idToken.isEmpty else {
             throw BackendAPIError.server("Google 登录未返回 idToken")
         }
-        return idToken
+        #if canImport(FirebaseAuth)
+        let accessToken = result.user.accessToken.tokenString
+        let credential = GoogleAuthProvider.credential(withIDToken: idToken, accessToken: accessToken)
+        let authResult = try await Auth.auth().signIn(with: credential)
+        return try await makeFirebaseAuthenticatedSession(for: authResult.user, forceRefresh: true)
+        #else
+        throw BackendAPIError.server("FirebaseAuth 未接入当前 target。")
+        #endif
     }
 
     private static func topViewController() -> UIViewController? {

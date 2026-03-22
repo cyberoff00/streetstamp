@@ -1,0 +1,29 @@
+#!/usr/bin/expect -f
+set timeout 60
+set password "Ylinteresting22@"
+set server "101.132.159.73"
+
+# 步骤1: 备份数据库和代码
+spawn ssh root@$server
+expect {
+    "password:" { send "$password\r" }
+    "yes/no" { send "yes\r"; exp_continue }
+}
+
+expect "#"
+send "mkdir -p /opt/streetstamps/backups\r"
+expect "#"
+send "docker exec streetstamps-postgres pg_dump -U streetstamps streetstamps > /opt/streetstamps/backups/db_\$(date +%Y%m%d_%H%M%S).sql\r"
+expect "#"
+send "BACKUP_DIR=/opt/streetstamps/backups/code_\$(date +%Y%m%d_%H%M%S)\r"
+expect "#"
+send "mkdir -p \$BACKUP_DIR\r"
+expect "#"
+send "cp /opt/streetstamps/backend-node-v1/server.js \$BACKUP_DIR/\r"
+expect "#"
+send "cp /opt/streetstamps/backend-node-v1/package.json \$BACKUP_DIR/\r"
+expect "#"
+send "echo \"备份完成: \$BACKUP_DIR\"\r"
+expect "#"
+send "exit\r"
+expect eof

@@ -8,8 +8,13 @@ final class CityLevelPreferenceStore {
 
     private let defaults = UserDefaults(suiteName: "group.com.streetstamps.shared") ?? .standard
     private let storageKey = "city.levelPreferenceByRegion.v1"
+    private var currentUserID: String = "local"
 
     private init() {}
+
+    func setCurrentUserID(_ userID: String) {
+        currentUserID = userID
+    }
 
     func preferredLevel(for parentRegionKey: String?) -> CityPlacemarkResolver.CardLevel? {
         guard let scopedRegionKey = scopedRegionKey(for: parentRegionKey) else { return nil }
@@ -26,6 +31,14 @@ final class CityLevelPreferenceStore {
         defaults.set(dict, forKey: storageKey)
     }
 
+    func clearAll() {
+        defaults.removeObject(forKey: storageKey)
+    }
+
+    func displayCacheScope(for parentRegionKey: String?) -> String {
+        preferredLevel(for: parentRegionKey)?.rawValue ?? "default"
+    }
+
     private func readAll() -> [String: String] {
         defaults.dictionary(forKey: storageKey) as? [String: String] ?? [:]
     }
@@ -33,6 +46,6 @@ final class CityLevelPreferenceStore {
     private func scopedRegionKey(for parentRegionKey: String?) -> String? {
         let key = (parentRegionKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { return nil }
-        return "\(UserScope.currentUserID)|\(key)"
+        return "\(currentUserID)|\(key)"
     }
 }

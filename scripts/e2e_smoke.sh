@@ -3,6 +3,12 @@ set -euo pipefail
 
 BASE_URL="${BASE_URL:-https://api.streetstamps.cyberkkk.cn}"
 
+if [[ "$BASE_URL" == "https://api.streetstamps.cyberkkk.cn" && "${ALLOW_PROD_MUTATION:-0}" != "1" ]]; then
+  echo "[FAIL] Refusing to run mutating smoke checks against production without ALLOW_PROD_MUTATION=1"
+  echo "[FAIL] Use ./scripts/readonly_prod_check.sh for read-only production verification"
+  exit 1
+fi
+
 json_get() {
   local path="$1"
   python3 -c 'import json,sys
@@ -116,10 +122,15 @@ me_profile="$(curl_json GET /v1/profile/me "$t1")"
 invite="$(printf '%s' "$me_profile" | json_get inviteCode)"
 [[ -n "$invite" ]] || fail "inviteCode missing from /v1/profile/me: $me_profile"
 
-friend_add="$(curl_json POST /v1/friends "$t2" "{\"displayName\":\"$u1\",\"inviteCode\":\"$invite\"}")"
-fid="$(printf '%s' "$friend_add" | json_get id)"
-[[ -n "$fid" ]] || fail "friend add failed: $friend_add"
-pass "friend add ok"
+friend_add="$(curl_json POST /v1/friends/requests "$t2" "{\"displayName\":\"$u1\",\"inviteCode\":\"$invite\"}")"
+rid="$(printf '%s' "$friend_add" | json_get request.id)"
+[[ -n "$rid" ]] || fail "friend request create failed: $friend_add"
+pass "friend request create ok"
+
+accept="$(curl_json POST "/v1/friends/requests/$rid/accept" "$t1")"
+friend_id="$(printf '%s' "$accept" | json_get friend.id)"
+[[ "$friend_id" == "$u2" ]] || fail "friend request accept failed: $accept"
+pass "friend request accept ok"
 
 friend_profile="$(curl_json GET "/v1/profile/$u1" "$t2")"
 friend_jc="$(printf '%s' "$friend_profile" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(len(d.get("journeys",[])))')"
@@ -127,7 +138,7 @@ friend_cards="$(printf '%s' "$friend_profile" | python3 -c 'import json,sys;d=js
 [[ "$friend_jc" == "2" && "$friend_cards" -ge "1" ]] || fail "friend visibility failed: $friend_profile"
 pass "friend visibility ok"
 
-_="$(curl_json DELETE "/v1/friends/$fid" "$t2")"
+_="$(curl_json DELETE "/v1/friends/$u1" "$t2")"
 fl2="$(curl_json GET /v1/friends "$t2")"
 fl2c="$(printf '%s' "$fl2" | json_len)"
 [[ "$fl2c" == "0" ]] || fail "friend delete failed: $fl2"

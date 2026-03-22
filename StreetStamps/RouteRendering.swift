@@ -8,8 +8,8 @@ import MapKit
 // =======================================================
 
 /// A lightweight, shared representation used by MapView / SharingCard / City & Intercity deep views / thumbnails.
-struct RenderRouteSegment: Identifiable, Equatable {
-    enum Style: String, Codable, Equatable { case solid, dashed }
+struct RenderRouteSegment: Identifiable, Equatable, Sendable {
+    enum Style: String, Codable, Equatable, Sendable { case solid, dashed }
     let id: String
     let style: Style
     let coords: [CLLocationCoordinate2D]
@@ -68,27 +68,6 @@ enum RouteRenderingPipeline {
             .distance(from: CLLocation(latitude: b.latitude, longitude: b.longitude))
     }
 
-    /// Flight-like when points are very sparse relative to distance (or a huge single jump).
-    private static func isFlightLike(_ coords: [CLLocationCoordinate2D]) -> Bool {
-        guard coords.count >= 2 else { return false }
-        let first = coords.first!
-        let last = coords.last!
-        let total = distanceMeters(first, last)
-
-        var hasBigJump = false
-        if coords.count >= 3 {
-            for i in 1..<coords.count {
-                if distanceMeters(coords[i-1], coords[i]) > 20_000 {
-                    hasBigJump = true
-                    break
-                }
-            }
-        }
-
-        let fewPointsButFar = (coords.count <= 6 && total > 80_000)
-        return hasBigJump || fewPointsButFar
-    }
-
     /// Build solid/dashed segments based on distance only (time isn't always available for cached routes).
     private static func segmentByDistance(coords: [CLLocationCoordinate2D], gapDistanceMeters: Double) -> [RenderRouteSegment] {
         guard coords.count >= 2 else {
@@ -130,21 +109,9 @@ enum RouteRenderingPipeline {
         let clean = input.coordsWGS84.filter { $0.isValid }
         guard clean.count >= 1 else { return ([], false) }
 
-        let flightLike = isFlightLike(clean)
-        let drawWGS: [CLLocationCoordinate2D] = {
-            if flightLike, let a = clean.first, let b = clean.last, clean.count >= 2 {
-                return [a, b]
-            }
-            return clean
-        }()
-
-        // Segment in WGS space.
-        var segs = segmentByDistance(coords: drawWGS, gapDistanceMeters: input.gapDistanceMeters)
-
-        // If we intentionally collapsed to 2 points, force dashed so it reads as "flight" everywhere.
-        if flightLike, segs.count == 1 {
-            segs = [RenderRouteSegment(id: segs[0].id, style: .dashed, coords: segs[0].coords)]
-        }
+        // Gap detection in segmentByDistance already renders long gaps as dashed.
+        // No need for special "flight-like" compression — all surfaces use the same logic.
+        let segs = segmentByDistance(coords: clean, gapDistanceMeters: input.gapDistanceMeters)
 
         // Adapt coordinates per surface.
         let adapted: [RenderRouteSegment] = segs.map { seg in
@@ -159,7 +126,7 @@ enum RouteRenderingPipeline {
             return RenderRouteSegment(id: seg.id, style: seg.style, coords: adaptedCoords)
         }
 
-        return (adapted, flightLike)
+        return (adapted, false)
     }
 }
 
@@ -180,18 +147,13 @@ enum RouteSnapshotDrawer {
         snapshot: MKMapSnapshotter.Snapshot,
         ctx: CGContext,
         coreColor: UIColor,
-        stroke: Stroke
+        stroke: Stroke,
+        glowColor: UIColor? = nil,
+        isDarkMap: Bool = false
     ) {
         guard segments.count > 0 else { return }
 
-        // Frequency weighting by segment signature (log + p95 normalization).
-        var counts: [String: Int] = [:]
-        for seg in segments where seg.style != .dashed && seg.coords.count >= 2 {
-            let sig = signature(seg.coords)
-            counts[sig, default: 0] += 1
-        }
-        let p95 = max(1.0, quantile(Array(counts.values), p: 0.95))
-
+        let glowTint = glowColor ?? coreColor
         ctx.saveGState()
         ctx.setLineCap(.round)
         ctx.setLineJoin(.round)
@@ -205,48 +167,41 @@ enum RouteSnapshotDrawer {
             }
 
             let isGap = seg.style == .dashed
-            let weight: CGFloat = {
-                guard !isGap else { return 0 }
-                let sig = signature(seg.coords)
-                let n = Double(counts[sig, default: 1])
-                let w = min(1.0, log(1.0 + n) / log(1.0 + p95))
-                return CGFloat(w)
-            }()
+            let mainWidth: CGFloat = isGap ? max(1.0, stroke.coreWidth * 0.45) : stroke.coreWidth
+            let glowWidth: CGFloat = mainWidth * (isGap ? 2.2 : 2.5)
 
-            // dash
-            if isGap {
-                let dash = isFlightLike ? RouteRenderStyleTokens.flightDashLengths : RouteRenderStyleTokens.dashLengths
-                ctx.setLineDash(phase: 0, lengths: dash)
-            } else {
-                ctx.setLineDash(phase: 0, lengths: [])
-            }
+            // dash setup
+            let dashPattern: [CGFloat]? = isGap ? RouteRenderStyleTokens.dashLengths : nil
 
-            // 1) halo
-            ctx.setStrokeColor(coreColor.withAlphaComponent(isGap ? 0.08 : 0.12).cgColor)
-            ctx.setLineWidth(isGap ? max(1.5, stroke.coreWidth * 0.65) : (stroke.coreWidth + 1.0 + weight * 1.0))
+            // 1) Glow with shadow blur
+            ctx.saveGState()
+            if let dp = dashPattern { ctx.setLineDash(phase: 0, lengths: dp) } else { ctx.setLineDash(phase: 0, lengths: []) }
+            ctx.setShadow(
+                offset: .zero,
+                blur: isDarkMap ? 5.0 : 2.0,
+                color: glowTint.withAlphaComponent(isDarkMap ? 0.50 : 0.30).cgColor
+            )
+            ctx.setStrokeColor(glowTint.withAlphaComponent(isGap ? 0.08 : (isDarkMap ? 0.30 : 0.15)).cgColor)
+            ctx.setLineWidth(glowWidth)
+            ctx.addPath(path.cgPath)
+            ctx.strokePath()
+            ctx.restoreGState()
+
+            // 2) Main line
+            if let dp = dashPattern { ctx.setLineDash(phase: 0, lengths: dp) } else { ctx.setLineDash(phase: 0, lengths: []) }
+            ctx.setStrokeColor(coreColor.withAlphaComponent(isGap ? 0.50 : 1.0).cgColor)
+            ctx.setLineWidth(mainWidth)
             ctx.addPath(path.cgPath)
             ctx.strokePath()
 
-            // 2) frequency overlay
+            // 3) Highlight
             if !isGap {
                 ctx.setLineDash(phase: 0, lengths: [])
-                ctx.setStrokeColor(coreColor.withAlphaComponent(0.05 + 0.15 * weight).cgColor)
-                ctx.setLineWidth(stroke.coreWidth + 0.5 + weight * 0.9)
+                ctx.setStrokeColor(UIColor.white.withAlphaComponent(isDarkMap ? 0.45 : 0.25).cgColor)
+                ctx.setLineWidth(mainWidth * 0.35)
                 ctx.addPath(path.cgPath)
                 ctx.strokePath()
             }
-
-            // 3) core
-            if isGap {
-                let dash = isFlightLike ? RouteRenderStyleTokens.flightDashLengths : RouteRenderStyleTokens.dashLengths
-                ctx.setLineDash(phase: 0, lengths: dash)
-            } else {
-                ctx.setLineDash(phase: 0, lengths: [])
-            }
-            ctx.setStrokeColor(coreColor.withAlphaComponent(isGap ? 0.30 : 0.84).cgColor)
-            ctx.setLineWidth(isGap ? max(1.0, stroke.coreWidth * 0.45) : (stroke.coreWidth * 0.65 + weight * 0.5))
-            ctx.addPath(path.cgPath)
-            ctx.strokePath()
         }
 
         ctx.restoreGState()

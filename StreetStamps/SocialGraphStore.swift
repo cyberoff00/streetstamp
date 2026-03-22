@@ -1,6 +1,42 @@
 import Foundation
 import SwiftUI
 
+enum FriendIdentityPresentation {
+    static func displayName(
+        displayName: String?,
+        exclusiveID: String?,
+        userID: String,
+        localize: (String) -> String = L10n.t
+    ) -> String {
+        if let displayName = normalizedHumanReadableValue(displayName) {
+            return displayName
+        }
+        if let exclusiveID = normalizedHumanReadableValue(exclusiveID) {
+            return exclusiveID
+        }
+
+        let trimmedUserID = userID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedUserID.isEmpty, !looksLikeInternalIdentifier(trimmedUserID) else {
+            return localize("unknown")
+        }
+        return trimmedUserID
+    }
+
+    private static func normalizedHumanReadableValue(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty,
+              !looksLikeInternalIdentifier(trimmed) else {
+            return nil
+        }
+        return trimmed
+    }
+
+    private static func looksLikeInternalIdentifier(_ value: String) -> Bool {
+        let lowercased = value.lowercased()
+        return lowercased.hasPrefix("u_") || lowercased.hasPrefix("account_")
+    }
+}
+
 struct FriendCityCard: Identifiable, Codable, Hashable {
     var id: String
     var name: String
@@ -13,17 +49,32 @@ struct FriendSharedMemory: Identifiable, Codable, Hashable {
     var notes: String
     var timestamp: Date
     var imageURLs: [String]
+    var latitude: Double?
+    var longitude: Double?
+    var locationStatus: String?
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, notes, timestamp, imageURLs
+        case id, title, notes, timestamp, imageURLs, latitude, longitude, locationStatus
     }
 
-    init(id: String, title: String, notes: String, timestamp: Date, imageURLs: [String]) {
+    init(
+        id: String,
+        title: String,
+        notes: String,
+        timestamp: Date,
+        imageURLs: [String],
+        latitude: Double? = nil,
+        longitude: Double? = nil,
+        locationStatus: String? = nil
+    ) {
         self.id = id
         self.title = title
         self.notes = notes
         self.timestamp = timestamp
         self.imageURLs = imageURLs
+        self.latitude = latitude
+        self.longitude = longitude
+        self.locationStatus = locationStatus
     }
 
     init(from decoder: Decoder) throws {
@@ -33,45 +84,57 @@ struct FriendSharedMemory: Identifiable, Codable, Hashable {
         notes = (try? c.decode(String.self, forKey: .notes)) ?? ""
         timestamp = (try? c.decode(Date.self, forKey: .timestamp)) ?? Date()
         imageURLs = (try? c.decode([String].self, forKey: .imageURLs)) ?? []
+        latitude = try c.decodeIfPresent(Double.self, forKey: .latitude)
+        longitude = try c.decodeIfPresent(Double.self, forKey: .longitude)
+        locationStatus = try c.decodeIfPresent(String.self, forKey: .locationStatus)
     }
 }
 
 struct FriendSharedJourney: Identifiable, Codable, Hashable {
     var id: String
     var title: String
+    var cityID: String?
     var activityTag: String?
     var overallMemory: String?
+    var overallMemoryImageURLs: [String]
     var distance: Double
     var startTime: Date?
     var endTime: Date?
     var visibility: JourneyVisibility
+    var sharedAt: Date?
     var routeCoordinates: [CoordinateCodable]
     var memories: [FriendSharedMemory]
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, activityTag, overallMemory, distance, startTime, endTime, visibility, routeCoordinates, coordinates, memories
+        case id, title, cityID, cityId, activityTag, overallMemory, overallMemoryImageURLs, distance, startTime, endTime, visibility, sharedAt, routeCoordinates, coordinates, memories
     }
 
     init(
         id: String,
         title: String,
+        cityID: String? = nil,
         activityTag: String?,
         overallMemory: String?,
+        overallMemoryImageURLs: [String] = [],
         distance: Double,
         startTime: Date?,
         endTime: Date?,
         visibility: JourneyVisibility,
+        sharedAt: Date? = nil,
         routeCoordinates: [CoordinateCodable],
         memories: [FriendSharedMemory]
     ) {
         self.id = id
         self.title = title
+        self.cityID = cityID
         self.activityTag = activityTag
         self.overallMemory = overallMemory
+        self.overallMemoryImageURLs = overallMemoryImageURLs
         self.distance = distance
         self.startTime = startTime
         self.endTime = endTime
         self.visibility = visibility
+        self.sharedAt = sharedAt
         self.routeCoordinates = routeCoordinates
         self.memories = memories
     }
@@ -80,12 +143,17 @@ struct FriendSharedJourney: Identifiable, Codable, Hashable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         title = (try? c.decode(String.self, forKey: .title)) ?? "Journey"
+        cityID =
+            (try? c.decode(String.self, forKey: .cityID))
+            ?? (try? c.decode(String.self, forKey: .cityId))
         activityTag = try? c.decode(String.self, forKey: .activityTag)
         overallMemory = try? c.decode(String.self, forKey: .overallMemory)
+        overallMemoryImageURLs = (try? c.decode([String].self, forKey: .overallMemoryImageURLs)) ?? []
         distance = (try? c.decode(Double.self, forKey: .distance)) ?? 0
         startTime = try? c.decode(Date.self, forKey: .startTime)
         endTime = try? c.decode(Date.self, forKey: .endTime)
         visibility = (try? c.decode(JourneyVisibility.self, forKey: .visibility)) ?? .private
+        sharedAt = try? c.decode(Date.self, forKey: .sharedAt)
         routeCoordinates =
             (try? c.decode([CoordinateCodable].self, forKey: .routeCoordinates))
             ?? (try? c.decode([CoordinateCodable].self, forKey: .coordinates))
@@ -97,12 +165,15 @@ struct FriendSharedJourney: Identifiable, Codable, Hashable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
         try c.encode(title, forKey: .title)
+        try c.encodeIfPresent(cityID, forKey: .cityID)
         try c.encodeIfPresent(activityTag, forKey: .activityTag)
         try c.encodeIfPresent(overallMemory, forKey: .overallMemory)
+        if !overallMemoryImageURLs.isEmpty { try c.encode(overallMemoryImageURLs, forKey: .overallMemoryImageURLs) }
         try c.encode(distance, forKey: .distance)
         try c.encodeIfPresent(startTime, forKey: .startTime)
         try c.encodeIfPresent(endTime, forKey: .endTime)
         try c.encode(visibility, forKey: .visibility)
+        try c.encodeIfPresent(sharedAt, forKey: .sharedAt)
         try c.encode(routeCoordinates, forKey: .routeCoordinates)
         try c.encode(memories, forKey: .memories)
     }
@@ -154,14 +225,19 @@ struct FriendProfileSnapshot: Identifiable, Codable, Hashable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
-        displayName = (try? c.decode(String.self, forKey: .displayName)) ?? "Explorer"
+        let rawDisplayName = try? c.decode(String.self, forKey: .displayName)
         bio = (try? c.decode(String.self, forKey: .bio)) ?? "Travel Enthusiastic"
-        loadout = (try? c.decode(RobotLoadout.self, forKey: .loadout)) ?? .defaultBoy
+        loadout = ((try? c.decode(RobotLoadout.self, forKey: .loadout)) ?? .defaultBoy).normalizedForCurrentAvatar()
         journeys = (try? c.decode([FriendSharedJourney].self, forKey: .journeys)) ?? []
         unlockedCityCards = (try? c.decode([FriendCityCard].self, forKey: .unlockedCityCards)) ?? []
         createdAt = (try? c.decode(Date.self, forKey: .createdAt)) ?? Date()
         inviteCode = (try? c.decode(String.self, forKey: .inviteCode)) ?? Self.fallbackInviteCode(source: id)
-        handle = (try? c.decode(String.self, forKey: .handle)) ?? "@\(ProfileSharingSettings.normalizeHandle(displayName))"
+        handle = (try? c.decode(String.self, forKey: .handle)) ?? Self.fallbackHandle(source: rawDisplayName ?? id)
+        displayName = FriendIdentityPresentation.displayName(
+            displayName: rawDisplayName,
+            exclusiveID: handle,
+            userID: id
+        )
         profileVisibility = (try? c.decode(ProfileVisibility.self, forKey: .profileVisibility)) ?? .friendsOnly
         stats = (try? c.decode(ProfileStatsSnapshot.self, forKey: .stats)) ?? ProfileStatsSnapshot(
             totalJourneys: journeys.count,
@@ -175,6 +251,12 @@ struct FriendProfileSnapshot: Identifiable, Codable, Hashable {
         let cleaned = source.replacingOccurrences(of: "-", with: "").uppercased()
         return String(cleaned.prefix(8))
     }
+
+    fileprivate static func fallbackHandle(source: String) -> String {
+        let cleaned = ProfileSharingSettings.normalizeHandle(source)
+        if !cleaned.isEmpty { return cleaned }
+        return "00000000"
+    }
 }
 
 extension FriendSharedJourney {
@@ -184,12 +266,15 @@ extension FriendSharedJourney {
             title: route.customTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
                 ? (route.customTitle ?? "")
                 : route.displayCityName,
+            cityID: FriendJourneyCityIdentity.stableCityID(from: route),
             activityTag: route.activityTag,
             overallMemory: route.overallMemory,
+            overallMemoryImageURLs: route.overallMemoryRemoteImageURLs,
             distance: route.distance,
             startTime: route.startTime,
             endTime: route.endTime,
             visibility: route.visibility,
+            sharedAt: route.sharedAt,
             routeCoordinates: route.coordinates,
             memories: route.memories.map {
                 FriendSharedMemory(
@@ -197,7 +282,10 @@ extension FriendSharedJourney {
                     title: $0.title,
                     notes: $0.notes,
                     timestamp: $0.timestamp,
-                    imageURLs: []
+                    imageURLs: $0.remoteImageURLs,
+                    latitude: $0.locationStatus == .pending ? nil : $0.coordinate.0,
+                    longitude: $0.locationStatus == .pending ? nil : $0.coordinate.1,
+                    locationStatus: $0.locationStatus.rawValue
                 )
             }
         )
@@ -227,6 +315,11 @@ final class SocialGraphStore: ObservableObject {
         handle rawHandle: String? = nil,
         accessToken: String?
     ) async throws {
+        let maxFriends = await MembershipStore.shared.maxFriends
+        if friends.count >= maxFriends {
+            throw BackendAPIError.server(L10n.t("membership_gate_friends_limit"))
+        }
+
         let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedCode = normalizedInviteCode(rawCode)
         let normalizedHandleRaw = String(rawHandle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -237,14 +330,13 @@ final class SocialGraphStore: ObservableObject {
             throw BackendAPIError.server("后端未连接，已禁止本地伪造好友。请先配置后端地址并登录账号。")
         }
 
-        let dto = try await BackendAPIClient.shared.addFriend(
+        _ = try await BackendAPIClient.shared.sendFriendRequest(
             token: token,
             displayName: finalName,
             inviteCode: normalizedCode,
-            handle: finalHandle
+            handle: finalHandle,
+            note: finalName
         )
-        let mapped = Self.friendSnapshot(from: dto)
-        importFriendSnapshot(mapped)
     }
 
     func importFriendSnapshot(_ snapshot: FriendProfileSnapshot) {
@@ -266,15 +358,8 @@ final class SocialGraphStore: ObservableObject {
     }
 
     func reloadFromBackendIfPossible(accessToken: String?) async {
-        guard BackendConfig.isEnabled, let token = accessToken, !token.isEmpty else { return }
-        do {
-            let remote = try await BackendAPIClient.shared.fetchFriends(token: token)
-            let mapped = remote.map(Self.friendSnapshot(from:))
-            friends = mapped
-            persistToDisk()
-        } catch {
-            print("❌ fetch friends failed:", error)
-        }
+        guard let mapped = await fetchFriendSnapshotsFromBackend(accessToken: accessToken) else { return }
+        replaceFriends(mapped)
     }
 
     func refreshFriendProfileIfPossible(friendID: String, accessToken: String?) async {
@@ -285,6 +370,28 @@ final class SocialGraphStore: ObservableObject {
         } catch {
             print("❌ fetch friend profile failed:", error)
         }
+    }
+
+    func restoreFriendsIfEmpty(_ snapshots: [FriendProfileSnapshot]) {
+        guard friends.isEmpty, !snapshots.isEmpty else { return }
+        friends = snapshots
+        persistToDisk()
+    }
+
+    func fetchFriendSnapshotsFromBackend(accessToken: String?) async -> [FriendProfileSnapshot]? {
+        guard BackendConfig.isEnabled, let token = accessToken, !token.isEmpty else { return nil }
+        do {
+            let remote = try await BackendAPIClient.shared.fetchFriends(token: token)
+            return remote.map(Self.friendSnapshot(from:))
+        } catch {
+            print("❌ fetch friends failed:", error)
+            return nil
+        }
+    }
+
+    func replaceFriends(_ snapshots: [FriendProfileSnapshot]) {
+        friends = snapshots
+        persistToDisk()
     }
 
     private var fileURL: URL {
@@ -337,14 +444,19 @@ final class SocialGraphStore: ObservableObject {
     }
 
     private static func friendSnapshot(from dto: BackendFriendDTO) -> FriendProfileSnapshot {
-        FriendProfileSnapshot(
+        let resolvedExclusiveID = dto.resolvedExclusiveID ?? FriendProfileSnapshot.fallbackHandle(source: dto.displayName)
+        return FriendProfileSnapshot(
             id: dto.id,
-            handle: dto.handle ?? "@\(ProfileSharingSettings.normalizeHandle(dto.displayName))",
+            handle: resolvedExclusiveID,
             inviteCode: dto.inviteCode ?? generateInviteCode(source: dto.id),
             profileVisibility: dto.profileVisibility ?? .friendsOnly,
-            displayName: dto.displayName,
+            displayName: FriendIdentityPresentation.displayName(
+                displayName: dto.displayName,
+                exclusiveID: resolvedExclusiveID,
+                userID: dto.id
+            ),
             bio: dto.bio,
-            loadout: dto.loadout ?? RobotLoadout.defaultBoy,
+            loadout: (dto.loadout ?? RobotLoadout.defaultBoy).normalizedForCurrentAvatar(),
             stats: dto.stats ?? ProfileStatsSnapshot(
                 totalJourneys: dto.journeys.count,
                 totalDistance: dto.journeys.reduce(0) { $0 + $1.distance },

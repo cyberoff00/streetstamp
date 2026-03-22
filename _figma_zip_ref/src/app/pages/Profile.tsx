@@ -1,165 +1,138 @@
 import { motion } from "motion/react";
+import { Bot, MapPin, Route, Settings, Shirt, StickyNote } from "lucide-react";
 import { useNavigate } from "react-router";
-import { Menu, Shirt, MapPin, TrendingUp, Navigation, ChevronRight, Map } from "lucide-react";
-import { useState } from "react";
-import { HamburgerMenu } from "../components/HamburgerMenu";
+import { MainTabLayout } from "../components/MainTabLayout";
+
+type ProfileEntry = {
+  title: string;
+  subtitle: string;
+  to: string;
+  icon: React.ComponentType<{ className?: string }>;
+  iconBg: string;
+  iconColor: string;
+};
+
+const profileEntries: ProfileEntry[] = [
+  {
+    title: "Equipment",
+    subtitle: "装备",
+    to: "/equipment",
+    icon: Shirt,
+    iconBg: "bg-[#52B788]/12",
+    iconColor: "text-[#3C9A71]",
+  },
+  {
+    title: "My Cities",
+    subtitle: "City Library",
+    to: "/cities",
+    icon: MapPin,
+    iconBg: "bg-[#B8947D]/12",
+    iconColor: "text-[#9B6B4A]",
+  },
+  {
+    title: "My Journeys",
+    subtitle: "我的旅程",
+    to: "/tracking",
+    icon: Route,
+    iconBg: "bg-[#74C69D]/16",
+    iconColor: "text-[#2F865B]",
+  },
+  {
+    title: "My Memories",
+    subtitle: "Journey Memory",
+    to: "/memories",
+    icon: StickyNote,
+    iconBg: "bg-[#D9D2C3]/28",
+    iconColor: "text-[#7F6952]",
+  },
+];
 
 export function Profile() {
   const navigate = useNavigate();
-  const [menuOpen, setMenuOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-[#FBFBF9] pb-20">
-      {/* Header */}
-      <motion.header
-        initial={{ y: -50, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.5 }}
-        className="sticky top-0 z-10 bg-white/90 backdrop-blur-2xl border-b border-black/[0.06]"
-      >
-        <div className="px-6 py-6 flex items-center justify-between">
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95, filter: "brightness(1.1)" }}
-            onClick={() => setMenuOpen(true)}
-            className="p-2 rounded-full hover:bg-black/5 transition-all active:shadow-[inset_0_2px_8px_rgba(0,0,0,0.1)]"
-          >
-            <Menu className="w-6 h-6 stroke-[1.5]" />
-          </motion.button>
-          <h1 className="text-3xl font-black tracking-tight uppercase">Profile</h1>
-          <div className="w-10" />
-        </div>
-      </motion.header>
-
-      <div className="px-6 py-8 space-y-6">
-        {/* Profile Card */}
-        <motion.div
+    <MainTabLayout
+      title="Profile"
+      rightSlot={
+        <button
+          onClick={() => navigate("/settings")}
+          className="flex h-10 w-10 items-center justify-center rounded-full transition-all hover:bg-black/5"
+          aria-label="Open settings"
+        >
+          <Settings className="h-5 w-5 stroke-[1.8]" />
+        </button>
+      }
+    >
+      <div className="mx-auto w-full max-w-xl space-y-6">
+        <motion.section
           initial={{ scale: 0.95, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
-          transition={{ delay: 0.1, type: "spring", stiffness: 200 }}
-          className="bg-white rounded-[36px] shadow-[0_8px_40px_rgba(0,0,0,0.04)] p-8"
+          transition={{ delay: 0.08, type: "spring", stiffness: 180 }}
+          className="rounded-[36px] bg-white p-8 shadow-[0_8px_40px_rgba(0,0,0,0.04)]"
         >
-          {/* Avatar - 8-bit Pixel Character */}
-          <motion.div
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{
-              delay: 0.3,
-              type: "spring",
-              stiffness: 200,
-              damping: 15,
-            }}
-            className="flex justify-center mb-6"
-          >
+          <div className="mb-6 flex justify-center">
             <div className="relative">
-              <div className="w-32 h-32 bg-gradient-to-br from-[#52B788]/10 to-[#74C69D]/20 rounded-[32px] shadow-[0_4px_24px_rgba(82,183,136,0.12)] flex items-center justify-center">
-                {/* 8-bit Pixel Avatar */}
-                <div className="text-6xl">👧</div>
+              <div className="flex h-32 w-32 items-center justify-center rounded-[32px] bg-gradient-to-br from-[#52B788]/12 to-[#74C69D]/22 shadow-[0_4px_24px_rgba(82,183,136,0.12)]">
+                <Bot className="h-14 w-14 text-[#2E7C59]" strokeWidth={1.7} />
               </div>
-              {/* Subtle Glow */}
               <motion.div
-                animate={{
-                  scale: [1, 1.1, 1],
-                  opacity: [0.2, 0, 0.2],
-                }}
-                transition={{
-                  duration: 3,
-                  repeat: Infinity,
-                }}
-                className="absolute inset-0 bg-[#52B788] rounded-[32px] blur-2xl -z-10"
+                animate={{ scale: [1, 1.1, 1], opacity: [0.2, 0, 0.2] }}
+                transition={{ duration: 3, repeat: Infinity }}
+                className="absolute inset-0 -z-10 rounded-[32px] bg-[#52B788] blur-2xl"
               />
             </div>
-          </motion.div>
+          </div>
 
-          {/* Name & Bio */}
-          <motion.div
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.4 }}
-            className="text-center"
-          >
-            <h2 className="text-2xl font-black mb-1 tracking-tight">CYBER KAKA</h2>
-            <p className="text-[#6B6B6B] text-sm tracking-wide">EXPLORER</p>
-          </motion.div>
-        </motion.div>
+          <div className="text-center">
+            <h2 className="mb-1 text-2xl font-black tracking-tight">CYBER KAKA</h2>
+            <p className="text-sm tracking-wide text-[#6B6B6B]">EXPLORER</p>
+          </div>
+        </motion.section>
 
-        {/* Data Cards */}
-        <motion.div
+        <motion.section
           initial={{ y: 20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.5 }}
+          transition={{ delay: 0.2 }}
           className="grid grid-cols-3 gap-3"
         >
-          <DataCard
-            icon={<MapPin className="w-5 h-5 stroke-[1.5]" />}
-            label="TRIPS"
-            value="200"
-          />
-          <DataCard
-            icon={<TrendingUp className="w-5 h-5 stroke-[1.5]" />}
-            label="DISTANCE"
-            value="0km"
-          />
-          <DataCard
-            icon={<Navigation className="w-5 h-5 stroke-[1.5]" />}
-            label="CITIES"
-            value="58"
-          />
-        </motion.div>
+          <DataCard label="Trips" value="200" />
+          <DataCard label="Distance" value="0km" />
+          <DataCard label="Cities" value="58" />
+        </motion.section>
 
-        {/* Action Sections */}
-        <motion.div
-          initial={{ y: 50, opacity: 0 }}
+        <motion.section
+          initial={{ y: 24, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.6 }}
+          transition={{ delay: 0.28 }}
           className="grid grid-cols-2 gap-4"
         >
-          <motion.button
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98, filter: "brightness(1.1)" }}
-            onClick={() => navigate("/equipment")}
-            className="bg-white rounded-[32px] shadow-[0_8px_40px_rgba(0,0,0,0.04)] p-6 flex flex-col items-center justify-center gap-3 active:shadow-[inset_0_2px_12px_rgba(144,169,160,0.12)] transition-all"
-          >
-            <div className="w-14 h-14 bg-[#52B788]/10 rounded-[20px] flex items-center justify-center">
-              <Shirt className="w-7 h-7 stroke-[1.5] text-[#52B788]" />
-            </div>
-            <h3 className="text-sm font-black tracking-tight uppercase">Equipment</h3>
-          </motion.button>
-
-          <motion.button
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98, filter: "brightness(1.1)" }}
-            onClick={() => navigate("/tracking")}
-            className="bg-white rounded-[32px] shadow-[0_8px_40px_rgba(0,0,0,0.04)] p-6 flex flex-col items-center justify-center gap-3 active:shadow-[inset_0_2px_12px_rgba(184,148,125,0.12)] transition-all"
-          >
-            <div className="w-14 h-14 bg-[#B8947D]/10 rounded-[20px] flex items-center justify-center">
-              <Map className="w-7 h-7 stroke-[1.5] text-[#B8947D]" />
-            </div>
-            <h3 className="text-sm font-black tracking-tight uppercase">Journeys</h3>
-          </motion.button>
-        </motion.div>
+          {profileEntries.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.title}
+                onClick={() => navigate(item.to)}
+                className="rounded-[28px] bg-white p-5 text-left shadow-[0_8px_40px_rgba(0,0,0,0.04)] transition-all active:scale-[0.98] active:brightness-[1.02]"
+              >
+                <div className={`mb-4 flex h-12 w-12 items-center justify-center rounded-[16px] ${item.iconBg}`}>
+                  <Icon className={`h-6 w-6 stroke-[1.7] ${item.iconColor}`} />
+                </div>
+                <h3 className="text-sm font-black tracking-tight">{item.title}</h3>
+                <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-[#6B6B6B]">{item.subtitle}</p>
+              </button>
+            );
+          })}
+        </motion.section>
       </div>
-
-      {/* Hamburger Menu */}
-      <HamburgerMenu isOpen={menuOpen} onClose={() => setMenuOpen(false)} />
-    </div>
+    </MainTabLayout>
   );
 }
 
-function DataCard({
-  icon,
-  label,
-  value,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-}) {
+function DataCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-white rounded-[28px] shadow-[0_4px_32px_rgba(0,0,0,0.04)] p-4 flex flex-col items-center gap-2">
-      <div className="text-[#6B6B6B]">{icon}</div>
+    <div className="flex flex-col items-center gap-2 rounded-[24px] bg-white p-4 shadow-[0_4px_28px_rgba(0,0,0,0.04)]">
       <p className="text-2xl font-black">{value}</p>
-      <p className="text-[10px] text-[#6B6B6B] tracking-wider uppercase font-semibold">{label}</p>
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-[#6B6B6B]">{label}</p>
     </div>
   );
 }

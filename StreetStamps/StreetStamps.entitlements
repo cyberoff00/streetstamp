@@ -12,9 +12,15 @@
 	<array>
 		<string>CloudKit</string>
 	</array>
+	<key>com.apple.developer.applesignin</key>
+	<array>
+		<string>Default</string>
+	</array>
+	<key>com.apple.developer.healthkit</key>
+	<true/>
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.claire.streetstampschatgpt</string>
+		<string>group.com.streetstamps.shared</string>
 	</array>
 </dict>
 </plist>

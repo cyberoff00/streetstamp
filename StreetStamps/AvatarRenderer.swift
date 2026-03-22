@@ -9,6 +9,7 @@
 
 import Foundation
 import SwiftUI
+import UIKit
 
 // MARK: - Facing (kept for backward compatibility)
 
@@ -31,31 +32,246 @@ func robotFaceFromHeading(_ headingDegrees: Double) -> RobotFace {
 // MARK: - Loadout (v1: pixel character)
 
 struct RobotLoadout: Codable, Equatable, Hashable {
+    static let defaultHairColorHex = "#2B2A28"
+    static let defaultBodyColorHex = "#E8BE9C"
+
+    static func normalizedHairId(_ hairId: String) -> String {
+        switch hairId {
+        case "hair_009":
+            return "hair_0007"
+        default:
+            return hairId
+        }
+    }
+
     // base character
     var bodyId: String = "body"
     var headId: String = "head"
 
     // equipment
-    var hairId: String = "hair_boy_default"
-    var outfitId: String = "outfit_boy_suit"
-    var accessoryId: String? = nil
+    var hairId: String = "hair_0001"
+    var suitId: String? = nil
+    var upperId: String = "upper_0001"
+    var underId: String = "under_0001"
+    var savedUpperIdForSuit: String = "upper_0001"
+    var savedUnderIdForSuit: String = "under_0001"
+    var shoesId: String? = nil
+    var hatId: String? = nil
+    var glassId: String? = nil
+    var accessoryIds: [String] = []
 
     // expression
-    var expressionId: String = "expr_default"
+    var expressionId: String = "expr_0001"
+
+    // appearance colors
+    var hairColorHex: String = defaultHairColorHex
+    var bodyColorHex: String = defaultBodyColorHex
+
+    enum CodingKeys: String, CodingKey {
+        case bodyId
+        case headId
+        case hairId
+        case suitId
+        case upperId
+        case underId
+        case savedUpperIdForSuit
+        case savedUnderIdForSuit
+        case shoesId
+        case hatId
+        case glassId
+        case accessoryIds
+        case legacyAccessoryId = "accessoryId"
+        case expressionId
+        case hairColorHex
+        case bodyColorHex
+    }
+
+    init(
+        bodyId: String = "body",
+        headId: String = "head",
+        hairId: String = "hair_0001",
+        suitId: String? = nil,
+        upperId: String = "upper_0001",
+        underId: String = "under_0001",
+        savedUpperIdForSuit: String = "upper_0001",
+        savedUnderIdForSuit: String = "under_0001",
+        shoesId: String? = nil,
+        hatId: String? = nil,
+        glassId: String? = nil,
+        accessoryIds: [String] = [],
+        expressionId: String = "expr_0001",
+        hairColorHex: String = defaultHairColorHex,
+        bodyColorHex: String = defaultBodyColorHex
+    ) {
+        self.bodyId = bodyId
+        self.headId = headId
+        self.hairId = Self.normalizedHairId(hairId)
+        self.suitId = suitId
+        self.upperId = upperId
+        self.underId = underId
+        self.savedUpperIdForSuit = savedUpperIdForSuit
+        self.savedUnderIdForSuit = savedUnderIdForSuit
+        self.shoesId = shoesId
+        self.hatId = hatId
+        self.glassId = glassId
+        self.accessoryIds = accessoryIds
+        self.expressionId = expressionId
+        self.hairColorHex = hairColorHex
+        self.bodyColorHex = bodyColorHex
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        bodyId = try c.decodeIfPresent(String.self, forKey: .bodyId) ?? "body"
+        headId = try c.decodeIfPresent(String.self, forKey: .headId) ?? "head"
+        hairId = Self.normalizedHairId(try c.decodeIfPresent(String.self, forKey: .hairId) ?? "hair_0001")
+        suitId = try c.decodeIfPresent(String.self, forKey: .suitId)
+        upperId = try c.decodeIfPresent(String.self, forKey: .upperId) ?? "upper_0001"
+        underId = try c.decodeIfPresent(String.self, forKey: .underId) ?? "under_0001"
+        savedUpperIdForSuit = try c.decodeIfPresent(String.self, forKey: .savedUpperIdForSuit) ?? upperId
+        savedUnderIdForSuit = try c.decodeIfPresent(String.self, forKey: .savedUnderIdForSuit) ?? underId
+        shoesId = try c.decodeIfPresent(String.self, forKey: .shoesId)
+        hatId = try c.decodeIfPresent(String.self, forKey: .hatId)
+        glassId = try c.decodeIfPresent(String.self, forKey: .glassId)
+        let decodedAccessoryIds = try c.decodeIfPresent([String].self, forKey: .accessoryIds)
+        if let decodedAccessoryIds {
+            accessoryIds = decodedAccessoryIds.filter { !$0.isEmpty && $0 != "none" }
+        } else if let legacyAccessoryId = try c.decodeIfPresent(String.self, forKey: .legacyAccessoryId),
+                  !legacyAccessoryId.isEmpty,
+                  legacyAccessoryId != "none" {
+            accessoryIds = [legacyAccessoryId]
+        } else {
+            accessoryIds = []
+        }
+        expressionId = try c.decodeIfPresent(String.self, forKey: .expressionId) ?? "expr_0001"
+        hairColorHex = try c.decodeIfPresent(String.self, forKey: .hairColorHex) ?? Self.defaultHairColorHex
+        bodyColorHex = try c.decodeIfPresent(String.self, forKey: .bodyColorHex) ?? Self.defaultBodyColorHex
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(bodyId, forKey: .bodyId)
+        try c.encode(headId, forKey: .headId)
+        try c.encode(hairId, forKey: .hairId)
+        try c.encode(suitId, forKey: .suitId)
+        try c.encode(upperId, forKey: .upperId)
+        try c.encode(underId, forKey: .underId)
+        try c.encode(savedUpperIdForSuit, forKey: .savedUpperIdForSuit)
+        try c.encode(savedUnderIdForSuit, forKey: .savedUnderIdForSuit)
+        try c.encode(shoesId, forKey: .shoesId)
+        try c.encode(hatId, forKey: .hatId)
+        try c.encode(glassId, forKey: .glassId)
+        try c.encode(accessoryIds, forKey: .accessoryIds)
+        try c.encode(accessoryIds.first, forKey: .legacyAccessoryId)
+        try c.encode(expressionId, forKey: .expressionId)
+        try c.encode(hairColorHex, forKey: .hairColorHex)
+        try c.encode(bodyColorHex, forKey: .bodyColorHex)
+    }
 
     static var defaultBoy: RobotLoadout {
         RobotLoadout(
             bodyId: "body",
             headId: "head",
-            hairId: "hair_boy_default",
-            outfitId: "outfit_boy_suit",
-            accessoryId: "acc_headphone",
-            expressionId: "expr_default"
+            hairId: "hair_0001",
+            suitId: nil,
+            upperId: "upper_0001",
+            underId: "under_0001",
+            savedUpperIdForSuit: "upper_0001",
+            savedUnderIdForSuit: "under_0001",
+            shoesId: nil,
+            hatId: nil,
+            glassId: nil,
+            accessoryIds: [],
+            expressionId: "expr_0001",
+            hairColorHex: defaultHairColorHex,
+            bodyColorHex: defaultBodyColorHex
         )
     }
+
+    func normalizedForCurrentAvatar() -> RobotLoadout {
+        var next = self
+        next.hairId = Self.normalizedHairId(next.hairId)
+        // Keep suit support. When suit is equipped, hide upper/under.
+        if next.suitId != nil {
+            if next.upperId != "none" {
+                next.savedUpperIdForSuit = next.upperId
+            }
+            if next.underId != "none" {
+                next.savedUnderIdForSuit = next.underId
+            }
+            next.upperId = "none"
+            next.underId = "none"
+        } else {
+            if next.upperId == "none" {
+                next.upperId = next.savedUpperIdForSuit == "none" ? "upper_0001" : next.savedUpperIdForSuit
+            }
+            if next.underId == "none" {
+                next.underId = next.savedUnderIdForSuit == "none" ? "under_0001" : next.savedUnderIdForSuit
+            }
+        }
+        return next
+    }
+
 }
 
 // MARK: - Renderer
+
+struct AvatarAssetLayout {
+    private static func logicalCanvasSize(for imageSize: CGSize) -> CGSize {
+        // New add-on assets were exported as 140x160 from an original 128x128 working canvas.
+        // Keep their visual layering scale consistent with legacy parts.
+        if Int(imageSize.width.rounded()) == 140 && Int(imageSize.height.rounded()) == 160 {
+            return CGSize(width: 128, height: 128)
+        }
+        return imageSize
+    }
+
+    static func imageRect(imageSize: CGSize, in containerSize: CGSize) -> CGRect {
+        guard imageSize.width > 0, imageSize.height > 0, containerSize.width > 0, containerSize.height > 0 else {
+            return CGRect(origin: .zero, size: containerSize)
+        }
+
+        let logicalSize = logicalCanvasSize(for: imageSize)
+        let scale = max(containerSize.width / logicalSize.width, containerSize.height / logicalSize.height)
+        let scaledSize = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
+        let origin = CGPoint(
+            x: (containerSize.width - scaledSize.width) / 2,
+            y: containerSize.height - scaledSize.height
+        )
+        return CGRect(origin: origin, size: scaledSize)
+    }
+}
+
+private struct AvatarLayerImage: View {
+    let imageName: String
+    var tintColor: Color? = nil
+
+    private var imageSize: CGSize {
+        UIImage(named: imageName)?.size ?? .zero
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let rect = AvatarAssetLayout.imageRect(imageSize: imageSize, in: proxy.size)
+
+            Group {
+                if let tintColor {
+                    Image(imageName)
+                        .renderingMode(.template)
+                        .resizable()
+                        .interpolation(.none)
+                        .foregroundColor(tintColor)
+                } else {
+                    Image(imageName)
+                        .resizable()
+                        .interpolation(.none)
+                }
+            }
+            .frame(width: rect.width, height: rect.height)
+            .position(x: rect.midX, y: rect.midY)
+        }
+    }
+}
 
 /// Renders a pixel character by stacking image layers.
 /// All images use `.interpolation(.none)` to keep the pixel edges crisp.
@@ -65,12 +281,15 @@ struct RobotRendererView: View {
     let loadout: RobotLoadout
 
     private let catalogStore = AvatarCatalogStore.shared
+    private var bodyTint: Color { Color(hexRGB: loadout.bodyColorHex, fallback: .white) }
+    private var hairTint: Color { Color(hexRGB: loadout.hairColorHex, fallback: .white) }
 
     private func img(_ name: String) -> some View {
-        Image(name)
-            .resizable()
-            .interpolation(.none)
-            .scaledToFit()
+        AvatarLayerImage(imageName: name)
+    }
+
+    private func maskTintedImg(_ name: String, color: Color) -> some View {
+        AvatarLayerImage(imageName: name, tintColor: color)
     }
 
     // MARK: Asset mapping (ids -> asset names)
@@ -81,18 +300,50 @@ struct RobotRendererView: View {
 }
 
 
-    private func outfitAsset(face: RobotFace) -> String? {
-    guard let item = catalogStore.item(categoryId: "outfit", itemId: loadout.outfitId) else { return nil }
-    return catalogStore.imageName(item.images, face: face)
-}
+    private func suitAsset(face: RobotFace) -> String? {
+        guard let suitId = loadout.suitId,
+              let item = catalogStore.item(categoryId: "suit", itemId: suitId) else { return nil }
+        return catalogStore.imageName(item.images, face: face)
+    }
+
+    private func upperAsset(face: RobotFace) -> String? {
+        guard let item = catalogStore.item(categoryId: "upper", itemId: loadout.upperId) else { return nil }
+        return catalogStore.imageName(item.images, face: face)
+    }
+
+    private func underAsset(face: RobotFace) -> String? {
+        guard let item = catalogStore.item(categoryId: "under", itemId: loadout.underId) else { return nil }
+        return catalogStore.imageName(item.images, face: face)
+    }
 
 
-    private func accessoryAsset(face: RobotFace) -> String? {
-    guard let accId = loadout.accessoryId else { return nil }
-    // accessory category contains a "none" item too, but loadout uses nil for none.
-    guard let item = catalogStore.item(categoryId: "accessory", itemId: accId) else { return nil }
-    return catalogStore.imageName(item.images, face: face)
-}
+    private func accessoryAsset(itemId: String, face: RobotFace) -> String? {
+        if let accessory = catalogStore.item(categoryId: "accessory", itemId: itemId) {
+            return catalogStore.imageName(accessory.images, face: face)
+        }
+        if let pat = catalogStore.item(categoryId: "pat", itemId: itemId) {
+            return catalogStore.imageName(pat.images, face: face)
+        }
+        return nil
+    }
+
+    private func shoesAsset(face: RobotFace) -> String? {
+        guard let shoesId = loadout.shoesId,
+              let item = catalogStore.item(categoryId: "shoes", itemId: shoesId) else { return nil }
+        return catalogStore.imageName(item.images, face: face)
+    }
+
+    private func hatAsset(face: RobotFace) -> String? {
+        guard let hatId = loadout.hatId,
+              let item = catalogStore.item(categoryId: "hat", itemId: hatId) else { return nil }
+        return catalogStore.imageName(item.images, face: face)
+    }
+
+    private func glassAsset(face: RobotFace) -> String? {
+        guard let glassId = loadout.glassId,
+              let item = catalogStore.item(categoryId: "glass", itemId: glassId) else { return nil }
+        return catalogStore.imageName(item.images, face: face)
+    }
 
 
     // MARK: Layers
@@ -103,17 +354,23 @@ private var bodyLayer: some View {
     switch face {
     case .front:
         img(catalogStore.imageName(part, face: .front) ?? "avatar_body_front")
+            .colorMultiply(bodyTint)
     case .right:
         img(catalogStore.imageName(part, face: .right) ?? "avatar_body_side")
+            .colorMultiply(bodyTint)
     case .left:
         img(catalogStore.imageName(part, face: .left) ?? catalogStore.imageName(part, face: .right) ?? "avatar_body_side")
             .scaleEffect(x: -1, y: 1)
+            .colorMultiply(bodyTint)
     case .back:
         if let back = catalogStore.imageName(part, face: .back) {
             img(back)
+                .colorMultiply(bodyTint)
         } else {
             // placeholder until back assets arrive
-            img(catalogStore.imageName(part, face: .front) ?? "avatar_body_front").opacity(0.35)
+            img(catalogStore.imageName(part, face: .front) ?? "avatar_body_front")
+                .opacity(0.35)
+                .colorMultiply(bodyTint)
         }
     }
 }
@@ -124,24 +381,27 @@ private var headLayer: some View {
     switch face {
     case .front:
         img(catalogStore.imageName(part, face: .front) ?? "avatar_head_front")
+            .colorMultiply(bodyTint)
     case .right:
         img(catalogStore.imageName(part, face: .right) ?? "avatar_head_side")
+            .colorMultiply(bodyTint)
     case .left:
         img(catalogStore.imageName(part, face: .left) ?? catalogStore.imageName(part, face: .right) ?? "avatar_head_side")
             .scaleEffect(x: -1, y: 1)
+            .colorMultiply(bodyTint)
     case .back:
         if let back = catalogStore.imageName(part, face: .back) {
             img(back)
+                .colorMultiply(bodyTint)
         } else {
-            img(catalogStore.imageName(part, face: .front) ?? "avatar_head_front").opacity(0.25)
+            img(catalogStore.imageName(part, face: .front) ?? "avatar_head_front")
+                .opacity(0.25)
+                .colorMultiply(bodyTint)
         }
     }
 }
 
-
-
-    @ViewBuilder
-private func expressionAsset(face: RobotFace) -> String? {
+    private func expressionAsset(face: RobotFace) -> String? {
     guard let item = catalogStore.item(categoryId: "expression", itemId: loadout.expressionId) else { return nil }
     return catalogStore.imageName(item.images, face: face)
 }
@@ -177,58 +437,74 @@ private var expressionLayer: some View {
     }
 }
     @ViewBuilder
-private var baseOutfitLayer: some View {
-    let part = catalogStore.catalog.base.baseOutfit
-    switch face {
-    case .front:
-        img(catalogStore.imageName(part, face: .front) ?? "avatar_base_top_front")
-    case .right:
-        img(catalogStore.imageName(part, face: .right) ?? "avatar_base_top_side")
-    case .left:
-        img(catalogStore.imageName(part, face: .left) ?? catalogStore.imageName(part, face: .right) ?? "avatar_base_top_side")
-            .scaleEffect(x: -1, y: 1)
-    case .back:
-        if let back = catalogStore.imageName(part, face: .back) {
-            img(back)
+    private func clothingLayer(for front: String?, right: String?, left: String?, back: String?) -> some View {
+        if let front {
+            switch face {
+            case .front:
+                img(front)
+            case .right:
+                if let right {
+                    img(right)
+                } else {
+                    img(front).opacity(0.25)
+                }
+            case .left:
+                if let left = left ?? right {
+                    img(left).scaleEffect(x: -1, y: 1)
+                } else {
+                    img(front).scaleEffect(x: -1, y: 1).opacity(0.25)
+                }
+            case .back:
+                if let back {
+                    img(back)
+                } else {
+                    img(front).opacity(0.20)
+                }
+            }
         } else {
-            img(catalogStore.imageName(part, face: .front) ?? "avatar_base_top_front").opacity(0.25)
+            EmptyView()
         }
     }
-}
 
     @ViewBuilder
-private var outfitLayer: some View {
-    // If the selected outfit has no side/back assets yet, show a light placeholder
-    // so the avatar still looks "dressed" when rotated.
-    if let outfitFront = outfitAsset(face: .front) {
-        switch face {
-        case .front:
-            img(outfitFront)
-        case .right:
-            if let side = outfitAsset(face: .right) {
-                img(side)
-            } else {
-                img(catalogStore.imageName(catalogStore.catalog.base.baseOutfit, face: .right) ?? "avatar_base_top_side").opacity(0.25)
-            }
-        case .left:
-            if let side = outfitAsset(face: .left) ?? outfitAsset(face: .right) {
-                img(side).scaleEffect(x: -1, y: 1)
-            } else {
-                img(catalogStore.imageName(catalogStore.catalog.base.baseOutfit, face: .right) ?? "avatar_base_top_side")
-                    .scaleEffect(x: -1, y: 1)
-                    .opacity(0.25)
-            }
-        case .back:
-            if let back = outfitAsset(face: .back) {
-                img(back)
-            } else {
-                img(catalogStore.imageName(catalogStore.catalog.base.baseOutfit, face: .front) ?? "avatar_base_top_front").opacity(0.20)
-            }
-        }
-    } else {
-        EmptyView()
+    private var underLayer: some View {
+        clothingLayer(
+            for: underAsset(face: .front),
+            right: underAsset(face: .right),
+            left: underAsset(face: .left),
+            back: underAsset(face: .back)
+        )
     }
-}
+
+    @ViewBuilder
+    private var shoesLayer: some View {
+        clothingLayer(
+            for: shoesAsset(face: .front),
+            right: shoesAsset(face: .right),
+            left: shoesAsset(face: .left),
+            back: shoesAsset(face: .back)
+        )
+    }
+
+    @ViewBuilder
+    private var suitLayer: some View {
+        clothingLayer(
+            for: suitAsset(face: .front),
+            right: suitAsset(face: .right),
+            left: suitAsset(face: .left),
+            back: suitAsset(face: .back)
+        )
+    }
+
+    @ViewBuilder
+    private var upperLayer: some View {
+        clothingLayer(
+            for: upperAsset(face: .front),
+            right: upperAsset(face: .right),
+            left: upperAsset(face: .left),
+            back: upperAsset(face: .back)
+        )
+    }
 
 @ViewBuilder
 private var hairLayer: some View {
@@ -236,24 +512,29 @@ private var hairLayer: some View {
     if let front = hairAsset(face: .front) {
         switch face {
         case .front:
-            img(front)
+            maskTintedImg(front, color: hairTint)
         case .right:
             if let side = hairAsset(face: .right) {
-                img(side)
+                maskTintedImg(side, color: hairTint)
             } else {
-                img(front).opacity(0.20)
+                maskTintedImg(front, color: hairTint)
+                    .opacity(0.20)
             }
         case .left:
             if let side = hairAsset(face: .left) ?? hairAsset(face: .right) {
-                img(side).scaleEffect(x: -1, y: 1)
+                maskTintedImg(side, color: hairTint)
+                    .scaleEffect(x: -1, y: 1)
             } else {
-                img(front).scaleEffect(x: -1, y: 1).opacity(0.20)
+                maskTintedImg(front, color: hairTint)
+                    .scaleEffect(x: -1, y: 1)
+                    .opacity(0.20)
             }
         case .back:
             if let back = hairAsset(face: .back) {
-                img(back)
+                maskTintedImg(back, color: hairTint)
             } else {
-                img(front).opacity(0.20)
+                maskTintedImg(front, color: hairTint)
+                    .opacity(0.20)
             }
         }
     } else {
@@ -261,45 +542,94 @@ private var hairLayer: some View {
     }
 }
 
-@ViewBuilder
-private var accessoryLayer: some View {
-    if let front = accessoryAsset(face: .front) {
-        switch face {
-        case .front:
-            img(front)
-        case .right:
-            if let side = accessoryAsset(face: .right) {
-                img(side)
-            } else {
-                img(front).opacity(0.20)
-            }
-        case .left:
-            if let side = accessoryAsset(face: .left) ?? accessoryAsset(face: .right) {
-                img(side).scaleEffect(x: -1, y: 1)
-            } else {
-                img(front).scaleEffect(x: -1, y: 1).opacity(0.20)
-            }
-        case .back:
-            if let back = accessoryAsset(face: .back) {
-                img(back)
-            } else {
-                img(front).opacity(0.20)
+    @ViewBuilder
+    private var accessoryLayer: some View {
+        let ids = loadout.accessoryIds.filter { $0 != "none" }
+        if ids.isEmpty {
+            EmptyView()
+        } else {
+            ForEach(ids, id: \.self) { itemId in
+                if let front = accessoryAsset(itemId: itemId, face: .front) {
+                    switch face {
+                    case .front:
+                        img(front)
+                    case .right:
+                        if let side = accessoryAsset(itemId: itemId, face: .right) {
+                            img(side)
+                        } else {
+                            img(front).opacity(0.20)
+                        }
+                    case .left:
+                        if let side = accessoryAsset(itemId: itemId, face: .left) ?? accessoryAsset(itemId: itemId, face: .right) {
+                            img(side).scaleEffect(x: -1, y: 1)
+                        } else {
+                            img(front).scaleEffect(x: -1, y: 1).opacity(0.20)
+                        }
+                    case .back:
+                        if let back = accessoryAsset(itemId: itemId, face: .back) {
+                            img(back)
+                        } else {
+                            img(front).opacity(0.20)
+                        }
+                    }
+                }
             }
         }
-    } else {
-        EmptyView()
     }
-}
+
+    @ViewBuilder
+    private var glassLayer: some View {
+        singleAccessoryLayer(front: glassAsset(face: .front), right: glassAsset(face: .right), left: glassAsset(face: .left), back: glassAsset(face: .back))
+    }
+
+    @ViewBuilder
+    private var hatLayer: some View {
+        singleAccessoryLayer(front: hatAsset(face: .front), right: hatAsset(face: .right), left: hatAsset(face: .left), back: hatAsset(face: .back))
+    }
+
+    @ViewBuilder
+    private func singleAccessoryLayer(front: String?, right: String?, left: String?, back: String?) -> some View {
+        if let front {
+            switch face {
+            case .front:
+                img(front)
+            case .right:
+                if let right {
+                    img(right)
+                } else {
+                    img(front).opacity(0.20)
+                }
+            case .left:
+                if let left = left ?? right {
+                    img(left).scaleEffect(x: -1, y: 1)
+                } else {
+                    img(front).scaleEffect(x: -1, y: 1).opacity(0.20)
+                }
+            case .back:
+                if let back {
+                    img(back)
+                } else {
+                    img(front).opacity(0.20)
+                }
+            }
+        } else {
+            EmptyView()
+        }
+    }
 
 var body: some View {
         ZStack {
             bodyLayer
-            baseOutfitLayer
-            outfitLayer
             headLayer
             expressionLayer
-            accessoryLayer
             hairLayer
+            shoesLayer
+            underLayer
+            upperLayer
+            suitLayer
+            accessoryLayer
+            glassLayer
+            hatLayer
 
             if face == .back {
                 Text(L10n.t("avatar_placeholder_back"))
@@ -379,7 +709,7 @@ private struct PixelExpressionView: View {
 // MARK: - Persist loadout
 
 enum AvatarLoadoutStore {
-    private static let key = "avatar.loadout.v1"
+    private static let key = "avatar.loadout.v2"
 
     static func load() -> RobotLoadout {
         guard
@@ -388,15 +718,36 @@ enum AvatarLoadoutStore {
         else {
             return .defaultBoy
         }
-        return decoded
+        return decoded.normalizedForCurrentAvatar()
     }
 
     static func save(_ loadout: RobotLoadout) {
-        guard let data = try? JSONEncoder().encode(loadout) else { return }
+        guard let data = try? JSONEncoder().encode(loadout.normalizedForCurrentAvatar()) else { return }
         UserDefaults.standard.set(data, forKey: key)
     }
 
     static func reset() {
         UserDefaults.standard.removeObject(forKey: key)
+    }
+}
+
+extension Color {
+    init(hexRGB hex: String, fallback: Color = .white) {
+        var normalized = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.hasPrefix("#") {
+            normalized.removeFirst()
+        }
+        if normalized.count != 6 {
+            self = fallback
+            return
+        }
+        guard let value = UInt64(normalized, radix: 16) else {
+            self = fallback
+            return
+        }
+        let r = Double((value >> 16) & 0xFF) / 255.0
+        let g = Double((value >> 8) & 0xFF) / 255.0
+        let b = Double(value & 0xFF) / 255.0
+        self = Color(red: r, green: g, blue: b)
     }
 }

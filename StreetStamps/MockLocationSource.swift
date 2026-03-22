@@ -19,6 +19,7 @@ final class MockLocationSource: LocationSource {
     private let player = MockRoutePlayer()
 
     func requestPermissionIfNeeded() {}
+    func requestSingleLocation() {}
 
     func start() {
         // mock 不需要 start 系统定位
@@ -101,4 +102,3 @@ final class MockRoutePlayer {
     }
 }
 #endif
-

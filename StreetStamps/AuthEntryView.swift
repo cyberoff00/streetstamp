@@ -1,19 +1,21 @@
 import SwiftUI
+import AuthenticationServices
 
 enum AuthEntryMode: String {
     case signIn
     case register
+    case resetPassword
 
     var primaryButtonTitle: String {
         switch self {
-        case .signIn: return "SIGN IN"
-        case .register: return "CREATE ACCOUNT"
+        case .signIn: return L10n.t("auth_sign_in")
+        case .register: return L10n.t("auth_create_account")
+        case .resetPassword: return "Reset Password"
         }
     }
 }
 
 private enum OAuthProvider {
-    case google
     case apple
 }
 
@@ -26,6 +28,7 @@ private enum AuthField: Hashable {
 
 struct AuthEntryView: View {
     @EnvironmentObject private var sessionStore: UserSessionStore
+    @EnvironmentObject private var deepLinkStore: AppDeepLinkStore
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
 
     let onContinueGuest: () -> Void
@@ -43,6 +46,9 @@ struct AuthEntryView: View {
     @State private var showMessage = false
     @State private var messageText = ""
     @State private var showGuestNotice = false
+    @State private var showVerificationSheet = false
+    @State private var pendingVerificationEmail: String?
+    @State private var pendingPasswordResetToken: String?
     @FocusState private var focusedField: AuthField?
 
     private let accent = FigmaTheme.primary
@@ -69,9 +75,11 @@ struct AuthEntryView: View {
                     formBlock
                     authPrimaryButton
                     switchModeRow
-                    socialDivider
-                    socialButtons
-                    guestButton
+                    if mode != .resetPassword {
+                        socialDivider
+                        socialButtons
+                        guestButton
+                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 28)
@@ -79,21 +87,43 @@ struct AuthEntryView: View {
             }
         }
         .interactiveDismissDisabled()
-        .alert("提示", isPresented: $showMessage) {
-            Button("好", role: .cancel) {}
+        .alert(L10n.t("prompt"), isPresented: $showMessage) {
+            Button(L10n.t("ok"), role: .cancel) {}
         } message: {
             Text(messageText)
         }
-        .alert("游客模式", isPresented: $showGuestNotice) {
-            Button("取消", role: .cancel) {}
-            Button("继续") { onContinueGuest() }
+        .alert(L10n.t("guest_mode_title"), isPresented: $showGuestNotice) {
+            Button(L10n.t("cancel"), role: .cancel) {}
+            Button(L10n.t("resume_prompt_continue")) { onContinueGuest() }
         } message: {
-            Text("游客账号无法使用好友功能，后续可随时在账号中心注册或登录。")
+            Text(L10n.t("guest_mode_message"))
+        }
+        .fullScreenCover(isPresented: $showVerificationSheet) {
+            EmailVerificationView(
+                email: pendingVerificationEmail,
+                onResend: {
+                    guard let pendingVerificationEmail else {
+                        throw BackendAPIError.server("缺少待验证邮箱")
+                    }
+                    try await sessionStore.resendVerificationEmail(email: pendingVerificationEmail)
+                },
+                onRefresh: {
+                    try await refreshVerificationState()
+                },
+                onCancel: {
+                    showVerificationSheet = false
+                }
+            )
         }
         .onAppear {
             if let initialMode {
                 mode = initialMode
             }
+            adoptPendingPasswordResetTokenIfNeeded()
+        }
+        .onReceive(deepLinkStore.$pendingPasswordResetToken) { token in
+            guard token != nil else { return }
+            adoptPendingPasswordResetTokenIfNeeded()
         }
     }
 
@@ -124,12 +154,12 @@ struct AuthEntryView: View {
 
     private var titleBlock: some View {
         VStack(spacing: 8) {
-                Text(mode == .signIn ? "SIGN IN" : "SIGN UP")
+                Text(titleText)
                     .appHeaderStyle()
                     .lineLimit(1)
                     .minimumScaleFactor(0.65)
 
-            Text(mode == .signIn ? "Enter your credentials to continue" : "Create your adventure account")
+            Text(subtitleText)
                 .appBodyStrongStyle()
                 .foregroundColor(FigmaTheme.subtext)
                 .lineLimit(2)
@@ -142,7 +172,7 @@ struct AuthEntryView: View {
     private var formBlock: some View {
         VStack(alignment: .leading, spacing: 14) {
             if mode == .register {
-                fieldLabel("FULL NAME")
+                fieldLabel(L10n.t("auth_full_name"))
                 fieldContainer(
                     icon: "person",
                     placeholder: "Cyber Kaka",
@@ -153,17 +183,19 @@ struct AuthEntryView: View {
                 )
             }
 
-            fieldLabel("EMAIL")
-            fieldContainer(
-                icon: "envelope",
-                placeholder: "your@email.com",
-                text: $email,
-                secure: false,
-                visible: true,
-                focused: .email
-            )
+            if mode != .resetPassword {
+                fieldLabel(L10n.t("auth_email"))
+                fieldContainer(
+                    icon: "envelope",
+                    placeholder: "your@email.com",
+                    text: $email,
+                    secure: false,
+                    visible: true,
+                    focused: .email
+                )
+            }
 
-            fieldLabel("PASSWORD")
+            fieldLabel(mode == .resetPassword ? "New Password" : L10n.t("auth_password"))
             fieldContainer(
                 icon: "lock",
                 placeholder: "••••••••",
@@ -174,22 +206,21 @@ struct AuthEntryView: View {
                 onToggleVisibility: { isPasswordVisible.toggle() }
             )
 
-            if mode == .register {
+            if mode == .register || mode == .resetPassword {
                 fieldContainer(
                     icon: "lock.rotation",
-                    placeholder: "confirm password",
+                    placeholder: mode == .resetPassword ? "confirm new password" : "confirm password",
                     text: $confirmPassword,
                     secure: true,
                     visible: isConfirmPasswordVisible,
                     focused: .confirmPassword,
                     onToggleVisibility: { isConfirmPasswordVisible.toggle() }
                 )
-            } else {
+            } else if mode == .signIn {
                 HStack {
                     Spacer()
-                    Button("Forgot password?") {
-                        messageText = "请在账户中心使用“修改密码”功能。"
-                        showMessage = true
+                    Button(L10n.t("auth_forgot_password")) {
+                        Task { await sendPasswordReset() }
                     }
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.black.opacity(0.58))
@@ -199,36 +230,50 @@ struct AuthEntryView: View {
     }
 
     private var authPrimaryButton: some View {
-        Button(submitting ? "PROCESSING..." : mode.primaryButtonTitle) {
+        Button {
             submitEmailAuth()
+        } label: {
+            Text(submitting ? L10n.t("processing") : mode.primaryButtonTitle)
+                .frame(maxWidth: .infinity)
+                .frame(height: 58)
+                .background(accent)
+                .foregroundColor(.white)
+                .font(.system(size: 17, weight: .semibold))
+                .clipShape(RoundedRectangle(cornerRadius: 29, style: .continuous))
+                .appFullSurfaceTapTarget(.roundedRect(29))
         }
         .disabled(submitting)
-        .frame(maxWidth: .infinity)
-        .frame(height: 58)
-        .background(accent)
-        .foregroundColor(.white)
-        .font(.system(size: 17, weight: .semibold))
-        .clipShape(RoundedRectangle(cornerRadius: 29, style: .continuous))
         .shadow(color: accent.opacity(0.28), radius: 20, x: 0, y: 12)
     }
 
     private var switchModeRow: some View {
         HStack(spacing: 8) {
             if mode == .signIn {
-                Text("Don't have an account?")
+                Text(L10n.t("auth_no_account"))
                     .foregroundColor(.black.opacity(0.56))
-                Button("Sign up") {
+                Button(L10n.t("auth_sign_up")) {
                     withAnimation(.easeInOut(duration: 0.16)) {
                         mode = .register
                     }
                 }
                 .foregroundColor(accent)
                 .fontWeight(.bold)
-            } else {
-                Text("Already have an account?")
+            } else if mode == .register {
+                Text(L10n.t("auth_have_account"))
                     .foregroundColor(.black.opacity(0.56))
-                Button("Sign in") {
+                Button(L10n.t("auth_sign_in_lower")) {
                     withAnimation(.easeInOut(duration: 0.16)) {
+                        mode = .signIn
+                    }
+                }
+                .foregroundColor(accent)
+                .fontWeight(.bold)
+            } else {
+                Text(L10n.t("auth_remembered_password"))
+                    .foregroundColor(.black.opacity(0.56))
+                Button(L10n.t("auth_sign_in_lower")) {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        clearPasswordResetDraft()
                         mode = .signIn
                     }
                 }
@@ -244,7 +289,7 @@ struct AuthEntryView: View {
             Rectangle()
                 .fill(Color.black.opacity(0.10))
                 .frame(height: 1)
-            Text("OR")
+            Text(L10n.t("or"))
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(.black.opacity(0.56))
             Rectangle()
@@ -256,29 +301,28 @@ struct AuthEntryView: View {
 
     private var socialButtons: some View {
         VStack(spacing: 12) {
-            socialButton(title: "Google", iconName: "g.circle.fill", iconColor: .blue) {
-                Task { await submitOAuth(provider: .google) }
-            }
-
             socialButton(title: "Apple", iconName: "applelogo", iconColor: .black) {
-                Task { await submitOAuth(provider: .apple) }
+                Task { await submitAppleAuth() }
             }
         }
     }
 
     private var guestButton: some View {
-        Button("Continue as Guest") {
+        Button {
             showGuestNotice = true
+        } label: {
+            Text(L10n.t("continue_as_guest"))
+                .frame(maxWidth: .infinity)
+                .frame(height: 50)
+                .background(Color.clear)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 25, style: .continuous)
+                        .stroke(warm.opacity(0.5), lineWidth: 2)
+                )
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(warm)
+                .appFullSurfaceTapTarget(.roundedRect(25))
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: 50)
-        .background(Color.clear)
-        .overlay(
-            RoundedRectangle(cornerRadius: 25, style: .continuous)
-                .stroke(warm.opacity(0.5), lineWidth: 2)
-        )
-        .font(.system(size: 14, weight: .bold))
-        .foregroundColor(warm)
         .padding(.top, 6)
     }
 
@@ -362,23 +406,29 @@ struct AuthEntryView: View {
             .overlay(
                 RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(Color.black.opacity(0.04), lineWidth: 1)
             )
+            .appFullSurfaceTapTarget(.roundedRect(26))
         }
         .buttonStyle(CardPressButtonStyle(pressedScale: 0.985, pressedOpacity: 0.95))
     }
 
     private func submitEmailAuth() {
+        if mode == .resetPassword {
+            submitPasswordReset()
+            return
+        }
+
         let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !trimmedEmail.isEmpty, !trimmedPassword.isEmpty else {
-            messageText = "请先填写邮箱和密码"
+            messageText = L10n.t("auth_fill_email_password")
             showMessage = true
             return
         }
 
         if mode == .register,
            trimmedPassword != confirmPassword.trimmingCharacters(in: .whitespacesAndNewlines) {
-            messageText = "两次密码不一致"
+            messageText = L10n.t("auth_password_mismatch")
             showMessage = true
             return
         }
@@ -388,15 +438,35 @@ struct AuthEntryView: View {
             defer { submitting = false }
             do {
                 if mode == .register {
-                    try await sessionStore.registerWithEmail(email: trimmedEmail, password: trimmedPassword)
                     let normalized = normalizedDisplayName(fullName)
+                    let registered = try await sessionStore.registerWithEmail(
+                        email: trimmedEmail,
+                        password: trimmedPassword,
+                        displayName: normalized
+                    )
                     if !normalized.isEmpty {
                         profileName = normalized
                     }
-                    onAuthenticated?()
+                    pendingVerificationEmail = registered.email
+                    if registered.emailVerificationRequired {
+                        showVerificationSheet = true
+                    } else {
+                        try await sessionStore.loginWithEmail(email: trimmedEmail, password: trimmedPassword)
+                        onAuthenticated?()
+                    }
                 } else {
-                    try await sessionStore.loginWithEmail(email: trimmedEmail, password: trimmedPassword)
-                    onAuthenticated?()
+                    do {
+                        try await sessionStore.loginWithEmail(email: trimmedEmail, password: trimmedPassword)
+                        pendingVerificationEmail = trimmedEmail
+                        onAuthenticated?()
+                    } catch {
+                        if isEmailVerificationRequired(error) {
+                            pendingVerificationEmail = trimmedEmail
+                            showVerificationSheet = true
+                        } else {
+                            throw error
+                        }
+                    }
                 }
             } catch {
                 messageText = error.localizedDescription
@@ -405,28 +475,162 @@ struct AuthEntryView: View {
         }
     }
 
-    private func submitOAuth(provider: OAuthProvider) async {
+    private func submitAppleAuth() async {
         submitting = true
         defer { submitting = false }
         do {
-            let token: String
-            switch provider {
-            case .apple:
-                token = try await AppleSignInService.signIn()
-            case .google:
-                token = try await GoogleSignInService.signIn()
-            }
-            let providerRaw = (provider == .apple) ? "apple" : "google"
-            try await sessionStore.loginWithOAuth(provider: providerRaw, idToken: token)
+            let appleSession = try await AppleSignInService.signIn()
+            try await sessionStore.loginWithApple(idToken: appleSession.idToken)
             onAuthenticated?()
         } catch {
-            messageText = error.localizedDescription
+            messageText = localizedOAuthErrorMessage(error, provider: .apple)
             showMessage = true
+        }
+    }
+
+    private func isEmailVerificationRequired(_ error: Error) -> Bool {
+        guard let backendError = error as? BackendAPIError,
+              let message = backendError.serverMessage else { return false }
+        return message.localizedCaseInsensitiveContains("email not verified")
+    }
+
+    private func sendPasswordReset() async {
+        let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedEmail.isEmpty else {
+            messageText = L10n.t("auth_fill_email_password")
+            showMessage = true
+            return
+        }
+        submitting = true
+        defer { submitting = false }
+        do {
+            try await sessionStore.sendPasswordReset(email: trimmedEmail)
+            messageText = "Password reset email sent."
+        } catch {
+            messageText = error.localizedDescription
+        }
+        showMessage = true
+    }
+
+    private func submitPasswordReset() {
+        let trimmedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedConfirmPassword = confirmPassword.trimmingCharacters(in: .whitespacesAndNewlines)
+        let token = pendingPasswordResetToken?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        guard !token.isEmpty else {
+            messageText = "Reset link is missing or invalid."
+            showMessage = true
+            return
+        }
+
+        guard !trimmedPassword.isEmpty, !trimmedConfirmPassword.isEmpty else {
+            messageText = "Please enter and confirm your new password."
+            showMessage = true
+            return
+        }
+
+        guard trimmedPassword == trimmedConfirmPassword else {
+            messageText = L10n.t("auth_password_mismatch")
+            showMessage = true
+            return
+        }
+
+        Task {
+            submitting = true
+            defer { submitting = false }
+            do {
+                try await sessionStore.resetPassword(token: token, newPassword: trimmedPassword)
+                deepLinkStore.consumePendingPasswordResetToken()
+                clearPasswordResetDraft()
+                mode = .signIn
+                messageText = "Password updated. Please sign in with your new password."
+            } catch {
+                messageText = error.localizedDescription
+            }
+            showMessage = true
+        }
+    }
+
+    private func refreshVerificationState() async throws -> Bool {
+        let trimmedEmail = pendingVerificationEmail?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let trimmedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedEmail.isEmpty, !trimmedPassword.isEmpty else {
+            throw BackendAPIError.server("请重新输入邮箱和密码后再继续。")
+        }
+        do {
+            try await sessionStore.loginWithEmail(email: trimmedEmail, password: trimmedPassword)
+            showVerificationSheet = false
+            onAuthenticated?()
+            return true
+        } catch {
+            if isEmailVerificationRequired(error) {
+                return false
+            }
+            throw error
         }
     }
 
     private func normalizedDisplayName(_ raw: String) -> String {
         let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return value.isEmpty ? "" : value.uppercased()
+    }
+
+    private var titleText: String {
+        switch mode {
+        case .signIn:
+            return L10n.t("auth_sign_in")
+        case .register:
+            return L10n.t("auth_sign_up")
+        case .resetPassword:
+            return "Reset Password"
+        }
+    }
+
+    private var subtitleText: String {
+        switch mode {
+        case .signIn:
+            return L10n.t("auth_sign_in_subtitle")
+        case .register:
+            return L10n.t("auth_create_account_subtitle")
+        case .resetPassword:
+            return "Choose a new password for your account."
+        }
+    }
+
+    private func adoptPendingPasswordResetTokenIfNeeded() {
+        let token = deepLinkStore.pendingPasswordResetToken?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !token.isEmpty else { return }
+        pendingPasswordResetToken = token
+        password = ""
+        confirmPassword = ""
+        withAnimation(.easeInOut(duration: 0.16)) {
+            mode = .resetPassword
+        }
+    }
+
+    private func clearPasswordResetDraft() {
+        pendingPasswordResetToken = nil
+        password = ""
+        confirmPassword = ""
+    }
+
+    private func localizedOAuthErrorMessage(_ error: Error, provider: OAuthProvider) -> String {
+        if provider == .apple, let authError = error as? ASAuthorizationError {
+            switch authError.code {
+            case .canceled:
+                return "Apple 登录已取消"
+            case .failed:
+                return "Apple 登录失败，请稍后重试"
+            case .invalidResponse:
+                return "Apple 登录返回无效响应"
+            case .notHandled:
+                return "Apple 登录请求未被系统处理"
+            case .unknown:
+                return "Apple 登录失败（错误码 1000）。请检查 Sign in with Apple capability、证书签名和设备 Apple ID 登录状态。"
+            @unknown default:
+                return "Apple 登录失败：\(authError.localizedDescription)"
+            }
+        }
+        return error.localizedDescription
     }
 }

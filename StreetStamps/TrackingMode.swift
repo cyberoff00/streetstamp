@@ -7,6 +7,13 @@
 
 import Foundation
 import CoreLocation
+import SwiftUI
+
+struct MapTrackingModePillPresentation: Equatable {
+    let symbolName: String
+    let iconFontSize: CGFloat
+    let foregroundOpacity: Double
+}
 
 /// 追踪模式：运动 vs 日常
 enum TrackingMode: String, Codable, CaseIterable {
@@ -24,6 +31,23 @@ enum TrackingMode: String, Codable, CaseIterable {
         switch self {
         case .sport: return "figure.run"
         case .daily: return "figure.walk.motion"
+        }
+    }
+
+    var mapPillPresentation: MapTrackingModePillPresentation {
+        switch self {
+        case .sport:
+            return MapTrackingModePillPresentation(
+                symbolName: "figure.run",
+                iconFontSize: 12,
+                foregroundOpacity: 0.82
+            )
+        case .daily:
+            return MapTrackingModePillPresentation(
+                symbolName: "figure.walk.motion",
+                iconFontSize: 12,
+                foregroundOpacity: 0.82
+            )
         }
     }
 }
@@ -87,7 +111,7 @@ struct TrackingModeConfig {
         enableStorageDownsample: false,     // 不抽稀，保留完整轨迹
         storageMaxPointsPerHour: 99999,
         
-        renderDebounceInterval: 0.08        // 12Hz渲染
+        renderDebounceInterval: 0.16        // 约6Hz渲染，保留实时感同时降低前台重绘
     )
     
     /// 日常模式：省电，适合8小时daytrip
@@ -114,7 +138,7 @@ struct TrackingModeConfig {
         enableStorageDownsample: true,      // 启用存盘抽稀
         storageMaxPointsPerHour: 200,       // 每小时最多200点
         
-        renderDebounceInterval: 0.25        // 4Hz渲染
+        renderDebounceInterval: 0.5         // 2Hz渲染，更适合日常长时记录
     )
     
     /// 根据模式获取配置
@@ -141,9 +165,9 @@ extension TrackingModeConfig {
                 backgroundMinDistance: 15,
                 maxAcceptableAccuracy: 60,
                 lockAccuracy: 30,
-                enableOneEuroFilter: false,
-                oneEuroMinCutoff: oneEuroMinCutoff,
-                oneEuroBeta: oneEuroBeta,
+                enableOneEuroFilter: true,
+                oneEuroMinCutoff: 1.3,
+                oneEuroBeta: 0.04,
                 turnKeepAngle: 22,
                 gapSecondsThreshold: 45,
                 gapDistanceThreshold: 800,
@@ -178,7 +202,7 @@ extension TrackingModeConfig {
                 renderDebounceInterval: 0.1
             )
             
-        case .transit, .bike:
+        case .transit:
             return TrackingModeConfig(
                 foregroundMinDistance: 15,
                 backgroundMinDistance: 30,
@@ -197,6 +221,27 @@ extension TrackingModeConfig {
                 enableStorageDownsample: true,
                 storageMaxPointsPerHour: 180,
                 renderDebounceInterval: 0.25
+            )
+
+        case .bike:
+            return TrackingModeConfig(
+                foregroundMinDistance: 9,
+                backgroundMinDistance: 16,
+                maxAcceptableAccuracy: 65,
+                lockAccuracy: 30,
+                enableOneEuroFilter: true,
+                oneEuroMinCutoff: 1.05,
+                oneEuroBeta: 0.05,
+                turnKeepAngle: 18,
+                gapSecondsThreshold: 45,
+                gapDistanceThreshold: 900,
+                stationaryMinMoveMeters: 12,
+                stationarySpeedThreshold: 0.9,
+                stationaryHoldSeconds: 12,
+                deltaPersistInterval: 120,
+                enableStorageDownsample: false,
+                storageMaxPointsPerHour: 500,
+                renderDebounceInterval: 0.12
             )
             
         case .drive, .motorcycle:

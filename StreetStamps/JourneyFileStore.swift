@@ -65,21 +65,23 @@ final class JourneysFileStore {
 
     /// Append-only coordinate persistence for ongoing journeys.
     /// Writes one JSON array per line to keep decoding simple and IO minimal.
+    /// Uses read-all + append + atomic-write to avoid partial lines on crash.
     func appendDelta(journeyId: String, newCoords: [CoordinateCodable]) throws {
         guard !newCoords.isEmpty else { return }
         try ensureBaseDir()
 
         let target = urlDelta(for: journeyId)
-        var data = try JSONEncoder().encode(newCoords)
-        data.append(0x0A) // newline
+        var newLine = try JSONEncoder().encode(newCoords)
+        newLine.append(0x0A) // newline
 
         if fm.fileExists(atPath: target.path) {
-            let handle = try FileHandle(forWritingTo: target)
-            handle.seekToEndOfFile()
-            handle.write(data)
-            handle.closeFile()
+            var existing = try Data(contentsOf: target)
+            existing.append(newLine)
+            let tmp = target.appendingPathExtension("tmp")
+            try existing.write(to: tmp, options: .atomic)
+            _ = try fm.replaceItemAt(target, withItemAt: tmp)
         } else {
-            try data.write(to: target, options: .atomic)
+            try newLine.write(to: target, options: .atomic)
         }
     }
 
@@ -139,25 +141,31 @@ final class JourneysFileStore {
             out = b
         }
 
-        // Apply deltas (if any)
+        // Apply deltas (if any). Delta corruption must NOT prevent loading
+        // the journey — losing the meta (endTime, memories, city) is far worse
+        // than losing some trailing coordinates.
         if fm.fileExists(atPath: deltaURL.path) {
-            let raw = try String(contentsOf: deltaURL, encoding: .utf8)
-            let lines = raw.split(separator: "\n")
+            do {
+                let raw = try String(contentsOf: deltaURL, encoding: .utf8)
+                let lines = raw.split(separator: "\n")
 
-            if !lines.isEmpty {
-                let decoder = JSONDecoder()
-                for line in lines {
-                    guard !line.isEmpty else { continue }
-                    if let data = line.data(using: .utf8),
-                       let chunk = try? decoder.decode([CoordinateCodable].self, from: data) {
-                        for c in chunk {
-                            if let last = out.coordinates.last, last.lat == c.lat, last.lon == c.lon {
-                                continue
+                if !lines.isEmpty {
+                    let decoder = JSONDecoder()
+                    for line in lines {
+                        guard !line.isEmpty else { continue }
+                        if let data = line.data(using: .utf8),
+                           let chunk = try? decoder.decode([CoordinateCodable].self, from: data) {
+                            for c in chunk {
+                                if let last = out.coordinates.last, last.lat == c.lat, last.lon == c.lon {
+                                    continue
+                                }
+                                out.coordinates.append(c)
                             }
-                            out.coordinates.append(c)
                         }
                     }
                 }
+            } catch {
+                print("⚠️ journey delta read failed for \(id), using meta-only: \(error)")
             }
         }
 
@@ -177,5 +185,22 @@ final class JourneysFileStore {
                 cont.resume(returning: result)
             }
         }
+    }
+
+    /// Find journey files on disk that are not in the index (orphans from crash between file write and index update).
+    func scanOrphanedIDs(knownIDs: Set<String>) -> [String] {
+        guard let files = try? fm.contentsOfDirectory(at: baseURL, includingPropertiesForKeys: nil) else { return [] }
+        var orphans: [String] = []
+        for file in files {
+            let name = file.lastPathComponent
+            guard name.hasSuffix(".json"),
+                  !name.contains(".meta."),
+                  !name.hasSuffix(".tmp.json") else { continue }
+            let id = String(name.dropLast(5)) // strip ".json"
+            if !knownIDs.contains(id) {
+                orphans.append(id)
+            }
+        }
+        return orphans
     }
 }

@@ -26,6 +26,8 @@ final class LiveActivityManager: ObservableObject {
     private var cachedDistance: Double = 0
     private var cachedMemoriesCount: Int = 0
     private var cachedIsPaused: Bool = false
+    private var accumulatedPausedDuration: TimeInterval = 0
+    private var currentPauseStartedAt: Date?
     
     // App Group UserDefaults 用于与 Widget 通信
     private let sharedDefaults = UserDefaults(suiteName: "group.com.streetstamps.shared")
@@ -36,10 +38,35 @@ final class LiveActivityManager: ObservableObject {
     }
     
     // MARK: - Public API
-    
+
     /// 检查设备是否支持 Live Activity
     var isLiveActivitySupported: Bool {
         ActivityAuthorizationInfo().areActivitiesEnabled
+    }
+
+    /// End all Live Activities left over from a previous process (e.g. app was killed).
+    /// Call this on cold start when there is no ongoing journey to resume.
+    func endAllStaleActivities() {
+        guard isLiveActivitySupported else { return }
+        Task {
+            for activity in Activity<TrackingActivityAttributes>.activities {
+                let finalState = TrackingActivityAttributes.ContentState(
+                    distanceMeters: 0,
+                    elapsedSeconds: 0,
+                    isTracking: false,
+                    isPaused: false,
+                    memoriesCount: 0
+                )
+                await activity.end(
+                    ActivityContent(state: finalState, staleDate: nil),
+                    dismissalPolicy: .immediate
+                )
+            }
+            currentActivity = nil
+            trackingStartTime = nil
+            accumulatedPausedDuration = 0
+            currentPauseStartedAt = nil
+        }
     }
     
     /// 开始 Live Activity
@@ -54,11 +81,14 @@ final class LiveActivityManager: ObservableObject {
             endActivity()
         }
         
-        trackingStartTime = Date()
-        
+        let startTime = Date()
+        trackingStartTime = startTime
+        accumulatedPausedDuration = 0
+        currentPauseStartedAt = nil
+
         let attributes = TrackingActivityAttributes(
             trackingMode: mode == .sport ? "sport" : "daily",
-            startTime: trackingStartTime!
+            startTime: startTime
         )
         
         let initialState = TrackingActivityAttributes.ContentState(
@@ -112,6 +142,15 @@ final class LiveActivityManager: ObservableObject {
     
     /// 暂停状态更新
     func updatePauseState(isPaused: Bool, distanceMeters: Double, elapsedSeconds: Int, memoriesCount: Int) {
+        let now = Date()
+        if isPaused {
+            if currentPauseStartedAt == nil {
+                currentPauseStartedAt = now
+            }
+        } else if let pauseStart = currentPauseStartedAt {
+            accumulatedPausedDuration += max(0, now.timeIntervalSince(pauseStart))
+            currentPauseStartedAt = nil
+        }
         cachedIsPaused = isPaused
         updateActivity(
             
@@ -142,6 +181,8 @@ final class LiveActivityManager: ObservableObject {
             )
             currentActivity = nil
             trackingStartTime = nil
+            accumulatedPausedDuration = 0
+            currentPauseStartedAt = nil
             print("[LiveActivity] Ended")
         }
     }
@@ -149,7 +190,13 @@ final class LiveActivityManager: ObservableObject {
     /// 获取当前已追踪的秒数
     func getElapsedSeconds() -> Int {
         guard let startTime = trackingStartTime else { return 0 }
-        return Int(Date().timeIntervalSince(startTime))
+        let now = Date()
+        let elapsed = max(0, now.timeIntervalSince(startTime))
+        var paused = max(0, accumulatedPausedDuration)
+        if let pauseStart = currentPauseStartedAt {
+            paused += max(0, now.timeIntervalSince(pauseStart))
+        }
+        return Int(max(0, elapsed - paused))
     }
     // MARK: - ✅ 定时更新 Timer
     
@@ -194,6 +241,15 @@ final class LiveActivityManager: ObservableObject {
     
     @objc private func checkPendingWidgetActions() {
         guard let defaults = sharedDefaults else { return }
+
+        if defaults.bool(forKey: "pendingOpenCapture") {
+            defaults.set(false, forKey: "pendingOpenCapture")
+
+            NotificationCenter.default.post(
+                name: .openCaptureFromWidget,
+                object: nil
+            )
+        }
         
         // 检查是否有待处理的"添加记忆"操作
         if defaults.bool(forKey: "pendingAddMemory") {
@@ -221,6 +277,7 @@ final class LiveActivityManager: ObservableObject {
 // MARK: - Notification Names
 
 extension Notification.Name {
+    static let openCaptureFromWidget = Notification.Name("openCaptureFromWidget")
     static let openAddMemoryFromWidget = Notification.Name("openAddMemoryFromWidget")
     static let togglePauseFromWidget = Notification.Name("togglePauseFromWidget")
 }
@@ -232,6 +289,7 @@ extension TrackingService {
     /// 开始追踪时启动 Live Activity
     func startLiveActivity() {
         Task { @MainActor in
+            guard AppSettings.isLiveActivityEnabled else { return }
             LiveActivityManager.shared.startActivity(mode: trackingMode)
         }
     }
@@ -239,10 +297,14 @@ extension TrackingService {
     /// 更新 Live Activity（在位置更新时调用）
     func updateLiveActivity(memoriesCount: Int = 0) {
         Task { @MainActor in
-            let elapsedSeconds = LiveActivityManager.shared.getElapsedSeconds()
+            refreshDurations()
+            guard AppSettings.isLiveActivityEnabled else {
+                LiveActivityManager.shared.endActivity()
+                return
+            }
             LiveActivityManager.shared.updateActivity(
                 distanceMeters: totalDistance,
-                elapsedSeconds: elapsedSeconds,
+                elapsedSeconds: movingSeconds,
                 isPaused: isPaused,
                 memoriesCount: memoriesCount
             )

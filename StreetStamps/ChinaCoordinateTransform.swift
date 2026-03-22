@@ -8,13 +8,18 @@ import CoreLocation
 ///   Instead, opt-in only when we have an authoritative ISO2 (`CN`) or a canonical cityKey ending with `|CN`.
 /// - The GCJ algorithm itself still uses a common bbox validity gate (to avoid producing garbage output).
 enum ChinaCoordinateTransform {
+    static func normalizedConfirmedISO2(_ countryISO2: String?) -> String? {
+        let iso = countryISO2?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard let iso, !iso.isEmpty else { return nil }
+        return iso
+    }
 
     /// Single, conservative source of truth for whether we should render in GCJ-02.
     ///
     /// - Prefer `countryISO2` (from reverse geocode / canonical resolver).
     /// - Fallback to `cityKey` suffix (`"<City>|CN"`).
     static func shouldApplyGCJ(countryISO2: String?, cityKey: String? = nil) -> Bool {
-        if let iso = countryISO2?.uppercased(), iso == "CN" { return true }
+        if normalizedConfirmedISO2(countryISO2) == "CN" { return true }
         if let key = cityKey, let suffix = key.split(separator: "|").last?.uppercased(), suffix == "CN" { return true }
         return false
     }

@@ -50,13 +50,13 @@ struct WatchTrackingView: View {
                     }
 
                     if recorder.state == .idle {
-                        Text("开始")
+                        Text(NSLocalizedString("watch_start", comment: ""))
                             .font(.system(size: 16, weight: .bold, design: .rounded))
                             .foregroundStyle(WatchTheme.ink)
                     } else {
                         HStack(spacing: 8) {
                             Button(action: pauseOrResume) {
-                                Text(recorder.state == .recording ? "暂停" : "恢复")
+                                Text(recorder.state == .recording ? NSLocalizedString("watch_pause", comment: "") : NSLocalizedString("watch_resume", comment: ""))
                                     .font(.system(size: 14, weight: .bold, design: .rounded))
                                     .frame(maxWidth: .infinity)
                                     .frame(height: 34)
@@ -65,7 +65,7 @@ struct WatchTrackingView: View {
                             .tint(WatchTheme.accent)
 
                             Button(action: endAction) {
-                                Text("结束")
+                                Text(NSLocalizedString("watch_end", comment: ""))
                                     .font(.system(size: 14, weight: .bold, design: .rounded))
                                     .frame(maxWidth: .infinity)
                                     .frame(height: 34)
@@ -92,14 +92,14 @@ struct WatchTrackingView: View {
             .onChange(of: context.date) { _, newDate in
                 recorder.handleTimerTick(now: newDate)
             }
-            .alert("低位移提醒", isPresented: $recorder.inactivityAlertPresented) {
-                Button("继续") {
+            .alert(NSLocalizedString("watch_inactivity_title", comment: ""), isPresented: $recorder.inactivityAlertPresented) {
+                Button(NSLocalizedString("watch_continue", comment: "")) {
                     recorder.continueAfterInactivityAlert()
                 }
-                Button("暂停") {
+                Button(NSLocalizedString("watch_pause", comment: "")) {
                     recorder.pauseFromInactivityAlert()
                 }
-                Button("30分钟后提醒") {
+                Button(NSLocalizedString("watch_remind_30m", comment: "")) {
                     recorder.snoozeInactivityAlert()
                 }
             } message: {

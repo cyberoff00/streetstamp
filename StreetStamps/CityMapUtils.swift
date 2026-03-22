@@ -77,6 +77,56 @@ public func regionForCityWhole(
 
     return nil
 }
+
+enum JourneySnapshotFraming {
+    static func region(
+        for coordsWGS84: [CLLocationCoordinate2D],
+        countryISO2: String?,
+        cityKey: String?,
+        targetAspectRatio: CGFloat
+    ) -> MKCoordinateRegion? {
+        let coords = MapCoordAdapter.forMapKit(
+            coordsWGS84.filter(\.isValid),
+            countryISO2: countryISO2,
+            cityKey: cityKey
+        )
+        guard !coords.isEmpty else { return nil }
+
+        var minLat = coords[0].latitude
+        var maxLat = coords[0].latitude
+        var minLon = coords[0].longitude
+        var maxLon = coords[0].longitude
+
+        for coord in coords.dropFirst() {
+            minLat = min(minLat, coord.latitude)
+            maxLat = max(maxLat, coord.latitude)
+            minLon = min(minLon, coord.longitude)
+            maxLon = max(maxLon, coord.longitude)
+        }
+
+        let rawLat = maxLat - minLat
+        let rawLon = maxLon - minLon
+        let paddingFactor = 1.18
+        var latDelta = max(0.01, rawLat * paddingFactor)
+        var lonDelta = max(0.01, rawLon * paddingFactor)
+
+        let safeAspectRatio = max(1.0, Double(targetAspectRatio))
+        if lonDelta / latDelta < safeAspectRatio {
+            lonDelta = latDelta * safeAspectRatio
+        } else {
+            latDelta = lonDelta / safeAspectRatio
+        }
+
+        return MKCoordinateRegion(
+            center: CLLocationCoordinate2D(
+                latitude: (minLat + maxLat) / 2,
+                longitude: (minLon + maxLon) / 2
+            ),
+            span: MKCoordinateSpan(latitudeDelta: latDelta, longitudeDelta: lonDelta)
+        )
+    }
+}
+
 enum MapCoordAdapter {
     /// MapKit in Mainland China expects GCJ-02. We only opt-in when we have an authoritative signal.
     static func forMapKit(
@@ -94,6 +144,49 @@ enum MapCoordAdapter {
         cityKey: String? = nil
     ) -> [CLLocationCoordinate2D] {
         coords.map { forMapKit($0, countryISO2: countryISO2, cityKey: cityKey) }
+    }
+}
+
+enum JourneyMemoryMapCoordinateResolver {
+    static func mapCoordinate(
+        rawCoordinate: CLLocationCoordinate2D,
+        preferredCityKey: String?,
+        fallbackCountryISO2: String?,
+        fallbackCityKey: String?
+    ) -> CLLocationCoordinate2D {
+        let normalizedPreferredCityKey = preferredCityKey?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let cityKeyForDecision: String? = {
+            if let normalizedPreferredCityKey, !normalizedPreferredCityKey.isEmpty {
+                return normalizedPreferredCityKey
+            }
+            return fallbackCityKey
+        }()
+        let countryForDecision: String? = {
+            guard cityKeyForDecision == nil else { return nil }
+            return fallbackCountryISO2
+        }()
+        return MapCoordAdapter.forMapKit(
+            rawCoordinate,
+            countryISO2: countryForDecision,
+            cityKey: cityKeyForDecision
+        )
+    }
+
+    static func mapCoordinate(
+        for memory: JourneyMemory,
+        fallbackCountryISO2: String?,
+        fallbackCityKey: String?
+    ) -> CLLocationCoordinate2D {
+        mapCoordinate(
+            rawCoordinate: CLLocationCoordinate2D(
+                latitude: memory.coordinate.0,
+                longitude: memory.coordinate.1
+            ),
+            preferredCityKey: memory.cityKey,
+            fallbackCountryISO2: fallbackCountryISO2,
+            fallbackCityKey: fallbackCityKey
+        )
     }
 }
 
@@ -197,10 +290,11 @@ enum CityDeepRenderEngine {
     }
 
     static func routeBaseColor(for appearanceRaw: String) -> UIColor {
-        if appearanceRaw == MapAppearanceStyle.light.rawValue {
-            return UIColor(red: 214.0 / 255.0, green: 109.0 / 255.0, blue: 34.0 / 255.0, alpha: 1.0)
-        }
-        return UIColor(red: 221.0 / 255.0, green: 247.0 / 255.0, blue: 161.0 / 255.0, alpha: 1.0)
+        MapAppearanceSettings.routeBaseColor(for: appearanceRaw)
+    }
+
+    static func routeGlowColor(for appearanceRaw: String) -> UIColor {
+        MapAppearanceSettings.routeGlowColor(for: appearanceRaw)
     }
 
     static func drawStyledSegments(
@@ -212,20 +306,35 @@ enum CityDeepRenderEngine {
         guard !segments.isEmpty else { return }
 
         let base = routeBaseColor(for: appearanceRaw)
+        let glowTint = routeGlowColor(for: appearanceRaw)
+        let isDark = MapAppearanceSettings.resolved(from: appearanceRaw) == .dark
         let dash = RouteRenderStyleTokens.dashLengths
 
         for seg in segments where seg.coords.count >= 2 {
             let points = seg.coords.map(snapshot.point(for:)).filter { $0.x.isFinite && $0.y.isFinite }
             guard points.count >= 2 else { continue }
 
-            let weight = CGFloat(max(0, min(1, seg.repeatWeight)))
-            let glowWidth: CGFloat = seg.isGap ? 2.0 : (3.0 + weight * 1.2)
-            let coreWidth: CGFloat = seg.isGap ? 1.1 : (1.6 + weight * 0.8)
-            let glowAlpha: CGFloat = seg.isGap ? 0.08 : 0.12
-            let coreAlpha: CGFloat = seg.isGap ? 0.30 : 0.84
+            let mainWidth: CGFloat = seg.isGap ? 1.2 : 2.2
+            let glowWidth: CGFloat = seg.isGap ? mainWidth * 2.2 : mainWidth * 2.5
+            let segDash: [CGFloat]? = seg.isGap ? dash : nil
 
-            drawPolyline(points: points, in: context, color: base.withAlphaComponent(glowAlpha), lineWidth: glowWidth, dash: seg.isGap ? dash : nil)
-            drawPolyline(points: points, in: context, color: base.withAlphaComponent(coreAlpha), lineWidth: coreWidth, dash: seg.isGap ? dash : nil)
+            // 1) Glow with shadow blur
+            context.saveGState()
+            context.setShadow(
+                offset: .zero,
+                blur: isDark ? 5.0 : 2.0,
+                color: glowTint.withAlphaComponent(isDark ? 0.50 : 0.30).cgColor
+            )
+            drawPolyline(points: points, in: context, color: glowTint.withAlphaComponent(seg.isGap ? 0.10 : (isDark ? 0.35 : 0.20)), lineWidth: glowWidth, dash: segDash)
+            context.restoreGState()
+
+            // 2) Main line
+            drawPolyline(points: points, in: context, color: base.withAlphaComponent(seg.isGap ? 0.50 : 1.0), lineWidth: mainWidth, dash: segDash)
+
+            // 3) Highlight
+            if !seg.isGap {
+                drawPolyline(points: points, in: context, color: UIColor.white.withAlphaComponent(isDark ? 0.45 : 0.25), lineWidth: mainWidth * 0.35, dash: nil)
+            }
         }
     }
 

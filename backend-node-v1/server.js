@@ -6,15 +6,54 @@ const express = require("express");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
+const compression = require("compression");
+let Pool = null;
+try {
+  ({ Pool } = require("pg"));
+} catch {
+  Pool = null;
+}
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const { OAuth2Client } = require("google-auth-library");
 const { createRemoteJWKSet, jwtVerify } = require("jose");
+const { canSendPostcard } = require("./postcard-rules");
+const bcrypt = require("bcrypt");
+const DB = require("./db-relational");
+const APNs = require("./apns");
 
 const PORT = Number(process.env.PORT || 18080);
 const JWT_SECRET = (process.env.JWT_SECRET || "change-me-in-production").trim();
 const DATA_FILE = (process.env.DATA_FILE || "./data/data.json").trim();
 const MEDIA_DIR = (process.env.MEDIA_DIR || "./media").trim();
 const MEDIA_PUBLIC_BASE = (process.env.MEDIA_PUBLIC_BASE || "").trim();
+const DATABASE_URL = (process.env.DATABASE_URL || "").trim();
+const PGHOST = (process.env.PGHOST || "").trim();
+const PGPORT = Number(process.env.PGPORT || 5432);
+const PGUSER = (process.env.PGUSER || "").trim();
+const PGPASSWORD = (process.env.PGPASSWORD || "").trim();
+const PGDATABASE = (process.env.PGDATABASE || "").trim();
+const PGSSL = String(process.env.PGSSL || "").trim().toLowerCase();
+const PG_STATE_KEY = (process.env.PG_STATE_KEY || "global").trim();
+const PG_MAX_CLIENTS = Number(process.env.PG_MAX_CLIENTS || 20);
+const JSON_BODY_LIMIT_MB = Number(process.env.JSON_BODY_LIMIT_MB || 3);
+const MEDIA_UPLOAD_MAX_BYTES = Number(process.env.MEDIA_UPLOAD_MAX_BYTES || 10 * 1024 * 1024);
+const CORS_ALLOWED_ORIGINS = String(process.env.CORS_ALLOWED_ORIGINS || "").trim();
+const AUTH_RATE_LIMIT_WINDOW_MS = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000);
+const AUTH_RATE_LIMIT_MAX = Number(process.env.AUTH_RATE_LIMIT_MAX || 20);
+const AUTH_LOGIN_RATE_LIMIT_WINDOW_MS = Number(process.env.AUTH_LOGIN_RATE_LIMIT_WINDOW_MS || AUTH_RATE_LIMIT_WINDOW_MS);
+const AUTH_LOGIN_RATE_LIMIT_MAX = Number(process.env.AUTH_LOGIN_RATE_LIMIT_MAX || AUTH_RATE_LIMIT_MAX);
+const AUTH_REFRESH_RATE_LIMIT_WINDOW_MS = Number(process.env.AUTH_REFRESH_RATE_LIMIT_WINDOW_MS || 5 * 60 * 1000);
+const AUTH_REFRESH_RATE_LIMIT_MAX = Number(process.env.AUTH_REFRESH_RATE_LIMIT_MAX || 80);
+const WRITE_RATE_LIMIT_WINDOW_MS = Number(process.env.WRITE_RATE_LIMIT_WINDOW_MS || 60 * 1000);
+const WRITE_RATE_LIMIT_MAX = Number(process.env.WRITE_RATE_LIMIT_MAX || 40);
+const UPLOAD_RATE_LIMIT_WINDOW_MS = Number(process.env.UPLOAD_RATE_LIMIT_WINDOW_MS || 60 * 1000);
+const UPLOAD_RATE_LIMIT_MAX = Number(process.env.UPLOAD_RATE_LIMIT_MAX || 10);
+const TEST_EMAIL_OUTBOX_FILE = (process.env.TEST_EMAIL_OUTBOX_FILE || "").trim();
+const AUTH_LINK_BASE = (process.env.AUTH_LINK_BASE || MEDIA_PUBLIC_BASE || "").trim();
+const SES_FROM_EMAIL = (process.env.SES_FROM_EMAIL || "").trim();
+const RESEND_API_KEY = (process.env.RESEND_API_KEY || "").trim();
+const RESEND_FROM_EMAIL = (process.env.RESEND_FROM_EMAIL || "").trim();
+const RESEND_API_BASE = (process.env.RESEND_API_BASE || "https://api.resend.com").trim().replace(/\/+$/, "");
 
 const R2_ACCOUNT_ID = (process.env.R2_ACCOUNT_ID || "").trim();
 const R2_ACCESS_KEY_ID = (process.env.R2_ACCESS_KEY_ID || "").trim();
@@ -25,12 +64,66 @@ const R2_REGION = (process.env.R2_REGION || "auto").trim();
 const R2_PUBLIC_BASE = (process.env.R2_PUBLIC_BASE || "").trim();
 const GOOGLE_CLIENT_ID = (process.env.GOOGLE_CLIENT_ID || "").trim();
 const APPLE_AUDIENCES = (process.env.APPLE_AUDIENCES || process.env.APPLE_BUNDLE_ID || "").trim();
+const APPSTORE_FALLBACK_URL = (process.env.APPSTORE_FALLBACK_URL || "https://apps.apple.com/us/search?term=StreetStamps").trim();
+const WRITE_FREEZE_ENABLED = String(process.env.WRITE_FREEZE_ENABLED || "").trim().toLowerCase();
+const SOCIAL_DISABLED_REGIONS = (process.env.SOCIAL_DISABLED_REGIONS || "CN").trim().toUpperCase().split(",").map(s => s.trim()).filter(Boolean);
+const LEGACY_EMAIL_REVERIFY_EMAIL = normalizeEmail(process.env.LEGACY_EMAIL_REVERIFY_EMAIL || "yinterestingy@163.com");
 
 const visibilityPrivate = "private";
 const visibilityFriendsOnly = "friendsOnly";
 const visibilityPublic = "public";
+const allowedOrigins = CORS_ALLOWED_ORIGINS
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+const NODE_ENV = String(process.env.NODE_ENV || "").trim().toLowerCase();
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: Number.isFinite(MEDIA_UPLOAD_MAX_BYTES) && MEDIA_UPLOAD_MAX_BYTES > 0
+      ? MEDIA_UPLOAD_MAX_BYTES
+      : 10 * 1024 * 1024
+  }
+});
+const rateLimitState = new Map();
+
+function timingNowNs() {
+  return process.hrtime.bigint();
+}
+
+function elapsedMs(startNs) {
+  return Number((process.hrtime.bigint() - startNs) / 1000000n);
+}
+
+function logTiming(event, fields) {
+  console.info(`[timing] ${JSON.stringify({ event, ...fields })}`);
+}
+
+const pgEnabled = Boolean(DATABASE_URL || (PGHOST && PGUSER && PGDATABASE));
+let pgPool = null;
+let pgSchemaReady = false;
+if (pgEnabled) {
+  if (!Pool) {
+    throw new Error("pg module not installed but PostgreSQL config is enabled");
+  }
+  const poolConfig = {
+    max: Number.isFinite(PG_MAX_CLIENTS) && PG_MAX_CLIENTS > 0 ? PG_MAX_CLIENTS : 10
+  };
+  if (DATABASE_URL) {
+    poolConfig.connectionString = DATABASE_URL;
+  } else {
+    poolConfig.host = PGHOST;
+    poolConfig.port = Number.isFinite(PGPORT) && PGPORT > 0 ? PGPORT : 5432;
+    poolConfig.user = PGUSER;
+    poolConfig.password = PGPASSWORD;
+    poolConfig.database = PGDATABASE;
+  }
+  if (PGSSL === "require" || PGSSL === "true" || PGSSL === "1") {
+    poolConfig.ssl = { rejectUnauthorized: false };
+  }
+  pgPool = new Pool(poolConfig);
+}
 
 let r2Client = null;
 if (R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_BUCKET && R2_ENDPOINT) {
@@ -48,6 +141,170 @@ const appleAudienceList = APPLE_AUDIENCES
   .split(",")
   .map((x) => x.trim())
   .filter(Boolean);
+const rawAppleFixtures = process.env.TEST_APPLE_OAUTH_FIXTURES || "{}";
+let appleOAuthFixtures = {};
+try {
+  appleOAuthFixtures = JSON.parse(rawAppleFixtures);
+} catch {
+  appleOAuthFixtures = {};
+}
+function normalizeEmail(raw) {
+  const email = String(raw || "").trim().toLowerCase();
+  return email.includes("@") ? email : "";
+}
+
+function writeFreezeEnabled() {
+  return WRITE_FREEZE_ENABLED === "1"
+    || WRITE_FREEZE_ENABLED === "true"
+    || WRITE_FREEZE_ENABLED === "yes";
+}
+
+function parseTruthy(raw) {
+  if (typeof raw === "boolean") return raw;
+  const value = String(raw || "").trim().toLowerCase();
+  return value === "true" || value === "1";
+}
+
+function rejectWhenWriteFrozen(_req, res, next) {
+  if (!writeFreezeEnabled()) return next();
+  return res.status(503).json({
+    code: "write_frozen",
+    message: "service is temporarily read-only for migration"
+  });
+}
+
+function corsConfigured() {
+  return allowedOrigins.length > 0;
+}
+
+function originAllowed(origin) {
+  if (!origin) return true;
+  if (!corsConfigured()) return true;
+  return allowedOrigins.includes(origin);
+}
+
+function applySecurityHeaders(res) {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "same-origin");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+}
+
+function applyHTMLSecurityHeaders(res) {
+  applySecurityHeaders(res);
+  res.setHeader("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https:;");
+}
+
+function makeRateLimiter({ keyPrefix, windowMs, maxHits, keyResolver }) {
+  return function rateLimiter(req, res, next) {
+    const now = Date.now();
+    const safeWindow = Number.isFinite(windowMs) && windowMs > 0 ? windowMs : 60 * 1000;
+    const safeMax = Number.isFinite(maxHits) && maxHits > 0 ? maxHits : 20;
+    let resolvedKey = "";
+    if (typeof keyResolver === "function") {
+      try {
+        resolvedKey = String(keyResolver(req) || "").trim();
+      } catch {
+        resolvedKey = "";
+      }
+    }
+    if (!resolvedKey) {
+      resolvedKey = req.ip || req.socket?.remoteAddress || "unknown";
+    }
+    const clientKey = `${keyPrefix}:${resolvedKey}`;
+    const existing = rateLimitState.get(clientKey);
+    if (!existing || existing.resetAt <= now) {
+      rateLimitState.set(clientKey, { hits: 1, resetAt: now + safeWindow });
+      return next();
+    }
+    existing.hits += 1;
+    if (existing.hits > safeMax) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((existing.resetAt - now) / 1000));
+      res.setHeader("Retry-After", String(retryAfterSeconds));
+      return res.status(429).json({ message: "too many requests" });
+    }
+    return next();
+  };
+}
+
+function refreshRateLimitKey(req) {
+  const ip = req.ip || req.socket?.remoteAddress || "unknown";
+  const refreshToken = String(req.body?.refreshToken || "").trim();
+  if (!refreshToken) return `${ip}:no-token`;
+  const fingerprint = crypto.createHash("sha256").update(refreshToken).digest("hex").slice(0, 16);
+  return `${ip}:${fingerprint}`;
+}
+
+function weakJWTSecretConfigured() {
+  if (!JWT_SECRET) return true;
+  const normalized = JWT_SECRET.trim().toLowerCase();
+  if (normalized === "change-me-in-production") return true;
+  if (normalized === "change-me") return true;
+  if (normalized === "replace-with-a-long-random-secret") return true;
+  if (JWT_SECRET.length < 32) return true;
+  return false;
+}
+
+function productionConfigError() {
+  if (NODE_ENV !== "production") return "";
+  if (weakJWTSecretConfigured()) {
+    return "weak JWT_SECRET for production; set a high-entropy secret (>=32 chars)";
+  }
+  if (!corsConfigured()) {
+    return "CORS_ALLOWED_ORIGINS must be configured in production";
+  }
+  return "";
+}
+
+function escapeHTML(raw) {
+  return String(raw || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+async function verifyGoogleIdentity(idToken) {
+  const verifyOptions = { idToken };
+  if (GOOGLE_CLIENT_ID) verifyOptions.audience = GOOGLE_CLIENT_ID;
+  const ticket = await googleOAuthClient.verifyIdToken(verifyOptions);
+  const payload = ticket.getPayload() || {};
+  const subject = String(payload.sub || "").trim();
+  if (!subject) throw new Error("invalid google token subject");
+  const email = normalizeEmail(payload.email);
+  const emailVerified = parseTruthy(payload.email_verified);
+  return { subject, email, emailVerified };
+}
+
+async function verifyAppleIdentity(idToken) {
+  const fixture = appleOAuthFixtures[String(idToken || "").trim()];
+  if (fixture && typeof fixture === "object") {
+    const subject = String(fixture.sub || "").trim();
+    if (!subject) throw new Error("invalid apple token subject");
+    return {
+      subject,
+      email: normalizeEmail(fixture.email),
+      emailVerified: parseTruthy(fixture.email_verified)
+    };
+  }
+  const verifyOptions = { issuer: "https://appleid.apple.com" };
+  if (appleAudienceList.length === 1) verifyOptions.audience = appleAudienceList[0];
+  else if (appleAudienceList.length > 1) verifyOptions.audience = appleAudienceList;
+  const { payload } = await jwtVerify(idToken, appleJWKS, verifyOptions);
+  const subject = String(payload?.sub || "").trim();
+  if (!subject) throw new Error("invalid apple token subject");
+  const email = normalizeEmail(payload?.email);
+  const emailVerified = parseTruthy(payload?.email_verified);
+  return { subject, email, emailVerified };
+}
+
+async function verifyOAuthIdentity(provider, idToken) {
+  if (provider === "google") return verifyGoogleIdentity(idToken);
+  if (provider === "apple") return verifyAppleIdentity(idToken);
+  throw new Error("unsupported oauth provider");
+}
 
 function nowUnix() {
   return Math.floor(Date.now() / 1000);
@@ -62,11 +319,517 @@ function hashSHA256(raw) {
 }
 
 function hashPassword(pw) {
-  return hashSHA256(`StreetStamps::${pw}`);
+  return bcrypt.hashSync(pw, 8);
+}
+
+function verifyPassword(pw, hash) {
+  try {
+    return bcrypt.compareSync(pw, hash);
+  } catch {
+    return false;
+  }
 }
 
 function genInviteCode() {
   return randHex(4).toUpperCase();
+}
+
+function normalizeInviteCode(raw) {
+  return String(raw || "").trim().toUpperCase();
+}
+
+function isStrongPassword(password) {
+  const value = String(password || "");
+  if (value.length < 8) return false;
+  if (!/[A-Za-z]/.test(value)) return false;
+  if (!/[0-9]/.test(value)) return false;
+  if (!/[^A-Za-z0-9]/.test(value)) return false;
+  return true;
+}
+
+function emailVerificationExpiresAt() {
+  return nowUnix() + (24 * 60 * 60);
+}
+
+async function appendTestEmailOutbox(entry) {
+  if (!TEST_EMAIL_OUTBOX_FILE) return;
+  let items = [];
+  try {
+    const raw = await fsp.readFile(TEST_EMAIL_OUTBOX_FILE, "utf8");
+    items = JSON.parse(raw);
+    if (!Array.isArray(items)) items = [];
+  } catch (error) {
+    if (!error || error.code !== "ENOENT") throw error;
+  }
+  items.push(entry);
+  await ensureDirForFile(TEST_EMAIL_OUTBOX_FILE);
+  await fsp.writeFile(TEST_EMAIL_OUTBOX_FILE, JSON.stringify(items, null, 2), "utf8");
+}
+
+async function deliverEmailViaResend({ to, subject, text }) {
+  if (!RESEND_API_KEY || !RESEND_FROM_EMAIL) return false;
+  const response = await fetch(`${RESEND_API_BASE}/emails`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      from: RESEND_FROM_EMAIL,
+      to: [to],
+      subject,
+      text
+    })
+  });
+  if (!response.ok) {
+    const raw = await response.text().catch(() => "");
+    throw new Error(`resend send failed: ${response.status} ${raw}`.trim());
+  }
+  return true;
+}
+
+async function deliverEmailViaSES({ to, subject, text }) {
+  if (!SES_FROM_EMAIL) {
+    return false;
+  }
+  const { SESv2Client, SendEmailCommand } = require("@aws-sdk/client-sesv2");
+  const client = new SESv2Client({});
+  await client.send(new SendEmailCommand({
+    FromEmailAddress: SES_FROM_EMAIL,
+    Destination: { ToAddresses: [to] },
+    Content: {
+      Simple: {
+        Subject: { Data: subject },
+        Body: {
+          Text: {
+            Data: text
+          }
+        }
+      }
+    }
+  }));
+  return true;
+}
+
+async function deliverVerificationEmail(email, token) {
+  const verificationURL = `${AUTH_LINK_BASE || "http://localhost"}/verify-email?token=${encodeURIComponent(token)}`;
+  if (TEST_EMAIL_OUTBOX_FILE) {
+    await appendTestEmailOutbox({
+      kind: "verify_email",
+      to: email,
+      verificationURL
+    });
+    return;
+  }
+  const subject = "Verify your StreetStamps email";
+  const text = `Verify your email by opening this link: ${verificationURL}`;
+  if (await deliverEmailViaResend({ to: email, subject, text })) {
+    return;
+  }
+  await deliverEmailViaSES({ to: email, subject, text });
+}
+
+async function deliverPasswordResetEmail(email, token) {
+  const resetURL = `${AUTH_LINK_BASE || "http://localhost"}/reset-password?token=${encodeURIComponent(token)}`;
+  if (TEST_EMAIL_OUTBOX_FILE) {
+    await appendTestEmailOutbox({
+      kind: "password_reset",
+      to: email,
+      resetURL
+    });
+    return;
+  }
+  const subject = "Reset your StreetStamps password";
+  const text = `Reset your password by opening this link: ${resetURL}`;
+  if (await deliverEmailViaResend({ to: email, subject, text })) {
+    return;
+  }
+  await deliverEmailViaSES({ to: email, subject, text });
+}
+
+async function consumeEmailVerificationToken(rawToken) {
+  const token = String(rawToken || "").trim();
+  if (!token) return { ok: false, status: 400, message: "token required" };
+
+  const tokenHash = hashSHA256(token);
+  const tokenRecord = Object.values(db.emailVerificationTokens || {}).find((item) => item.tokenHash === tokenHash);
+  if (!tokenRecord) return { ok: false, status: 400, message: "invalid token" };
+  if (tokenRecord.usedAt) return { ok: false, status: 400, message: "token already used" };
+  if (Number(tokenRecord.expiresAt || 0) < nowUnix()) return { ok: false, status: 400, message: "token expired" };
+
+  const identity = Object.values(db.authIdentities || {}).find((item) => (
+    item.provider === "email_password"
+      && item.userID === tokenRecord.userID
+      && item.email === tokenRecord.email
+  ));
+  if (!identity) return { ok: false, status: 400, message: "identity not found" };
+
+  tokenRecord.usedAt = nowUnix();
+  identity.emailVerified = true;
+  identity.updatedAt = nowUnix();
+  await persistPG(async () => {
+    await DB.markEmailVerificationUsed(pgPool, tokenRecord.id, tokenRecord.usedAt);
+    await DB.updateAuthIdentity(pgPool, identity.id, { emailVerified: true, updatedAt: identity.updatedAt });
+  });
+  return { ok: true, status: 200, email: tokenRecord.email };
+}
+
+function inspectPasswordResetToken(rawToken) {
+  const token = String(rawToken || "").trim();
+  if (!token) return { ok: false, status: 400, message: "token required" };
+
+  const tokenHash = hashSHA256(token);
+  const tokenRecord = Object.values(db.passwordResetTokens || {}).find((item) => item.tokenHash === tokenHash);
+  if (!tokenRecord) return { ok: false, status: 400, message: "invalid token" };
+  if (tokenRecord.usedAt) return { ok: false, status: 400, message: "token already used" };
+  if (Number(tokenRecord.expiresAt || 0) < nowUnix()) return { ok: false, status: 400, message: "token expired" };
+  return { ok: true, status: 200, token, tokenRecord };
+}
+
+function renderEmailVerificationHTML({ ok, title, body }) {
+  const safeTitle = escapeHTML(title);
+  const safeBody = escapeHTML(body);
+  const accent = ok ? "#136f63" : "#9f2d2d";
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${safeTitle}</title>
+  <style>
+    :root { color-scheme: light; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #f7efe5 0%, #fffdf9 100%);
+      color: #1f1f1f;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    main {
+      width: min(100%, 480px);
+      background: rgba(255,255,255,0.96);
+      border: 1px solid rgba(31,31,31,0.08);
+      border-radius: 24px;
+      padding: 28px 24px;
+      box-shadow: 0 18px 50px rgba(31,31,31,0.08);
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 28px;
+      line-height: 1.1;
+      color: ${accent};
+    }
+    p {
+      margin: 0 0 14px;
+      font-size: 16px;
+      line-height: 1.55;
+    }
+    .hint {
+      color: #555;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>${safeTitle}</h1>
+    <p>${safeBody}</p>
+    <p class="hint">Return to the StreetStamps app. If this link failed, request a new verification email and try again.</p>
+  </main>
+</body>
+</html>`;
+}
+
+function renderPasswordResetHTML({ ok, title, body, deepLink = "" }) {
+  const safeTitle = escapeHTML(title);
+  const safeBody = escapeHTML(body);
+  const safeDeepLink = escapeHTML(deepLink);
+  const accent = ok ? "#136f63" : "#9f2d2d";
+  const launchMarkup = ok ? `<p><a href="${safeDeepLink}">Open StreetStamps</a></p>` : "";
+  const scriptMarkup = ok ? `<script>
+    const target = ${JSON.stringify(deepLink)};
+    window.setTimeout(() => { window.location.href = target; }, 120);
+  </script>` : "";
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${safeTitle}</title>
+  <style>
+    :root { color-scheme: light; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #f7efe5 0%, #fffdf9 100%);
+      color: #1f1f1f;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    main {
+      width: min(100%, 480px);
+      background: rgba(255,255,255,0.96);
+      border: 1px solid rgba(31,31,31,0.08);
+      border-radius: 24px;
+      padding: 28px 24px;
+      box-shadow: 0 18px 50px rgba(31,31,31,0.08);
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 28px;
+      line-height: 1.1;
+      color: ${accent};
+    }
+    p {
+      margin: 0 0 14px;
+      font-size: 16px;
+      line-height: 1.55;
+    }
+    a {
+      color: #136f63;
+      font-weight: 600;
+      text-decoration: none;
+    }
+    .hint {
+      color: #555;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>${safeTitle}</h1>
+    <p>${safeBody}</p>
+    ${launchMarkup}
+    <p class="hint">If the app does not open, return to StreetStamps and request another password reset email.</p>
+  </main>
+  ${scriptMarkup}
+</body>
+</html>`;
+}
+
+function issueEmailVerificationToken(userID, email) {
+  const rawToken = randHex(24);
+  const tokenID = `evt_${randHex(12)}`;
+  issueEmailVerificationToken._lastID = tokenID;
+  db.emailVerificationTokens[tokenID] = {
+    id: tokenID,
+    userID,
+    email,
+    tokenHash: hashSHA256(rawToken),
+    expiresAt: emailVerificationExpiresAt(),
+    usedAt: null,
+    createdAt: nowUnix()
+  };
+  return rawToken;
+}
+
+function issuePasswordResetToken(userID, email) {
+  const rawToken = randHex(24);
+  const tokenID = `prt_${randHex(12)}`;
+  issuePasswordResetToken._lastID = tokenID;
+  db.passwordResetTokens[tokenID] = {
+    id: tokenID,
+    userID,
+    email,
+    tokenHash: hashSHA256(rawToken),
+    expiresAt: emailVerificationExpiresAt(),
+    usedAt: null,
+    createdAt: nowUnix()
+  };
+  return rawToken;
+}
+
+function revokeRefreshTokensForUser(userID) {
+  const revokedAt = nowUnix();
+  for (const record of Object.values(db.refreshTokens || {})) {
+    if (record.userID === userID && !record.revokedAt) {
+      record.revokedAt = revokedAt;
+    }
+  }
+}
+
+function issueStoredRefreshToken(userID, provider, deviceInfo = null) {
+  const rawToken = makeRefreshToken(userID, provider);
+  const tokenID = `rft_${randHex(12)}`;
+  issueStoredRefreshToken._lastID = tokenID;
+  db.refreshTokens[tokenID] = {
+    id: tokenID,
+    userID,
+    tokenHash: hashSHA256(rawToken),
+    deviceInfo: deviceInfo || null,
+    expiresAt: nowUnix() + (30 * 24 * 60 * 60),
+    revokedAt: null,
+    createdAt: nowUnix()
+  };
+  return rawToken;
+}
+
+function findRefreshTokenRecord(rawToken) {
+  const tokenHash = hashSHA256(String(rawToken || "").trim());
+  return Object.values(db.refreshTokens || {}).find((item) => item.tokenHash === tokenHash) || null;
+}
+
+function isApplePrivateRelayEmail(email) {
+  const normalized = normalizeEmail(email);
+  return normalized.endsWith("@privaterelay.appleid.com");
+}
+
+function findAuthIdentityByProviderSubject(provider, providerSubject) {
+  const normalizedProvider = String(provider || "").trim();
+  const normalizedSubject = String(providerSubject || "").trim();
+  if (!normalizedProvider || !normalizedSubject) return null;
+  return Object.values(db.authIdentities || {}).find((item) => (
+    item.provider === normalizedProvider && item.providerSubject === normalizedSubject
+  )) || null;
+}
+
+function findVerifiedEmailPasswordIdentity(email) {
+  const normalized = normalizeEmail(email);
+  if (!normalized) return null;
+  return Object.values(db.authIdentities || {}).find((item) => (
+    item.provider === "email_password"
+      && item.email === normalized
+      && parseTruthy(item.emailVerified)
+  )) || null;
+}
+
+function findEmailPasswordIdentity(email) {
+  const normalized = normalizeEmail(email);
+  if (!normalized) return null;
+  return Object.values(db.authIdentities || {}).find((item) => (
+    item.provider === "email_password"
+      && item.email === normalized
+  )) || null;
+}
+
+function userHasEmailPassword(userID) {
+  if (!userID) return false;
+  return Object.values(db.authIdentities || {}).some((item) => (
+    item.provider === "email_password" && item.userID === userID
+  ));
+}
+
+function canRecoverLegacyEmailRegistration(email) {
+  const normalized = normalizeEmail(email);
+  if (!normalized || normalized !== LEGACY_EMAIL_REVERIFY_EMAIL) return false;
+
+  const indexedUserID = existingUserID(db.emailIndex?.[normalized]);
+  if (!indexedUserID || !db.users?.[indexedUserID]) return false;
+
+  const hasModernEmailIdentity = Object.values(db.authIdentities || {}).some((item) => (
+    item.provider === "email_password"
+      && item.email === normalized
+  ));
+  return !hasModernEmailIdentity;
+}
+
+function createDefaultUser(provider, email = "") {
+  const uid = `u_${randHex(12)}`;
+  const invite = genInviteCode();
+  const user = {
+    id: uid,
+    provider,
+    email: normalizeEmail(email) || null,
+    inviteCode: invite,
+    handle: null,
+    handleChangeUsed: false,
+    profileVisibility: visibilityFriendsOnly,
+    displayName: "Explorer",
+    profileSetupCompleted: false,
+    bio: "Travel Enthusiastic",
+    loadout: defaultLoadout(),
+    journeys: [],
+    cityCards: [],
+    friendIDs: [],
+    notifications: [],
+    sentPostcards: [],
+    receivedPostcards: [],
+    createdAt: nowUnix()
+  };
+  db.users[uid] = user;
+  setUserHandle(uid, null, { strict: false });
+  db.inviteIndex[invite] = uid;
+  return user;
+}
+
+function ensureUserInviteCode(uid, user) {
+  const owner = existingUserID(uid);
+  if (!owner || !user) return "";
+  if (!db.inviteIndex || typeof db.inviteIndex !== "object") {
+    db.inviteIndex = {};
+  }
+
+  let code = normalizeInviteCode(user.inviteCode);
+  if (!code) {
+    code = genInviteCode();
+  } else {
+    const indexedOwner = existingUserID(db.inviteIndex[code]);
+    if (indexedOwner && indexedOwner !== owner) {
+      const indexedUser = db.users[indexedOwner];
+      if (normalizeInviteCode(indexedUser?.inviteCode) === code) {
+        code = genInviteCode();
+      }
+    }
+  }
+
+  user.inviteCode = code;
+  db.inviteIndex[code] = owner;
+  return code;
+}
+
+function resolveUserByInviteCode(rawCode) {
+  const code = normalizeInviteCode(rawCode);
+  if (!code) return null;
+
+  const indexedOwner = existingUserID(db.inviteIndex?.[code]);
+  if (indexedOwner) {
+    const indexedUser = db.users[indexedOwner];
+    if (indexedUser && normalizeInviteCode(indexedUser.inviteCode) === code) {
+      ensureUserInviteCode(indexedOwner, indexedUser);
+      return indexedUser;
+    }
+  }
+
+  for (const [uid, user] of Object.entries(db.users || {})) {
+    if (normalizeInviteCode(user?.inviteCode) !== code) continue;
+    ensureUserInviteCode(uid, user);
+    return user;
+  }
+
+  return null;
+}
+
+function upsertAppleAuthIdentity(userID, subject, email, emailVerified) {
+  const normalizedSubject = String(subject || "").trim();
+  const normalizedEmail = normalizeEmail(email);
+  let identity = findAuthIdentityByProviderSubject("apple", normalizedSubject);
+  if (!identity) {
+    const identityID = `aid_${randHex(12)}`;
+    identity = {
+      id: identityID,
+      userID,
+      provider: "apple",
+      providerSubject: normalizedSubject,
+      email: normalizedEmail || null,
+      emailVerified: parseTruthy(emailVerified),
+      passwordHash: null,
+      createdAt: nowUnix(),
+      updatedAt: nowUnix()
+    };
+    db.authIdentities[identityID] = identity;
+    return identity;
+  }
+  identity.userID = userID;
+  identity.email = normalizedEmail || identity.email || null;
+  identity.emailVerified = parseTruthy(emailVerified) || parseTruthy(identity.emailVerified);
+  identity.updatedAt = nowUnix();
+  return identity;
 }
 
 function normalizeHandle(raw) {
@@ -74,13 +837,12 @@ function normalizeHandle(raw) {
     .trim()
     .toLowerCase()
     .replace(/^@+/, "")
-    .replace(/[^a-z0-9_.]/g, "");
+    .replace(/[^a-z0-9_]/g, "");
   return cleaned.slice(0, 24);
 }
 
-function genHandle(source) {
-  const n = normalizeHandle(source);
-  return n || `mora_${randHex(3)}`;
+function genAutoNumericHandle() {
+  return String(Math.floor(Math.random() * 100000000)).padStart(8, "0");
 }
 
 function canUseHandle(handle, uid) {
@@ -93,17 +855,11 @@ function allocateSystemHandle(uid, preferred) {
   const preferredNormalized = normalizeHandle(preferred);
   if (preferredNormalized && canUseHandle(preferredNormalized, owner)) return preferredNormalized;
 
-  const idSeed = owner.replace(/[^a-z0-9]/gi, "").toLowerCase().slice(-8);
-  if (idSeed) {
-    const fromID = normalizeHandle(`mora_${idSeed}`);
-    if (fromID && canUseHandle(fromID, owner)) return fromID;
+  for (let i = 0; i < 500; i += 1) {
+    const numeric = genAutoNumericHandle();
+    if (canUseHandle(numeric, owner)) return numeric;
   }
-
-  for (let i = 0; i < 64; i += 1) {
-    const randomHandle = normalizeHandle(`mora_${randHex(3)}`);
-    if (randomHandle && canUseHandle(randomHandle, owner)) return randomHandle;
-  }
-  return `mora_${randHex(4)}`;
+  return `${nowUnix()}${Math.floor(Math.random() * 10)}`.slice(-8);
 }
 
 function setUserHandle(uid, rawHandle, options = { strict: false }) {
@@ -135,9 +891,96 @@ function normalizeVisibility(v) {
 }
 
 function normalizeDisplayName(raw) {
-  const trimmed = String(raw || "").trim().replace(/\s+/g, " ");
+  const trimmed = String(raw || "").trim();
   if (!trimmed) return "";
-  return trimmed.slice(0, 24);
+  if (trimmed.length > 24) return "";
+  if (/\s/u.test(trimmed)) return "";
+  if (/[^\p{L}\p{N}_.-]/u.test(trimmed)) return "";
+  return trimmed;
+}
+
+function baseDisplayName(raw) {
+  const trimmed = String(raw || "").trim();
+  return trimmed || "Explorer";
+}
+
+function canUseDisplayName(displayName, excludedUserID = "") {
+  const next = baseDisplayName(displayName);
+  const owner = displayNameIndex.get(next);
+  return !owner || owner === excludedUserID;
+}
+
+function allocateUniqueDisplayName(displayName, excludedUserID = "") {
+  const base = baseDisplayName(displayName);
+  if (canUseDisplayName(base, excludedUserID)) return base;
+  let suffix = 2;
+  while (suffix < 1000000) {
+    const candidate = `${base}${suffix}`;
+    if (canUseDisplayName(candidate, excludedUserID)) return candidate;
+    suffix += 1;
+  }
+  return `${base}${nowUnix()}`;
+}
+
+function normalizeHistoricalDisplayNames() {
+  const users = Object.values(db.users || {})
+    .filter(Boolean)
+    .sort((left, right) => {
+      const leftCreatedAt = Number(left?.createdAt || 0);
+      const rightCreatedAt = Number(right?.createdAt || 0);
+      if (leftCreatedAt !== rightCreatedAt) return leftCreatedAt - rightCreatedAt;
+      return String(left?.id || "").localeCompare(String(right?.id || ""));
+    });
+
+  const used = new Set();
+  let changed = false;
+
+  for (const user of users) {
+    const original = baseDisplayName(user.displayName);
+    let next = original;
+    if (used.has(next)) {
+      let suffix = 2;
+      while (used.has(`${original}${suffix}`)) {
+        suffix += 1;
+      }
+      next = `${original}${suffix}`;
+    }
+    used.add(next);
+    if (user.displayName !== next) {
+      user.displayName = next;
+      changed = true;
+    }
+    displayNameIndex.set(next, user.id);
+  }
+
+  return changed;
+}
+
+function ensureProfileSetupCompleted(user, defaultValue) {
+  if (!user || typeof user !== "object") return false;
+  if (typeof user.profileSetupCompleted === "boolean") return false;
+  user.profileSetupCompleted = Boolean(defaultValue);
+  return true;
+}
+
+function resolvedProfileSetupCompleted(user, defaultValue = true) {
+  if (!user || typeof user !== "object") return Boolean(defaultValue);
+  if (typeof user.profileSetupCompleted === "boolean") {
+    return user.profileSetupCompleted;
+  }
+  return Boolean(defaultValue);
+}
+
+function authSuccessPayload(user, provider, email, accessToken, refreshToken) {
+  return {
+    userId: user.id,
+    provider,
+    email: email || null,
+    accessToken,
+    refreshToken,
+    needsProfileSetup: !resolvedProfileSetupCompleted(user, true),
+    hasEmailPassword: userHasEmailPassword(user.id)
+  };
 }
 
 function normalizeISOTime(raw) {
@@ -167,23 +1010,88 @@ function normalizeJourneyMemories(rawMemories) {
     title: String(m?.title || "").slice(0, 120),
     notes: String(m?.notes || "").slice(0, 4000),
     timestamp: normalizeISOTime(m?.timestamp) || new Date().toISOString(),
-    imageURLs: Array.isArray(m?.imageURLs) ? m.imageURLs.map((x) => String(x || "")).filter(Boolean).slice(0, 32) : []
+    imageURLs: Array.isArray(m?.imageURLs) ? m.imageURLs.map((x) => String(x || "")).filter(Boolean).slice(0, 32) : [],
+    latitude: typeof m?.latitude === "number" && Number.isFinite(m.latitude) ? m.latitude : null,
+    longitude: typeof m?.longitude === "number" && Number.isFinite(m.longitude) ? m.longitude : null,
+    locationStatus: ["resolved", "fallback", "pending"].includes(m?.locationStatus) ? m.locationStatus : null
   }));
 }
 
-function normalizeJourneyPayload(raw) {
+function normalizeJourneyPayload(raw, ownerUserID) {
   return {
     id: String(raw?.id || `j_${randHex(8)}`),
     title: String(raw?.title || "Journey").slice(0, 120),
+    cityID: String(raw?.cityID || raw?.cityId || "").trim() || null,
     activityTag: raw?.activityTag == null ? null : String(raw.activityTag).slice(0, 32),
     overallMemory: raw?.overallMemory == null ? null : String(raw.overallMemory).slice(0, 4000),
+    overallMemoryImageURLs: Array.isArray(raw?.overallMemoryImageURLs)
+      ? raw.overallMemoryImageURLs.map((x) => String(x || "")).filter(Boolean).slice(0, 32)
+      : [],
     distance: Number(raw?.distance || 0),
     startTime: normalizeISOTime(raw?.startTime),
     endTime: normalizeISOTime(raw?.endTime),
     visibility: normalizeVisibility(raw?.visibility),
+    sharedAt: normalizeISOTime(raw?.sharedAt),
     routeCoordinates: normalizeRouteCoordinates(raw?.routeCoordinates || raw?.coordinates),
-    memories: normalizeJourneyMemories(raw?.memories)
+    memories: normalizeJourneyMemories(raw?.memories),
+    ownerUserID: ownerUserID || undefined
   };
+}
+
+function normalizeCityCardPayload(raw) {
+  const id = String(raw?.id || "").trim();
+  if (!id) return null;
+  return {
+    id,
+    name: String(raw?.name || id).trim() || id,
+    countryISO2: raw?.countryISO2 == null ? null : String(raw.countryISO2 || "").trim() || null
+  };
+}
+
+function mergeJourneyPayloads(existingJourneys, incomingJourneys, removedJourneyIDs, snapshotComplete, ownerUserID) {
+  const normalizedIncoming = (incomingJourneys || []).map(j => normalizeJourneyPayload(j, ownerUserID));
+  if (snapshotComplete) return normalizedIncoming;
+
+  const removed = new Set((removedJourneyIDs || []).map((x) => String(x || "").trim()).filter(Boolean));
+  const incomingByID = new Map(normalizedIncoming.map((journey) => [String(journey.id), journey]));
+  const out = [...normalizedIncoming];
+
+  for (const journey of existingJourneys || []) {
+    const journeyID = String(journey?.id || "").trim();
+    if (!journeyID || removed.has(journeyID) || incomingByID.has(journeyID)) continue;
+    out.push(journey);
+  }
+
+  return out;
+}
+
+function mergeCityCardPayloads(existingCards, incomingCards, snapshotComplete) {
+  const normalizedIncoming = (incomingCards || [])
+    .map(normalizeCityCardPayload)
+    .filter(Boolean);
+  if (snapshotComplete) return normalizedIncoming;
+
+  const incomingIDs = new Set(normalizedIncoming.map((card) => String(card.id)));
+  const out = [...normalizedIncoming];
+
+  for (const card of existingCards || []) {
+    const cardID = String(card?.id || "").trim();
+    if (!cardID || incomingIDs.has(cardID)) continue;
+    out.push(card);
+  }
+
+  // Deduplicate final result by city ID
+  const seen = new Map();
+  const deduplicated = [];
+  for (const card of out) {
+    const id = String(card.id);
+    if (!seen.has(id)) {
+      seen.set(id, true);
+      deduplicated.push(card);
+    }
+  }
+
+  return deduplicated;
 }
 
 function safeExt(fileName) {
@@ -201,15 +1109,101 @@ function removeID(ids, id) {
   return ids.filter((x) => x !== id);
 }
 
+function resolveBearerUserID(token) {
+  return parseLegacyAccessToken(token);
+}
+
 function defaultLoadout() {
   return {
     bodyId: "body",
     headId: "head",
-    skinId: "skin_default",
-    hairId: "hair_boy_default",
-    outfitId: "outfit_boy_suit",
-    accessoryIds: ["acc_headphone"],
-    expressionId: "expr_default"
+    hairId: "hair_0001",
+    suitId: null,
+    upperId: "upper_0001",
+    underId: "under_0001",
+    savedUpperIdForSuit: "upper_0001",
+    savedUnderIdForSuit: "under_0001",
+    hatId: null,
+    glassId: null,
+    accessoryIds: [],
+    expressionId: "expr_0001",
+    hairColorHex: "#2B2A28",
+    bodyColorHex: "#E8BE9C"
+  };
+}
+
+function normalizeLoadout(raw, fallbackRaw) {
+  const fallback = fallbackRaw ? normalizeLoadout(fallbackRaw) : defaultLoadout();
+  const src = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+
+  const firstString = (...values) => {
+    for (const value of values) {
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (trimmed) return trimmed;
+      }
+    }
+    return "";
+  };
+
+  const normalizeLegacyHairId = (hairId) => {
+    if (hairId === "hair_boy_default" || hairId === "hair_girl_default") return "hair_0001";
+    return hairId;
+  };
+
+  const normalizeLegacyExpressionId = (expressionId) => {
+    if (expressionId === "expr_default") return "expr_0001";
+    return expressionId;
+  };
+
+  const legacyOutfitToUpper = {
+    outfit_boy_suit: "upper_0001",
+    outfit_girl_suit: "upper_0001"
+  };
+  const mapLegacyOutfit = (outfitId) => legacyOutfitToUpper[outfitId] || "";
+
+  let accessoryIds = fallback.accessoryIds;
+  if (Array.isArray(src.accessoryIds)) {
+    accessoryIds = src.accessoryIds
+      .map((item) => String(item || "").trim())
+      .filter((item) => item && item !== "none");
+  } else if (src.accessoryId === null) {
+    accessoryIds = [];
+  } else if (Object.prototype.hasOwnProperty.call(src, "accessoryId")) {
+    const legacy = firstString(src.accessoryId);
+    accessoryIds = legacy && legacy !== "none" ? [legacy] : [];
+  }
+
+  const upperFromLegacyOutfit = mapLegacyOutfit(firstString(src.outfitId));
+  const hairId = normalizeLegacyHairId(
+    firstString(src.hairId, fallback.hairId, "hair_0001")
+  );
+  const expressionId = normalizeLegacyExpressionId(
+    firstString(src.expressionId, fallback.expressionId, "expr_0001")
+  );
+  const upperId = firstString(src.upperId, upperFromLegacyOutfit, fallback.upperId, "upper_0001");
+  const underId = firstString(src.underId, fallback.underId, "under_0001");
+  const savedUpperIdForSuit = firstString(src.savedUpperIdForSuit, upperId, fallback.savedUpperIdForSuit, "upper_0001");
+  const savedUnderIdForSuit = firstString(src.savedUnderIdForSuit, underId, fallback.savedUnderIdForSuit, "under_0001");
+  const suitId = src.suitId == null ? null : firstString(src.suitId);
+  const hatId = src.hatId == null ? null : firstString(src.hatId);
+  const glassId = src.glassId == null ? null : firstString(src.glassId);
+
+  return {
+    bodyId: firstString(src.bodyId, fallback.bodyId, "body"),
+    headId: firstString(src.headId, fallback.headId, "head"),
+    hairId,
+    suitId,
+    upperId,
+    underId,
+    savedUpperIdForSuit,
+    savedUnderIdForSuit,
+    hatId,
+    glassId,
+    accessoryIds,
+    expressionId,
+    hairColorHex: firstString(src.hairColorHex, fallback.hairColorHex, "#2B2A28"),
+    bodyColorHex: firstString(src.bodyColorHex, fallback.bodyColorHex, "#E8BE9C")
   };
 }
 
@@ -256,57 +1250,736 @@ function seedDemoCityCards() {
 }
 
 function makeAccessToken(uid, provider) {
-  return jwt.sign({ uid, prv: provider, typ: "access" }, JWT_SECRET, { expiresIn: "2h" });
+  return jwt.sign({ uid, prv: provider, typ: "access", sid: randHex(8) }, JWT_SECRET, { expiresIn: "2h" });
 }
 
 function makeRefreshToken(uid, provider) {
-  return jwt.sign({ uid, prv: provider, typ: "refresh" }, JWT_SECRET, { expiresIn: "30d" });
+  return jwt.sign({ uid, prv: provider, typ: "refresh", sid: randHex(8) }, JWT_SECRET, { expiresIn: "30d" });
 }
 
-function parseBearer(req) {
+function extractBearerToken(req) {
   const h = req.headers.authorization || "";
   if (!h.startsWith("Bearer ")) throw new Error("missing bearer");
-  const tok = h.slice(7).trim();
-  const payload = jwt.verify(tok, JWT_SECRET);
+  return h.slice(7).trim();
+}
+
+function parseLegacyAccessToken(token) {
+  const payload = jwt.verify(token, JWT_SECRET);
   if (!payload || payload.typ !== "access") throw new Error("invalid token");
   return payload.uid;
 }
 
+function parseBearer(req) {
+  const token = extractBearerToken(req);
+  if (req.authError) throw req.authError;
+  if (req.authUserID) return req.authUserID;
+  return parseLegacyAccessToken(token);
+}
+
+function parseRefreshToken(rawToken) {
+  const tok = String(rawToken || "").trim();
+  if (!tok) throw new Error("missing refresh token");
+  const payload = jwt.verify(tok, JWT_SECRET);
+  if (!payload || payload.typ !== "refresh") throw new Error("invalid refresh token");
+  return payload;
+}
+
 function emptyDB() {
-  return { users: {}, emailIndex: {}, inviteIndex: {}, oauthIndex: {}, handleIndex: {} };
+  return {
+    users: {},
+    emailIndex: {},
+    inviteIndex: {},
+    oauthIndex: {},
+    authIdentities: {},
+    emailVerificationTokens: {},
+    passwordResetTokens: {},
+    refreshTokens: {},
+    handleIndex: {},
+    likesIndex: {},
+    friendRequestsIndex: {},
+    postcardsIndex: {}
+  };
+}
+
+function normalizeDBShape(parsed) {
+  return {
+    users: parsed?.users || {},
+    emailIndex: parsed?.emailIndex || {},
+    inviteIndex: parsed?.inviteIndex || {},
+    oauthIndex: parsed?.oauthIndex || {},
+    authIdentities: parsed?.authIdentities || {},
+    emailVerificationTokens: parsed?.emailVerificationTokens || {},
+    passwordResetTokens: parsed?.passwordResetTokens || {},
+    refreshTokens: parsed?.refreshTokens || {},
+    handleIndex: parsed?.handleIndex || {},
+    likesIndex: parsed?.likesIndex || {},
+    friendRequestsIndex: parsed?.friendRequestsIndex || {},
+    postcardsIndex: parsed?.postcardsIndex || {}
+  };
+}
+
+function hasPersistedData(parsed) {
+  const src = parsed || {};
+  const keys = [
+    "users",
+    "emailIndex",
+    "inviteIndex",
+    "oauthIndex",
+    "authIdentities",
+    "emailVerificationTokens",
+    "passwordResetTokens",
+    "refreshTokens",
+    "handleIndex",
+    "likesIndex",
+    "friendRequestsIndex",
+    "postcardsIndex"
+  ];
+  return keys.some((k) => src[k] && Object.keys(src[k]).length > 0);
 }
 
 async function ensureDirForFile(filePath) {
   await fsp.mkdir(path.dirname(filePath), { recursive: true });
 }
 
-async function loadDB() {
+async function loadDBFromFile() {
   try {
     const raw = await fsp.readFile(DATA_FILE, "utf8");
     if (!raw.trim()) return emptyDB();
-    const parsed = JSON.parse(raw);
-    return {
-      users: parsed.users || {},
-      emailIndex: parsed.emailIndex || {},
-      inviteIndex: parsed.inviteIndex || {},
-      oauthIndex: parsed.oauthIndex || {},
-      handleIndex: parsed.handleIndex || {}
-    };
+    return normalizeDBShape(JSON.parse(raw));
   } catch (e) {
     if (e && e.code === "ENOENT") return emptyDB();
     throw e;
   }
 }
 
+async function ensurePGSchema() {
+  if (!pgPool || pgSchemaReady) return;
+  // Create relational tables
+  await DB.ensureSchema(pgPool);
+  // Keep legacy app_state table for migration fallback
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS app_state (
+      key TEXT PRIMARY KEY,
+      state JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  pgSchemaReady = true;
+}
+
+async function loadDBFromPostgres() {
+  if (!pgPool) return null;
+  await ensurePGSchema();
+
+  // Try loading from relational tables first
+  const usersResult = await pgPool.query("SELECT COUNT(*) AS c FROM users");
+  const hasRelationalData = Number(usersResult.rows[0].c) > 0;
+
+  if (hasRelationalData) {
+    console.log("[db] loading from relational tables");
+    return loadDBFromRelationalTables();
+  }
+
+  // Fall back to legacy app_state blob
+  const result = await pgPool.query("SELECT state FROM app_state WHERE key = $1 LIMIT 1", [PG_STATE_KEY]);
+  if (!result.rows.length) return null;
+  return normalizeDBShape(result.rows[0]?.state || {});
+}
+
+async function loadDBFromRelationalTables() {
+  const loaded = emptyDB();
+
+  // Users
+  const { rows: userRows } = await pgPool.query("SELECT * FROM users");
+  for (const row of userRows) {
+    const user = {
+      id: row.id,
+      email: row.email,
+      provider: row.provider,
+      displayName: row.display_name,
+      handle: row.handle,
+      inviteCode: row.invite_code,
+      profileVisibility: row.profile_visibility,
+      profileSetupCompleted: row.profile_setup_completed,
+      handleChangeUsed: row.handle_change_used,
+      bio: row.bio,
+      loadout: row.loadout || null,
+      createdAt: Number(row.created_at),
+      journeys: [],
+      cityCards: [],
+      friendIDs: [],
+      notifications: [],
+      sentPostcards: [],
+      receivedPostcards: [],
+    };
+    loaded.users[row.id] = user;
+    if (row.email) loaded.emailIndex[row.email] = row.id;
+    if (row.handle) loaded.handleIndex[row.handle] = row.id;
+    if (row.invite_code) loaded.inviteIndex[row.invite_code] = row.id;
+  }
+
+  // Journeys
+  const { rows: journeyRows } = await pgPool.query("SELECT user_id, data FROM journeys");
+  for (const row of journeyRows) {
+    if (loaded.users[row.user_id]) {
+      loaded.users[row.user_id].journeys.push(row.data);
+    }
+  }
+
+  // City cards
+  const { rows: cityRows } = await pgPool.query("SELECT * FROM city_cards");
+  for (const row of cityRows) {
+    if (loaded.users[row.user_id]) {
+      loaded.users[row.user_id].cityCards.push({
+        id: row.city_id,
+        name: row.city_name,
+        countryISO2: row.country_iso2,
+      });
+    }
+  }
+
+  // Friendships
+  const { rows: friendRows } = await pgPool.query("SELECT user_id, friend_id FROM friendships");
+  for (const row of friendRows) {
+    if (loaded.users[row.user_id]) {
+      loaded.users[row.user_id].friendIDs.push(row.friend_id);
+    }
+  }
+
+  // Notifications
+  const { rows: notifRows } = await pgPool.query(
+    "SELECT * FROM notifications ORDER BY created_at DESC"
+  );
+  for (const row of notifRows) {
+    if (loaded.users[row.user_id]) {
+      loaded.users[row.user_id].notifications.push({
+        id: row.id,
+        type: row.type,
+        fromUserID: row.from_user_id,
+        fromDisplayName: row.from_display_name,
+        journeyID: row.journey_id,
+        journeyTitle: row.journey_title,
+        message: row.message,
+        read: row.read,
+        createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+      });
+    }
+  }
+
+  // Auth identities
+  const { rows: authRows } = await pgPool.query("SELECT * FROM auth_identities");
+  for (const row of authRows) {
+    loaded.authIdentities[row.id] = {
+      id: row.id,
+      userID: row.user_id,
+      provider: row.provider,
+      providerSubject: row.provider_subject,
+      email: row.email,
+      passwordHash: row.password_hash,
+      emailVerified: row.email_verified,
+      createdAt: Number(row.created_at),
+      updatedAt: Number(row.updated_at),
+    };
+  }
+
+  // OAuth index
+  const { rows: oauthRows } = await pgPool.query("SELECT * FROM oauth_index");
+  for (const row of oauthRows) {
+    loaded.oauthIndex[row.oauth_key] = row.user_id;
+  }
+
+  // Email verification tokens
+  const { rows: evtRows } = await pgPool.query("SELECT * FROM email_verification_tokens");
+  for (const row of evtRows) {
+    loaded.emailVerificationTokens[row.id] = {
+      id: row.id,
+      userID: row.user_id,
+      email: row.email,
+      tokenHash: row.token_hash,
+      expiresAt: Number(row.expires_at),
+      usedAt: row.used_at ? Number(row.used_at) : null,
+      createdAt: Number(row.created_at),
+    };
+  }
+
+  // Password reset tokens
+  const { rows: prtRows } = await pgPool.query("SELECT * FROM password_reset_tokens");
+  for (const row of prtRows) {
+    loaded.passwordResetTokens[row.id] = {
+      id: row.id,
+      userID: row.user_id,
+      email: row.email,
+      tokenHash: row.token_hash,
+      expiresAt: Number(row.expires_at),
+      usedAt: row.used_at ? Number(row.used_at) : null,
+      createdAt: Number(row.created_at),
+    };
+  }
+
+  // Refresh tokens
+  const { rows: rtRows } = await pgPool.query("SELECT * FROM refresh_tokens");
+  for (const row of rtRows) {
+    loaded.refreshTokens[row.id] = {
+      id: row.id,
+      userID: row.user_id,
+      tokenHash: row.token_hash,
+      deviceInfo: row.device_info,
+      expiresAt: Number(row.expires_at),
+      revokedAt: row.revoked_at ? Number(row.revoked_at) : null,
+      createdAt: Number(row.created_at),
+    };
+  }
+
+  // Friend requests
+  const { rows: frRows } = await pgPool.query("SELECT * FROM friend_requests");
+  for (const row of frRows) {
+    loaded.friendRequestsIndex[row.id] = {
+      id: row.id,
+      fromUserID: row.from_user_id,
+      toUserID: row.to_user_id,
+      note: row.note,
+      createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+      updatedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at),
+    };
+  }
+
+  // Likes
+  const { rows: likeRows } = await pgPool.query("SELECT * FROM journey_likes");
+  for (const row of likeRows) {
+    const key = `${row.owner_user_id}:${row.journey_id}`;
+    if (!loaded.likesIndex[key]) {
+      loaded.likesIndex[key] = {
+        ownerUserID: row.owner_user_id,
+        journeyID: row.journey_id,
+        likerIDs: [],
+        likedAtByUserID: {},
+        updatedAt: new Date().toISOString(),
+      };
+    }
+    loaded.likesIndex[key].likerIDs.push(row.liker_user_id);
+    loaded.likesIndex[key].likedAtByUserID[row.liker_user_id] =
+      row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at);
+  }
+
+  // Postcards
+  const { rows: pcRows } = await pgPool.query("SELECT * FROM postcards ORDER BY sent_at DESC");
+  for (const row of pcRows) {
+    const pc = {
+      messageID: row.message_id,
+      type: "postcard",
+      fromUserID: row.from_user_id,
+      fromDisplayName: row.from_display_name,
+      toUserID: row.to_user_id,
+      toDisplayName: row.to_display_name,
+      cityID: row.city_id,
+      cityName: row.city_name,
+      photoURL: row.photo_url,
+      messageText: row.message_text,
+      clientDraftID: row.client_draft_id,
+      status: row.status,
+      sentAt: row.sent_at instanceof Date ? row.sent_at.toISOString() : String(row.sent_at),
+    };
+    loaded.postcardsIndex[row.message_id] = pc;
+    if (loaded.users[row.from_user_id]) {
+      loaded.users[row.from_user_id].sentPostcards.push(pc);
+    }
+    if (loaded.users[row.to_user_id]) {
+      loaded.users[row.to_user_id].receivedPostcards.push(pc);
+    }
+  }
+
+  // Postcard reactions → stored on user.postcardReactions
+  const { rows: prRows } = await pgPool.query(
+    `SELECT pr.*, p.from_user_id AS sender_uid
+     FROM postcard_reactions pr
+     JOIN postcards p ON p.message_id = pr.postcard_message_id`
+  );
+  for (const row of prRows) {
+    const senderUID = row.sender_uid;
+    if (loaded.users[senderUID]) {
+      if (!loaded.users[senderUID].postcardReactions) {
+        loaded.users[senderUID].postcardReactions = {};
+      }
+      loaded.users[senderUID].postcardReactions[row.postcard_message_id] = {
+        id: row.id,
+        postcardMessageID: row.postcard_message_id,
+        fromUserID: row.from_user_id,
+        viewedAt: row.viewed_at instanceof Date ? row.viewed_at.toISOString() : row.viewed_at,
+        reactionEmoji: row.reaction_emoji,
+        comment: row.comment,
+        reactedAt: row.reacted_at instanceof Date ? row.reacted_at.toISOString() : row.reacted_at,
+      };
+    }
+  }
+
+  return loaded;
+}
+
+async function saveDBToRelationalTables(nextDB) {
+  if (!pgPool) return;
+  const client = await pgPool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Users — upsert all
+    for (const [uid, user] of Object.entries(nextDB.users || {})) {
+      await client.query(
+        `INSERT INTO users (id, email, display_name, handle, invite_code,
+          profile_visibility, profile_setup_completed, handle_change_used,
+          bio, loadout, provider, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         ON CONFLICT (id) DO UPDATE SET
+           email = EXCLUDED.email,
+           display_name = EXCLUDED.display_name,
+           handle = EXCLUDED.handle,
+           invite_code = EXCLUDED.invite_code,
+           profile_visibility = EXCLUDED.profile_visibility,
+           profile_setup_completed = EXCLUDED.profile_setup_completed,
+           handle_change_used = EXCLUDED.handle_change_used,
+           bio = EXCLUDED.bio,
+           loadout = EXCLUDED.loadout,
+           provider = EXCLUDED.provider`,
+        [
+          uid,
+          user.email || null,
+          user.displayName || "Explorer",
+          user.handle || null,
+          user.inviteCode || null,
+          user.profileVisibility || "friendsOnly",
+          user.profileSetupCompleted ?? false,
+          user.handleChangeUsed ?? false,
+          user.bio || "",
+          user.loadout ? JSON.stringify(user.loadout) : null,
+          user.provider || null,
+          user.createdAt || 0,
+        ]
+      );
+
+      // Journeys — replace for this user
+      await client.query("DELETE FROM journeys WHERE user_id = $1", [uid]);
+      for (const j of user.journeys || []) {
+        if (!j || !j.id) continue;
+        await client.query(
+          `INSERT INTO journeys (id, user_id, title, city_id, distance,
+            start_time, end_time, visibility, data, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+           ON CONFLICT DO NOTHING`,
+          [
+            j.id, uid, j.title || null,
+            j.cityID || j.cityId || null,
+            j.distance || 0,
+            j.startTime ? new Date(j.startTime).toISOString() : null,
+            j.endTime ? new Date(j.endTime).toISOString() : null,
+            j.visibility || "friendsOnly",
+            JSON.stringify(j),
+            j.createdAt || user.createdAt || 0,
+          ]
+        );
+      }
+
+      // City cards — replace for this user
+      await client.query("DELETE FROM city_cards WHERE user_id = $1", [uid]);
+      for (const card of user.cityCards || []) {
+        if (!card || !card.id) continue;
+        await client.query(
+          `INSERT INTO city_cards (user_id, city_id, city_name, country_iso2, created_at)
+           VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
+          [uid, card.id, card.name || card.id, card.countryISO2 || null, user.createdAt || 0]
+        );
+      }
+
+      // Friendships — replace for this user
+      await client.query("DELETE FROM friendships WHERE user_id = $1", [uid]);
+      for (const fid of user.friendIDs || []) {
+        await client.query(
+          `INSERT INTO friendships (user_id, friend_id, created_at)
+           VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+          [uid, fid, user.createdAt || 0]
+        );
+      }
+
+      // Notifications — replace for this user
+      await client.query("DELETE FROM notifications WHERE user_id = $1", [uid]);
+      for (const n of user.notifications || []) {
+        if (!n || !n.id) continue;
+        await client.query(
+          `INSERT INTO notifications (id, user_id, type, from_user_id, from_display_name,
+            journey_id, journey_title, message, read, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO NOTHING`,
+          [
+            n.id, uid, n.type || "unknown", n.fromUserID || null,
+            n.fromDisplayName || null, n.journeyID || null,
+            n.journeyTitle || null, n.message || "",
+            n.read ?? false,
+            n.createdAt ? new Date(n.createdAt).toISOString() : new Date().toISOString(),
+          ]
+        );
+      }
+
+      // Postcard reactions
+      for (const [messageID, r] of Object.entries(user.postcardReactions || {})) {
+        if (!r) continue;
+        await client.query(
+          `INSERT INTO postcard_reactions (id, postcard_message_id, from_user_id,
+            viewed_at, reaction_emoji, comment, reacted_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)
+           ON CONFLICT (postcard_message_id, from_user_id) DO UPDATE SET
+             viewed_at = COALESCE(postcard_reactions.viewed_at, EXCLUDED.viewed_at),
+             reaction_emoji = COALESCE(EXCLUDED.reaction_emoji, postcard_reactions.reaction_emoji),
+             comment = COALESCE(EXCLUDED.comment, postcard_reactions.comment),
+             reacted_at = COALESCE(EXCLUDED.reacted_at, postcard_reactions.reacted_at)`,
+          [
+            r.id || `pr_migrated_${uid}_${messageID}`,
+            messageID, r.fromUserID || uid,
+            r.viewedAt ? new Date(r.viewedAt).toISOString() : null,
+            r.reactionEmoji || null, r.comment || null,
+            r.reactedAt ? new Date(r.reactedAt).toISOString() : null,
+          ]
+        );
+      }
+    }
+
+    // Auth identities
+    for (const [aid, identity] of Object.entries(nextDB.authIdentities || {})) {
+      if (!identity || !identity.userID) continue;
+      await client.query(
+        `INSERT INTO auth_identities (id, user_id, provider, provider_subject,
+          email, password_hash, email_verified, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         ON CONFLICT (id) DO UPDATE SET
+           user_id = EXCLUDED.user_id,
+           email = EXCLUDED.email,
+           password_hash = EXCLUDED.password_hash,
+           email_verified = EXCLUDED.email_verified,
+           updated_at = EXCLUDED.updated_at`,
+        [
+          aid, identity.userID, identity.provider || "unknown",
+          identity.providerSubject || null, identity.email || null,
+          identity.passwordHash || null, identity.emailVerified ?? false,
+          identity.createdAt || 0, identity.updatedAt || identity.createdAt || 0,
+        ]
+      );
+    }
+
+    // OAuth index
+    for (const [key, userID] of Object.entries(nextDB.oauthIndex || {})) {
+      if (!key || !userID) continue;
+      await client.query(
+        `INSERT INTO oauth_index (oauth_key, user_id) VALUES ($1, $2)
+         ON CONFLICT (oauth_key) DO UPDATE SET user_id = EXCLUDED.user_id`,
+        [key, userID]
+      );
+    }
+
+    // Email verification tokens
+    for (const [tid, token] of Object.entries(nextDB.emailVerificationTokens || {})) {
+      if (!token || !token.userID) continue;
+      await client.query(
+        `INSERT INTO email_verification_tokens (id, user_id, email, token_hash, expires_at, used_at, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (id) DO UPDATE SET used_at = EXCLUDED.used_at`,
+        [tid, token.userID, token.email || "", token.tokenHash || "", token.expiresAt || 0, token.usedAt || null, token.createdAt || 0]
+      );
+    }
+
+    // Password reset tokens
+    for (const [tid, token] of Object.entries(nextDB.passwordResetTokens || {})) {
+      if (!token || !token.userID) continue;
+      await client.query(
+        `INSERT INTO password_reset_tokens (id, user_id, email, token_hash, expires_at, used_at, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (id) DO UPDATE SET used_at = EXCLUDED.used_at`,
+        [tid, token.userID, token.email || "", token.tokenHash || "", token.expiresAt || 0, token.usedAt || null, token.createdAt || 0]
+      );
+    }
+
+    // Refresh tokens
+    for (const [tid, token] of Object.entries(nextDB.refreshTokens || {})) {
+      if (!token || !token.userID) continue;
+      await client.query(
+        `INSERT INTO refresh_tokens (id, user_id, token_hash, device_info, expires_at, revoked_at, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (id) DO UPDATE SET revoked_at = EXCLUDED.revoked_at`,
+        [tid, token.userID, token.tokenHash || "", token.deviceInfo || null, token.expiresAt || 0, token.revokedAt || null, token.createdAt || 0]
+      );
+    }
+
+    // Friend requests
+    for (const [rid, req] of Object.entries(nextDB.friendRequestsIndex || {})) {
+      if (!req || !req.fromUserID || !req.toUserID) continue;
+      await client.query(
+        `INSERT INTO friend_requests (id, from_user_id, to_user_id, note, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT (id) DO NOTHING`,
+        [
+          rid, req.fromUserID, req.toUserID, req.note || null,
+          req.createdAt ? new Date(req.createdAt).toISOString() : new Date().toISOString(),
+          req.updatedAt ? new Date(req.updatedAt).toISOString() : new Date().toISOString(),
+        ]
+      );
+    }
+    // Delete removed friend requests
+    const frIDs = Object.keys(nextDB.friendRequestsIndex || {});
+    if (frIDs.length > 0) {
+      await client.query(
+        "DELETE FROM friend_requests WHERE id != ALL($1::text[])",
+        [frIDs]
+      );
+    } else {
+      await client.query("DELETE FROM friend_requests");
+    }
+
+    // Likes
+    await client.query("DELETE FROM journey_likes");
+    for (const [, record] of Object.entries(nextDB.likesIndex || {})) {
+      if (!record || !record.ownerUserID || !record.journeyID) continue;
+      for (const likerID of record.likerIDs || []) {
+        const likedAt = record.likedAtByUserID?.[likerID];
+        await client.query(
+          `INSERT INTO journey_likes (owner_user_id, journey_id, liker_user_id, created_at)
+           VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
+          [
+            record.ownerUserID, record.journeyID, likerID,
+            likedAt ? new Date(likedAt).toISOString() : new Date().toISOString(),
+          ]
+        );
+      }
+    }
+
+    // Postcards
+    for (const [, pc] of Object.entries(nextDB.postcardsIndex || {})) {
+      if (!pc || !pc.messageID) continue;
+      await client.query(
+        `INSERT INTO postcards (message_id, from_user_id, from_display_name,
+          to_user_id, to_display_name, city_id, city_name, photo_url,
+          message_text, client_draft_id, status, sent_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         ON CONFLICT (message_id) DO NOTHING`,
+        [
+          pc.messageID, pc.fromUserID, pc.fromDisplayName || null,
+          pc.toUserID, pc.toDisplayName || null,
+          pc.cityID || "", pc.cityName || "",
+          pc.photoURL || null, pc.messageText || "",
+          pc.clientDraftID || null, pc.status || "sent",
+          pc.sentAt ? new Date(pc.sentAt).toISOString() : new Date().toISOString(),
+        ]
+      );
+    }
+
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+async function saveDBToPostgres(nextDB) {
+  if (!pgPool) return;
+  await ensurePGSchema();
+  // Fast JSON blob fallback — relational tables are written by targeted persistPG/persistPGTx calls.
+  await pgPool.query(
+    `INSERT INTO app_state (key, state) VALUES ('global', $1)
+     ON CONFLICT (key) DO UPDATE SET state = $1`,
+    [JSON.stringify(nextDB)]
+  );
+}
+
+async function loadDB() {
+  if (!pgPool) return loadDBFromFile();
+  const fromPG = await loadDBFromPostgres();
+  if (fromPG) return fromPG;
+
+  const fromFile = await loadDBFromFile();
+  if (hasPersistedData(fromFile)) {
+    await saveDBToPostgres(fromFile);
+  }
+  return fromFile;
+}
+
 let db = emptyDB();
 let writeChain = Promise.resolve();
+let writeLock = false;
+const displayNameIndex = new Map();
 
 function saveDB() {
   writeChain = writeChain.then(async () => {
-    await ensureDirForFile(DATA_FILE);
-    await fsp.writeFile(DATA_FILE, JSON.stringify(db, null, 2), "utf8");
+    while (writeLock) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    writeLock = true;
+    try {
+      if (pgPool) {
+        await saveDBToPostgres(db);
+        return;
+      }
+      await ensureDirForFile(DATA_FILE);
+      await fsp.writeFile(DATA_FILE, JSON.stringify(db, null, 2), "utf8");
+    } finally {
+      writeLock = false;
+    }
   });
   return writeChain;
+}
+
+// ---------------------------------------------------------------------------
+// Targeted incremental persistence helpers
+// ---------------------------------------------------------------------------
+
+async function persistPG(pgAction) {
+  if (pgPool) {
+    await pgAction();
+  } else {
+    await saveDB();
+  }
+}
+
+async function persistPGTx(pgAction) {
+  if (!pgPool) { await saveDB(); return; }
+  const client = await pgPool.connect();
+  try {
+    await client.query("BEGIN");
+    await pgAction(client);
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+async function persistNotificationToPG(ownerID) {
+  if (!pgPool) return;
+  const owner = db.users[ownerID];
+  if (!owner?.notifications?.length) return;
+  const n = owner.notifications[0];
+  await DB.insertNotification(pgPool, {
+    id: n.id, userID: ownerID, type: n.type || "unknown",
+    fromUserID: n.fromUserID || null, fromDisplayName: n.fromDisplayName || null,
+    journeyID: n.journeyID || null, journeyTitle: n.journeyTitle || null,
+    message: n.message || "", read: n.read ?? false,
+    createdAt: n.createdAt || new Date().toISOString(),
+  });
+}
+
+async function persistEmailVerificationTokenToPG(tokenID) {
+  if (!pgPool || !tokenID) return;
+  const t = db.emailVerificationTokens[tokenID];
+  if (t) await DB.insertEmailVerificationToken(pgPool, t);
+}
+
+async function persistPasswordResetTokenToPG(tokenID) {
+  if (!pgPool || !tokenID) return;
+  const t = db.passwordResetTokens[tokenID];
+  if (t) await DB.insertPasswordResetToken(pgPool, t);
+}
+
+async function persistRefreshTokenToPG(tokenID) {
+  if (!pgPool || !tokenID) return;
+  const t = db.refreshTokens[tokenID];
+  if (t) await DB.insertRefreshToken(pgPool, t);
 }
 
 function filterJourneys(journeys, isSelf, isFriend) {
@@ -320,25 +1993,593 @@ function filterJourneys(journeys, isSelf, isFriend) {
   return out;
 }
 
+function canViewJourney(viewer, owner, journey) {
+  const isSelf = viewer && owner && viewer.id === owner.id;
+  if (isSelf) return true;
+  const isFriend = viewer && owner ? isFriendOf(viewer, owner.id) : false;
+  const v = normalizeVisibility(journey?.visibility);
+  if (v === visibilityPublic) return true;
+  if (v === visibilityFriendsOnly && isFriend) return true;
+  return false;
+}
+
+function journeyLikeKey(ownerUserID, journeyID) {
+  return `${ownerUserID}:${journeyID}`;
+}
+
+function ensureLikeRecord(ownerUserID, journeyID) {
+  const key = journeyLikeKey(ownerUserID, journeyID);
+  if (!db.likesIndex[key]) {
+    db.likesIndex[key] = {
+      ownerUserID,
+      journeyID,
+      likerIDs: [],
+      likedAtByUserID: {},
+      updatedAt: new Date().toISOString()
+    };
+  }
+  if (!Array.isArray(db.likesIndex[key].likerIDs)) db.likesIndex[key].likerIDs = [];
+  if (!db.likesIndex[key].likedAtByUserID || typeof db.likesIndex[key].likedAtByUserID !== "object") {
+    db.likesIndex[key].likedAtByUserID = {};
+  }
+  return db.likesIndex[key];
+}
+
+function ensureUserNotifications(user) {
+  if (!Array.isArray(user.notifications)) user.notifications = [];
+}
+
+function ensurePostcardCollections(user) {
+  if (!Array.isArray(user.sentPostcards)) user.sentPostcards = [];
+  if (!Array.isArray(user.receivedPostcards)) user.receivedPostcards = [];
+}
+
+function ensurePostcardIndex() {
+  if (!db.postcardsIndex || typeof db.postcardsIndex !== "object") {
+    db.postcardsIndex = {};
+  }
+}
+
+function oauthSubjectKey(provider, subject) {
+  const normalizedProvider = String(provider || "").trim().toLowerCase();
+  const normalizedSubject = String(subject || "").trim();
+  if (!normalizedProvider || !normalizedSubject) return "";
+  return `${normalizedProvider}:${normalizedSubject}`;
+}
+
+function oauthLegacyKey(provider, idToken) {
+  const normalizedProvider = String(provider || "").trim().toLowerCase();
+  const normalizedToken = String(idToken || "").trim();
+  if (!normalizedProvider || !normalizedToken) return "";
+  return `${normalizedProvider}:${hashSHA256(normalizedToken)}`;
+}
+
+function existingUserID(rawUID) {
+  const uid = String(rawUID || "").trim();
+  if (!uid) return "";
+  return db.users[uid] ? uid : "";
+}
+
+function hasUserLikesOrLikeOwnership(uid) {
+  for (const record of Object.values(db.likesIndex || {})) {
+    if (!record) continue;
+    if (record.ownerUserID === uid) return true;
+    if (Array.isArray(record.likerIDs) && record.likerIDs.includes(uid)) return true;
+  }
+  return false;
+}
+
+function hasUserFriendLinks(uid) {
+  for (const user of Object.values(db.users || {})) {
+    if (!user || !Array.isArray(user.friendIDs)) continue;
+    if (user.friendIDs.includes(uid)) return true;
+  }
+  return false;
+}
+
+function hasUserFriendRequests(uid) {
+  return allFriendRequests().some((item) => item.fromUserID === uid || item.toUserID === uid);
+}
+
+function hasUserPostcards(uid) {
+  for (const item of Object.values(db.postcardsIndex || {})) {
+    if (!item) continue;
+    if (item.fromUserID === uid || item.toUserID === uid) return true;
+  }
+  return false;
+}
+
+function isSafeEmptyOAuthAccount(uid) {
+  const user = db.users[uid];
+  if (!user) return false;
+  if (user.provider !== "google" && user.provider !== "apple") return false;
+  if (user.passwordHash) return false;
+  if (Array.isArray(user.journeys) && user.journeys.length > 0) return false;
+  if (Array.isArray(user.cityCards) && user.cityCards.length > 0) return false;
+  if (Array.isArray(user.friendIDs) && user.friendIDs.length > 0) return false;
+  if (Array.isArray(user.notifications) && user.notifications.length > 0) return false;
+  if (Array.isArray(user.sentPostcards) && user.sentPostcards.length > 0) return false;
+  if (Array.isArray(user.receivedPostcards) && user.receivedPostcards.length > 0) return false;
+  if (hasUserLikesOrLikeOwnership(uid)) return false;
+  if (hasUserFriendLinks(uid)) return false;
+  if (hasUserFriendRequests(uid)) return false;
+  if (hasUserPostcards(uid)) return false;
+  return true;
+}
+
+function oauthCandidateScore(uid, source) {
+  if (!existingUserID(uid)) return -1;
+  const sourceBase = source === "modern" ? 3 : source === "legacy" ? 2 : 1;
+  return sourceBase + (isSafeEmptyOAuthAccount(uid) ? 0 : 100);
+}
+
+function chooseCanonicalOAuthUserID(candidates) {
+  const seen = new Set();
+  let bestUID = "";
+  let bestScore = -1;
+
+  for (const candidate of candidates) {
+    const uid = existingUserID(candidate?.uid);
+    if (!uid || seen.has(uid)) continue;
+    seen.add(uid);
+    const score = oauthCandidateScore(uid, candidate?.source);
+    if (score > bestScore) {
+      bestUID = uid;
+      bestScore = score;
+    }
+  }
+  return bestUID;
+}
+
+function mergeEmptyOAuthAccountInto(sourceUID, targetUID) {
+  const fromUID = existingUserID(sourceUID);
+  const toUID = existingUserID(targetUID);
+  if (!fromUID || !toUID || fromUID === toUID) return false;
+  if (!isSafeEmptyOAuthAccount(fromUID)) return false;
+
+  const source = db.users[fromUID];
+  const target = db.users[toUID];
+  if (!source || !target) return false;
+
+  if (!target.email && source.email) {
+    target.email = source.email;
+  }
+
+  for (const [email, ownerUID] of Object.entries(db.emailIndex || {})) {
+    if (ownerUID === fromUID) db.emailIndex[email] = toUID;
+  }
+  for (const [key, ownerUID] of Object.entries(db.oauthIndex || {})) {
+    if (ownerUID === fromUID) db.oauthIndex[key] = toUID;
+  }
+  for (const [handle, ownerUID] of Object.entries(db.handleIndex || {})) {
+    if (ownerUID === fromUID) delete db.handleIndex[handle];
+  }
+  for (const [inviteCode, ownerUID] of Object.entries(db.inviteIndex || {})) {
+    if (ownerUID === fromUID) delete db.inviteIndex[inviteCode];
+  }
+
+  delete db.users[fromUID];
+  return true;
+}
+
+function derivePublicBase(req) {
+  const xfProto = String(req?.headers?.["x-forwarded-proto"] || "").split(",")[0].trim();
+  const xfHost = String(req?.headers?.["x-forwarded-host"] || "").split(",")[0].trim();
+  const host = xfHost || String(req?.headers?.host || "").split(",")[0].trim();
+  const proto = xfProto || req?.protocol || "";
+  if (host && proto) return `${proto}://${host}`.replace(/\/$/, "");
+  if (MEDIA_PUBLIC_BASE) return MEDIA_PUBLIC_BASE.replace(/\/$/, "");
+  return "";
+}
+
+function absolutizePostcardPhotoURL(rawURL, req) {
+  const value = String(rawURL || "").trim();
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value)) return value;
+  if (!value.startsWith("/")) return value;
+  const base = derivePublicBase(req);
+  if (!base) return value;
+  return `${base}${value}`;
+}
+
+function normalizePostcardMessage(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const messageID = String(raw.messageID || "").trim();
+  const fromUserID = String(raw.fromUserID || "").trim();
+  const toUserID = String(raw.toUserID || "").trim();
+  if (!messageID || !fromUserID || !toUserID) return null;
+
+  return {
+    messageID,
+    type: "postcard",
+    fromUserID,
+    fromDisplayName: raw.fromDisplayName == null ? null : String(raw.fromDisplayName),
+    toUserID,
+    toDisplayName: raw.toDisplayName == null ? null : String(raw.toDisplayName),
+    cityID: String(raw.cityID || "").trim(),
+    cityName: String(raw.cityName || raw.cityID || "").trim(),
+    photoURL: raw.photoURL == null ? null : String(raw.photoURL),
+    messageText: String(raw.messageText || "").slice(0, 2000),
+    sentAt: normalizeISOTime(raw.sentAt) || new Date().toISOString(),
+    clientDraftID: String(raw.clientDraftID || "").trim(),
+    status: raw.status == null ? "sent" : String(raw.status)
+  };
+}
+
+function upsertPostcard(raw) {
+  const normalized = normalizePostcardMessage(raw);
+  if (!normalized) return null;
+  ensurePostcardIndex();
+  db.postcardsIndex[normalized.messageID] = normalized;
+  return normalized;
+}
+
+function postcardsForUser(uid, box) {
+  ensurePostcardIndex();
+  const out = Object.values(db.postcardsIndex || {}).filter((item) => {
+    if (!item || typeof item !== "object") return false;
+    if (box === "received") return item.toUserID === uid;
+    return item.fromUserID === uid;
+  });
+  out.sort((a, b) => Date.parse(b.sentAt || "") - Date.parse(a.sentAt || ""));
+  return out;
+}
+
+function postcardReactionPayloadForViewer(viewerID, item, box) {
+  const viewer = db.users?.[viewerID];
+  const sender = db.users?.[item?.fromUserID];
+  const receiver = db.users?.[item?.toUserID];
+  const messageID = String(item?.messageID || "").trim();
+  if (!messageID) {
+    return {
+      reaction: null,
+      myReaction: null,
+      peerReaction: null
+    };
+  }
+
+  let myReaction = null;
+  let peerReaction = null;
+
+  if (box === "received") {
+    // Reactions made by the receiver are stored on the sender record.
+    myReaction = sender?.postcardReactions?.[messageID] || null;
+  } else {
+    // Reactions made by the receiver of my sent postcard are stored on my record.
+    peerReaction = viewer?.postcardReactions?.[messageID] || null;
+  }
+
+  // Keep a defensive peer lookup so legacy data still renders if the payload is stored on the
+  // opposite side unexpectedly.
+  if (!peerReaction && box === "received") {
+    peerReaction = receiver?.postcardReactions?.[messageID] || null;
+  }
+  if (!myReaction && box === "sent") {
+    myReaction = viewer?.postcardReactions?.[messageID] || null;
+  }
+
+  return {
+    reaction: box === "received" ? myReaction : peerReaction,
+    myReaction,
+    peerReaction
+  };
+}
+
+function reconcilePostcardsForUser(user, uid) {
+  ensurePostcardCollections(user);
+  const expectedSent = postcardsForUser(uid, "sent");
+  const expectedReceived = postcardsForUser(uid, "received");
+
+  const currentSentIDs = (user.sentPostcards || []).map((x) => String(x?.messageID || ""));
+  const currentReceivedIDs = (user.receivedPostcards || []).map((x) => String(x?.messageID || ""));
+  const nextSentIDs = expectedSent.map((x) => x.messageID);
+  const nextReceivedIDs = expectedReceived.map((x) => x.messageID);
+
+  let changed = false;
+  if (JSON.stringify(currentSentIDs) !== JSON.stringify(nextSentIDs)) {
+    user.sentPostcards = expectedSent;
+    changed = true;
+  }
+  if (JSON.stringify(currentReceivedIDs) !== JSON.stringify(nextReceivedIDs)) {
+    user.receivedPostcards = expectedReceived;
+    changed = true;
+  }
+  return changed;
+}
+
+function pushJourneyLikeNotification(owner, fromUser, journey) {
+  ensureUserNotifications(owner);
+  owner.notifications.unshift({
+    id: `n_${randHex(10)}`,
+    type: "journey_like",
+    fromUserID: fromUser.id,
+    fromDisplayName: fromUser.displayName,
+    journeyID: journey.id,
+    journeyTitle: journey.title,
+    message: `${fromUser.displayName} liked your journey "${journey.title}"`,
+    createdAt: new Date().toISOString(),
+    read: false
+  });
+  if (owner.notifications.length > 400) {
+    owner.notifications = owner.notifications.slice(0, 400);
+  }
+  fireRemotePush(owner.id, {
+    title: fromUser.displayName,
+    body: `liked your journey "${journey.title}"`
+  });
+}
+
+function pushProfileStompNotification(owner, fromUser) {
+  ensureUserNotifications(owner);
+  owner.notifications.unshift({
+    id: `n_${randHex(10)}`,
+    type: "profile_stomp",
+    fromUserID: fromUser.id,
+    fromDisplayName: fromUser.displayName,
+    journeyID: null,
+    journeyTitle: null,
+    message: `${fromUser.displayName}在你的沙发上坐了一坐`,
+    createdAt: new Date().toISOString(),
+    read: false
+  });
+  if (owner.notifications.length > 400) {
+    owner.notifications = owner.notifications.slice(0, 400);
+  }
+  fireRemotePush(owner.id, {
+    title: "StreetStamps",
+    body: `${fromUser.displayName}在你的沙发上坐了一坐`
+  });
+}
+
+function pushFriendRequestNotification(owner, fromUser) {
+  ensureUserNotifications(owner);
+  owner.notifications.unshift({
+    id: `n_${randHex(10)}`,
+    type: "friend_request",
+    fromUserID: fromUser.id,
+    fromDisplayName: fromUser.displayName,
+    journeyID: null,
+    journeyTitle: null,
+    message: `${fromUser.displayName} 向你发送了好友申请`,
+    createdAt: new Date().toISOString(),
+    read: false
+  });
+  if (owner.notifications.length > 400) {
+    owner.notifications = owner.notifications.slice(0, 400);
+  }
+  fireRemotePush(owner.id, {
+    title: "StreetStamps",
+    body: `${fromUser.displayName} 向你发送了好友申请`
+  });
+}
+
+function pushFriendRequestAcceptedNotification(owner, fromUser) {
+  ensureUserNotifications(owner);
+  owner.notifications.unshift({
+    id: `n_${randHex(10)}`,
+    type: "friend_request_accepted",
+    fromUserID: fromUser.id,
+    fromDisplayName: fromUser.displayName,
+    journeyID: null,
+    journeyTitle: null,
+    message: `${fromUser.displayName} 通过了你的好友申请`,
+    createdAt: new Date().toISOString(),
+    read: false
+  });
+  if (owner.notifications.length > 400) {
+    owner.notifications = owner.notifications.slice(0, 400);
+  }
+  fireRemotePush(owner.id, {
+    title: "StreetStamps",
+    body: `${fromUser.displayName} 通过了你的好友申请`
+  });
+}
+
+function pushPostcardReceivedNotification(owner, fromUser, postcard) {
+  ensureUserNotifications(owner);
+  owner.notifications.unshift({
+    id: `n_${randHex(10)}`,
+    type: "postcard_received",
+    fromUserID: fromUser.id,
+    fromDisplayName: fromUser.displayName,
+    journeyID: null,
+    journeyTitle: null,
+    message: `${fromUser.displayName} 给你寄来了一张来自 ${postcard.cityName || postcard.cityID} 的明信片`,
+    createdAt: new Date().toISOString(),
+    read: false,
+    postcardMessageID: postcard.messageID,
+    cityID: postcard.cityID,
+    cityName: postcard.cityName || postcard.cityID,
+    photoURL: postcard.photoURL || null,
+    messageText: postcard.messageText || ""
+  });
+  if (owner.notifications.length > 400) {
+    owner.notifications = owner.notifications.slice(0, 400);
+  }
+  fireRemotePush(owner.id, {
+    title: fromUser.displayName,
+    body: `给你寄来了一张来自 ${postcard.cityName || postcard.cityID} 的明信片`
+  }, { type: "postcard_received", postcardMessageID: postcard.messageID });
+}
+
+function pushPostcardReactionNotification(owner, fromUser, postcard, reactionEmoji, comment) {
+  ensureUserNotifications(owner);
+  let message = `${fromUser.displayName} `;
+  if (reactionEmoji) {
+    message += `${reactionEmoji} 了你的明信片`;
+  } else if (comment) {
+    message += `评论了你的明信片`;
+  } else {
+    message += `查看了你的明信片`;
+  }
+
+  owner.notifications.unshift({
+    id: `n_${randHex(10)}`,
+    type: "postcard_reaction",
+    fromUserID: fromUser.id,
+    fromDisplayName: fromUser.displayName,
+    journeyID: null,
+    journeyTitle: null,
+    message: message,
+    createdAt: new Date().toISOString(),
+    read: false,
+    postcardMessageID: postcard.messageID,
+    reactionEmoji: reactionEmoji || null,
+    comment: comment || null
+  });
+  if (owner.notifications.length > 400) {
+    owner.notifications = owner.notifications.slice(0, 400);
+  }
+  fireRemotePush(owner.id, {
+    title: fromUser.displayName,
+    body: message
+  });
+}
+
+/**
+ * Fire an APNs remote push to a user (non-blocking, best-effort).
+ * @param {string} ownerID - target user ID
+ * @param {{ title: string, body: string }} alert
+ * @param {object} [data] - optional custom data payload
+ */
+function fireRemotePush(ownerID, alert, data) {
+  if (!APNs.isConfigured() || !pgPool) return;
+  // Run async in background — never block the HTTP response
+  (async () => {
+    try {
+      const tokens = await DB.getPushTokens(pgPool, ownerID);
+      if (!tokens.length) return;
+      await APNs.sendToUser(tokens, alert, data, async (invalidToken) => {
+        await DB.deletePushToken(pgPool, ownerID, invalidToken);
+      });
+    } catch (err) {
+      console.error(`[APNs] fireRemotePush error for ${ownerID}:`, err.message);
+    }
+  })();
+}
+
 function isFriendOf(viewer, targetID) {
   return (viewer.friendIDs || []).includes(targetID);
+}
+
+function resolveUserByAnyID(rawID) {
+  const candidate = String(rawID || "").trim();
+  if (!candidate) return null;
+  if (db.users[candidate]) return db.users[candidate];
+  if (candidate.startsWith("account_")) {
+    const stripped = candidate.slice("account_".length);
+    if (db.users[stripped]) return db.users[stripped];
+  } else {
+    const prefixed = `account_${candidate}`;
+    if (db.users[prefixed]) return db.users[prefixed];
+  }
+  return null;
+}
+
+function friendRequestUserDTO(user) {
+  return {
+    id: user.id,
+    displayName: user.displayName,
+    handle: user.handle || null,
+    exclusiveID: user.handle || null,
+    loadout: normalizeLoadout(user.loadout)
+  };
+}
+
+function friendRequestDTO(request) {
+  const from = db.users[request.fromUserID];
+  const to = db.users[request.toUserID];
+  if (!from || !to) return null;
+  return {
+    id: request.id,
+    fromUserID: request.fromUserID,
+    toUserID: request.toUserID,
+    fromUser: friendRequestUserDTO(from),
+    toUser: friendRequestUserDTO(to),
+    note: request.note || "",
+    createdAt: request.createdAt
+  };
+}
+
+function allFriendRequests() {
+  return Object.values(db.friendRequestsIndex || {}).filter((x) => x && x.id && x.fromUserID && x.toUserID);
+}
+
+function sortByCreatedDesc(requests) {
+  return requests.sort((a, b) => Date.parse(b.createdAt || "") - Date.parse(a.createdAt || ""));
+}
+
+function findPendingFriendRequest(fromUserID, toUserID) {
+  return allFriendRequests().find((item) => item.fromUserID === fromUserID && item.toUserID === toUserID) || null;
+}
+
+function removeFriendRequestByID(requestID) {
+  if (!requestID) return;
+  if (db.friendRequestsIndex && db.friendRequestsIndex[requestID]) {
+    delete db.friendRequestsIndex[requestID];
+  }
+}
+
+function removeFriendRequestsBetween(userA, userB) {
+  for (const req of allFriendRequests()) {
+    const sameDirection = req.fromUserID === userA && req.toUserID === userB;
+    const reverseDirection = req.fromUserID === userB && req.toUserID === userA;
+    if (sameDirection || reverseDirection) {
+      delete db.friendRequestsIndex[req.id];
+    }
+  }
+}
+
+function collectFriendRequestIDsBetween(userA, userB) {
+  const ids = [];
+  for (const req of allFriendRequests()) {
+    const sameDirection = req.fromUserID === userA && req.toUserID === userB;
+    const reverseDirection = req.fromUserID === userB && req.toUserID === userA;
+    if (sameDirection || reverseDirection) ids.push(req.id);
+  }
+  return ids;
 }
 
 function profileDTOForViewer(target, isSelf, isFriend) {
   const visibility = target.profileVisibility || visibilityFriendsOnly;
   const blocked = !isSelf && visibility === visibilityPrivate;
   const journeys = blocked ? [] : filterJourneys(target.journeys || [], isSelf, isFriend);
-  const cards = blocked ? [] : (isSelf || isFriend ? (target.cityCards || []) : []);
+  let cards = blocked ? [] : (isSelf || isFriend ? (target.cityCards || []) : []);
+
+  // When viewing another user's profile, only include city cards that have
+  // at least one visible journey so deleted/private journeys don't leave
+  // empty ghost city cards.
+  if (!isSelf && cards.length > 0 && journeys.length > 0) {
+    const visibleCityIDs = new Set();
+    for (const j of journeys) {
+      const ck = (j.startCityKey || j.cityKey || "").trim();
+      if (ck) visibleCityIDs.add(ck);
+    }
+    cards = cards.filter((c) => visibleCityIDs.has((c.id || "").trim()));
+  } else if (!isSelf) {
+    cards = [];
+  }
 
   return {
     id: target.id,
-    handle: target.handle ? `@${target.handle}` : null,
+    handle: target.handle || null,
+    exclusiveID: target.handle || null,
     inviteCode: target.inviteCode,
     profileVisibility: visibility,
     displayName: target.displayName,
+    profileSetupCompleted: resolvedProfileSetupCompleted(target, true),
+    email: isSelf ? (target.email || null) : null,
     bio: target.bio,
-    loadout: target.loadout,
-    stats: profileStatsFrom(target),
+    loadout: normalizeLoadout(target.loadout),
+    handleChangeUsed: Boolean(target.handleChangeUsed),
+    canUpdateHandleOneTime: !target.handleChangeUsed,
+    hasEmailPassword: isSelf ? userHasEmailPassword(target.id) : undefined,
+    stats: isSelf ? profileStatsFrom(target) : {
+      totalJourneys: journeys.length,
+      totalDistance: journeys.reduce((acc, j) => acc + Number(j.distance || 0), 0),
+      totalMemories: journeys.reduce((acc, j) => acc + ((j.memories || []).length), 0),
+      totalUnlockedCities: cards.length
+    },
     journeys,
     unlockedCityCards: cards
   };
@@ -367,80 +2608,782 @@ function r2PublicURL(objectKey) {
 }
 
 async function main() {
+  const prodConfigError = productionConfigError();
+  if (prodConfigError) {
+    throw new Error(prodConfigError);
+  }
   db = await loadDB();
+  console.log(`[streetstamps-node-v1] storage=${pgPool ? "postgresql-relational" : "file"}`);
   db.handleIndex = {};
+  db.inviteIndex = {};
+  let shouldPersistMigration = false;
+  if (!db.likesIndex || typeof db.likesIndex !== "object") {
+    db.likesIndex = {};
+  }
+  if (!db.friendRequestsIndex || typeof db.friendRequestsIndex !== "object") {
+    db.friendRequestsIndex = {};
+  }
+  ensurePostcardIndex();
   for (const [uid, user] of Object.entries(db.users || {})) {
     setUserHandle(uid, user.handle || user.displayName || uid, { strict: false });
+    ensureUserInviteCode(uid, user);
     if (!user.profileVisibility) user.profileVisibility = visibilityFriendsOnly;
+    if (typeof user.handleChangeUsed !== "boolean") {
+      user.handleChangeUsed = false;
+    }
+    shouldPersistMigration = ensureProfileSetupCompleted(user, true) || shouldPersistMigration;
+    user.loadout = normalizeLoadout(user.loadout);
+    ensureUserNotifications(user);
+    ensurePostcardCollections(user);
+    for (const item of user.sentPostcards) upsertPostcard(item);
+    for (const item of user.receivedPostcards) upsertPostcard(item);
+  }
+  for (const [uid, user] of Object.entries(db.users || {})) {
+    reconcilePostcardsForUser(user, uid);
+  }
+  shouldPersistMigration = normalizeHistoricalDisplayNames() || shouldPersistMigration;
+  for (const req of allFriendRequests()) {
+    const from = db.users[req.fromUserID];
+    const to = db.users[req.toUserID];
+    if (!from || !to || from.id === to.id || isFriendOf(from, to.id)) {
+      delete db.friendRequestsIndex[req.id];
+    }
+  }
+  if (shouldPersistMigration) {
+    await saveDB();
   }
   await fsp.mkdir(MEDIA_DIR, { recursive: true });
 
   const app = express();
-  app.use(cors({ origin: "*" }));
-  app.use(express.json({ limit: "20mb" }));
+  app.set("trust proxy", true);
+  app.disable("x-powered-by");
+  app.use((req, res, next) => {
+    applySecurityHeaders(res);
+    const origin = String(req.headers.origin || "").trim();
+    if (!originAllowed(origin)) {
+      return res.status(403).json({ message: "origin not allowed" });
+    }
+    if (origin) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Vary", "Origin");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+      res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS");
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+    } else if (!corsConfigured()) {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+    }
+    if (req.method === "OPTIONS") {
+      return res.status(204).end();
+    }
+    return next();
+  });
+  app.use(compression());
+  app.use(express.json({
+    limit: `${Number.isFinite(JSON_BODY_LIMIT_MB) && JSON_BODY_LIMIT_MB > 0 ? JSON_BODY_LIMIT_MB : 6}mb`
+  }));
   app.use("/media", express.static(MEDIA_DIR));
+  app.use((req, _res, next) => {
+    const header = String(req.headers.authorization || "");
+    if (!header.startsWith("Bearer ")) {
+      return next();
+    }
+    try {
+      req.authUserID = resolveBearerUserID(header.slice(7).trim());
+    } catch (error) {
+      req.authError = error;
+    }
+    return next();
+  });
+  const authRateLimiter = makeRateLimiter({
+    keyPrefix: "auth-general",
+    windowMs: AUTH_RATE_LIMIT_WINDOW_MS,
+    maxHits: AUTH_RATE_LIMIT_MAX
+  });
+  const authLoginRateLimiter = makeRateLimiter({
+    keyPrefix: "auth-login",
+    windowMs: AUTH_LOGIN_RATE_LIMIT_WINDOW_MS,
+    maxHits: AUTH_LOGIN_RATE_LIMIT_MAX
+  });
+  const authRefreshRateLimiter = makeRateLimiter({
+    keyPrefix: "auth-refresh",
+    windowMs: AUTH_REFRESH_RATE_LIMIT_WINDOW_MS,
+    maxHits: AUTH_REFRESH_RATE_LIMIT_MAX,
+    keyResolver: refreshRateLimitKey
+  });
+  const writeRateLimiter = makeRateLimiter({
+    keyPrefix: "write",
+    windowMs: WRITE_RATE_LIMIT_WINDOW_MS,
+    maxHits: WRITE_RATE_LIMIT_MAX
+  });
+  const uploadRateLimiter = makeRateLimiter({
+    keyPrefix: "upload",
+    windowMs: UPLOAD_RATE_LIMIT_WINDOW_MS,
+    maxHits: UPLOAD_RATE_LIMIT_MAX
+  });
 
-  app.get("/v1/health", (_req, res) => res.status(200).json({ status: "ok" }));
+  app.get("/open/invite", (req, res) => {
+    applyHTMLSecurityHeaders(res);
+    const inviteCode = String(req.query?.code || "").trim().toUpperCase();
+    const handle = String(req.query?.handle || "").trim().replace(/^@+/, "");
 
-  app.post("/v1/auth/email/register", async (req, res) => {
+    if (!inviteCode && !handle) {
+      return res.status(400).send("missing invite code or handle");
+    }
+
+    const params = new URLSearchParams();
+    if (inviteCode) params.set("code", inviteCode);
+    if (handle) params.set("handle", handle);
+    const appURL = `streetstamps://add-friend?${params.toString()}`;
+
+    const safeAppURL = JSON.stringify(appURL);
+    const safeFallbackURL = JSON.stringify(APPSTORE_FALLBACK_URL);
+    const safeInviteCode = escapeHTML(inviteCode ? inviteCode : "");
+    const safeHandle = escapeHTML(handle ? `@${handle}` : "");
+
+    return res
+      .status(200)
+      .type("html")
+      .send(`<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>StreetStamps 邀请</title>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Helvetica Neue",Arial,sans-serif;background:#f5f6fb;margin:0;padding:0}
+    .card{max-width:520px;margin:36px auto;padding:24px;background:#fff;border-radius:18px;box-shadow:0 10px 28px rgba(0,0,0,.08)}
+    h1{margin:0 0 10px;font-size:28px}
+    p{margin:6px 0;color:#424242;line-height:1.6}
+    .meta{margin-top:14px;padding:12px;border-radius:12px;background:#f7f8fb}
+    .btn{display:inline-block;margin-top:16px;padding:12px 18px;border-radius:12px;text-decoration:none;font-weight:700}
+    .btn-open{background:#1f8f45;color:#fff}
+    .btn-store{margin-left:10px;background:#eceff5;color:#111}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>StreetStamps 好友邀请</h1>
+    <p>正在打开 App 并跳转到“加好友”页面。</p>
+    <div class="meta">
+      <p>邀请码：${safeInviteCode || "（未提供）"}</p>
+      <p>专属ID：${safeHandle || "（未提供）"}</p>
+    </div>
+    <a class="btn btn-open" href="${appURL}">立即打开 App</a>
+    <a class="btn btn-store" href="${APPSTORE_FALLBACK_URL}">没有 App？去下载</a>
+  </div>
+  <script>
+    (function() {
+      var appURL = ${safeAppURL};
+      var fallbackURL = ${safeFallbackURL};
+      var redirected = false;
+      function toStore() {
+        if (redirected) return;
+        redirected = true;
+        window.location.replace(fallbackURL);
+      }
+      var timer = setTimeout(toStore, 1500);
+      window.location.href = appURL;
+      document.addEventListener("visibilitychange", function() {
+        if (document.hidden) clearTimeout(timer);
+      });
+    })();
+  </script>
+</body>
+</html>`);
+  });
+
+  app.get("/v1/health", (_req, res) => res.status(200).json({
+    status: "ok",
+    storage: pgPool ? "postgresql" : "file",
+    cors: corsConfigured() ? "allowlist" : "open",
+    auth: {
+      businessBearer: "backend_jwt_only"
+    },
+    maintenance: {
+      writeFrozen: writeFreezeEnabled()
+    },
+    media: {
+      maxUploadBytes: Number.isFinite(MEDIA_UPLOAD_MAX_BYTES) && MEDIA_UPLOAD_MAX_BYTES > 0
+        ? MEDIA_UPLOAD_MAX_BYTES
+        : 10 * 1024 * 1024,
+      objectStorage: Boolean(r2Client)
+    }
+  }));
+
+  app.get("/v1/feature-flags", (req, res) => {
+    const region = String(req.query.region || req.headers["x-storefront-region"] || "").trim().toUpperCase();
+    const socialEnabled = region ? !SOCIAL_DISABLED_REGIONS.includes(region) : true;
+    res.status(200).json({
+      social: socialEnabled,
+      region: region || null
+    });
+  });
+
+  app.post("/v1/auth/register", authRateLimiter, async (req, res) => {
     try {
       const email = String(req.body?.email || "").trim().toLowerCase();
       const password = String(req.body?.password || "");
-      if (!email.includes("@") || password.length < 8) return res.status(400).json({ message: "invalid email or password" });
-      if (db.emailIndex[email]) return res.status(409).json({ message: "email already exists" });
+      const displayName = String(req.body?.displayName || "").trim();
+      if (!email.includes("@")) return res.status(400).json({ message: "invalid email" });
+      if (!isStrongPassword(password)) {
+        return res.status(400).json({ message: "password must be at least 8 characters and include a letter, number, and special character" });
+      }
+      const existingEmailIdentity = findEmailPasswordIdentity(email);
+      if (db.emailIndex[email] && !canRecoverLegacyEmailRegistration(email)) {
+        if (existingEmailIdentity && !parseTruthy(existingEmailIdentity.emailVerified)) {
+          const existingUser = db.users?.[existingEmailIdentity.userID];
+          if (!existingUser) return res.status(409).json({ message: "email already exists" });
+
+          const now = nowUnix();
+          const passwordHash = hashPassword(password);
+          existingEmailIdentity.passwordHash = passwordHash;
+          existingEmailIdentity.updatedAt = now;
+          existingUser.passwordHash = passwordHash;
+          if (displayName) {
+            existingUser.displayName = displayName;
+          }
+          const verificationToken = issueEmailVerificationToken(existingEmailIdentity.userID, email);
+          await persistPG(async () => {
+            await DB.updateAuthIdentity(pgPool, existingEmailIdentity.id, { passwordHash: existingEmailIdentity.passwordHash, updatedAt: existingEmailIdentity.updatedAt });
+            await DB.updateUser(pgPool, existingEmailIdentity.userID, { displayName: existingUser.displayName });
+            await persistEmailVerificationTokenToPG(issueEmailVerificationToken._lastID);
+          });
+          await deliverVerificationEmail(email, verificationToken);
+
+          return res.status(200).json({
+            userId: existingEmailIdentity.userID,
+            email,
+            emailVerificationRequired: true,
+            needsProfileSetup: !resolvedProfileSetupCompleted(existingUser, true)
+          });
+        }
+        return res.status(409).json({ message: "email already exists" });
+      }
 
       const uid = `u_${randHex(12)}`;
       const invite = genInviteCode();
+      const passwordHash = hashPassword(password);
+      const createdAt = nowUnix();
       const user = {
         id: uid,
         provider: "email",
         email,
-        passwordHash: hashPassword(password),
+        passwordHash,
         inviteCode: invite,
         handle: null,
+        handleChangeUsed: false,
         profileVisibility: visibilityFriendsOnly,
-        displayName: "Explorer",
+        displayName: displayName || "Explorer",
+        profileSetupCompleted: false,
         bio: "Travel Enthusiastic",
         loadout: defaultLoadout(),
         journeys: [],
         cityCards: [],
         friendIDs: [],
-        createdAt: nowUnix()
+        notifications: [],
+        sentPostcards: [],
+        receivedPostcards: [],
+        createdAt
       };
       db.users[uid] = user;
-      setUserHandle(uid, email.split("@")[0], { strict: false });
+      setUserHandle(uid, null, { strict: false });
       db.emailIndex[email] = uid;
       db.inviteIndex[invite] = uid;
-      await saveDB();
+      const identityID = `aid_${randHex(12)}`;
+      db.authIdentities[identityID] = {
+        id: identityID,
+        userID: uid,
+        provider: "email_password",
+        providerSubject: email,
+        email,
+        emailVerified: false,
+        passwordHash,
+        createdAt,
+        updatedAt: createdAt
+      };
+      const verificationToken = issueEmailVerificationToken(uid, email);
+      await persistPG(async () => {
+        await DB.insertUser(pgPool, db.users[uid]);
+        await DB.insertAuthIdentity(pgPool, db.authIdentities[identityID]);
+        await persistEmailVerificationTokenToPG(issueEmailVerificationToken._lastID);
+      });
+      await deliverVerificationEmail(email, verificationToken);
 
-      return res.status(200).json({ userId: uid, provider: "email", email, accessToken: makeAccessToken(uid, "email"), refreshToken: makeRefreshToken(uid, "email") });
-    } catch (e) {
-      return res.status(500).json({ message: "internal error" });
-    }
-  });
-
-  app.post("/v1/auth/email/login", (req, res) => {
-    try {
-      const email = String(req.body?.email || "").trim().toLowerCase();
-      const password = String(req.body?.password || "");
-      const uid = db.emailIndex[email];
-      if (!uid) return res.status(404).json({ message: "account not found" });
-      const u = db.users[uid];
-      if (!u || u.passwordHash !== hashPassword(password)) return res.status(401).json({ message: "wrong email or password" });
-      return res.status(200).json({ userId: uid, provider: u.provider, email: u.email || null, accessToken: makeAccessToken(uid, u.provider), refreshToken: makeRefreshToken(uid, u.provider) });
+      return res.status(200).json({
+        userId: uid,
+        email,
+        emailVerificationRequired: true,
+        needsProfileSetup: true
+      });
     } catch {
       return res.status(500).json({ message: "internal error" });
     }
   });
 
-  app.post("/v1/auth/oauth", async (req, res) => {
+  app.post("/v1/auth/verify-email", authRateLimiter, async (req, res) => {
+    try {
+      const result = await consumeEmailVerificationToken(req.body?.token);
+      if (!result.ok) return res.status(result.status).json({ message: result.message });
+      return res.status(200).json({ ok: true, email: result.email });
+    } catch {
+      return res.status(500).json({ message: "internal error" });
+    }
+  });
+
+  app.get("/verify-email", async (req, res) => {
+    try {
+      applyHTMLSecurityHeaders(res);
+      const result = await consumeEmailVerificationToken(req.query?.token);
+      if (!result.ok) {
+        res.status(result.status);
+        res.type("html");
+        return res.send(renderEmailVerificationHTML({
+          ok: false,
+          title: "Verification link failed",
+          body: result.message === "token expired"
+            ? "This verification link has expired."
+            : "This verification link is invalid or has already been used."
+        }));
+      }
+      res.status(200);
+      res.type("html");
+      return res.send(renderEmailVerificationHTML({
+        ok: true,
+        title: "Email verified",
+        body: "Your StreetStamps email has been verified. You can return to the app and sign in."
+      }));
+    } catch {
+      res.status(500);
+      res.type("html");
+      return res.send(renderEmailVerificationHTML({
+        ok: false,
+        title: "Verification link failed",
+        body: "We could not verify your email right now."
+      }));
+    }
+  });
+
+  app.get("/reset-password", (req, res) => {
+    try {
+      applyHTMLSecurityHeaders(res);
+      const result = inspectPasswordResetToken(req.query?.token);
+      if (!result.ok) {
+        res.status(result.status);
+        res.type("html");
+        return res.send(renderPasswordResetHTML({
+          ok: false,
+          title: "Reset link failed",
+          body: result.message === "token expired"
+            ? "This password reset link has expired."
+            : "This password reset link is invalid or has already been used."
+        }));
+      }
+      const deepLink = `streetstamps://reset-password?token=${encodeURIComponent(result.token)}`;
+      res.status(200);
+      res.type("html");
+      return res.send(renderPasswordResetHTML({
+        ok: true,
+        title: "Open StreetStamps",
+        body: "Continue in the StreetStamps app to choose a new password.",
+        deepLink
+      }));
+    } catch {
+      res.status(500);
+      res.type("html");
+      return res.send(renderPasswordResetHTML({
+        ok: false,
+        title: "Reset link failed",
+        body: "We could not open the password reset flow right now."
+      }));
+    }
+  });
+
+  app.post("/v1/auth/resend-verification", authRateLimiter, async (req, res) => {
+    try {
+      const email = normalizeEmail(req.body?.email);
+      if (!email) return res.status(200).json({ ok: true });
+
+      const identity = Object.values(db.authIdentities || {}).find((item) => (
+        item.provider === "email_password" && item.email === email
+      ));
+      if (!identity || parseTruthy(identity.emailVerified)) {
+        return res.status(200).json({ ok: true });
+      }
+
+      const token = issueEmailVerificationToken(identity.userID, email);
+      await persistPG(async () => {
+        await persistEmailVerificationTokenToPG(issueEmailVerificationToken._lastID);
+      });
+      await deliverVerificationEmail(email, token);
+      return res.status(200).json({ ok: true });
+    } catch {
+      return res.status(500).json({ message: "internal error" });
+    }
+  });
+
+  app.post("/v1/auth/login", authLoginRateLimiter, async (req, res) => {
+    try {
+      const email = String(req.body?.email || "").trim().toLowerCase();
+      const password = String(req.body?.password || "");
+      const identity = Object.values(db.authIdentities || {}).find((item) => (
+        item.provider === "email_password" && item.email === email
+      ));
+      if (!identity) return res.status(404).json({ message: "account not found" });
+
+      // 验证密码（支持旧SHA256和新bcrypt）
+      let passwordValid = false;
+      if (identity.passwordHash.startsWith("$2")) {
+        // bcrypt格式
+        passwordValid = verifyPassword(password, identity.passwordHash);
+      } else {
+        // 旧SHA256格式，自动升级
+        const oldHash = hashSHA256(`StreetStamps::${password}`);
+        if (identity.passwordHash === oldHash) {
+          passwordValid = true;
+          // 升级到bcrypt
+          identity.passwordHash = hashPassword(password);
+          identity.updatedAt = nowUnix();
+          await persistPG(async () => {
+            await DB.updateAuthIdentity(pgPool, identity.id, { passwordHash: identity.passwordHash, updatedAt: identity.updatedAt });
+          });
+        }
+      }
+
+      if (!passwordValid) return res.status(401).json({ message: "wrong email or password" });
+      if (!identity.emailVerified) return res.status(403).json({ message: "email not verified" });
+
+      const user = db.users[identity.userID];
+      if (!user) return res.status(404).json({ message: "account not found" });
+
+      const accessToken = makeAccessToken(user.id, user.provider || "email");
+      const refreshToken = issueStoredRefreshToken(user.id, user.provider || "email");
+      await persistPG(async () => {
+        await persistRefreshTokenToPG(issueStoredRefreshToken._lastID);
+      });
+      return res.status(200).json(authSuccessPayload(
+        user,
+        user.provider || "email",
+        user.email || identity.email || null,
+        accessToken,
+        refreshToken
+      ));
+    } catch {
+      return res.status(500).json({ message: "internal error" });
+    }
+  });
+
+  app.post("/v1/auth/refresh", authRefreshRateLimiter, async (req, res) => {
+    try {
+      const rawToken = String(req.body?.refreshToken || "").trim();
+      const payload = parseRefreshToken(rawToken);
+      const record = findRefreshTokenRecord(rawToken);
+      if (!record || record.revokedAt) return res.status(401).json({ message: "refresh token invalid" });
+      if (Number(record.expiresAt || 0) < nowUnix()) return res.status(401).json({ message: "refresh token expired" });
+
+      const user = db.users[payload.uid];
+      if (!user) return res.status(401).json({ message: "account not found" });
+
+      return res.status(200).json({
+        accessToken: makeAccessToken(user.id, user.provider || payload.prv || "email")
+      });
+    } catch {
+      return res.status(401).json({ message: "refresh token invalid" });
+    }
+  });
+
+  app.post("/v1/auth/logout", authRateLimiter, async (req, res) => {
+    try {
+      const rawToken = String(req.body?.refreshToken || "").trim();
+      if (!rawToken) return res.status(400).json({ message: "refresh token required" });
+      parseRefreshToken(rawToken);
+      const record = findRefreshTokenRecord(rawToken);
+      if (!record) return res.status(401).json({ message: "refresh token invalid" });
+      if (!record.revokedAt) {
+        record.revokedAt = nowUnix();
+        await persistPG(async () => {
+          await DB.revokeRefreshToken(pgPool, record.id);
+        });
+      }
+      return res.status(200).json({ ok: true });
+    } catch {
+      return res.status(401).json({ message: "refresh token invalid" });
+    }
+  });
+
+  app.post("/v1/auth/forgot-password", authRateLimiter, async (req, res) => {
+    try {
+      const email = String(req.body?.email || "").trim().toLowerCase();
+      if (!email.includes("@")) {
+        return res.status(200).json({ ok: true });
+      }
+      const identity = Object.values(db.authIdentities || {}).find((item) => (
+        item.provider === "email_password" && item.email === email
+      ));
+      if (identity) {
+        const token = issuePasswordResetToken(identity.userID, email);
+        await persistPG(async () => {
+          await persistPasswordResetTokenToPG(issuePasswordResetToken._lastID);
+        });
+        await deliverPasswordResetEmail(email, token);
+      }
+      return res.status(200).json({ ok: true });
+    } catch {
+      return res.status(500).json({ message: "internal error" });
+    }
+  });
+
+  app.post("/v1/auth/reset-password", authRateLimiter, async (req, res) => {
+    try {
+      const rawToken = String(req.body?.token || "").trim();
+      const newPassword = String(req.body?.newPassword || "");
+      if (!rawToken) return res.status(400).json({ message: "token required" });
+      if (!isStrongPassword(newPassword)) {
+        return res.status(400).json({ message: "password must be at least 8 characters and include a letter, number, and special character" });
+      }
+
+      const tokenHash = hashSHA256(rawToken);
+      const tokenRecord = Object.values(db.passwordResetTokens || {}).find((item) => item.tokenHash === tokenHash);
+      if (!tokenRecord) return res.status(400).json({ message: "invalid token" });
+      if (tokenRecord.usedAt) return res.status(400).json({ message: "token already used" });
+      if (Number(tokenRecord.expiresAt || 0) < nowUnix()) return res.status(400).json({ message: "token expired" });
+
+      const identity = Object.values(db.authIdentities || {}).find((item) => (
+        item.provider === "email_password"
+          && item.userID === tokenRecord.userID
+          && item.email === tokenRecord.email
+      ));
+      if (!identity) return res.status(400).json({ message: "identity not found" });
+
+      const nextHash = hashPassword(newPassword);
+      identity.passwordHash = nextHash;
+      identity.updatedAt = nowUnix();
+      const user = db.users[tokenRecord.userID];
+      if (user) user.passwordHash = nextHash;
+      tokenRecord.usedAt = nowUnix();
+      revokeRefreshTokensForUser(tokenRecord.userID);
+      await persistPG(async () => {
+        await DB.updateAuthIdentity(pgPool, identity.id, { passwordHash: nextHash, updatedAt: identity.updatedAt });
+        // passwordHash is stored in auth_identities, not users table
+        await DB.markPasswordResetUsed(pgPool, tokenRecord.id, tokenRecord.usedAt);
+        await DB.revokeRefreshTokensForUser(pgPool, tokenRecord.userID);
+      });
+      return res.status(200).json({ ok: true });
+    } catch {
+      return res.status(500).json({ message: "internal error" });
+    }
+  });
+
+  app.post("/v1/auth/apple", authLoginRateLimiter, async (req, res) => {
+    try {
+      const idToken = String(req.body?.idToken || "").trim();
+      if (!idToken) return res.status(400).json({ message: "idToken required" });
+
+      const identity = await verifyAppleIdentity(idToken);
+      const modernKey = oauthSubjectKey("apple", identity.subject);
+      const legacyKey = oauthLegacyKey("apple", idToken);
+      const existingAppleIdentity = findAuthIdentityByProviderSubject("apple", identity.subject);
+      const relayEmail = isApplePrivateRelayEmail(identity.email);
+      const verifiedEmailIdentity = identity.email && identity.emailVerified && !relayEmail
+        ? findVerifiedEmailPasswordIdentity(identity.email)
+        : null;
+
+      const modernUID = existingUserID(existingAppleIdentity?.userID || db.oauthIndex[modernKey]);
+      const legacyUID = existingUserID(db.oauthIndex[legacyKey]);
+      const emailUID = existingUserID(verifiedEmailIdentity?.userID);
+
+      let uid = chooseCanonicalOAuthUserID([
+        { uid: modernUID, source: "modern" },
+        { uid: legacyUID, source: "legacy" },
+        { uid: emailUID, source: "email" }
+      ]);
+      let changed = false;
+
+      if (modernUID && modernUID !== uid && mergeEmptyOAuthAccountInto(modernUID, uid)) {
+        changed = true;
+      }
+      if (legacyUID && legacyUID !== uid && mergeEmptyOAuthAccountInto(legacyUID, uid)) {
+        changed = true;
+      }
+      if (emailUID && emailUID !== uid && mergeEmptyOAuthAccountInto(emailUID, uid)) {
+        changed = true;
+      }
+
+      if (!uid) {
+        const user = createDefaultUser("apple", identity.email);
+        uid = user.id;
+        changed = true;
+      }
+
+      if (!uid) return res.status(500).json({ message: "user not found after apple login" });
+
+      const user = db.users[uid];
+      if (!user) return res.status(500).json({ message: "user not found after apple login" });
+
+      if (modernKey && db.oauthIndex[modernKey] !== uid) {
+        db.oauthIndex[modernKey] = uid;
+        changed = true;
+      }
+
+      if (!relayEmail && identity.email && identity.emailVerified) {
+        const currentEmailUID = existingUserID(db.emailIndex[identity.email]);
+        if (!user.email && (!currentEmailUID || currentEmailUID === uid)) {
+          user.email = identity.email;
+          changed = true;
+        }
+        if ((!currentEmailUID || currentEmailUID === uid) && db.emailIndex[identity.email] !== uid) {
+          db.emailIndex[identity.email] = uid;
+          changed = true;
+        }
+      } else if (!user.email && identity.email) {
+        user.email = identity.email;
+        changed = true;
+      }
+
+      const appleIdentity = upsertAppleAuthIdentity(uid, identity.subject, identity.email, identity.emailVerified);
+      if (appleIdentity.userID !== uid) {
+        appleIdentity.userID = uid;
+        appleIdentity.updatedAt = nowUnix();
+        changed = true;
+      } else {
+        changed = true;
+      }
+
+      const accessToken = makeAccessToken(uid, "apple");
+      const refreshToken = issueStoredRefreshToken(uid, "apple");
+      await persistPG(async () => {
+        const user = db.users[uid];
+        if (user) await DB.updateUser(pgPool, uid, { email: user.email, provider: user.provider });
+        if (modernKey) await DB.setOAuthUser(pgPool, modernKey, uid);
+        const appleIdent = findAuthIdentityByProviderSubject("apple", identity.subject);
+        if (appleIdent) {
+          try { await DB.insertAuthIdentity(pgPool, appleIdent); } catch { await DB.updateAuthIdentity(pgPool, appleIdent.id, { userID: uid, email: appleIdent.email, emailVerified: appleIdent.emailVerified, updatedAt: appleIdent.updatedAt }); }
+        }
+        await persistRefreshTokenToPG(issueStoredRefreshToken._lastID);
+      });
+
+      return res.status(200).json(authSuccessPayload(
+        user,
+        "apple",
+        user.email || appleIdentity.email || null,
+        accessToken,
+        refreshToken
+      ));
+    } catch (e) {
+      const message = String(e?.message || "").toLowerCase();
+      if (message.includes("token") || message.includes("jwt") || message.includes("audience") || message.includes("issuer")) {
+        return res.status(401).json({ message: "invalid apple token" });
+      }
+      return res.status(500).json({ message: "internal error" });
+    }
+  });
+
+  app.post("/v1/auth/link-email-password", authRateLimiter, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const user = db.users[uid];
+      if (!user) return res.status(404).json({ message: "account not found" });
+
+      const email = normalizeEmail(req.body?.email);
+      const password = String(req.body?.password || "");
+      if (!email || !email.includes("@")) return res.status(400).json({ message: "invalid email" });
+      if (!isStrongPassword(password)) {
+        return res.status(400).json({ message: "password must be at least 8 characters and include a letter, number, and special character" });
+      }
+
+      if (userHasEmailPassword(uid)) {
+        return res.status(409).json({ message: "email password already linked" });
+      }
+
+      const existingEmailIdentity = findEmailPasswordIdentity(email);
+      if (existingEmailIdentity && existingEmailIdentity.userID !== uid) {
+        return res.status(409).json({ message: "email already in use by another account" });
+      }
+
+      const passwordHash = hashPassword(password);
+      const now = nowUnix();
+      const identityID = `aid_${randHex(12)}`;
+      db.authIdentities[identityID] = {
+        id: identityID,
+        userID: uid,
+        provider: "email_password",
+        providerSubject: email,
+        email,
+        emailVerified: false,
+        passwordHash,
+        createdAt: now,
+        updatedAt: now
+      };
+
+      if (!user.email) user.email = email;
+      if (!db.emailIndex[email]) db.emailIndex[email] = uid;
+
+      const verificationToken = issueEmailVerificationToken(uid, email);
+      await persistPG(async () => {
+        await DB.insertAuthIdentity(pgPool, db.authIdentities[identityID]);
+        await DB.updateUser(pgPool, uid, { email: user.email });
+        await persistEmailVerificationTokenToPG(issueEmailVerificationToken._lastID);
+      });
+      await saveDB();
+      await deliverVerificationEmail(email, verificationToken);
+
+      return res.status(200).json({
+        ok: true,
+        email,
+        emailVerificationRequired: true
+      });
+    } catch (e) {
+      if (e?.message === "missing bearer" || e?.message === "invalid token") {
+        return res.status(401).json({ message: "unauthorized" });
+      }
+      return res.status(500).json({ message: "internal error" });
+    }
+  });
+
+  app.post("/v1/auth/email/register", authRateLimiter, async (req, res) => {
+    return res.status(410).json({
+      code: "legacy_auth_endpoint_disabled",
+      message: "legacy endpoint disabled; use /v1/auth/register"
+    });
+  });
+
+  app.post("/v1/auth/email/login", authLoginRateLimiter, (req, res) => {
+    return res.status(410).json({
+      code: "legacy_auth_endpoint_disabled",
+      message: "legacy endpoint disabled; use /v1/auth/login"
+    });
+  });
+
+  app.post("/v1/auth/oauth", authLoginRateLimiter, async (req, res) => {
     try {
       const provider = String(req.body?.provider || "").trim().toLowerCase();
       const idToken = String(req.body?.idToken || "").trim();
       if (provider !== "apple" && provider !== "google") return res.status(400).json({ message: "provider must be apple or google" });
       if (!idToken) return res.status(400).json({ message: "idToken required" });
-      const key = `${provider}:${hashSHA256(idToken)}`;
-      let uid = db.oauthIndex[key];
+      const identity = await verifyOAuthIdentity(provider, idToken);
+      const modernKey = oauthSubjectKey(provider, identity.subject);
+      const legacyKey = oauthLegacyKey(provider, idToken);
+      const modernUID = existingUserID(db.oauthIndex[modernKey]);
+      const legacyUID = existingUserID(db.oauthIndex[legacyKey]);
+      const emailUID = identity.email && identity.emailVerified
+        ? existingUserID(db.emailIndex[identity.email])
+        : "";
+      let uid = chooseCanonicalOAuthUserID([
+        { uid: modernUID, source: "modern" },
+        { uid: legacyUID, source: "legacy" },
+        { uid: emailUID, source: "email" }
+      ]);
+      let changed = false;
+
+      if (modernUID && modernUID !== uid && mergeEmptyOAuthAccountInto(modernUID, uid)) {
+        changed = true;
+      }
+      if (legacyUID && legacyUID !== uid && mergeEmptyOAuthAccountInto(legacyUID, uid)) {
+        changed = true;
+      }
+      if (emailUID && emailUID !== uid && mergeEmptyOAuthAccountInto(emailUID, uid)) {
+        changed = true;
+      }
+
       if (!uid) {
         uid = `u_${randHex(12)}`;
         const invite = genInviteCode();
@@ -449,6 +3392,7 @@ async function main() {
           provider,
           inviteCode: invite,
           handle: null,
+          handleChangeUsed: false,
           profileVisibility: visibilityFriendsOnly,
           displayName: "Explorer",
           bio: "Travel Enthusiastic",
@@ -456,16 +3400,63 @@ async function main() {
           journeys: [],
           cityCards: [],
           friendIDs: [],
+          notifications: [],
+          sentPostcards: [],
+          receivedPostcards: [],
           createdAt: nowUnix()
         };
-        setUserHandle(uid, uid, { strict: false });
-        db.oauthIndex[key] = uid;
+        setUserHandle(uid, null, { strict: false });
         db.inviteIndex[invite] = uid;
-        await saveDB();
+        changed = true;
       }
+
+      if (modernKey && db.oauthIndex[modernKey] !== uid) {
+        db.oauthIndex[modernKey] = uid;
+        changed = true;
+      }
+
       const u = db.users[uid];
-      return res.status(200).json({ userId: uid, provider: u.provider, email: u.email || null, accessToken: makeAccessToken(uid, u.provider), refreshToken: makeRefreshToken(uid, u.provider) });
-    } catch {
+      if (!u) return res.status(500).json({ message: "user not found after oauth login" });
+
+      if (identity.email && identity.emailVerified) {
+        const currentEmailUID = existingUserID(db.emailIndex[identity.email]);
+        if (!u.email && (!currentEmailUID || currentEmailUID === uid)) {
+          u.email = identity.email;
+          changed = true;
+        }
+        if ((!currentEmailUID || currentEmailUID === uid) && db.emailIndex[identity.email] !== uid) {
+          db.emailIndex[identity.email] = uid;
+          changed = true;
+        }
+      }
+
+      const refreshToken = issueStoredRefreshToken(uid, u.provider);
+      if (changed) {
+        await persistPG(async () => {
+          const user = db.users[uid];
+          if (user) {
+            try { await DB.insertUser(pgPool, user); } catch { await DB.updateUser(pgPool, uid, { email: user.email, provider: user.provider }); }
+          }
+          if (modernKey) await DB.setOAuthUser(pgPool, modernKey, uid);
+          await persistRefreshTokenToPG(issueStoredRefreshToken._lastID);
+        });
+      } else {
+        await persistPG(async () => {
+          await persistRefreshTokenToPG(issueStoredRefreshToken._lastID);
+        });
+      }
+      return res.status(200).json(authSuccessPayload(
+        u,
+        u.provider,
+        u.email || null,
+        makeAccessToken(uid, u.provider),
+        refreshToken
+      ));
+    } catch (e) {
+      const message = String(e?.message || "").toLowerCase();
+      if (message.includes("token") || message.includes("jwt") || message.includes("audience") || message.includes("issuer")) {
+        return res.status(401).json({ message: "invalid oauth token" });
+      }
       return res.status(500).json({ message: "internal error" });
     }
   });
@@ -486,23 +3477,51 @@ async function main() {
     }
   });
 
-  app.post("/v1/friends", async (req, res) => {
+  app.post("/v1/friends", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      if (!db.users[uid]) return res.status(404).json({ message: "user not found" });
+      return res.status(409).json({ message: "direct add disabled, use /v1/friends/requests" });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.get("/v1/friends/requests", (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
       if (!me) return res.status(404).json({ message: "user not found" });
+
+      const incoming = sortByCreatedDesc(
+        allFriendRequests().filter((item) => item.toUserID === uid).map(friendRequestDTO).filter(Boolean)
+      );
+      const outgoing = sortByCreatedDesc(
+        allFriendRequests().filter((item) => item.fromUserID === uid).map(friendRequestDTO).filter(Boolean)
+      );
+      return res.status(200).json({ incoming, outgoing });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.post("/v1/friends/requests", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = db.users[uid];
+      if (!me) return res.status(404).json({ message: "user not found" });
+
       const displayName = String(req.body?.displayName || "").trim();
-      const handleRaw = String(req.body?.handle || "").trim();
+      const handleRaw = String(req.body?.handle || req.body?.exclusiveID || "").trim();
       const inviteCodeRaw = req.body?.inviteCode == null ? "" : String(req.body.inviteCode).trim();
+      const note = String(req.body?.note || displayName || "").trim().slice(0, 120);
       if (!displayName && !inviteCodeRaw && !handleRaw) {
-        return res.status(400).json({ message: "displayName or inviteCode or handle required" });
+        return res.status(400).json({ message: "displayName or inviteCode or exclusiveID required" });
       }
 
       let target = null;
       if (inviteCodeRaw) {
-        const code = inviteCodeRaw.toUpperCase();
-        const targetID = db.inviteIndex[code];
-        if (targetID) target = db.users[targetID] || null;
+        target = resolveUserByInviteCode(inviteCodeRaw);
       }
       const requestedHandle = normalizeHandle(handleRaw || displayName);
       if (!target && requestedHandle) {
@@ -515,9 +3534,9 @@ async function main() {
           return res.status(404).json({ message: "invite code not found" });
         }
         if (requestedHandle) {
-          return res.status(404).json({ message: "handle not found" });
+          return res.status(404).json({ message: "exclusive id not found" });
         }
-        return res.status(400).json({ message: "use inviteCode or handle to add friend" });
+        return res.status(400).json({ message: "use inviteCode or exclusiveID to add friend" });
       }
 
       if (target.id === me.id) {
@@ -525,19 +3544,116 @@ async function main() {
       }
 
       if ((me.friendIDs || []).includes(target.id)) {
-        return res.status(200).json(friendDTOForViewer(target, true));
+        return res.status(409).json({ message: "already friends" });
       }
 
-      appendUnique(me.friendIDs, target.id);
-      appendUnique(target.friendIDs, me.id);
-      await saveDB();
-      return res.status(200).json(friendDTOForViewer(target, true));
+      const existing = findPendingFriendRequest(uid, target.id);
+      if (existing) {
+        const dto = friendRequestDTO(existing);
+        return res.status(200).json({ ok: true, request: dto, message: "好友申请已发送，等待对方通过" });
+      }
+
+      const reverse = findPendingFriendRequest(target.id, uid);
+      if (reverse) {
+        return res.status(409).json({ message: "对方已向你发送申请，请在申请列表中通过" });
+      }
+
+      const reqID = `fr_${randHex(10)}`;
+      const createdAt = new Date().toISOString();
+      db.friendRequestsIndex[reqID] = {
+        id: reqID,
+        fromUserID: uid,
+        toUserID: target.id,
+        note,
+        createdAt,
+        updatedAt: createdAt
+      };
+      pushFriendRequestNotification(target, me);
+      await persistPG(async () => {
+        await DB.insertFriendRequest(pgPool, db.friendRequestsIndex[reqID]);
+        await persistNotificationToPG(target.id);
+      });
+      return res.status(200).json({
+        ok: true,
+        request: friendRequestDTO(db.friendRequestsIndex[reqID]),
+        message: "好友申请已发送，等待对方通过"
+      });
     } catch {
       return res.status(401).json({ message: "unauthorized" });
     }
   });
 
-  app.delete("/v1/friends/:friendID", async (req, res) => {
+  app.post("/v1/friends/requests/:requestID/accept", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = db.users[uid];
+      if (!me) return res.status(404).json({ message: "user not found" });
+      const requestID = String(req.params.requestID || "").trim();
+      if (!requestID) return res.status(400).json({ message: "request id required" });
+
+      const pending = db.friendRequestsIndex[requestID];
+      if (!pending) return res.status(404).json({ message: "request not found" });
+      if (pending.toUserID !== uid) return res.status(403).json({ message: "forbidden" });
+
+      const fromUser = db.users[pending.fromUserID];
+      if (!fromUser) {
+        removeFriendRequestByID(requestID);
+        await persistPG(async () => {
+          await DB.deleteFriendRequest(pgPool, requestID);
+        });
+        return res.status(404).json({ message: "request sender not found" });
+      }
+
+      const deletedRequestIDs = collectFriendRequestIDsBetween(me.id, fromUser.id);
+      appendUnique(me.friendIDs, fromUser.id);
+      appendUnique(fromUser.friendIDs, me.id);
+      removeFriendRequestsBetween(me.id, fromUser.id);
+      pushFriendRequestAcceptedNotification(fromUser, me);
+      await persistPGTx(async (client) => {
+        await DB.addFriendship(client, me.id, fromUser.id);
+        for (const rid of deletedRequestIDs) await DB.deleteFriendRequest(client, rid);
+        const n = (fromUser.notifications || [])[0];
+        if (n) await DB.insertNotification(client, {
+          id: n.id, userID: fromUser.id, type: n.type || "unknown",
+          fromUserID: n.fromUserID || null, fromDisplayName: n.fromDisplayName || null,
+          journeyID: n.journeyID || null, journeyTitle: n.journeyTitle || null,
+          message: n.message || "", read: n.read ?? false,
+          createdAt: n.createdAt || new Date().toISOString(),
+        });
+      });
+      return res.status(200).json({
+        ok: true,
+        friend: friendDTOForViewer(fromUser, true),
+        message: "已通过好友申请"
+      });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.post("/v1/friends/requests/:requestID/reject", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = db.users[uid];
+      if (!me) return res.status(404).json({ message: "user not found" });
+      const requestID = String(req.params.requestID || "").trim();
+      if (!requestID) return res.status(400).json({ message: "request id required" });
+
+      const pending = db.friendRequestsIndex[requestID];
+      if (!pending) return res.status(404).json({ message: "request not found" });
+      if (pending.toUserID !== uid) return res.status(403).json({ message: "forbidden" });
+
+      removeFriendRequestByID(requestID);
+      await persistPG(async () => {
+        await DB.deleteFriendRequest(pgPool, requestID);
+      });
+      return res.status(200).json({ ok: true, message: "已拒绝好友申请" });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.delete("/v1/friends/:friendID", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -545,27 +3661,525 @@ async function main() {
       const fid = String(req.params.friendID || "").trim();
       if (!fid) return res.status(400).json({ message: "friend id required" });
 
+      const deletedRequestIDs = collectFriendRequestIDsBetween(uid, fid);
       me.friendIDs = removeID(me.friendIDs || [], fid);
       const f = db.users[fid];
       if (f) f.friendIDs = removeID(f.friendIDs || [], uid);
-      await saveDB();
+      removeFriendRequestsBetween(uid, fid);
+      await persistPGTx(async (client) => {
+        await DB.removeFriendship(client, uid, fid);
+        for (const rid of deletedRequestIDs) await DB.deleteFriendRequest(client, rid);
+      });
       return res.status(200).json({});
     } catch {
       return res.status(401).json({ message: "unauthorized" });
     }
   });
 
-  app.post("/v1/journeys/migrate", async (req, res) => {
+  app.post("/v1/journeys/migrate", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
       if (!me) return res.status(404).json({ message: "user not found" });
       const journeys = Array.isArray(req.body?.journeys) ? req.body.journeys : [];
       const unlockedCityCards = Array.isArray(req.body?.unlockedCityCards) ? req.body.unlockedCityCards : [];
-      me.journeys = journeys.map(normalizeJourneyPayload);
-      me.cityCards = unlockedCityCards;
-      await saveDB();
+      const removedJourneyIDs = Array.isArray(req.body?.removedJourneyIDs) ? req.body.removedJourneyIDs : [];
+      const snapshotComplete = parseTruthy(req.body?.snapshotComplete);
+      me.journeys = mergeJourneyPayloads(me.journeys || [], journeys, removedJourneyIDs, snapshotComplete, uid);
+      me.cityCards = mergeCityCardPayloads(me.cityCards || [], unlockedCityCards, snapshotComplete);
+      await persistPG(async () => {
+        for (const j of journeys) await DB.upsertJourney(pgPool, uid, j);
+        if (removedJourneyIDs.length) await DB.deleteJourneys(pgPool, uid, removedJourneyIDs);
+        await DB.replaceCityCards(pgPool, uid, me.cityCards);
+      });
       return res.status(200).json({ journeys: me.journeys.length, cityCards: me.cityCards.length });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.post("/v1/journeys/likes/batch", writeRateLimiter, rejectWhenWriteFrozen, (req, res) => {
+    try {
+      const viewerID = parseBearer(req);
+      const viewer = db.users[viewerID];
+      if (!viewer) return res.status(404).json({ message: "user not found" });
+
+      const ownerUserIDRaw = String(req.body?.ownerUserID || "").trim();
+      const ownerUserID = ownerUserIDRaw || viewerID;
+      const owner = db.users[ownerUserID];
+      if (!owner) return res.status(404).json({ message: "user not found" });
+
+      const ids = Array.isArray(req.body?.journeyIDs)
+        ? req.body.journeyIDs.map((x) => String(x || "").trim()).filter(Boolean)
+        : [];
+      const uniqIDs = [...new Set(ids)];
+
+      const ownerJourneyByID = new Map((owner.journeys || []).map((j) => [String(j.id), j]));
+      const items = [];
+      for (const journeyID of uniqIDs) {
+        const journey = ownerJourneyByID.get(journeyID);
+        if (!journey) {
+          items.push({ journeyID, likes: 0, likedByMe: false });
+          continue;
+        }
+        if (!canViewJourney(viewer, owner, journey)) {
+          items.push({ journeyID, likes: 0, likedByMe: false });
+          continue;
+        }
+        const record = ensureLikeRecord(ownerUserID, journeyID);
+        const likerIDs = Array.isArray(record.likerIDs) ? record.likerIDs : [];
+        items.push({
+          journeyID,
+          likes: likerIDs.length,
+          likedByMe: likerIDs.includes(viewerID)
+        });
+      }
+      return res.status(200).json({ items });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.get("/v1/journeys/:ownerUserID/:journeyID/likes", writeRateLimiter, (req, res) => {
+    try {
+      const viewerID = parseBearer(req);
+      const ownerUserID = String(req.params.ownerUserID || "").trim();
+      const journeyID = String(req.params.journeyID || "").trim();
+      if (!ownerUserID || !journeyID) return res.status(400).json({ message: "ownerUserID and journeyID required" });
+
+      const viewer = db.users[viewerID];
+      const owner = db.users[ownerUserID];
+      if (!viewer || !owner) return res.status(404).json({ message: "user not found" });
+
+      const journey = (owner.journeys || []).find((x) => String(x.id) === journeyID);
+      if (!journey) return res.status(404).json({ message: "journey not found" });
+      if (!canViewJourney(viewer, owner, journey)) return res.status(403).json({ message: "forbidden" });
+
+      const record = ensureLikeRecord(ownerUserID, journeyID);
+      const likedAtByUserID = record.likedAtByUserID || {};
+      const items = (record.likerIDs || [])
+        .map((userID) => {
+          const liker = db.users[userID];
+          if (!liker) return null;
+          return {
+            userID,
+            displayName: String(liker.displayName || userID),
+            likedAt: likedAtByUserID[userID] || record.updatedAt || new Date().toISOString()
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => Date.parse(b.likedAt || "") - Date.parse(a.likedAt || ""));
+
+      return res.status(200).json({ items });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.post("/v1/journeys/:ownerUserID/:journeyID/like", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
+    try {
+      const viewerID = parseBearer(req);
+      const ownerUserID = String(req.params.ownerUserID || "").trim();
+      const journeyID = String(req.params.journeyID || "").trim();
+      if (!ownerUserID || !journeyID) return res.status(400).json({ message: "ownerUserID and journeyID required" });
+
+      const viewer = db.users[viewerID];
+      const owner = db.users[ownerUserID];
+      if (!viewer || !owner) return res.status(404).json({ message: "user not found" });
+      const journey = (owner.journeys || []).find((x) => String(x.id) === journeyID);
+      if (!journey) return res.status(404).json({ message: "journey not found" });
+      if (!canViewJourney(viewer, owner, journey)) return res.status(403).json({ message: "forbidden" });
+
+      const record = ensureLikeRecord(ownerUserID, journeyID);
+      if (!record.likerIDs.includes(viewerID)) {
+        record.likerIDs.push(viewerID);
+        const now = new Date().toISOString();
+        record.likedAtByUserID[viewerID] = now;
+        record.updatedAt = now;
+        if (viewerID !== ownerUserID) {
+          pushJourneyLikeNotification(owner, viewer, journey);
+        }
+        await persistPG(async () => {
+          await DB.addJourneyLike(pgPool, ownerUserID, journeyID, viewerID);
+          if (viewerID !== ownerUserID) await persistNotificationToPG(ownerUserID);
+        });
+      }
+
+      return res.status(200).json({
+        ownerUserID,
+        journeyID,
+        likes: record.likerIDs.length,
+        likedByMe: true
+      });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.delete("/v1/journeys/:ownerUserID/:journeyID/like", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
+    try {
+      const viewerID = parseBearer(req);
+      const ownerUserID = String(req.params.ownerUserID || "").trim();
+      const journeyID = String(req.params.journeyID || "").trim();
+      if (!ownerUserID || !journeyID) return res.status(400).json({ message: "ownerUserID and journeyID required" });
+
+      const owner = db.users[ownerUserID];
+      if (!owner) return res.status(404).json({ message: "user not found" });
+      const record = ensureLikeRecord(ownerUserID, journeyID);
+      const next = (record.likerIDs || []).filter((x) => x !== viewerID);
+      if (next.length !== (record.likerIDs || []).length) {
+        record.likerIDs = next;
+        delete record.likedAtByUserID[viewerID];
+        record.updatedAt = new Date().toISOString();
+        await persistPG(async () => {
+          await DB.removeJourneyLike(pgPool, ownerUserID, journeyID, viewerID);
+        });
+      }
+      return res.status(200).json({
+        ownerUserID,
+        journeyID,
+        likes: (record.likerIDs || []).length,
+        likedByMe: false
+      });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.post("/v1/postcards/send", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
+    const requestStartedAt = timingNowNs();
+    try {
+      const uid = parseBearer(req);
+      const me = db.users[uid];
+      if (!me) return res.status(404).json({ message: "user not found" });
+
+      const toUserID = String(req.body?.toUserID || "").trim();
+      const cityID = String(req.body?.cityID || "").trim();
+      const cityJourneyCount = Math.max(1, Number.parseInt(String(req.body?.cityJourneyCount ?? ""), 10) || 1);
+      const cityNameRaw = String(req.body?.cityName || "").trim();
+      const cityName = cityNameRaw || cityID;
+      const messageText = String(req.body?.messageText || "").trim();
+      const photoURL = absolutizePostcardPhotoURL(req.body?.photoURL, req);
+      const clientDraftID = String(req.body?.clientDraftID || "").trim();
+      const allowedCityIDs = Array.isArray(req.body?.allowedCityIDs)
+        ? req.body.allowedCityIDs.map((x) => String(x || "").trim()).filter(Boolean)
+        : [];
+
+      if (!toUserID || !cityID || !clientDraftID) {
+        return res.status(400).json({ message: "toUserID, cityID and clientDraftID are required" });
+      }
+      if (!photoURL) {
+        return res.status(400).json({ message: "photoURL required" });
+      }
+      if (messageText.length > 80) {
+        return res.status(400).json({ code: "message_too_long", message: "messageText must be <= 80 chars" });
+      }
+
+      const target = resolveUserByAnyID(toUserID);
+      if (!target) return res.status(404).json({ message: "target user not found" });
+      if (uid === target.id) return res.status(400).json({ message: "cannot send postcard to yourself" });
+      if (!isFriendOf(me, target.id)) return res.status(403).json({ message: "friends only" });
+
+      ensurePostcardCollections(me);
+      ensurePostcardCollections(target);
+
+      const rule = canSendPostcard({
+        sentPostcards: me.sentPostcards,
+        toUserID,
+        cityID,
+        cityJourneyCount,
+        clientDraftID,
+        allowedCityIDs
+      });
+
+      if (rule.idempotentHit) {
+        const hit = rule.idempotentHit;
+        return res.status(200).json({
+          messageID: hit.messageID,
+          sentAt: hit.sentAt,
+          idempotent: true
+        });
+      }
+
+      if (!rule.ok) {
+        if (rule.reason === "city_not_allowed") {
+          return res.status(400).json({ code: rule.reason, message: "city not allowed" });
+        }
+        if (rule.reason === "city_friend_quota_exceeded") {
+          return res.status(409).json({
+            code: rule.reason,
+            message: "friend city postcard limit reached"
+          });
+        }
+        if (rule.reason === "city_total_quota_exceeded") {
+          return res.status(409).json({
+            code: rule.reason,
+            message: "city postcard limit reached"
+          });
+        }
+        return res.status(409).json({ code: rule.reason, message: "postcard quota exceeded" });
+      }
+
+      const nowISO = new Date().toISOString();
+      const message = {
+        messageID: `pm_${randHex(12)}`,
+        type: "postcard",
+        fromUserID: me.id,
+        fromDisplayName: me.displayName,
+        toUserID: target.id,
+        toDisplayName: target.displayName,
+        cityID,
+        cityName,
+        photoURL,
+        messageText,
+        sentAt: nowISO,
+        clientDraftID,
+        status: "sent"
+      };
+      const canonicalMessage = upsertPostcard(message) || message;
+
+      me.sentPostcards.unshift(canonicalMessage);
+      target.receivedPostcards.unshift(canonicalMessage);
+      if (me.sentPostcards.length > 1000) me.sentPostcards = me.sentPostcards.slice(0, 1000);
+      if (target.receivedPostcards.length > 1000) target.receivedPostcards = target.receivedPostcards.slice(0, 1000);
+
+      pushPostcardReceivedNotification(target, me, canonicalMessage);
+      const saveStartedAt = timingNowNs();
+      await persistPGTx(async (client) => {
+        await DB.insertPostcard(client, canonicalMessage);
+        const n = (target.notifications || [])[0];
+        if (n) await DB.insertNotification(client, {
+          id: n.id, userID: target.id, type: n.type || "unknown",
+          fromUserID: n.fromUserID || null, fromDisplayName: n.fromDisplayName || null,
+          journeyID: n.journeyID || null, journeyTitle: n.journeyTitle || null,
+          message: n.message || "", read: n.read ?? false,
+          createdAt: n.createdAt || new Date().toISOString(),
+        });
+      });
+      const saveDurationMs = elapsedMs(saveStartedAt);
+
+      logTiming("postcard_send", {
+        userID: uid,
+        toUserID: target.id,
+        cityID,
+        saveDurationMs,
+        totalDurationMs: elapsedMs(requestStartedAt)
+      });
+
+      return res.status(200).json({
+        messageID: canonicalMessage.messageID,
+        sentAt: canonicalMessage.sentAt
+      });
+    } catch (error) {
+      logTiming("postcard_send_error", {
+        totalDurationMs: elapsedMs(requestStartedAt),
+        message: error && error.message ? error.message : "unauthorized"
+      });
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.get("/v1/postcards", (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = db.users[uid];
+      if (!me) return res.status(404).json({ message: "user not found" });
+      ensurePostcardCollections(me);
+
+      const boxRaw = String(req.query?.box || "sent").trim().toLowerCase();
+      const box = boxRaw === "received" ? "received" : "sent";
+      const source = box === "received" ? (me.receivedPostcards || []) : (me.sentPostcards || []);
+      const items = source
+        .map((item) => normalizePostcardMessage(item))
+        .filter(Boolean)
+        .filter((item) => String(item.photoURL || "").trim().length > 0)
+        .map((item) => {
+          const reactionPayload = postcardReactionPayloadForViewer(uid, item, box);
+          return {
+            ...item,
+            photoURL: absolutizePostcardPhotoURL(item.photoURL, req),
+            reaction: reactionPayload.reaction,
+            myReaction: reactionPayload.myReaction,
+            peerReaction: reactionPayload.peerReaction
+          };
+        })
+        .sort((a, b) => Date.parse(b.sentAt || "") - Date.parse(a.sentAt || ""));
+      return res.status(200).json({ items, cursor: null });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.post("/v1/postcards/:messageID/view", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = db.users[uid];
+      if (!me) return res.status(404).json({ message: "user not found" });
+
+      const messageID = String(req.params.messageID || "").trim();
+      if (!messageID) return res.status(400).json({ message: "messageID required" });
+
+      ensurePostcardCollections(me);
+      const postcard = (me.receivedPostcards || []).find((p) => p.messageID === messageID);
+      if (!postcard) return res.status(404).json({ message: "postcard not found" });
+
+      const sender = db.users[postcard.fromUserID];
+      if (!sender) return res.status(404).json({ message: "sender not found" });
+
+      if (!sender.postcardReactions) sender.postcardReactions = {};
+      if (!sender.postcardReactions[messageID]) {
+        sender.postcardReactions[messageID] = {
+          id: `pr_${randHex(12)}`,
+          postcardMessageID: messageID,
+          fromUserID: me.id,
+          viewedAt: new Date().toISOString(),
+          reactionEmoji: null,
+          comment: null,
+          reactedAt: null
+        };
+        await persistPG(async () => {
+          await DB.upsertPostcardReaction(pgPool, sender.postcardReactions[messageID]);
+        });
+      }
+
+      return res.status(200).json({ success: true });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.post("/v1/postcards/:messageID/react", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = db.users[uid];
+      if (!me) return res.status(404).json({ message: "user not found" });
+
+      const messageID = String(req.params.messageID || "").trim();
+      const reactionEmoji = String(req.body?.reactionEmoji || "").trim();
+      const comment = String(req.body?.comment || "").trim();
+
+      if (!messageID) return res.status(400).json({ message: "messageID required" });
+      if (comment.length > 50) return res.status(400).json({ message: "comment too long (max 50 chars)" });
+
+      ensurePostcardCollections(me);
+      const postcard = (me.receivedPostcards || []).find((p) => p.messageID === messageID);
+      if (!postcard) return res.status(404).json({ message: "postcard not found" });
+
+      const sender = db.users[postcard.fromUserID];
+      if (!sender) return res.status(404).json({ message: "sender not found" });
+
+      if (!sender.postcardReactions) sender.postcardReactions = {};
+      const existing = sender.postcardReactions[messageID];
+      const nowISO = new Date().toISOString();
+
+      sender.postcardReactions[messageID] = {
+        id: existing?.id || `pr_${randHex(12)}`,
+        postcardMessageID: messageID,
+        fromUserID: me.id,
+        viewedAt: existing?.viewedAt || nowISO,
+        reactionEmoji: reactionEmoji || null,
+        comment: comment || null,
+        reactedAt: nowISO
+      };
+
+      pushPostcardReactionNotification(sender, me, postcard, reactionEmoji, comment);
+      await persistPG(async () => {
+        await DB.upsertPostcardReaction(pgPool, sender.postcardReactions[messageID]);
+        await persistNotificationToPG(sender.id);
+      });
+
+      return res.status(200).json({
+        reaction: sender.postcardReactions[messageID]
+      });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.get("/v1/notifications", (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = db.users[uid];
+      if (!me) return res.status(404).json({ message: "user not found" });
+      ensureUserNotifications(me);
+      const unreadOnlyRaw = String(req.query.unreadOnly || "1").trim().toLowerCase();
+      const unreadOnly = !(unreadOnlyRaw === "0" || unreadOnlyRaw === "false" || unreadOnlyRaw === "no");
+      const source = me.notifications || [];
+      const filtered = unreadOnly ? source.filter((x) => !x.read) : source;
+      const items = filtered.map((item) => {
+        if (!item || item.type !== "postcard_received") return item;
+        return {
+          ...item,
+          photoURL: absolutizePostcardPhotoURL(item.photoURL, req)
+        };
+      });
+      return res.status(200).json({ items });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.post("/v1/notifications/read", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = db.users[uid];
+      if (!me) return res.status(404).json({ message: "user not found" });
+      ensureUserNotifications(me);
+
+      const markAll = Boolean(req.body?.all);
+      const ids = Array.isArray(req.body?.ids)
+        ? req.body.ids.map((x) => String(x || "").trim()).filter(Boolean)
+        : [];
+      const idSet = new Set(ids);
+
+      let changed = false;
+      me.notifications = (me.notifications || []).map((item) => {
+        const shouldRead = markAll || idSet.has(String(item.id));
+        if (shouldRead && !item.read) {
+          changed = true;
+          return { ...item, read: true };
+        }
+        return item;
+      });
+
+      if (changed) {
+        await persistPG(async () => {
+          if (markAll) {
+            await DB.markAllNotificationsRead(pgPool, uid);
+          } else {
+            await DB.markNotificationsRead(pgPool, uid, ids);
+          }
+        });
+      }
+      return res.status(200).json({ ok: true });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  // ---- Push Token Registration ----
+  app.put("/v1/push-token", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = db.users[uid];
+      if (!me) return res.status(404).json({ message: "user not found" });
+      const token = String(req.body?.token || "").trim();
+      const platform = String(req.body?.platform || "ios").trim();
+      if (!token) return res.status(400).json({ message: "token required" });
+      await DB.upsertPushToken(pgPool, uid, token, platform);
+      return res.status(200).json({ ok: true });
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.delete("/v1/push-token", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const token = String(req.body?.token || "").trim();
+      if (!token) return res.status(400).json({ message: "token required" });
+      await DB.deletePushToken(pgPool, uid, token);
+      return res.status(200).json({ ok: true });
     } catch {
       return res.status(401).json({ message: "unauthorized" });
     }
@@ -582,32 +4196,72 @@ async function main() {
     }
   });
 
-  app.patch("/v1/profile/handle", async (req, res) => {
+  app.post("/v1/profile/:userID/stomp", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
-      const uid = parseBearer(req);
-      const me = db.users[uid];
-      if (!me) return res.status(404).json({ message: "user not found" });
+      const viewerID = parseBearer(req);
+      const targetID = String(req.params.userID || "").trim();
+      if (!targetID) return res.status(400).json({ message: "target user id required" });
 
-      const incoming = String(req.body?.handle || "").trim();
-      const updated = setUserHandle(uid, incoming, { strict: true });
-      if (!updated.ok) {
-        if (updated.code === "invalid_handle") {
-          return res.status(400).json({ message: "invalid handle" });
-        }
-        if (updated.code === "handle_taken") {
-          return res.status(409).json({ message: "handle already taken" });
-        }
-        return res.status(400).json({ message: "handle update failed" });
-      }
+      const viewer = db.users[viewerID];
+      const target = db.users[targetID];
+      if (!viewer || !target) return res.status(404).json({ message: "user not found" });
+      if (viewerID === targetID) return res.status(400).json({ message: "cannot stomp yourself" });
+      if (!isFriendOf(viewer, targetID)) return res.status(403).json({ message: "friends only" });
 
-      await saveDB();
-      return res.status(200).json(profileDTOForViewer(me, true, true));
+      pushProfileStompNotification(target, viewer);
+      await persistPG(async () => {
+        await persistNotificationToPG(targetID);
+      });
+      return res.status(200).json({ ok: true, message: `已踩一踩 ${target.displayName} 的主页` });
     } catch {
       return res.status(401).json({ message: "unauthorized" });
     }
   });
 
-  app.patch("/v1/profile/display-name", async (req, res) => {
+  const updateExclusiveID = async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = db.users[uid];
+      if (!me) return res.status(404).json({ message: "user not found" });
+
+      const incoming = String(req.body?.exclusiveID || req.body?.handle || "").trim();
+      const current = normalizeHandle(me.handle);
+      const next = normalizeHandle(incoming);
+      if (!next) {
+        return res.status(400).json({ message: "invalid exclusive id" });
+      }
+      if (next === current) {
+        return res.status(200).json(profileDTOForViewer(me, true, true));
+      }
+      if (me.handleChangeUsed) {
+        return res.status(403).json({ message: "exclusive id can only be changed once" });
+      }
+
+      const updated = setUserHandle(uid, incoming, { strict: true });
+      if (!updated.ok) {
+        if (updated.code === "invalid_handle") {
+          return res.status(400).json({ message: "invalid exclusive id" });
+        }
+        if (updated.code === "handle_taken") {
+          return res.status(409).json({ message: "exclusive id already taken" });
+        }
+        return res.status(400).json({ message: "exclusive id update failed" });
+      }
+
+      me.handleChangeUsed = true;
+      await persistPG(async () => {
+        await DB.updateUser(pgPool, uid, { handle: me.handle, handleChangeUsed: true });
+      });
+      return res.status(200).json(profileDTOForViewer(me, true, true));
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  };
+
+  app.patch("/v1/profile/exclusive-id", rejectWhenWriteFrozen, updateExclusiveID);
+  app.patch("/v1/profile/handle", rejectWhenWriteFrozen, updateExclusiveID);
+
+  app.patch("/v1/profile/display-name", rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -615,16 +4269,21 @@ async function main() {
 
       const nextName = normalizeDisplayName(req.body?.displayName);
       if (!nextName) return res.status(400).json({ message: "invalid display name" });
+      if (!canUseDisplayName(nextName, uid)) {
+        return res.status(409).json({ message: "display name already taken" });
+      }
 
       me.displayName = nextName;
-      await saveDB();
+      await persistPG(async () => {
+        await DB.updateUser(pgPool, uid, { displayName: nextName });
+      });
       return res.status(200).json(profileDTOForViewer(me, true, true));
     } catch {
       return res.status(401).json({ message: "unauthorized" });
     }
   });
 
-  app.patch("/v1/profile/visibility", async (req, res) => {
+  app.patch("/v1/profile/visibility", rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -632,14 +4291,16 @@ async function main() {
 
       const next = normalizeVisibility(req.body?.profileVisibility);
       me.profileVisibility = next;
-      await saveDB();
+      await persistPG(async () => {
+        await DB.updateUser(pgPool, uid, { profileVisibility: next });
+      });
       return res.status(200).json(profileDTOForViewer(me, true, true));
     } catch {
       return res.status(401).json({ message: "unauthorized" });
     }
   });
 
-  app.patch("/v1/profile/bio", async (req, res) => {
+  app.patch("/v1/profile/bio", rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -647,7 +4308,59 @@ async function main() {
 
       const bio = String(req.body?.bio || "").slice(0, 200);
       me.bio = bio;
-      await saveDB();
+      await persistPG(async () => {
+        await DB.updateUser(pgPool, uid, { bio });
+      });
+      return res.status(200).json(profileDTOForViewer(me, true, true));
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.patch("/v1/profile/loadout", rejectWhenWriteFrozen, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = db.users[uid];
+      if (!me) return res.status(404).json({ message: "user not found" });
+
+      const incoming = req.body?.loadout;
+      if (!incoming || typeof incoming !== "object" || Array.isArray(incoming)) {
+        return res.status(400).json({ message: "invalid loadout" });
+      }
+
+      me.loadout = normalizeLoadout(incoming, me.loadout);
+      await persistPG(async () => {
+        await DB.updateUser(pgPool, uid, { loadout: me.loadout });
+      });
+      return res.status(200).json(profileDTOForViewer(me, true, true));
+    } catch {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.post("/v1/profile/setup", rejectWhenWriteFrozen, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = db.users[uid];
+      if (!me) return res.status(404).json({ message: "user not found" });
+
+      const nextName = normalizeDisplayName(req.body?.displayName);
+      if (!nextName) return res.status(400).json({ message: "invalid display name" });
+      if (!canUseDisplayName(nextName, uid)) {
+        return res.status(409).json({ message: "display name already taken" });
+      }
+
+      const incoming = req.body?.loadout;
+      if (!incoming || typeof incoming !== "object" || Array.isArray(incoming)) {
+        return res.status(400).json({ message: "invalid loadout" });
+      }
+
+      me.displayName = nextName;
+      me.loadout = normalizeLoadout(incoming, me.loadout);
+      me.profileSetupCompleted = true;
+      await persistPG(async () => {
+        await DB.updateUser(pgPool, uid, { displayName: nextName, loadout: me.loadout, profileSetupCompleted: true });
+      });
       return res.status(200).json(profileDTOForViewer(me, true, true));
     } catch {
       return res.status(401).json({ message: "unauthorized" });
@@ -676,7 +4389,8 @@ async function main() {
     }
   });
 
-  app.post("/v1/media/upload", upload.single("file"), async (req, res) => {
+  app.post("/v1/media/upload", uploadRateLimiter, rejectWhenWriteFrozen, upload.single("file"), async (req, res) => {
+    const requestStartedAt = timingNowNs();
     try {
       const uid = parseBearer(req);
       if (!db.users[uid]) return res.status(404).json({ message: "user not found" });
@@ -687,26 +4401,69 @@ async function main() {
 
       if (r2Client) {
         try {
+          const r2UploadStartedAt = timingNowNs();
           await uploadToR2OrThrow(objectKey, req.file.buffer, req.file.mimetype);
           const url = r2PublicURL(objectKey);
-          if (url) return res.status(200).json({ objectKey, url });
+          if (url) {
+            logTiming("media_upload", {
+              userID: uid,
+              backend: "r2",
+              bytes: req.file.buffer.length,
+              uploadDurationMs: elapsedMs(r2UploadStartedAt),
+              totalDurationMs: elapsedMs(requestStartedAt)
+            });
+            return res.status(200).json({ objectKey, url });
+          }
         } catch (e) {
           console.error("r2 upload failed, fallback to local disk:", e && e.message ? e.message : e);
         }
       }
 
       const fullPath = path.join(MEDIA_DIR, objectKey);
+      const diskWriteStartedAt = timingNowNs();
       await fsp.mkdir(path.dirname(fullPath), { recursive: true });
       await fsp.writeFile(fullPath, req.file.buffer);
-      const url = MEDIA_PUBLIC_BASE ? `${MEDIA_PUBLIC_BASE.replace(/\/$/, "")}/media/${objectKey}` : `/media/${objectKey}`;
+      const base = derivePublicBase(req);
+      const url = base ? `${base}/media/${objectKey}` : `/media/${objectKey}`;
+      logTiming("media_upload", {
+        userID: uid,
+        backend: "disk",
+        bytes: req.file.buffer.length,
+        writeDurationMs: elapsedMs(diskWriteStartedAt),
+        totalDurationMs: elapsedMs(requestStartedAt)
+      });
       return res.status(200).json({ objectKey, url });
-    } catch {
+    } catch (error) {
+      logTiming("media_upload_error", {
+        totalDurationMs: elapsedMs(requestStartedAt),
+        message: error && error.message ? error.message : "unauthorized"
+      });
       return res.status(401).json({ message: "unauthorized" });
     }
   });
 
+  app.use((err, _req, res, _next) => {
+    if (err && (err.type === "entity.too.large" || err.status === 413)) {
+      return res.status(413).json({ message: "payload too large" });
+    }
+    if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
+      return res.status(413).json({ message: "payload too large" });
+    }
+    if (err) {
+      console.error("request error:", err && err.message ? err.message : err);
+    }
+    return res.status(500).json({ message: "internal error" });
+  });
+
   app.listen(PORT, () => {
     console.log(`[streetstamps-node-v1] listening on :${PORT}`);
+    setInterval(() => {
+      const mem = process.memoryUsage();
+      console.log(`[memory] rss=${(mem.rss/1024/1024).toFixed(0)}MB heap=${(mem.heapUsed/1024/1024).toFixed(0)}MB`);
+      if (mem.heapUsed > 1500 * 1024 * 1024) {
+        console.warn('[memory] high memory usage detected');
+      }
+    }, 60000);
   });
 }
 

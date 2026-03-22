@@ -6,7 +6,7 @@ import Combine
 final class CityLocationManager: ObservableObject {
 
     /// ✅ UI 展示用（跟随系统语言）
-    @Published private(set) var displayName: String = "Unknown"
+    @Published private(set) var displayName: String = L10n.t("unknown")
 
     /// ✅ 后端 canonical（英文，稳定）
     @Published private(set) var canonicalCity: String = "Unknown"
@@ -54,7 +54,10 @@ final class CityLocationManager: ObservableObject {
             if Task.isCancelled { return }
 
             // Best-effort localized title: cached only (no new request here)
-            let cachedTitle = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: canon.cityKey)
+            let cachedTitle = await ReverseGeocodeService.shared.cachedDisplayTitle(
+                cityKey: canon.cityKey,
+                parentRegionKey: canon.parentRegionKey
+            )
 
             // Update canonical fields + ensure display updates immediately when cityKey changes
             await MainActor.run {
@@ -72,7 +75,7 @@ final class CityLocationManager: ObservableObject {
                 } else if let cachedTitle {
                     // Same city, but we might have learned a localized title later.
                     self.displayName = cachedTitle
-                } else if self.displayName == "Unknown" {
+                } else if self.displayName == "Unknown" || self.displayName == L10n.t("unknown") {
                     self.displayName = canon.cityName
                 }
             }
@@ -85,7 +88,11 @@ final class CityLocationManager: ObservableObject {
             displayTask = Task { [weak self] in
                 guard let self else { return }
                 if Task.isCancelled { return }
-                let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: canon.cityKey)
+                let title = await ReverseGeocodeService.shared.displayTitle(
+                    for: loc,
+                    cityKey: canon.cityKey,
+                    parentRegionKey: canon.parentRegionKey
+                )
                 if Task.isCancelled { return }
                 guard let title else { return }
                 await MainActor.run { self.displayName = title }

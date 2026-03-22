@@ -1,0 +1,16 @@
+#!/usr/bin/expect -f
+set timeout 60
+set password "Ylinteresting22@"
+set server "101.132.159.73"
+
+spawn scp server.js root@$server:/opt/streetstamps/backend-node-v1/server.js.new
+expect "password:" { send "$password\r" }
+expect eof
+
+spawn scp package.json root@$server:/opt/streetstamps/backend-node-v1/package.json.new
+expect "password:" { send "$password\r" }
+expect eof
+
+spawn scp package-lock.json root@$server:/opt/streetstamps/backend-node-v1/package-lock.json.new
+expect "password:" { send "$password\r" }
+expect eof
