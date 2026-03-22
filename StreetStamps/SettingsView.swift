@@ -145,14 +145,6 @@ enum SettingsGeneralPresentation {
     static func rows() -> [SettingsGeneralRowPresentation] {
         var rows: [SettingsGeneralRowPresentation] = [
             SettingsGeneralRowPresentation(
-                title: L10n.t("settings_import_gpx_row"),
-                icon: "map",
-                iconColor: FigmaTheme.primary,
-                badgeText: nil,
-                rowHeight: 64,
-                destination: .importGPX
-            ),
-            SettingsGeneralRowPresentation(
                 title: L10n.t("settings_notifications_title"),
                 icon: "bell",
                 iconColor: FigmaTheme.secondary,
@@ -290,6 +282,7 @@ struct SettingsView: View {
     @State private var showBackgroundModeInfo = false
     @State private var iCloudAvailable = false
     @State private var isRestoringFromICloud = false
+    @State private var showRestoreConfirmation = false
     @State private var showMembershipGate: MembershipGatedFeature? = nil
 
     private var appearance: MapAppearanceStyle {
@@ -342,9 +335,8 @@ struct SettingsView: View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 24) {
                 accountSection
-                servicesSection
-                mapAppearanceSection
-                trackingAssistSection
+                subscriptionSection
+                utilitiesSection
                 generalSection
                 infoSection
             }
@@ -367,6 +359,14 @@ struct SettingsView: View {
             Button(L10n.t("ok"), role: .cancel) {}
         } message: {
             Text(accountMessage)
+        }
+        .alert(L10n.t("settings_restore_from_icloud"), isPresented: $showRestoreConfirmation) {
+            Button(L10n.t("cancel"), role: .cancel) {}
+            Button(L10n.t("settings_restore_confirm_action"), role: .destructive) {
+                Task { await restoreFromICloudManually() }
+            }
+        } message: {
+            Text(L10n.t("settings_restore_confirm_message"))
         }
         .alert(L10n.t("settings_lifelog_bg_mode_title"), isPresented: $showBackgroundModeInfo) {
             Button(L10n.t("got_it"), role: .cancel) {}
@@ -426,75 +426,6 @@ struct SettingsView: View {
         }
     }
 
-    private var mapAppearanceSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionTitle(L10n.t("settings_section_map_appearance"))
-
-            toggleRowCard(
-                presentation: .mapDarkMode,
-                isOn: Binding(
-                    get: { appearance == .dark },
-                    set: { newValue in
-                        let targetStyle: MapAppearanceStyle = newValue ? .dark : .light
-                        if MembershipStore.shared.isMapAppearanceLocked(targetStyle) {
-                            showMembershipGate = .mapAppearance
-                            return
-                        }
-                        appearance = targetStyle
-                        MapAppearanceSettings.apply(targetStyle)
-                        cityCache.refreshThumbnailsForCurrentMapAppearance()
-                    }
-                )
-            )
-        }
-    }
-
-    private var trackingAssistSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionTitle(L10n.t("settings_section_tracking_assist"))
-
-            VStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(alignment: .center, spacing: 10) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(L10n.t("settings_lifelog_bg_mode_title"))
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(FigmaTheme.text)
-                        }
-
-                        Spacer(minLength: 8)
-
-                        Button {
-                            showBackgroundModeInfo = true
-                        } label: {
-                            Image(systemName: "questionmark.circle")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(FigmaTheme.subtext)
-                        }
-                        .buttonStyle(.plain)
-                    }
-
-                    segmentedContainer {
-                        segmentButton(
-                            title: L10n.t(LifelogBackgroundMode.highPrecision.titleKey),
-                            isSelected: lifelogBackgroundMode == .highPrecision
-                        ) {
-                            lifelogBackgroundMode = .highPrecision
-                        }
-                        segmentButton(
-                            title: L10n.t(LifelogBackgroundMode.lowPrecision.titleKey),
-                            isSelected: lifelogBackgroundMode == .lowPrecision
-                        ) {
-                            lifelogBackgroundMode = .lowPrecision
-                        }
-                    }
-                }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 18)
-                .figmaSurfaceCard(radius: 30)
-            }
-        }
-    }
 
     private var generalSection: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -767,9 +698,23 @@ struct SettingsView: View {
         )
     }
 
-    private var servicesSection: some View {
+    private var subscriptionSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionTitle(L10n.t("settings_section_services"))
+            sectionTitle(L10n.t("settings_subscription_row"))
+
+            NavigationLink {
+                MembershipSubscriptionView()
+                    .environmentObject(MembershipStore.shared)
+            } label: {
+                settingsRowLabel(title: L10n.t("settings_subscription_row"), icon: "creditcard", iconColor: FigmaTheme.primary)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var utilitiesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionTitle(L10n.t("settings_section_utilities"))
 
             VStack(spacing: 10) {
                 NavigationLink {
@@ -779,13 +724,74 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
 
+                toggleRowCard(
+                    presentation: .mapDarkMode,
+                    isOn: Binding(
+                        get: { appearance == .dark },
+                        set: { newValue in
+                            let targetStyle: MapAppearanceStyle = newValue ? .dark : .light
+                            if MembershipStore.shared.isMapAppearanceLocked(targetStyle) {
+                                showMembershipGate = .mapAppearance
+                                return
+                            }
+                            appearance = targetStyle
+                            MapAppearanceSettings.apply(targetStyle)
+                            cityCache.refreshThumbnailsForCurrentMapAppearance()
+                        }
+                    )
+                )
+
                 NavigationLink {
-                    MembershipSubscriptionView()
-                        .environmentObject(MembershipStore.shared)
+                    gpxImportEntryView
                 } label: {
-                    settingsRowLabel(title: L10n.t("settings_subscription_row"), icon: "creditcard", iconColor: FigmaTheme.primary)
+                    settingsRowLabel(
+                        title: L10n.t("settings_import_gpx_row"),
+                        icon: "map",
+                        iconColor: FigmaTheme.primary,
+                        badgeText: nil,
+                        rowHeight: 64
+                    )
                 }
                 .buttonStyle(.plain)
+
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .center, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(L10n.t("settings_lifelog_bg_mode_title"))
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(FigmaTheme.text)
+                        }
+
+                        Spacer(minLength: 8)
+
+                        Button {
+                            showBackgroundModeInfo = true
+                        } label: {
+                            Image(systemName: "questionmark.circle")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(FigmaTheme.subtext)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    segmentedContainer {
+                        segmentButton(
+                            title: L10n.t(LifelogBackgroundMode.highPrecision.titleKey),
+                            isSelected: lifelogBackgroundMode == .highPrecision
+                        ) {
+                            lifelogBackgroundMode = .highPrecision
+                        }
+                        segmentButton(
+                            title: L10n.t(LifelogBackgroundMode.lowPrecision.titleKey),
+                            isSelected: lifelogBackgroundMode == .lowPrecision
+                        ) {
+                            lifelogBackgroundMode = .lowPrecision
+                        }
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 18)
+                .figmaSurfaceCard(radius: 30)
             }
         }
     }
@@ -931,7 +937,7 @@ struct SettingsView: View {
                             icon: "icloud.and.arrow.down",
                             iconColor: FigmaTheme.secondary
                         ) {
-                            Task { await restoreFromICloudManually() }
+                            showRestoreConfirmation = true
                         }
                     }
                     .padding(16)
@@ -1151,7 +1157,9 @@ struct SettingsView: View {
                             case .checkUpdates:
                                 showPlaceholder(L10n.t("settings_check_updates_placeholder"))
                             case .privacyPolicy:
-                                showPlaceholder(L10n.t("settings_privacy_policy_placeholder"))
+                                if let url = URL(string: "https://cyberoff00.github.io/streetstamp/privacy-policy.html") {
+                                    UIApplication.shared.open(url)
+                                }
                             case .aboutUs:
                                 break
                             }

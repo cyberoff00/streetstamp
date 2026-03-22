@@ -40,6 +40,7 @@ private enum FriendsRoute: Hashable, Identifiable {
     case profile(String)
     case cities(String)
     case publicMemories(String)
+    case collection(String)
     case journey(friendID: String, snapshot: FriendProfileSnapshot?, journeyID: String)
 
     var id: String {
@@ -54,6 +55,8 @@ private enum FriendsRoute: Hashable, Identifiable {
             return "cities_\(friendID)"
         case .publicMemories(let friendID):
             return "public_memories_\(friendID)"
+        case .collection(let friendID):
+            return "collection_\(friendID)"
         case .journey(let friendID, _, let journeyID):
             return "journey_\(friendID)_\(journeyID)"
         }
@@ -654,6 +657,8 @@ struct FriendsHubView: View {
                 FriendCitiesScreen(friendID: friendID)
             case .publicMemories(let friendID):
                 FriendPublicMemoriesScreen(friendID: friendID)
+            case .collection(let friendID):
+                FriendCollectionScreen(friendID: friendID)
             case .journey(let friendID, let snapshot, let journeyID):
                 FriendJourneyDetailScreen(friendID: friendID, fallbackSnapshot: snapshot, journeyID: journeyID)
             }
@@ -1842,6 +1847,7 @@ private struct FriendProfileScreen: View {
     @State private var deleteFriendErrorText = ""
     @State private var isDeletingFriend = false
     @State private var showPostcardComposer = false
+    @State private var showPhotoBooth = false
     @State private var activeRoute: FriendsRoute?
 
     private var viewerUserID: String {
@@ -1979,9 +1985,18 @@ private struct FriendProfileScreen: View {
                 FriendCitiesScreen(friendID: friendID)
             case .publicMemories(let friendID):
                 FriendPublicMemoriesScreen(friendID: friendID)
+            case .collection(let friendID):
+                FriendCollectionScreen(friendID: friendID)
             case .journey(let friendID, let snapshot, let journeyID):
                 FriendJourneyDetailScreen(friendID: friendID, fallbackSnapshot: snapshot, journeyID: journeyID)
             }
+        }
+        .fullScreenCover(isPresented: $showPhotoBooth) {
+            FriendPhotoBoothView(
+                hostName: (friend ?? fallbackFriend).displayName,
+                hostLoadout: (friend ?? fallbackFriend).loadout,
+                visitorLoadout: visitorLoadout
+            )
         }
     }
 
@@ -2000,6 +2015,25 @@ private struct FriendProfileScreen: View {
                 .buttonStyle(.plain)
 
                 Spacer()
+
+                if isVisitorSeated && !isViewingOwnFriendProfile {
+                    Button {
+                        showPhotoBooth = true
+                    } label: {
+                        Image(systemName: "camera.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(width: 38, height: 38)
+                            .background(
+                                Circle()
+                                    .fill(FigmaTheme.primary)
+                                    .shadow(color: FigmaTheme.primary.opacity(0.35), radius: 8, x: 0, y: 4)
+                            )
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .transition(.scale.combined(with: .opacity))
+                }
 
                 if sessionStore.isLoggedIn && (sessionStore.accountUserID ?? "") != friendID {
                     Menu {
@@ -2078,12 +2112,19 @@ private struct FriendProfileScreen: View {
 
                     if sceneState.showsCTA, let ctaTitle = sceneState.ctaTitle {
                         Button {
-                            Task {
-                                await sendProfileStomp(to: friend)
+                            switch sceneState.ctaAction {
+                            case .sit:
+                                Task { await sendProfileStomp(to: friend) }
+                            case .leave:
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                    isVisitorSeated = false
+                                }
+                            case .none:
+                                break
                             }
                         } label: {
                             HStack(spacing: 8) {
-                                Image(systemName: isVisitorSeated ? "sofa.fill" : "sofa")
+                                Image(systemName: sceneState.ctaAction == .leave ? "figure.walk.departure" : (isVisitorSeated ? "sofa.fill" : "sofa"))
                                     .font(.system(size: 16, weight: .bold))
                                 Text(ctaTitle)
                                     .font(.system(size: 14, weight: .bold))
@@ -2091,7 +2132,7 @@ private struct FriendProfileScreen: View {
                             .foregroundColor(.white)
                             .frame(height: 48)
                             .padding(.horizontal, 20)
-                            .background(FigmaTheme.primary)
+                            .background(sceneState.ctaAction == .leave ? Color(red: 0.55, green: 0.55, blue: 0.58) : FigmaTheme.primary)
                             .clipShape(Capsule())
                         }
                         .buttonStyle(.plain)
@@ -2133,27 +2174,14 @@ private struct FriendProfileScreen: View {
                     .buttonStyle(.plain)
 
                     Button {
-                        activeRoute.wrappedValue = .cities(friendID)
+                        activeRoute.wrappedValue = .collection(friendID)
                     } label: {
                         friendActivityTile(
-                            icon: "map.fill",
+                            icon: "rectangle.stack.fill",
                             iconColor: Color(red: 0.24, green: 0.56, blue: 0.21),
                             iconBg: Color(red: 0.95, green: 0.98, blue: 0.92),
-                            title: L10n.t("friend_city_cards"),
-                            subtitle: nil
-                        )
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        activeRoute.wrappedValue = .publicMemories(friendID)
-                    } label: {
-                        friendActivityTile(
-                            icon: "photo.fill",
-                            iconColor: Color(red: 0.85, green: 0.45, blue: 0.20),
-                            iconBg: Color(red: 1.0, green: 0.95, blue: 0.90),
-                            title: L10n.t("friend_journey_memories"),
-                            subtitle: nil
+                            title: L10n.t("friend_collection"),
+                            subtitle: String(format: L10n.t("friend_collection_subtitle_format"), friend.stats.totalUnlockedCities, friend.stats.totalMemories)
                         )
                     }
                     .buttonStyle(.plain)
@@ -2825,6 +2853,164 @@ private final class FriendMirrorContext: ObservableObject {
         )
     }
 
+}
+
+private enum FriendCollectionPage: Int, CaseIterable, Identifiable {
+    case cities
+    case memories
+
+    var id: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .cities: return L10n.t("collection_segment_cities")
+        case .memories: return L10n.t("tab_memory")
+        }
+    }
+}
+
+private struct FriendCollectionScreen: View {
+    @EnvironmentObject private var socialStore: SocialGraphStore
+    @EnvironmentObject private var sessionStore: UserSessionStore
+    @EnvironmentObject private var flow: AppFlowCoordinator
+    @Environment(\.locale) private var locale
+    @Environment(\.dismiss) private var dismiss
+    let friendID: String
+
+    @StateObject private var mirror: FriendMirrorContext
+    @State private var page: FriendCollectionPage = .cities
+    @State private var sidebarHideToken = UUID().uuidString
+
+    init(friendID: String) {
+        self.friendID = friendID
+        _mirror = StateObject(wrappedValue: FriendMirrorContext(friendID: friendID))
+    }
+
+    var body: some View {
+        Group {
+            if let friend = socialStore.friends.first(where: { $0.id == friendID }) {
+                VStack(spacing: 0) {
+                    collectionHeader(friend: friend)
+                    collectionPagePicker
+                    collectionPager(friend: friend)
+                }
+                .task(id: FriendMirrorContext.signature(for: friend)) {
+                    await mirror.apply(snapshot: friend)
+                }
+            } else {
+                Text(L10n.t("content_unavailable"))
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .background(FigmaTheme.background.ignoresSafeArea())
+        .background(SwipeBackEnabler())
+        .navigationBarBackButtonHidden(true)
+        .navigationBarHidden(true)
+        .onAppear {
+            flow.pushSidebarButtonHidden(token: sidebarHideToken)
+        }
+        .onDisappear {
+            flow.popSidebarButtonHidden(token: sidebarHideToken)
+        }
+        .task {
+            await socialStore.refreshFriendProfileIfPossible(
+                friendID: friendID,
+                accessToken: sessionStore.currentAccessToken
+            )
+        }
+    }
+
+    private func collectionHeader(friend: FriendProfileSnapshot) -> some View {
+        UnifiedTabPageHeader(
+            title: String(format: L10n.t("friend_collection_title_format"), friend.displayName),
+            titleLevel: .secondary,
+            horizontalPadding: 20,
+            topPadding: 14,
+            bottomPadding: 12
+        ) {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.black)
+                    .frame(width: 42, height: 42)
+                    .appFullSurfaceTapTarget(.circle)
+            }
+            .buttonStyle(.plain)
+        } trailing: {
+            Color.clear
+        }
+    }
+
+    private var collectionPagePicker: some View {
+        HStack {
+            ForEach(FriendCollectionPage.allCases) { item in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        page = item
+                    }
+                } label: {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 17, style: .continuous)
+                            .fill(page == item ? FigmaTheme.primary : Color.clear)
+
+                        Text(item.title)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(page == item ? .white : .black.opacity(0.65))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 34)
+                    .appFullSurfaceTapTarget(.roundedRect(17))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(4)
+        .background(Color.white)
+        .clipShape(RoundedRectangle(cornerRadius: 21, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 21, style: .continuous)
+                .stroke(FigmaTheme.border, lineWidth: 1)
+        )
+        .padding(.horizontal, 18)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
+    }
+
+    private func collectionPager(friend: FriendProfileSnapshot) -> some View {
+        TabView(selection: $page) {
+            CityStampLibraryView(
+                showSidebar: .constant(false),
+                autoRebuildFromJourneyStore: false,
+                usesSidebarHeader: false,
+                showHeader: false,
+                allowCityDetailNavigation: false,
+                emptyTitleKey: "friend_city_cards_empty_title",
+                emptySubtitleKey: "friend_city_cards_empty_subtitle"
+            )
+            .environmentObject(mirror.journeyStore)
+            .environmentObject(mirror.cityCache)
+            .environmentObject(mirror.renderCacheStore)
+            .tag(FriendCollectionPage.cities)
+
+            JourneyMemoryMainView(
+                showSidebar: .constant(false),
+                usesSidebarHeader: false,
+                hideLeadingControl: true,
+                showHeader: false,
+                readOnly: true,
+                emptyTitleKey: "friend_memories_empty_title",
+                emptySubtitleKey: "friend_memories_empty_subtitle"
+            )
+            .environmentObject(mirror.journeyStore)
+            .environmentObject(mirror.cityCache)
+            .environmentObject(sessionStore)
+            .tag(FriendCollectionPage.memories)
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+    }
 }
 
 private struct FriendCitiesScreen: View {

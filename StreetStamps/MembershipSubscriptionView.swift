@@ -18,6 +18,7 @@ struct MembershipSubscriptionView: View {
     @State private var errorMessage: String?
     @State private var selectedProductID: String?
     @State private var productsLoadFinished = false
+    @State private var activeInfoKey: String?
 
     private var sortedProducts: [Product] {
         products.sorted { $0.price < $1.price }
@@ -39,6 +40,11 @@ struct MembershipSubscriptionView: View {
             .padding(.bottom, 40)
         }
         .background(FigmaTheme.mutedBackground.ignoresSafeArea())
+        .onTapGesture {
+            if activeInfoKey != nil {
+                withAnimation(.easeInOut(duration: 0.15)) { activeInfoKey = nil }
+            }
+        }
         .safeAreaInset(edge: .top, spacing: 0) { topBar }
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
@@ -180,7 +186,8 @@ struct MembershipSubscriptionView: View {
             comparisonRow(
                 feature: L10n.t("membership_compare_photos"),
                 freeValue: "6",
-                premiumValue: "12"
+                premiumValue: "12",
+                infoKey: "photos"
             )
             comparisonRow(
                 feature: L10n.t("membership_compare_friends"),
@@ -210,7 +217,8 @@ struct MembershipSubscriptionView: View {
             comparisonRow(
                 feature: L10n.t("membership_compare_postcard"),
                 freeValue: "1/3",
-                premiumValue: "2/10"
+                premiumValue: "2/10",
+                infoKey: "postcard"
             )
             comparisonRow(
                 feature: L10n.t("membership_compare_map_theme"),
@@ -260,13 +268,28 @@ struct MembershipSubscriptionView: View {
         feature: String,
         freeValue: String?,
         premiumValue: String,
+        infoKey: String? = nil,
         isLast: Bool = false
     ) -> some View {
         HStack(spacing: 0) {
-            Text(feature)
-                .font(.system(size: 13))
-                .foregroundColor(FigmaTheme.text)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 4) {
+                Text(feature)
+                    .font(.system(size: 13))
+                    .foregroundColor(FigmaTheme.text)
+                if let infoKey {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            activeInfoKey = activeInfoKey == infoKey ? nil : infoKey
+                        }
+                    } label: {
+                        Image(systemName: "questionmark.circle")
+                            .font(.system(size: 11))
+                            .foregroundColor(FigmaTheme.subtext.opacity(0.5))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             cellContent(value: freeValue, isPremium: false)
                 .frame(width: 60, alignment: .center)
@@ -279,6 +302,23 @@ struct MembershipSubscriptionView: View {
         .overlay(alignment: .bottom) {
             if !isLast {
                 FigmaTheme.border.frame(height: 1)
+            }
+        }
+        .overlay(alignment: .bottomLeading) {
+            if let infoKey, activeInfoKey == infoKey {
+                Text(L10n.t("membership_info_\(infoKey)"))
+                    .font(.system(size: 11))
+                    .foregroundColor(FigmaTheme.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .frame(maxWidth: 260, alignment: .leading)
+                    .background(FigmaTheme.card)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .shadow(color: .black.opacity(0.15), radius: 8, y: 2)
+                    .offset(x: 4, y: 4)
+                    .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .topLeading)))
+                    .zIndex(10)
             }
         }
     }

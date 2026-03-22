@@ -6,6 +6,7 @@ final class ProfileSceneInteractionStateTests: XCTestCase {
         "friend_profile_cta_idle": "Take a seat",
         "friend_profile_cta_loading": "Sitting down...",
         "friend_profile_cta_done": "Seated",
+        "friend_profile_cta_leave": "Get up",
         "friends_postcard_prompt": "bring you a postcard"
     ]
 
@@ -13,6 +14,7 @@ final class ProfileSceneInteractionStateTests: XCTestCase {
         "friend_profile_cta_idle": "坐一坐",
         "friend_profile_cta_loading": "坐下中...",
         "friend_profile_cta_done": "已坐下",
+        "friend_profile_cta_leave": "起身离开",
         "friends_postcard_prompt": "送你一张明信片"
     ]
 
@@ -48,9 +50,11 @@ final class ProfileSceneInteractionStateTests: XCTestCase {
         XCTAssertTrue(state.showsCTA)
         XCTAssertTrue(state.isCTAEnabled)
         XCTAssertEqual(state.ctaTitle, "Take a seat")
+        XCTAssertEqual(state.ctaAction, .sit)
+        XCTAssertFalse(state.showsPhotoBooth)
     }
 
-    func test_friendProfile_afterSit_showsVisitorRightAndDisablesCTA() {
+    func test_friendProfile_afterSit_showsVisitorRightAndLeaveCTA() {
         let state = ProfileSceneInteractionState.resolve(
             mode: .friendProfile,
             isViewingOwnFriendProfile: false,
@@ -63,9 +67,11 @@ final class ProfileSceneInteractionStateTests: XCTestCase {
         XCTAssertEqual(state.visitorSeat, .right)
         XCTAssertTrue(state.showsWelcomeBubble)
         XCTAssertTrue(state.showsCTA)
-        XCTAssertFalse(state.isCTAEnabled)
-        XCTAssertEqual(state.ctaTitle, "Seated")
+        XCTAssertTrue(state.isCTAEnabled)
+        XCTAssertEqual(state.ctaTitle, "Get up")
+        XCTAssertEqual(state.ctaAction, .leave)
         XCTAssertEqual(state.postcardPromptText, "bring you a postcard")
+        XCTAssertTrue(state.showsPhotoBooth)
     }
 
     func test_friendProfile_loading_usesLoadingCopy() {
@@ -129,7 +135,7 @@ final class ProfileSceneInteractionStateTests: XCTestCase {
             localize: { self.simplifiedChineseStrings[$0] ?? $0 }
         )
 
-        XCTAssertEqual(seatedState.ctaTitle, "已坐下")
+        XCTAssertEqual(seatedState.ctaTitle, "起身离开")
         XCTAssertEqual(seatedState.postcardPromptText, "送你一张明信片")
         XCTAssertEqual(loadingState.ctaTitle, "坐下中...")
     }

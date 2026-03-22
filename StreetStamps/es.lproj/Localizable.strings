@@ -220,6 +220,12 @@
 "friend_memories_empty_subtitle" = "Este amigo aún no ha publicado recuerdos de viaje.";
 "friend_memories_empty_title" = "Aún no hay recuerdos de viaje";
 "friend_profile_cta_done" = "Seated";
+"friend_profile_cta_leave" = "Get up";
+"friend_photo_booth_title" = "Photo Booth";
+"friend_photo_caption_format" = "Hanging out with %@";
+"friend_photo_stamp_subtitle" = "Friendship Snapshot";
+"friend_photo_retake" = "Retake";
+"friend_photo_save" = "Save";
 "friend_profile_cta_idle" = "Take a seat";
 "friend_profile_cta_loading" = "Sitting down...";
 "friend_profile_stat_cities" = "CIUDADES";
@@ -641,12 +647,15 @@
 "settings_profile_visibility_private" = "Perfil visible solo para mi";
 "settings_restore_from_icloud" = "Restaurar desde iCloud";
 "settings_restore_from_icloud_no_backup" = "No se encontró una copia de seguridad más reciente en iCloud.";
+"settings_restore_confirm_action" = "Restaurar";
+"settings_restore_confirm_message" = "Se restaurarán los datos desde la copia de seguridad de iCloud. Los datos locales actuales se fusionarán con la copia. ¿Desea continuar?";
 "settings_restore_from_icloud_success" = "Se restauró la última copia de seguridad de iCloud.";
 "settings_section_general" = "GENERAL";
 "settings_section_information" = "INFORMATION";
 "settings_section_level_rules" = "LEVEL RULES";
 "settings_section_map_appearance" = "MAP APPEARANCE";
 "settings_section_services" = "SERVICES";
+"settings_section_utilities" = "UTILIDADES";
 "settings_section_tracking_assist" = "TRACKING ASSIST";
 "settings_sign_in_subtitle" = "Sync your travel data and unlock social features";
 "settings_sign_in_title" = "Sign in to Worldo";
@@ -845,6 +854,8 @@
 "membership_compare_free" = "Gratis";
 "membership_compare_premium" = "Premium";
 "membership_compare_photos" = "Fotos / recuerdo";
+"membership_info_photos" = "Fotos máx. por viaje. Gratis: 6, Premium: 12.";
+"membership_info_postcard" = "Por ciudad: envía 1 (Gratis) / 2 (Premium) postales por amigo, a máx. 3 (Gratis) / 10 (Premium) amigos. Cada viaje extra da +1 por amigo y más destinatarios.";
 "membership_compare_friends" = "Amigos";
 "membership_compare_unlimited" = "Ilimitado";
 "membership_compare_globe" = "Vista global";
@@ -878,6 +889,9 @@
 "friend_activity_record_entry" = "REGISTRO DE ACTIVIDAD";
 "friend_city_cards" = "TARJETAS DE CIUDAD";
 "friend_journey_memories" = "RECUERDOS DE VIAJE";
+"friend_collection" = "COLECCIÓN";
+"friend_collection_subtitle_format" = "%d ciudades · %d recuerdos";
+"friend_collection_title_format" = "Colección de %@";
 "friend_postcards" = "POSTAL";
 "friend_stats_summary_format" = "%d viajes · %d recuerdos · %d tarjetas";
 "lifelog_always_guide_enable" = "Activar";

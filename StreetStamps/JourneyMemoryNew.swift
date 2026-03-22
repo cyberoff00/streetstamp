@@ -40,6 +40,7 @@ struct JourneyMemoryMainView: View {
     @State private var monthCursor = Date()
     @State private var selectedStartDate: Date? = nil
     @State private var selectedEndDate: Date? = nil
+    @State private var selectedActivityTag: String? = nil
     /// Localized city display cache for this screen (cityKey -> localized title in current locale)
     @State private var localizedCityNameByKey: [String: String] = [:]
     @State private var cachedCityGroups: [CityGroupData] = []
@@ -79,17 +80,40 @@ struct JourneyMemoryMainView: View {
             .sorted { ($0.endTime ?? $0.startTime ?? .distantPast) > ($1.endTime ?? $1.startTime ?? .distantPast) }
     }
 
-    private var filteredMemoryJourneys: [JourneyRoute] {
-        guard let startDate = selectedStartDate else { return allMemoryJourneys }
-        let cal = Calendar.current
-        let start = cal.startOfDay(for: startDate)
-        let upperBase = selectedEndDate ?? startDate
-        let endExclusive = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: upperBase)) ?? upperBase
-
-        return allMemoryJourneys.filter { j in
-            guard let date = j.endTime ?? j.startTime else { return false }
-            return date >= start && date < endExclusive
+    private var availableActivityTags: [String] {
+        let tags = allMemoryJourneys.compactMap { j -> String? in
+            let tag = (j.activityTag ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return tag.isEmpty ? nil : tag
         }
+        return Array(Set(tags)).sorted()
+    }
+
+    private var filteredMemoryJourneys: [JourneyRoute] {
+        var result = allMemoryJourneys
+
+        if let startDate = selectedStartDate {
+            let cal = Calendar.current
+            let start = cal.startOfDay(for: startDate)
+            let upperBase = selectedEndDate ?? startDate
+            let endExclusive = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: upperBase)) ?? upperBase
+            result = result.filter { j in
+                guard let date = j.endTime ?? j.startTime else { return false }
+                return date >= start && date < endExclusive
+            }
+        }
+
+        if let tag = selectedActivityTag {
+            result = result.filter { j in
+                let jTag = (j.activityTag ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                return jTag == tag
+            }
+        }
+
+        return result
+    }
+
+    private var hasActiveFilters: Bool {
+        selectedStartDate != nil || selectedActivityTag != nil
     }
 
     var body: some View {
@@ -153,6 +177,9 @@ struct JourneyMemoryMainView: View {
             rebuildCityGroups()
         }
         .onChange(of: selectedEndDate) { _, _ in
+            rebuildCityGroups()
+        }
+        .onChange(of: selectedActivityTag) { _, _ in
             rebuildCityGroups()
         }
         // Keep city names localized to current language (do NOT rely on persisted English titles).
@@ -259,33 +286,64 @@ struct JourneyMemoryMainView: View {
                 .buttonStyle(.plain)
             }
         } trailing: {
-            Button {
-                showFilterPopover.toggle()
-            } label: {
-                Image(systemName: selectedStartDate == nil ? "calendar" : "calendar.badge.clock")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.black)
-            }
-            .buttonStyle(.plain)
-            .popover(isPresented: $showFilterPopover, attachmentAnchor: .point(.bottom), arrowEdge: .top) {
-                JourneyMemoryCalendarRangePopover(
-                    monthCursor: $monthCursor,
-                    selectedStartDate: $selectedStartDate,
-                    selectedEndDate: $selectedEndDate,
-                    journeys: allMemoryJourneys,
-                    onRangeCompleted: {
-                        showFilterPopover = false
-                    },
-                    onApply: {
-                        showFilterPopover = false
-                    },
-                    onClear: {
-                        selectedStartDate = nil
-                        selectedEndDate = nil
-                        showFilterPopover = false
+            HStack(spacing: 6) {
+                if !availableActivityTags.isEmpty {
+                    Menu {
+                        ForEach(availableActivityTags, id: \.self) { tag in
+                            Button {
+                                selectedActivityTag = (selectedActivityTag == tag) ? nil : tag
+                                rebuildCityGroups()
+                            } label: {
+                                HStack {
+                                    Text(tag)
+                                    if selectedActivityTag == tag {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                        if selectedActivityTag != nil {
+                            Divider()
+                            Button(L10n.t("clear")) {
+                                selectedActivityTag = nil
+                                rebuildCityGroups()
+                            }
+                        }
+                    } label: {
+                        Image(systemName: selectedActivityTag == nil ? "tag" : "tag.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(selectedActivityTag == nil ? .black : FigmaTheme.primary)
                     }
-                )
-                .presentationCompactAdaptation(.popover)
+                }
+
+                Button {
+                    showFilterPopover.toggle()
+                } label: {
+                    Image(systemName: hasActiveFilters ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(hasActiveFilters ? FigmaTheme.primary : .black)
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: $showFilterPopover, attachmentAnchor: .point(.bottom), arrowEdge: .top) {
+                    JourneyMemoryCalendarRangePopover(
+                        monthCursor: $monthCursor,
+                        selectedStartDate: $selectedStartDate,
+                        selectedEndDate: $selectedEndDate,
+                        journeys: allMemoryJourneys,
+                        onRangeCompleted: {
+                            showFilterPopover = false
+                        },
+                        onApply: {
+                            showFilterPopover = false
+                        },
+                        onClear: {
+                            selectedStartDate = nil
+                            selectedEndDate = nil
+                            showFilterPopover = false
+                        }
+                    )
+                    .presentationCompactAdaptation(.popover)
+                }
             }
         }
     }
@@ -1275,27 +1333,33 @@ struct JourneyMemoryDetailView: View {
             // Title + actions
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
-                        if isEditing {
-                            TextField(
-                                cityName,
-                                text: $draftJourneyTitle,
-                                prompt: Text(cityName)
-                                    .foregroundColor(Color(red: 0.42, green: 0.45, blue: 0.51).opacity(0.72))
-                            )
-                            .textFieldStyle(.plain)
+                    if isEditing {
+                        TextField(
+                            cityName,
+                            text: $draftJourneyTitle,
+                            prompt: Text(cityName)
+                                .foregroundColor(Color(red: 0.42, green: 0.45, blue: 0.51).opacity(0.72))
+                        )
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 30, weight: .bold))
+                        .textInputAutocapitalization(.words)
+                        .disableAutocorrection(true)
+                        .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
+                        .submitLabel(.done)
+                    } else {
+                        Text(journeyDisplayTitle.uppercased())
                             .font(.system(size: 30, weight: .bold))
-                            .textInputAutocapitalization(.words)
-                            .disableAutocorrection(true)
                             .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
-                            .submitLabel(.done)
-                        } else {
-                            Text(journeyDisplayTitle.uppercased())
-                                .font(.system(size: 30, weight: .bold))
-                                .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.75)
-                        }
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.7)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    HStack(spacing: 8) {
+                        Text(journeyMetaSubtitle)
+                            .font(.system(size: 12, weight: .medium))
+                            .tracking(1.2)
+                            .foregroundColor(Color(red: 0.42, green: 0.45, blue: 0.51))
 
                         if !journeyActivityTag.isEmpty {
                             Text(journeyActivityTag.uppercased())
@@ -1308,11 +1372,6 @@ struct JourneyMemoryDetailView: View {
                                 .clipShape(Capsule(style: .continuous))
                         }
                     }
-                    
-                    Text(journeyMetaSubtitle)
-                        .font(.system(size: 12, weight: .medium))
-                        .tracking(1.2)
-                        .foregroundColor(Color(red: 0.42, green: 0.45, blue: 0.51))
 
                     if !readOnly {
                         visibilityStatusButton

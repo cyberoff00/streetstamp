@@ -94,6 +94,9 @@
 "friend_city_cards_title" = "CITY CARDS";
 "friend_city_cards" = "CITY CARDS";
 "friend_journey_memories" = "JOURNEY MEMORY";
+"friend_collection" = "COLLECTION";
+"friend_collection_subtitle_format" = "%d cities · %d memories";
+"friend_collection_title_format" = "%@'s Collection";
 "friend_postcards" = "POSTCARD";
 "friend_activity_record_entry" = "ACTIVITY RECORD";
 "friend_profile_stat_trips" = "TRIPS";
@@ -739,6 +742,7 @@
 "settings_section_general" = "GENERAL";
 "settings_import_gpx_row" = "IMPORT GPX";
 "settings_section_services" = "SERVICES";
+"settings_section_utilities" = "UTILITIES";
 "settings_section_level_rules" = "LEVEL RULES";
 "settings_section_information" = "INFORMATION";
 "settings_private_transfer_title" = "Private Data Transfer";
@@ -822,6 +826,12 @@
 "friend_profile_cta_idle" = "Take a seat";
 "friend_profile_cta_loading" = "Sitting down...";
 "friend_profile_cta_done" = "Seated";
+"friend_profile_cta_leave" = "Get up";
+"friend_photo_booth_title" = "Photo Booth";
+"friend_photo_caption_format" = "Hanging out with %@";
+"friend_photo_stamp_subtitle" = "Friendship Snapshot";
+"friend_photo_retake" = "Retake";
+"friend_photo_save" = "Save";
 "friend_profile_stomp_success_format" = "You sat on %@'s sofa";
 "friend_profile_stomp_failed_format" = "Couldn't sit down: %@";
 "watch_status_permission_needed" = "Allow location access first";
@@ -887,6 +897,8 @@
 "settings_restore_from_icloud_success" = "Restored latest iCloud backup.";
 "settings_restart_app_to_see_changes" = "Please restart the app to see equipment updates.";
 "settings_restore_from_icloud_no_backup" = "No newer iCloud backup was found.";
+"settings_restore_confirm_action" = "Restore";
+"settings_restore_confirm_message" = "This will restore your data from iCloud backup. Your current local data will be merged with the backup. Continue?";
 "settings_icloud_sync_enabled_hint" = "iCloud sync is enabled. New data will upload automatically.";
 "settings_icloud_sync_disabled_hint" = "iCloud sync is disabled. Data will stay local on this device.";
 "settings_icloud_status_idle" = "Status: Not synced yet.";
@@ -946,6 +958,8 @@
 "membership_compare_free" = "Free";
 "membership_compare_premium" = "Premium";
 "membership_compare_photos" = "Photos / memory";
+"membership_info_photos" = "Max photos per journey memory. Free: 6, Premium: 12.";
+"membership_info_postcard" = "Per city: send up to 1 (Free) or 2 (Premium) postcards to each friend, to max 3 (Free) or 10 (Premium) friends. Each extra journey in that city gives +1 per friend and more recipients.";
 "membership_compare_friends" = "Friends";
 "membership_compare_unlimited" = "Unlimited";
 "membership_compare_globe" = "Global view";

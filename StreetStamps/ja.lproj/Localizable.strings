@@ -220,6 +220,12 @@
 "friend_memories_empty_subtitle" = "この友だちはまだ旅の記憶を公開していません。";
 "friend_memories_empty_title" = "まだ公開された旅の記憶がありません";
 "friend_profile_cta_done" = "Seated";
+"friend_profile_cta_leave" = "Get up";
+"friend_photo_booth_title" = "Photo Booth";
+"friend_photo_caption_format" = "Hanging out with %@";
+"friend_photo_stamp_subtitle" = "Friendship Snapshot";
+"friend_photo_retake" = "Retake";
+"friend_photo_save" = "Save";
 "friend_profile_cta_idle" = "Take a seat";
 "friend_profile_cta_loading" = "Sitting down...";
 "friend_profile_stat_cities" = "都市";
@@ -641,12 +647,15 @@
 "settings_profile_visibility_private" = "プロフィールは自分のみ表示";
 "settings_restore_from_icloud" = "iCloudから復元";
 "settings_restore_from_icloud_no_backup" = "新しいiCloudバックアップが見つかりませんでした。";
+"settings_restore_confirm_action" = "復元";
+"settings_restore_confirm_message" = "iCloudバックアップからデータを復元します。現在のローカルデータはバックアップと統合されます。続行しますか？";
 "settings_restore_from_icloud_success" = "最新のiCloudバックアップを復元しました。";
 "settings_section_general" = "GENERAL";
 "settings_section_information" = "INFORMATION";
 "settings_section_level_rules" = "LEVEL RULES";
 "settings_section_map_appearance" = "MAP APPEARANCE";
 "settings_section_services" = "SERVICES";
+"settings_section_utilities" = "ユーティリティ";
 "settings_section_tracking_assist" = "TRACKING ASSIST";
 "settings_sign_in_subtitle" = "Sync your travel data and unlock social features";
 "settings_sign_in_title" = "Sign in to Worldo";
@@ -845,6 +854,8 @@
 "membership_compare_free" = "無料";
 "membership_compare_premium" = "Premium";
 "membership_compare_photos" = "写真 / メモリー";
+"membership_info_photos" = "旅ごとに追加できる写真の上限。無料: 6枚、Premium: 12枚。";
+"membership_info_postcard" = "都市ごと：友達1人に1枚(無料)/2枚(Premium)送付可、最大3人(無料)/10人(Premium)。その都市の旅が増えるたびに友達1人あたり+1枚、送付先も増加。";
 "membership_compare_friends" = "フレンド";
 "membership_compare_unlimited" = "無制限";
 "membership_compare_globe" = "グローバルビュー";
@@ -878,6 +889,9 @@
 "friend_activity_record_entry" = "アクティビティ記録";
 "friend_city_cards" = "都市カード";
 "friend_journey_memories" = "旅の記憶";
+"friend_collection" = "コレクション";
+"friend_collection_subtitle_format" = "%d 都市 · %d 記憶";
+"friend_collection_title_format" = "%@のコレクション";
 "friend_postcards" = "ポストカード";
 "friend_stats_summary_format" = "%d 旅程 · %d 記憶 · %d カード";
 "lifelog_always_guide_enable" = "有効にする";

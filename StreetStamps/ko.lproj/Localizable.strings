@@ -220,6 +220,12 @@
 "friend_memories_empty_subtitle" = "이 친구는 아직 여정 기억을 공개하지 않았습니다.";
 "friend_memories_empty_title" = "아직 공개된 여정 기억이 없습니다";
 "friend_profile_cta_done" = "Seated";
+"friend_profile_cta_leave" = "Get up";
+"friend_photo_booth_title" = "Photo Booth";
+"friend_photo_caption_format" = "Hanging out with %@";
+"friend_photo_stamp_subtitle" = "Friendship Snapshot";
+"friend_photo_retake" = "Retake";
+"friend_photo_save" = "Save";
 "friend_profile_cta_idle" = "Take a seat";
 "friend_profile_cta_loading" = "Sitting down...";
 "friend_profile_stat_cities" = "도시";
@@ -641,12 +647,15 @@
 "settings_profile_visibility_private" = "프로필 나만 보기";
 "settings_restore_from_icloud" = "iCloud에서 복원";
 "settings_restore_from_icloud_no_backup" = "최신 iCloud 백업을 찾을 수 없습니다.";
+"settings_restore_confirm_action" = "복원";
+"settings_restore_confirm_message" = "iCloud 백업에서 데이터를 복원합니다. 현재 로컬 데이터가 백업과 병합됩니다. 계속하시겠습니까?";
 "settings_restore_from_icloud_success" = "최신 iCloud 백업을 복원했습니다.";
 "settings_section_general" = "GENERAL";
 "settings_section_information" = "INFORMATION";
 "settings_section_level_rules" = "LEVEL RULES";
 "settings_section_map_appearance" = "MAP APPEARANCE";
 "settings_section_services" = "SERVICES";
+"settings_section_utilities" = "유틸리티";
 "settings_section_tracking_assist" = "TRACKING ASSIST";
 "settings_sign_in_subtitle" = "Sync your travel data and unlock social features";
 "settings_sign_in_title" = "Sign in to Worldo";
@@ -845,6 +854,8 @@
 "membership_compare_free" = "무료";
 "membership_compare_premium" = "Premium";
 "membership_compare_photos" = "사진 / 메모리";
+"membership_info_photos" = "여정당 추가 가능한 최대 사진 수. 무료: 6장, Premium: 12장.";
+"membership_info_postcard" = "도시당: 친구 1명에게 1장(무료)/2장(Premium) 발송 가능, 최대 3명(무료)/10명(Premium). 해당 도시의 여정이 추가될 때마다 친구당 +1장, 수신자 수도 증가.";
 "membership_compare_friends" = "친구";
 "membership_compare_unlimited" = "무제한";
 "membership_compare_globe" = "글로벌 뷰";
@@ -878,6 +889,9 @@
 "friend_activity_record_entry" = "활동 기록";
 "friend_city_cards" = "도시 카드";
 "friend_journey_memories" = "여정 기록";
+"friend_collection" = "컬렉션";
+"friend_collection_subtitle_format" = "%d 도시 · %d 기억";
+"friend_collection_title_format" = "%@의 컬렉션";
 "friend_postcards" = "엽서";
 "friend_stats_summary_format" = "%d 여정 · %d 기억 · %d 카드";
 "lifelog_always_guide_enable" = "활성화";

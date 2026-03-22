@@ -220,6 +220,12 @@
 "friend_memories_empty_subtitle" = "Cet ami n'a pas encore publié de souvenirs de parcours.";
 "friend_memories_empty_title" = "Aucun souvenir de parcours pour le moment";
 "friend_profile_cta_done" = "Seated";
+"friend_profile_cta_leave" = "Get up";
+"friend_photo_booth_title" = "Photo Booth";
+"friend_photo_caption_format" = "Hanging out with %@";
+"friend_photo_stamp_subtitle" = "Friendship Snapshot";
+"friend_photo_retake" = "Retake";
+"friend_photo_save" = "Save";
 "friend_profile_cta_idle" = "Take a seat";
 "friend_profile_cta_loading" = "Sitting down...";
 "friend_profile_stat_cities" = "VILLES";
@@ -641,12 +647,15 @@
 "settings_profile_visibility_private" = "Profil visible seulement pour moi";
 "settings_restore_from_icloud" = "Restaurer depuis iCloud";
 "settings_restore_from_icloud_no_backup" = "Aucune sauvegarde iCloud plus récente n'a été trouvée.";
+"settings_restore_confirm_action" = "Restaurer";
+"settings_restore_confirm_message" = "Les données seront restaurées depuis la sauvegarde iCloud. Vos données locales actuelles seront fusionnées avec la sauvegarde. Continuer ?";
 "settings_restore_from_icloud_success" = "Dernière sauvegarde iCloud restaurée.";
 "settings_section_general" = "GENERAL";
 "settings_section_information" = "INFORMATION";
 "settings_section_level_rules" = "LEVEL RULES";
 "settings_section_map_appearance" = "MAP APPEARANCE";
 "settings_section_services" = "SERVICES";
+"settings_section_utilities" = "UTILITAIRES";
 "settings_section_tracking_assist" = "TRACKING ASSIST";
 "settings_sign_in_subtitle" = "Sync your travel data and unlock social features";
 "settings_sign_in_title" = "Sign in to Worldo";
@@ -845,6 +854,8 @@
 "membership_compare_free" = "Gratuit";
 "membership_compare_premium" = "Premium";
 "membership_compare_photos" = "Photos / souvenir";
+"membership_info_photos" = "Photos max par trajet. Gratuit : 6, Premium : 12.";
+"membership_info_postcard" = "Par ville : envoyez 1 (Gratuit) / 2 (Premium) cartes par ami, à 3 (Gratuit) / 10 (Premium) amis max. Chaque trajet supplémentaire donne +1 par ami et plus de destinataires.";
 "membership_compare_friends" = "Amis";
 "membership_compare_unlimited" = "Illimité";
 "membership_compare_globe" = "Vue globale";
@@ -878,6 +889,9 @@
 "friend_activity_record_entry" = "HISTORIQUE D'ACTIVITÉ";
 "friend_city_cards" = "CARTES DE VILLE";
 "friend_journey_memories" = "SOUVENIRS DE PARCOURS";
+"friend_collection" = "COLLECTION";
+"friend_collection_subtitle_format" = "%d villes · %d souvenirs";
+"friend_collection_title_format" = "Collection de %@";
 "friend_postcards" = "CARTE POSTALE";
 "friend_stats_summary_format" = "%d parcours · %d souvenirs · %d cartes";
 "lifelog_always_guide_enable" = "Activer";

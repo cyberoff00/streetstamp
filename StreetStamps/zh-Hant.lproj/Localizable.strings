@@ -221,12 +221,18 @@
 "friend_memories_empty_title" = "TA 暂無旅程記憶";
 "friend_profile_cta_done" = "已坐下";
 "friend_profile_cta_idle" = "坐一坐";
+"friend_profile_cta_leave" = "起身離開";
 "friend_profile_cta_loading" = "坐下中...";
+"friend_photo_booth_title" = "合影留念";
+"friend_photo_caption_format" = "和 %@ 一起玩";
+"friend_photo_stamp_subtitle" = "友誼快照";
+"friend_photo_retake" = "重拍";
+"friend_photo_save" = "保存";
 "friend_profile_stat_cities" = "城市卡片";
 "friend_profile_stat_memories" = "記憶";
 "friend_profile_stat_trips" = "旅程";
 "friend_profile_stomp_failed_format" = "坐一坐失敗：%@";
-"friend_profile_stomp_success_format" = "你在 %@ 的沙发上坐了一坐";
+"friend_profile_stomp_success_format" = "你在 %@ 的沙發上坐了一坐";
 "friend_section_title_format" = "%1$@ · %2$@";
 "friends_accept" = "通过";
 "friends_accept_failed_format" = "通过失敗：%@";
@@ -645,7 +651,9 @@
 "settings_profile_visibility_friends" = "Profile 好友可見";
 "settings_profile_visibility_private" = "Profile 仅自己可見";
 "settings_restore_from_icloud" = "从 iCloud 恢復数据";
-"settings_restore_from_icloud_no_backup" = "没有找到更新的 iCloud 備份。";
+"settings_restore_from_icloud_no_backup" = "沒有找到更新的 iCloud 備份。";
+"settings_restore_confirm_action" = "恢復";
+"settings_restore_confirm_message" = "將從 iCloud 備份恢復資料，目前本機資料會與備份合併。確定繼續嗎？";
 "settings_restore_from_icloud_success" = "已恢復最新 iCloud 備份。";
 "settings_restart_app_to_see_changes" = "請重啟 App 以查看裝備更新。";
 "settings_section_general" = "通用";
@@ -653,6 +661,7 @@
 "settings_section_level_rules" = "等級规则";
 "settings_section_map_appearance" = "地圖外观";
 "settings_section_services" = "服務";
+"settings_section_utilities" = "輔助功能";
 "settings_section_tracking_assist" = "追蹤辅助";
 "settings_sign_in_subtitle" = "同步旅行数据，解鎖好友功能";
 "settings_sign_in_title" = "登入 Worldo";
@@ -851,6 +860,8 @@
 "membership_compare_free" = "免費";
 "membership_compare_premium" = "Premium";
 "membership_compare_photos" = "照片 / 記憶";
+"membership_info_photos" = "每段旅程最多可添加的照片數。免費 6 張，Premium 12 張。";
+"membership_info_postcard" = "每個城市：可向每位好友發 1 張(免費)/2 張(Premium)明信片，最多 3 位(免費)/10 位(Premium)好友。該城市每多一段旅程，每位好友 +1 張，可發好友數也增加。";
 "membership_compare_friends" = "好友";
 "membership_compare_unlimited" = "無限";
 "membership_compare_globe" = "全球視圖";
@@ -884,6 +895,9 @@
 "friend_activity_record_entry" = "活動記錄";
 "friend_city_cards" = "城市卡";
 "friend_journey_memories" = "旅程記憶";
+"friend_collection" = "收藏集";
+"friend_collection_subtitle_format" = "%d 城市 · %d 記憶";
+"friend_collection_title_format" = "%@的收藏";
 "friend_postcards" = "明信片";
 "friend_stats_summary_format" = "%d 旅程 · %d 記憶 · %d 卡片";
 "lifelog_always_guide_enable" = "去開啟";

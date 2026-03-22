@@ -11,6 +11,11 @@ enum ProfileSceneSeat: Equatable {
     case right
 }
 
+enum ProfileSceneCTAAction: Equatable {
+    case sit
+    case leave
+}
+
 struct ProfileSceneInteractionState: Equatable {
     let hostSeat: ProfileSceneSeat
     let visitorSeat: ProfileSceneSeat?
@@ -18,7 +23,9 @@ struct ProfileSceneInteractionState: Equatable {
     let showsCTA: Bool
     let isCTAEnabled: Bool
     let ctaTitle: String?
+    let ctaAction: ProfileSceneCTAAction?
     let postcardPromptText: String?
+    let showsPhotoBooth: Bool
 
     static func resolve(
         mode: ProfileSceneMode,
@@ -36,29 +43,36 @@ struct ProfileSceneInteractionState: Equatable {
                 showsCTA: false,
                 isCTAEnabled: false,
                 ctaTitle: nil,
-                postcardPromptText: nil
+                ctaAction: nil,
+                postcardPromptText: nil,
+                showsPhotoBooth: false
             )
         case .friendProfile:
             let showsCTA = !isViewingOwnFriendProfile
             let ctaTitle: String?
             let isCTAEnabled: Bool
+            let ctaAction: ProfileSceneCTAAction?
             let postcardPromptText: String?
 
             if !showsCTA {
                 ctaTitle = nil
                 isCTAEnabled = false
+                ctaAction = nil
                 postcardPromptText = nil
             } else if isInteractionInFlight {
                 ctaTitle = localize("friend_profile_cta_loading")
                 isCTAEnabled = false
+                ctaAction = nil
                 postcardPromptText = nil
             } else if isVisitorSeated {
-                ctaTitle = localize("friend_profile_cta_done")
-                isCTAEnabled = false
+                ctaTitle = localize("friend_profile_cta_leave")
+                isCTAEnabled = true
+                ctaAction = .leave
                 postcardPromptText = localize("friends_postcard_prompt")
             } else {
                 ctaTitle = localize("friend_profile_cta_idle")
                 isCTAEnabled = true
+                ctaAction = .sit
                 postcardPromptText = nil
             }
 
@@ -69,7 +83,9 @@ struct ProfileSceneInteractionState: Equatable {
                 showsCTA: showsCTA,
                 isCTAEnabled: isCTAEnabled,
                 ctaTitle: ctaTitle,
-                postcardPromptText: postcardPromptText
+                ctaAction: ctaAction,
+                postcardPromptText: postcardPromptText,
+                showsPhotoBooth: isVisitorSeated && !isViewingOwnFriendProfile
             )
         }
     }

@@ -731,6 +731,7 @@
 "settings_section_general" = "通用";
 "settings_import_gpx_row" = "导入 GPX";
 "settings_section_services" = "服务";
+"settings_section_utilities" = "辅助功能";
 "settings_section_level_rules" = "等级规则";
 "settings_section_information" = "信息";
 "settings_private_transfer_title" = "私密数据迁移";
@@ -808,6 +809,12 @@
 "friend_profile_cta_idle" = "坐一坐";
 "friend_profile_cta_loading" = "坐下中...";
 "friend_profile_cta_done" = "已坐下";
+"friend_profile_cta_leave" = "起身离开";
+"friend_photo_booth_title" = "合影留念";
+"friend_photo_caption_format" = "和 %@ 一起玩";
+"friend_photo_stamp_subtitle" = "友谊快照";
+"friend_photo_retake" = "重拍";
+"friend_photo_save" = "保存";
 "friend_profile_stomp_success_format" = "你在 %@ 的沙发上坐了一坐";
 "friend_profile_stomp_failed_format" = "坐一坐失败：%@";
 "watch_status_permission_needed" = "请先允许定位权限";
@@ -873,6 +880,8 @@
 "settings_restore_from_icloud_success" = "已恢复最新 iCloud 备份。";
 "settings_restart_app_to_see_changes" = "请重启 App 以查看装备更新。";
 "settings_restore_from_icloud_no_backup" = "没有找到更新的 iCloud 备份。";
+"settings_restore_confirm_action" = "恢复";
+"settings_restore_confirm_message" = "将从 iCloud 备份恢复数据，当前本地数据会与备份合并。确定继续吗？";
 "settings_icloud_sync_enabled_hint" = "已开启 iCloud 同步，后续数据会自动上传。";
 "settings_icloud_sync_disabled_hint" = "已关闭 iCloud 同步，数据仅保存在本机。";
 "settings_icloud_status_idle" = "状态：尚未发生同步。";
@@ -912,6 +921,9 @@
 "friend_stats_summary_format" = "%d 旅程 · %d 记忆 · %d 卡片";
 "friend_city_cards" = "城市卡";
 "friend_journey_memories" = "旅程记忆";
+"friend_collection" = "收藏集";
+"friend_collection_subtitle_format" = "%d 城市 · %d 记忆";
+"friend_collection_title_format" = "%@的收藏";
 "friend_postcards" = "明信片";
 "friend_activity_record_entry" = "活动记录";
 
@@ -956,6 +968,8 @@
 "membership_compare_free" = "免费";
 "membership_compare_premium" = "Premium";
 "membership_compare_photos" = "照片 / 记忆";
+"membership_info_photos" = "每段旅程最多可添加的照片数。免费 6 张，Premium 12 张。";
+"membership_info_postcard" = "每个城市：可向每位好友发 1 张(免费)/2 张(Premium)明信片，最多 3 位(免费)/10 位(Premium)好友。该城市每多一段旅程，每位好友 +1 张，可发好友数也增加。";
 "membership_compare_friends" = "好友";
 "membership_compare_unlimited" = "无限";
 "membership_compare_globe" = "全球视图";
