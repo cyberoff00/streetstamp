@@ -30,7 +30,7 @@ function normalizedJourneyCount(value) {
   return Math.max(1, numeric);
 }
 
-function canSendPostcard({ sentPostcards, toUserID, cityID, cityJourneyCount, clientDraftID, allowedCityIDs }) {
+function canSendPostcard({ sentPostcards, toUserID, cityID, cityJourneyCount, clientDraftID, allowedCityIDs, membershipTier }) {
   const all = Array.isArray(sentPostcards) ? sentPostcards : [];
   const normalizedDraftID = normalizeText(clientDraftID);
 
@@ -54,10 +54,13 @@ function canSendPostcard({ sentPostcards, toUserID, cityID, cityJourneyCount, cl
     return { ok: false, reason: 'city_not_allowed', idempotentHit: null };
   }
 
+  const isPremium = normalizeKey(membershipTier) === 'premium';
   const sentOnly = all.filter((item) => statusOf(item) === 'sent');
   const additionalJourneyCount = Math.max(0, normalizedJourneyCount(cityJourneyCount) - 1);
-  const perFriendQuota = 2 + additionalJourneyCount;
-  const cityUniqueFriendQuota = 10 + (additionalJourneyCount * 10);
+  const basePerFriend = isPremium ? 2 : 1;
+  const baseCityFriends = isPremium ? 10 : 3;
+  const perFriendQuota = basePerFriend + additionalJourneyCount;
+  const cityUniqueFriendQuota = baseCityFriends + (additionalJourneyCount * (isPremium ? 10 : 3));
 
   const sameFriendSameCityCount = sentOnly.filter((item) => {
     return cityIDOf(item) === normalizedCityID && toUserIDOf(item) === normalizedToUserID;

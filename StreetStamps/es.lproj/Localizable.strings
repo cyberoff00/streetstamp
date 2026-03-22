@@ -201,6 +201,9 @@
 "finish_confirm_finish" = "Confirmar finalización";
 "finish_confirm_message" = "Si pulsaste Finalizar por error, puedes continuar el viaje.";
 "finish_confirm_title" = "¿Finalizar el viaje?";
+"finish_no_city_title" = "No se puede identificar la ciudad";
+"finish_no_city_message" = "La red no está disponible y no se pudo determinar la ciudad del viaje. Espera a que se recupere la red antes de finalizar.";
+"finish_no_city_continue" = "Continuar viaje";
 "finish_pending_memory_title" = "Señal GPS débil";
 "finish_pending_memory_message" = "Algunos recuerdos no pudieron obtener ubicación. Si finalizas ahora, se perderán esos recuerdos. Puedes esperar a que el GPS se recupere.";
 "finish_pending_memory_finish_now" = "Finalizar ahora";
@@ -296,7 +299,7 @@
 "go_to_library" = "Ir a City Library";
 "got_it" = "Entendido";
 "gpx_import_choose_city_card" = "Choose city card to migrate into:";
-"gpx_import_choose_detected_city" = "Choose one detected city:";
+"gpx_import_choose_detected_city" = "Ciudades detectadas:";
 "gpx_import_conversion_progress" = "Track Conversion Progress";
 "gpx_import_create_city_card" = "Create New City Card";
 "gpx_import_detected_cities" = "Detected by sampled reverse-geocode:";
@@ -859,6 +862,9 @@
 "membership_subscribe_button" = "Suscribirse";
 "membership_restore_purchases" = "Restaurar compras";
 "membership_auto_renew_note" = "La suscripción se renueva automáticamente. Cancela en cualquier momento desde Ajustes.";
+"membership_welcome_bonus_title" = "¡Bono de bienvenida!";
+"membership_welcome_bonus_message" = "¡Has ganado %d monedas como regalo de bienvenida por ser miembro Premium!";
+"membership_welcome_bonus_ok" = "¡Genial!";
 "membership_products_unavailable" = "Los productos no están disponibles. Inténtalo de nuevo más tarde.";
 "activity_record_title" = "REGISTRO DE ACTIVIDAD";
 "activity_ring_help" = "Exterior: Progreso de nivel (viajes ≥1km cuentan)\nMedio: Colección de recuerdos (50 recuerdos por anillo)\nInterior: Progreso de ciudades desbloqueadas (10 ciudades por anillo)";

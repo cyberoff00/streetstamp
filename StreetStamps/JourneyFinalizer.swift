@@ -95,8 +95,9 @@ enum JourneyFinalizer {
 
         func persistAndReturn(_ updated: JourneyRoute, notify: (() -> Void)?) {
             Task { @MainActor in
+                // upsertSnapshotThrottled already calls flushPersist(force: true)
+                // for completed journeys (endTime != nil), so no extra flushPersist needed.
                 journeyStore.upsertSnapshotThrottled(updated, coordCount: updated.coordinates.count)
-                journeyStore.flushPersist()
                 if updated.endTime != nil {
                     lifelogStore.archiveJourneyPointsIfNeeded(updated)
                 }

@@ -810,6 +810,7 @@ struct MapView: View {
 
     @State private var showMemoryEditor = false
     @State private var showFinishConfirm = false
+    @State private var showFinishNoCityWarning = false
     @State private var showFinishPendingMemoryWarning = false
     @State private var showExitWarning = false
     @State private var showModeSelector = false
@@ -977,6 +978,11 @@ struct MapView: View {
             Button(L10n.t("finish_confirm_continue"), role: .cancel) {}
         } message: {
             Text(L10n.t("finish_confirm_message"))
+        }
+        .alert(L10n.t("finish_no_city_title"), isPresented: $showFinishNoCityWarning) {
+            Button(L10n.t("finish_no_city_continue"), role: .cancel) {}
+        } message: {
+            Text(L10n.t("finish_no_city_message"))
         }
         .alert(L10n.t("finish_pending_memory_title"), isPresented: $showFinishPendingMemoryWarning) {
             Button(L10n.t("finish_pending_memory_finish_now"), role: .destructive) { finishJourney() }
@@ -1580,7 +1586,17 @@ struct MapView: View {
         mapController.setRegion(.init(center: center, span: .init(latitudeDelta: latDelta, longitudeDelta: lonDelta)))
     }
 
+    private var hasPendingCityKey: Bool {
+        let key = (journeyRoute.startCityKey ?? journeyRoute.cityKey)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return key.isEmpty || key == "Unknown|"
+    }
+
     private func handleFinishTapped() {
+        if hasPendingCityKey {
+            showFinishNoCityWarning = true
+            return
+        }
         let hasPendingMemories = journeyRoute.memories.contains { $0.locationStatus == .pending }
         if hasPendingMemories {
             showFinishPendingMemoryWarning = true

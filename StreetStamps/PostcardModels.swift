@@ -9,6 +9,7 @@ struct SendPostcardRequest: Codable {
     var messageText: String
     var photoURL: String
     var allowedCityIDs: [String]
+    var membershipTier: String
 
     private enum CodingKeys: String, CodingKey {
         case clientDraftID
@@ -19,6 +20,7 @@ struct SendPostcardRequest: Codable {
         case messageText
         case photoURL
         case allowedCityIDs
+        case membershipTier
     }
 }
 

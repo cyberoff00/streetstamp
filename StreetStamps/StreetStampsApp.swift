@@ -85,6 +85,7 @@ struct StreetStampsApp: App {
     @State private var showSplash = true
     @State private var scheduledTileRebuild: DispatchWorkItem?
     @State private var trackTileRebuildTask: Task<Void, Never>?
+    @State private var trackTileDirty: Bool = false
     @State private var profileSwitchTask: Task<Void, Never>?
 #if DEBUG
     @State private var showDebugFirstProfileSetupPreview = true
@@ -358,6 +359,11 @@ struct StreetStampsApp: App {
                 await LifelogMigrationService.migrateLegacyLifelogIfNeededAsync(
                     paths: StoragePath(userID: startupUserID)
                 )
+
+                // Phase 1: Load journey and lifelog in parallel.
+                // journeyStore must finish before Live Activity cleanup,
+                // so start lifelogStore first and await journeyStore immediately.
+                async let lifelogLoad: () = lifelogStore.loadAsync()
                 await journeyStore.loadAsync()
                 // Clean up Live Activities left over from a previous process
                 // if there is no ongoing journey to resume.
@@ -365,7 +371,16 @@ struct StreetStampsApp: App {
                     LiveActivityManager.shared.endAllStaleActivities()
                 }
                 setupAutoEndHandler()
-                await lifelogStore.loadAsync()
+                await lifelogLoad
+
+                // Phase 2: Bind and reduced warmup (4 cities now, rest deferred)
+                lifelogStore.bind(to: locationHub)
+                lifelogRenderCache.reset()
+                lifelogRenderCache.bind(
+                    journeyStore: journeyStore,
+                    lifelogStore: lifelogStore,
+                    trackTileStore: trackTileStore
+                )
                 let journeysSnapshot = journeyStore.journeys
                 let cachedCitiesSnapshot = cityCache.cachedCities
                 let appearanceRaw = MapAppearanceSettings.current.rawValue
@@ -377,23 +392,17 @@ struct StreetStampsApp: App {
                     cities: cities,
                     appearanceRaw: appearanceRaw,
                     renderCacheStore: renderCache,
-                    limit: 16
+                    limit: 4
                 )
-                lifelogStore.bind(to: locationHub)
-                lifelogRenderCache.reset()
-                lifelogRenderCache.bind(
-                    journeyStore: journeyStore,
-                    lifelogStore: lifelogStore,
-                    trackTileStore: trackTileStore
-                )
-                // Wait for lifelog data to finish loading before building
-                // tiles, otherwise the rebuild runs with empty points and
-                // overwrites good persisted tiles from the previous session.
-                await awaitLifelogLoadThenRebuildTiles()
                 lifelogRenderCache.scheduleWarmupRecentDays(
                     countryISO2: lifelogStore.countryISO2 ?? locationHub.countryISO2
                 )
 
+                // Track tile rebuild is deferred — triggered lazily by
+                // onChange(trackTileRevision) + onChange(currentTab) when
+                // user navigates to the lifelog tab.
+
+                // Phase 3: Deferred non-critical services
                 Task { @MainActor in
                     await Task.yield()
                     VoiceBroadcastService.shared.start()
@@ -405,6 +414,21 @@ struct StreetStampsApp: App {
                     try? await Task.sleep(nanoseconds: 800_000_000)
                     applyIdleLocationPolicy(requestSingleRefreshWhenIdle: true)
                     syncMotionActivityPolicy()
+                }
+
+                // Phase 4: Deferred remaining city warmup
+                Task(priority: .utility) { @MainActor in
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    let js = journeyStore.journeys
+                    let cc = cityCache.cachedCities
+                    let ar = MapAppearanceSettings.current.rawValue
+                    let rc = cityRenderCache
+                    let c = await Task.detached(priority: .utility) {
+                        CityLibraryVM.buildCities(journeys: js, cachedCities: cc)
+                    }.value
+                    StartupWarmupService.shared.start(
+                        cities: c, appearanceRaw: ar, renderCacheStore: rc, limit: 16
+                    )
                 }
             }
     }
@@ -433,12 +457,23 @@ struct StreetStampsApp: App {
                         cityCache: cityCache,
                         failureStore: journeyDeletionSyncFailureStore
                     )
-                    await journeyStore.loadAsync()
-                    guard !Task.isCancelled else { return }
                     lifelogStore.rebind(paths: paths)
-                    await lifelogStore.loadAsync()
-                    guard !Task.isCancelled else { return }
                     cityRenderCache.rebind(rootDir: paths.thumbnailsDir)
+                    trackTileStore.rebind(paths: paths)
+
+                    // Load journey and lifelog in parallel
+                    async let journeyLoad: () = journeyStore.loadAsync()
+                    async let lifelogLoad: () = lifelogStore.loadAsync()
+                    _ = await (journeyLoad, lifelogLoad)
+                    guard !Task.isCancelled else { return }
+
+                    lifelogStore.bind(to: locationHub)
+                    lifelogRenderCache.reset()
+                    lifelogRenderCache.bind(
+                        journeyStore: journeyStore,
+                        lifelogStore: lifelogStore,
+                        trackTileStore: trackTileStore
+                    )
                     let journeysSnapshot = journeyStore.journeys
                     let cachedCitiesSnapshot = cityCache.cachedCities
                     let appearanceRaw = MapAppearanceSettings.current.rawValue
@@ -451,25 +486,33 @@ struct StreetStampsApp: App {
                         cities: cities,
                         appearanceRaw: appearanceRaw,
                         renderCacheStore: renderCache,
-                        limit: 16
+                        limit: 4
                     )
-                    lifelogStore.bind(to: locationHub)
-                    trackTileStore.rebind(paths: paths)
-                    lifelogRenderCache.reset()
-                    lifelogRenderCache.bind(
-                        journeyStore: journeyStore,
-                        lifelogStore: lifelogStore,
-                        trackTileStore: trackTileStore
-                    )
-                    await awaitLifelogLoadThenRebuildTiles()
-                    guard !Task.isCancelled else { return }
                     lifelogRenderCache.scheduleWarmupRecentDays(
                         countryISO2: lifelogStore.countryISO2 ?? locationHub.countryISO2
                     )
+
+                    // Track tile rebuild deferred — triggered by onChange handlers when needed.
+
                     applyIdleLocationPolicy(requestSingleRefreshWhenIdle: true)
                     syncMotionActivityPolicy()
                     socialStore.switchUser(uid)
                     postcardCenter.switchUser(uid)
+
+                    // Deferred: remaining city warmup
+                    Task(priority: .utility) { @MainActor in
+                        try? await Task.sleep(nanoseconds: 2_000_000_000)
+                        let js = journeyStore.journeys
+                        let cc = cityCache.cachedCities
+                        let ar = MapAppearanceSettings.current.rawValue
+                        let rc = cityRenderCache
+                        let c = await Task.detached(priority: .utility) {
+                            CityLibraryVM.buildCities(journeys: js, cachedCities: cc)
+                        }.value
+                        StartupWarmupService.shared.start(
+                            cities: c, appearanceRaw: ar, renderCacheStore: rc, limit: 16
+                        )
+                    }
                 }
             }
             .onChange(of: sessionStore.reauthenticationPromptVersion) { _, version in
@@ -517,9 +560,8 @@ struct StreetStampsApp: App {
                 )
             }
             .onChange(of: flow.currentTab) { _, tab in
-                if TrackTileRebuildPolicy.shouldRebuild(for: tab) {
-                    // Defer heavy rebuild slightly so tab switch interaction stays responsive.
-                    scheduleTrackTileRebuild(delay: 0.75, force: false)
+                if trackTileDirty && TrackTileRebuildPolicy.shouldRebuild(for: tab) {
+                    scheduleTrackTileRebuild(delay: 0.25, force: true)
                 }
             }
             .onChange(of: lifelogBackgroundModeRaw) { _, _ in
@@ -584,8 +626,10 @@ struct StreetStampsApp: App {
 
     private func scheduleTrackTileRebuild(delay: TimeInterval = 0.25, force: Bool = true) {
         if !force && !TrackTileRebuildPolicy.shouldRebuild(for: flow.currentTab) {
+            trackTileDirty = true
             return
         }
+        trackTileDirty = false
         scheduledTileRebuild?.cancel()
         let work = DispatchWorkItem { rebuildTrackTiles() }
         scheduledTileRebuild = work

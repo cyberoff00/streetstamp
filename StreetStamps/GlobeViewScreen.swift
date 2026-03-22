@@ -46,6 +46,13 @@ struct GlobeViewScreen: View {
             )
             .ignoresSafeArea()
 
+            // Pinch gate sits between the map and the UI controls so it
+            // intercepts zoom attempts without blocking button taps.
+            if !membership.isPremium {
+                PinchGateCatcher { showMembershipGate = true }
+                    .ignoresSafeArea()
+            }
+
             VStack(spacing: 0) {
                 topHeader
                 Spacer()
@@ -60,13 +67,6 @@ struct GlobeViewScreen: View {
         }
         .sheet(isPresented: $showMembershipGate) {
             MembershipGateView()
-        }
-        .overlay {
-            if !membership.isPremium {
-                // Transparent pinch catcher — intercepts zoom attempts for free users.
-                // Does not block single-finger gestures (pan/rotate pass through).
-                PinchGateCatcher { showMembershipGate = true }
-            }
         }
         .overlay {
             if isPreparingData {

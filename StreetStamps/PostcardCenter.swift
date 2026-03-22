@@ -245,7 +245,8 @@ final class PostcardCenter: ObservableObject {
                 cityName: draft.cityName,
                 messageText: String(draft.message.prefix(80)),
                 photoURL: photoResolution.url,
-                allowedCityIDs: allowedCityIDs
+                allowedCityIDs: allowedCityIDs,
+                membershipTier: MembershipStore.shared.tier.rawValue
             )
             let sendStartedAt = ContinuousClock.now
             let response = try await BackendAPIClient.shared.sendPostcard(token: token, req: payload)

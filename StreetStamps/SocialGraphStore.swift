@@ -300,13 +300,17 @@ final class SocialGraphStore: ObservableObject {
 
     init(userID: String) {
         self.activeUserID = userID
-        loadFromDisk()
+        Task { [weak self] in
+            await self?.loadFromDiskAsync()
+        }
     }
 
     func switchUser(_ userID: String) {
         guard activeUserID != userID else { return }
         activeUserID = userID
-        loadFromDisk()
+        Task { [weak self] in
+            await self?.loadFromDiskAsync()
+        }
     }
 
     func addFriendSmart(
@@ -399,22 +403,23 @@ final class SocialGraphStore: ObservableObject {
         return paths.cachesDir.appendingPathComponent("friends_graph_v1.json")
     }
 
-    private func loadFromDisk() {
-        do {
-            let paths = StoragePath(userID: activeUserID)
-            try paths.ensureBaseDirectoriesExist()
-
-            guard FileManager.default.fileExists(atPath: fileURL.path) else {
-                friends = []
-                return
+    private func loadFromDiskAsync() async {
+        let url = fileURL
+        let userID = activeUserID
+        let loaded: [FriendProfileSnapshot] = await Task.detached(priority: .userInitiated) {
+            do {
+                let paths = StoragePath(userID: userID)
+                try paths.ensureBaseDirectoriesExist()
+                guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+                let data = try Data(contentsOf: url)
+                return try JSONDecoder().decode([FriendProfileSnapshot].self, from: data)
+            } catch {
+                print("❌ SocialGraph load failed:", error)
+                return []
             }
-
-            let data = try Data(contentsOf: fileURL)
-            friends = try JSONDecoder().decode([FriendProfileSnapshot].self, from: data)
-        } catch {
-            friends = []
-            print("❌ SocialGraph load failed:", error)
-        }
+        }.value
+        guard activeUserID == userID else { return }
+        friends = loaded
     }
 
     private func persistToDisk() {

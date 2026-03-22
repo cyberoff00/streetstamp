@@ -3883,13 +3883,15 @@ async function main() {
       ensurePostcardCollections(me);
       ensurePostcardCollections(target);
 
+      const membershipTier = String(req.body?.membershipTier || "free").trim();
       const rule = canSendPostcard({
         sentPostcards: me.sentPostcards,
         toUserID,
         cityID,
         cityJourneyCount,
         clientDraftID,
-        allowedCityIDs
+        allowedCityIDs,
+        membershipTier
       });
 
       if (rule.idempotentHit) {

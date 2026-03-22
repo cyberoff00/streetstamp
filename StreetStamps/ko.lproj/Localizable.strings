@@ -201,6 +201,9 @@
 "finish_confirm_finish" = "종료 확정";
 "finish_confirm_message" = "실수로 종료를 눌렀다면 여정을 계속할 수 있어요.";
 "finish_confirm_title" = "여정을 종료할까요?";
+"finish_no_city_title" = "도시를 식별할 수 없습니다";
+"finish_no_city_message" = "네트워크를 사용할 수 없어 여정의 도시를 확인할 수 없습니다. 네트워크 복구 후 종료해 주세요.";
+"finish_no_city_continue" = "여정 계속하기";
 "finish_pending_memory_title" = "GPS 신호가 약합니다";
 "finish_pending_memory_message" = "일부 기록의 위치를 가져오지 못했어요. 지금 종료하면 해당 기록이 유실됩니다. GPS가 복구될 때까지 기다릴 수 있어요.";
 "finish_pending_memory_finish_now" = "바로 종료";
@@ -296,7 +299,7 @@
 "go_to_library" = "도시 라이브러리로";
 "got_it" = "알겠어요";
 "gpx_import_choose_city_card" = "Choose city card to migrate into:";
-"gpx_import_choose_detected_city" = "Choose one detected city:";
+"gpx_import_choose_detected_city" = "감지된 도시：";
 "gpx_import_conversion_progress" = "Track Conversion Progress";
 "gpx_import_create_city_card" = "Create New City Card";
 "gpx_import_detected_cities" = "Detected by sampled reverse-geocode:";
@@ -859,6 +862,9 @@
 "membership_subscribe_button" = "구독하기";
 "membership_restore_purchases" = "구매 복원";
 "membership_auto_renew_note" = "구독은 자동 갱신됩니다. 설정에서 언제든 취소할 수 있습니다.";
+"membership_welcome_bonus_title" = "환영 보너스!";
+"membership_welcome_bonus_message" = "Premium 회원이 된 것을 축하합니다! %d 코인을 획득했습니다!";
+"membership_welcome_bonus_ok" = "좋아요!";
 "membership_products_unavailable" = "현재 상품을 이용할 수 없습니다. 잠시 후 다시 시도해 주세요.";
 "activity_record_title" = "활동 기록";
 "activity_ring_help" = "바깥: 레벨 진행도 (1km 이상 여정 카운트)\n중간: 기억 수집 (50개당 1바퀴)\n안쪽: 도시 해금 진행도 (10개당 1바퀴)";

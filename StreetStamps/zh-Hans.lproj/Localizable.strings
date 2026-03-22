@@ -139,6 +139,9 @@
 "finish_confirm_message" = "如果你是不小心点到结束，可以选择继续旅程。";
 "finish_confirm_continue" = "继续旅程";
 "finish_confirm_finish" = "确认结束";
+"finish_no_city_title" = "无法识别城市";
+"finish_no_city_message" = "当前网络不可用，无法确定旅程所在城市。请等待网络恢复后再结束旅程。";
+"finish_no_city_continue" = "继续旅程";
 "finish_pending_memory_title" = "GPS 信号较差";
 "finish_pending_memory_message" = "部分记忆未能获取位置信息，立即结束将丢失这些记忆。你可以等待 GPS 信号恢复后再结束。";
 "finish_pending_memory_finish_now" = "立即结束";
@@ -492,8 +495,8 @@
 "gpx_import_progress_building" = "正在构建轨迹预览";
 "gpx_import_progress_detecting" = "正在识别城市候选";
 "gpx_import_progress_detecting_format" = "正在识别城市（%d/%d）";
-"gpx_import_progress_done" = "转换完成，可选择城市";
-"gpx_import_choose_detected_city" = "请选择一个识别出的城市：";
+"gpx_import_progress_done" = "转换完成，可导入";
+"gpx_import_choose_detected_city" = "识别到的城市：";
 "gpx_import_no_detected_city" = "未从该 GPX 轨迹识别到城市。";
 "app_name" = "WORLDO";
 "splash_tagline" = "绘制你的世界记忆";
@@ -970,4 +973,7 @@
 "membership_subscribe_button" = "订阅";
 "membership_restore_purchases" = "恢复购买";
 "membership_auto_renew_note" = "订阅自动续期，可随时在「设置」中取消。";
+"membership_welcome_bonus_title" = "欢迎奖励！";
+"membership_welcome_bonus_message" = "恭喜成为 Premium 会员！已获得 %d 金币作为欢迎礼物！";
+"membership_welcome_bonus_ok" = "太棒了！";
 "membership_products_unavailable" = "产品暂不可用，请稍后再试。";

@@ -880,8 +880,8 @@ final class CityThumbnailLoader: ObservableObject {
             anchor: city.anchor ?? city.journeys.first?.allCLCoords.first
         )
         let img: UIImage
-        if let snapshot = Self.makeSnapshot(city: city, appearanceRaw: appearanceRaw, fetchedBoundary: fetchedBoundary) {
-            img = snapshot
+        if let primary = Self.makeSnapshot(city: city, appearanceRaw: appearanceRaw, fetchedBoundary: fetchedBoundary) {
+            img = primary
         } else if let fallback = await Self.makeFallbackSnapshot(city: city, appearanceRaw: appearanceRaw) {
             img = fallback
         } else {

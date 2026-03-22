@@ -195,11 +195,27 @@ final class MembershipStore: ObservableObject {
         }
 
         if foundActive {
+            let wasFreeBefore = tier == .free
             applyTier(.premium, expiration: latestExpiration)
+            if wasFreeBefore && !welcomeBonusGranted {
+                awardWelcomeBonus()
+            }
         } else {
             applyTier(.free, expiration: nil)
         }
     }
+
+    /// Award the one-time 1500 coin welcome bonus on first premium subscription.
+    private func awardWelcomeBonus() {
+        var economy = EquipmentEconomyStore.load()
+        economy.coins += MembershipTierConfig.premiumWelcomeBonus
+        EquipmentEconomyStore.save(economy)
+        markWelcomeBonusGranted()
+        showWelcomeBonusAlert = true
+    }
+
+    /// Set by `awardWelcomeBonus` so the UI can show a congratulations alert.
+    @Published var showWelcomeBonusAlert = false
 
     /// Purchase a subscription product.
     func purchase(_ product: Product) async throws -> Bool {

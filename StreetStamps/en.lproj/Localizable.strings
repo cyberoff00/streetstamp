@@ -139,6 +139,9 @@
 "finish_confirm_message" = "If you tapped Finish by mistake, you can continue your journey.";
 "finish_confirm_continue" = "Continue Journey";
 "finish_confirm_finish" = "Confirm Finish";
+"finish_no_city_title" = "Unable to identify city";
+"finish_no_city_message" = "Network is unavailable and the city for this journey could not be determined. Please wait for network to recover before finishing.";
+"finish_no_city_continue" = "Continue Journey";
 "finish_pending_memory_title" = "GPS signal is weak";
 "finish_pending_memory_message" = "Some memories could not get a location. Finishing now will lose those memories. You can wait for GPS to recover.";
 "finish_pending_memory_finish_now" = "Finish Now";
@@ -500,8 +503,8 @@
 "gpx_import_progress_building" = "Building route preview";
 "gpx_import_progress_detecting" = "Detecting city candidates";
 "gpx_import_progress_detecting_format" = "Detecting cities (%d/%d)";
-"gpx_import_progress_done" = "Conversion finished, ready to choose city";
-"gpx_import_choose_detected_city" = "Choose one detected city:";
+"gpx_import_progress_done" = "Conversion finished, ready to import";
+"gpx_import_choose_detected_city" = "Detected cities:";
 "gpx_import_no_detected_city" = "No city was detected from this GPX track.";
 "app_name" = "Worldo";
 "splash_tagline" = "Map your Journey. Pin your memories.";
@@ -960,6 +963,9 @@
 "membership_subscribe_button" = "Subscribe";
 "membership_restore_purchases" = "Restore Purchases";
 "membership_auto_renew_note" = "Subscription auto-renews. Cancel anytime in Settings.";
+"membership_welcome_bonus_title" = "Welcome Bonus!";
+"membership_welcome_bonus_message" = "You've earned %d coins as a welcome gift for becoming a Premium member!";
+"membership_welcome_bonus_ok" = "Awesome!";
 "membership_products_unavailable" = "Products are currently unavailable. Please try again later.";
 
 "friends_activity_record_title" = "ACTIVITY RECORD";

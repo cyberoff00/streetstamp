@@ -42,6 +42,8 @@ struct JourneyMemoryMainView: View {
     @State private var selectedEndDate: Date? = nil
     /// Localized city display cache for this screen (cityKey -> localized title in current locale)
     @State private var localizedCityNameByKey: [String: String] = [:]
+    @State private var cachedCityGroups: [CityGroupData] = []
+    @State private var cachedLocalizationFingerprint: String = ""
     
     @Binding var showSidebar: Bool
     private let usesSidebarHeader: Bool
@@ -137,6 +139,21 @@ struct JourneyMemoryMainView: View {
                 store.load()
             }
             onboardingGuide.advance(.openMemory)
+            cachedLocalizationFingerprint = rebuildLocalizationFingerprint()
+            rebuildCityGroups()
+        }
+        .onChange(of: store.journeys.count) { _, _ in
+            cachedLocalizationFingerprint = rebuildLocalizationFingerprint()
+            rebuildCityGroups()
+        }
+        .onChange(of: localizedCityNameByKey) { _, _ in
+            rebuildCityGroups()
+        }
+        .onChange(of: selectedStartDate) { _, _ in
+            rebuildCityGroups()
+        }
+        .onChange(of: selectedEndDate) { _, _ in
+            rebuildCityGroups()
         }
         // Keep city names localized to current language (do NOT rely on persisted English titles).
         .task(id: localizationFingerprint) {
@@ -146,6 +163,10 @@ struct JourneyMemoryMainView: View {
 
     /// A stable-ish fingerprint to re-run localization when journey list changes.
     private var localizationFingerprint: String {
+        cachedLocalizationFingerprint
+    }
+
+    private func rebuildLocalizationFingerprint() -> String {
         let lang = languagePreference.currentLanguage ?? "sys"
         let journeyPart = allMemoryJourneys
             .map { "\($0.id)|\($0.startCityKey ?? $0.cityKey)" }
@@ -153,7 +174,7 @@ struct JourneyMemoryMainView: View {
         return "\(lang)|\(journeyPart)"
     }
 
-    private var cachedCitiesByKey: [String: CachedCity] {
+    private func buildCachedCitiesByKey() -> [String: CachedCity] {
         Dictionary(
             uniqueKeysWithValues: cityCache.cachedCities
                 .filter { !($0.isTemporary ?? false) }
@@ -165,6 +186,7 @@ struct JourneyMemoryMainView: View {
     private func refreshCityLocalizations() async {
         await MainActor.run { localizedCityNameByKey = [:] }
         let journeys = allMemoryJourneys
+        let citiesByKey = buildCachedCitiesByKey()
 
         // cityKey -> sample start coordinate
         var coordByKey: [String: CLLocationCoordinate2D] = [:]
@@ -176,31 +198,42 @@ struct JourneyMemoryMainView: View {
             }
         }
 
-        for (key, coord) in coordByKey {
-            let displayLocale = LanguagePreference.shared.displayLocale
+        // Phase 1: resolve all cached titles instantly (no geocode needed)
+        var needsGeocode: [(key: String, coord: CLLocationCoordinate2D)] = []
+        var resolvedBatch: [String: String] = [:]
 
-            // Single source of truth from CachedCity.
-            if let cachedCity = cachedCitiesByKey[key] {
+        for (key, coord) in coordByKey {
+            if let cachedCity = citiesByKey[key] {
                 let title = cachedCity.displayTitle
                 if !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    await MainActor.run { localizedCityNameByKey[key] = title }
+                    resolvedBatch[key] = title
                     continue
                 }
             }
 
-            // Prefer service cache (now locale-aware) to avoid extra geocode calls.
-            let parentRegionKey = cachedCitiesByKey[key]?.parentScopeKey
-
+            let parentRegionKey = citiesByKey[key]?.parentScopeKey
             if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key, parentRegionKey: parentRegionKey),
                !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                await MainActor.run { localizedCityNameByKey[key] = cached }
+                resolvedBatch[key] = cached
                 continue
             }
 
-            let loc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
-            if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key, parentRegionKey: parentRegionKey),
+            needsGeocode.append((key: key, coord: coord))
+        }
+
+        if !resolvedBatch.isEmpty {
+            await MainActor.run {
+                for (k, v) in resolvedBatch { localizedCityNameByKey[k] = v }
+            }
+        }
+
+        // Phase 2: geocode remaining keys (still serial due to CLGeocoder rate limits)
+        for item in needsGeocode {
+            let parentRegionKey = citiesByKey[item.key]?.parentScopeKey
+            let loc = CLLocation(latitude: item.coord.latitude, longitude: item.coord.longitude)
+            if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: item.key, parentRegionKey: parentRegionKey),
                !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                await MainActor.run { localizedCityNameByKey[key] = title }
+                await MainActor.run { localizedCityNameByKey[item.key] = title }
             }
         }
     }
@@ -285,6 +318,11 @@ struct JourneyMemoryMainView: View {
     // MARK: - Data Grouping
 
     private var cityGroups: [CityGroupData] {
+        cachedCityGroups
+    }
+
+    private func rebuildCityGroups() {
+        let citiesByKey = buildCachedCitiesByKey()
         let journeys = filteredMemoryJourneys
         let journeyById = Dictionary(uniqueKeysWithValues: journeys.map { ($0.id, $0) })
 
@@ -295,14 +333,12 @@ struct JourneyMemoryMainView: View {
 
         for j in journeys {
             let rawKey = (j.startCityKey ?? j.cityKey)
-            let cached = cachedCitiesByKey[rawKey]
+            let cached = citiesByKey[rawKey]
             let key = cached.map(CityCollectionResolver.resolveCollectionKey(for:))
                 ?? CityCollectionResolver.resolveCollectionKey(cityKey: rawKey)
 
-            // 把整个 journey 的 memories 都归到起点城市下面
             buckets[key, default: [:]][j.id] = j.memories
 
-            // 城市名：统一按 collectionKey 解析，避免同城不同层级拆成多组。
             if nameForKey[key] == nil {
                 let fallbackTitle: String
                 if let localized = localizedCityNameByKey[key], !localized.isEmpty {
@@ -311,7 +347,7 @@ struct JourneyMemoryMainView: View {
                     fallbackTitle = JourneyCityNamePresentation.title(
                         for: j,
                         localizedCityNameByKey: localizedCityNameByKey,
-                        cachedCitiesByKey: cachedCitiesByKey
+                        cachedCitiesByKey: citiesByKey
                     )
                 }
                 nameForKey[key] = cityOnly(
@@ -319,7 +355,6 @@ struct JourneyMemoryMainView: View {
                 )
             }
 
-            // 国家从 collectionKey (City|ISO2) 取
             if countryForKey[key] == nil {
                 if let iso2 = CityDisplayResolver.iso2(from: key) {
                     countryForKey[key] = countryName(from: iso2)
@@ -342,7 +377,7 @@ struct JourneyMemoryMainView: View {
         }
 
         groups.sort(by: { $0.cityName < $1.cityName })
-        return groups
+        cachedCityGroups = groups
     }
 
     
@@ -1777,7 +1812,11 @@ struct JourneyMemoryDetailView: View {
     @MainActor
     private func generateRouteThumbnail() async {
         let coords = journey.coordinates.clCoords
-        guard coords.count >= 2 else { return }
+        guard coords.count >= 2 else {
+            // No route points — generate a plain map tile from the city key center.
+            await generateFallbackRouteThumbnail()
+            return
+        }
 
         let built = RouteRenderingPipeline.buildSegments(
             .init(coordsWGS84: coords, applyGCJForChina: false, gapDistanceMeters: 2_200,
@@ -1827,6 +1866,46 @@ struct JourneyMemoryDetailView: View {
             RouteThumbnailCache.shared.set(img, for: journey.id)
         } catch {
             print("Route thumbnail snapshot error:", error)
+        }
+    }
+
+    @MainActor
+    private func generateFallbackRouteThumbnail() async {
+        guard let cityKey = journey.stableCityKey else { return }
+        let parts = cityKey.split(separator: "|")
+        guard parts.count >= 2 else { return }
+        let cityName = String(parts[0])
+        let countryISO2 = String(parts[1])
+
+        let center: CLLocationCoordinate2D? = await withCheckedContinuation { cont in
+            CLGeocoder().geocodeAddressString("\(cityName), \(countryISO2)") { placemarks, _ in
+                cont.resume(returning: placemarks?.first?.location?.coordinate)
+            }
+        }
+
+        guard let center, CLLocationCoordinate2DIsValid(center) else { return }
+
+        let mappedCenter = MapCoordAdapter.forMapKit(center, countryISO2: countryISO2, cityKey: cityKey)
+        let region = MKCoordinateRegion(
+            center: mappedCenter,
+            span: MKCoordinateSpan(latitudeDelta: 0.18, longitudeDelta: 0.18)
+        )
+
+        let snapshotSize = CGSize(width: 400, height: 200)
+        let appearance = MapAppearanceSettings.current
+        let options = MKMapSnapshotter.Options()
+        options.region = region
+        options.size = snapshotSize
+        options.scale = UIScreen.main.scale
+        options.mapType = MapAppearanceSettings.mapType(for: appearance)
+        options.traitCollection = UITraitCollection(userInterfaceStyle: MapAppearanceSettings.interfaceStyle(for: appearance))
+
+        do {
+            let snap = try await MKMapSnapshotter(options: options).start()
+            self.routeThumbnail = snap.image
+            RouteThumbnailCache.shared.set(snap.image, for: journey.id)
+        } catch {
+            print("Fallback route thumbnail error:", error)
         }
     }
 
@@ -2114,6 +2193,42 @@ private struct PlainGrowingEditor: View {
 }
 
 
+private struct AsyncLocalImage: View {
+    let path: String
+    let userID: String
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let img = image {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity)
+                    .overlay(
+                        Rectangle()
+                            .inset(by: 0.5)
+                            .stroke(
+                                Color(red: 0.90, green: 0.91, blue: 0.92),
+                                lineWidth: 0.5
+                            )
+                    )
+            } else {
+                Color(red: 0.95, green: 0.95, blue: 0.95)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 140)
+            }
+        }
+        .task(id: path) {
+            let uid = userID
+            let p = path
+            image = await Task.detached(priority: .userInitiated) {
+                PhotoStore.loadImage(named: p, userID: uid)
+            }.value
+        }
+    }
+}
+
 private struct MemoryImagesView: View {
     let imagePaths: [String]
     let remoteImageURLs: [String]
@@ -2122,20 +2237,7 @@ private struct MemoryImagesView: View {
     var body: some View {
         VStack(spacing: 12) {
             ForEach(imagePaths, id: \.self) { path in
-                if let img = PhotoStore.loadImage(named: path, userID: userID) {
-                    Image(uiImage: img)
-                        .resizable()
-                        .scaledToFit() // ✅ keep original aspect ratio, no crop
-                        .frame(maxWidth: .infinity)
-                        .overlay(
-                            Rectangle()
-                                .inset(by: 0.5)
-                                .stroke(
-                                    Color(red: 0.90, green: 0.91, blue: 0.92),
-                                    lineWidth: 0.5
-                                )
-                        )
-                }
+                AsyncLocalImage(path: path, userID: userID)
             }
             ForEach(remoteImageURLs, id: \.self) { rawURL in
                 if let url = URL(string: rawURL) {
@@ -2185,20 +2287,7 @@ private struct EditableMemoryImagesView: View {
         VStack(spacing: 12) {
             ForEach(imagePaths, id: \.self) { path in
                 ZStack(alignment: .topTrailing) {
-                    if let img = PhotoStore.loadImage(named: path, userID: userID) {
-                        Image(uiImage: img)
-                            .resizable()
-                            .scaledToFit() // ✅ keep original aspect ratio, no crop
-                            .frame(maxWidth: .infinity)
-                            .overlay(
-                                Rectangle()
-                                    .inset(by: 0.5)
-                                    .stroke(
-                                        Color(red: 0.90, green: 0.91, blue: 0.92),
-                                        lineWidth: 0.5
-                                    )
-                            )
-                    }
+                    AsyncLocalImage(path: path, userID: userID)
 
                     Button {
                         PhotoStore.delete(named: path, userID: userID)

@@ -270,7 +270,6 @@ struct SettingsView: View {
     @State private var gpxImportError: String?
     @State private var gpxImportPreview: GPXImportPreview?
     @State private var selectedGPXFileName: String?
-    @State private var selectedImportCityKey: String = ""
     @State private var gpxImportProgress: Double = 0
     @State private var gpxImportProgressText: String = L10n.t("gpx_import_progress_idle")
     @State private var isParsingGPX = false
@@ -291,9 +290,6 @@ struct SettingsView: View {
     @State private var showBackgroundModeInfo = false
     @State private var iCloudAvailable = false
     @State private var isRestoringFromICloud = false
-    @State var isRepairingData = false
-    @State var repairMessage = ""
-    @State var showRepairMessage = false
     @State private var showMembershipGate: MembershipGatedFeature? = nil
 
     private var appearance: MapAppearanceStyle {
@@ -350,7 +346,6 @@ struct SettingsView: View {
                 mapAppearanceSection
                 trackingAssistSection
                 generalSection
-                dataRepairSection
                 infoSection
             }
             .padding(.horizontal, 18)
@@ -1194,7 +1189,11 @@ struct SettingsView: View {
                     }
 
                     Button {
-                        showGPXImporter = true
+                        if MembershipStore.shared.gpxExportEnabled {
+                            showGPXImporter = true
+                        } else {
+                            showMembershipGate = .gpxExport
+                        }
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: "square.and.arrow.up")
@@ -1594,7 +1593,6 @@ struct SettingsView: View {
     private func parseSelectedGPXFile(_ url: URL) async {
         selectedGPXFileName = url.lastPathComponent
         gpxImportPreview = nil
-        selectedImportCityKey = ""
         isParsingGPX = true
         gpxImportProgress = 0.02
         gpxImportProgressText = L10n.t("gpx_import_progress_reading")
@@ -1621,7 +1619,6 @@ struct SettingsView: View {
                 gpxImportProgressText = text
             }
             gpxImportPreview = preview
-            selectedImportCityKey = preview.defaultCityKey ?? preview.detectedCityCandidates.first?.cityKey ?? ""
             gpxImportProgress = 1
             gpxImportProgressText = L10n.t("gpx_import_progress_done")
         } catch {
@@ -1655,26 +1652,19 @@ struct SettingsView: View {
                 } else {
                     List {
                         ForEach(preview.detectedCityCandidates, id: \.cityKey) { option in
-                            Button {
-                                selectedImportCityKey = option.cityKey
-                            } label: {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(option.name)
-                                            .font(.system(size: 15, weight: .semibold))
-                                            .foregroundColor(FigmaTheme.text)
-                                        if let iso2 = option.iso2, !iso2.isEmpty {
-                                            Text(iso2.uppercased())
-                                                .font(.system(size: 12, weight: .regular))
-                                                .foregroundColor(FigmaTheme.subtext)
-                                        }
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(option.name)
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundColor(FigmaTheme.text)
+                                    if let iso2 = option.iso2, !iso2.isEmpty {
+                                        Text(iso2.uppercased())
+                                            .font(.system(size: 12, weight: .regular))
+                                            .foregroundColor(FigmaTheme.subtext)
                                     }
-                                    Spacer()
-                                    Image(systemName: selectedImportCityKey == option.cityKey ? "checkmark.circle.fill" : "circle")
-                                        .foregroundColor(selectedImportCityKey == option.cityKey ? FigmaTheme.primary : .black.opacity(0.3))
                                 }
+                                Spacer()
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                     .listStyle(.plain)
@@ -1697,12 +1687,12 @@ struct SettingsView: View {
                         Spacer()
                     }
                     .frame(height: 48)
-                    .background(selectedImportCityKey.isEmpty ? Color.black.opacity(0.25) : FigmaTheme.primary)
+                    .background(isImportingGPX ? Color.black.opacity(0.25) : FigmaTheme.primary)
                     .foregroundColor(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
                 .buttonStyle(.plain)
-                .disabled(selectedImportCityKey.isEmpty || isImportingGPX)
+                .disabled(isImportingGPX)
             }
             .padding(18)
             .background(FigmaTheme.mutedBackground.ignoresSafeArea())
@@ -1727,27 +1717,32 @@ struct SettingsView: View {
 
     @MainActor
     private func confirmImportGPX(_ preview: GPXImportPreview) async {
-        guard !selectedImportCityKey.isEmpty else { return }
         guard !isImportingGPX else { return }
-        guard let selected = preview.detectedCityCandidates.first(where: { $0.cityKey == selectedImportCityKey }) else { return }
 
         isImportingGPX = true
         defer { isImportingGPX = false }
 
         var route = preview.route
-        route.startCityKey = selected.cityKey
-        route.endCityKey = selected.cityKey
-        route.cityKey = selected.cityKey
-        route.canonicalCity = selected.name
-        route.currentCity = selected.name
-        route.cityName = selected.name
-        route.countryISO2 = selected.iso2
-        route.exploreMode = .city
         route.ensureThumbnail(maxPoints: 280)
 
-        journeyStore.addCompletedJourney(route)
-        cityCache.rebuildFromJourneyStore()
+        // Use JourneyFinalizer — same path as normal journeys.
+        // City fields, post-correction, drift detection, and CityCache
+        // notification are all handled consistently.
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            JourneyFinalizer.finalize(
+                route: route,
+                journeyStore: journeyStore,
+                cityCache: cityCache,
+                lifelogStore: lifelogStore,
+                source: .userConfirmedFinish
+            ) { _ in
+                continuation.resume()
+            }
+        }
 
+        // Import full GPX timeline into lifelog (with original timestamps).
+        // JourneyFinalizer only archives journey coordinates; this preserves
+        // the fine-grained GPX timeline for passive history.
         let lifelogTimeline = preview.points.enumerated().map { idx, point -> (coord: CoordinateCodable, timestamp: Date) in
             let ts = point.timestamp ?? GPXImportService.fallbackTimestamp(for: idx, total: preview.points.count, start: route.startTime, end: route.endTime)
             return (coord: point.coordinate, timestamp: ts)

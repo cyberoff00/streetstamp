@@ -514,8 +514,17 @@ final class JourneyStore: ObservableObject {
         }
     }
 
+    private var recentlySyncedIDs: [String: Date] = [:]
+    private let syncDedupWindow: TimeInterval = 30
+
     private func syncCompletedJourneyIfNeeded(_ journey: JourneyRoute) {
         guard journey.endTime != nil else { return }
+        let now = Date()
+        if let lastSync = recentlySyncedIDs[journey.id],
+           now.timeIntervalSince(lastSync) < syncDedupWindow {
+            return
+        }
+        recentlySyncedIDs[journey.id] = now
         syncHooks.upsertCompletedJourney?(journey)
     }
 

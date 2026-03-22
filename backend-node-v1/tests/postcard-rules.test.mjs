@@ -15,7 +15,8 @@ test('allows up to two postcards to the same friend from the same city and rejec
     toUserID: 'u2',
     cityID: 'paris',
     clientDraftID: 'd3',
-    allowedCityIDs: ['paris', 'tokyo']
+    allowedCityIDs: ['paris', 'tokyo'],
+    membershipTier: 'premium'
   });
 
   assert.equal(result.ok, false);
@@ -34,7 +35,8 @@ test('an additional journey increases the same-city per-friend quota by one', ()
     cityID: 'paris',
     cityJourneyCount: 2,
     clientDraftID: 'd3',
-    allowedCityIDs: ['paris']
+    allowedCityIDs: ['paris'],
+    membershipTier: 'premium'
   });
 
   assert.equal(result.ok, true);
@@ -54,7 +56,8 @@ test('rejects city total above 10', () => {
     toUserID: 'u11',
     cityID: 'paris',
     clientDraftID: 'd11',
-    allowedCityIDs: ['paris']
+    allowedCityIDs: ['paris'],
+    membershipTier: 'premium'
   });
 
   assert.equal(result.ok, false);
@@ -75,7 +78,8 @@ test('an additional journey increases the same-city unique friend quota by ten',
     cityID: 'paris',
     cityJourneyCount: 2,
     clientDraftID: 'd11',
-    allowedCityIDs: ['paris']
+    allowedCityIDs: ['paris'],
+    membershipTier: 'premium'
   });
 
   assert.equal(result.ok, true);
@@ -95,14 +99,15 @@ test('second postcard to an existing friend does not consume a new city friend s
     toUserID: 'u1',
     cityID: 'paris',
     clientDraftID: 'd11',
-    allowedCityIDs: ['paris']
+    allowedCityIDs: ['paris'],
+    membershipTier: 'premium'
   });
 
   assert.equal(result.ok, true);
   assert.equal(result.reason, null);
 });
 
-test('second postcard to the same friend from the same city is still allowed', () => {
+test('second postcard to the same friend from the same city is still allowed (premium)', () => {
   const sent = [{ toUserID: 'u2', cityID: 'paris', status: 'sent', clientDraftID: 'd1' }];
 
   const result = canSendPostcard({
@@ -110,7 +115,8 @@ test('second postcard to the same friend from the same city is still allowed', (
     toUserID: 'u2',
     cityID: 'paris',
     clientDraftID: 'd2',
-    allowedCityIDs: ['paris']
+    allowedCityIDs: ['paris'],
+    membershipTier: 'premium'
   });
 
   assert.equal(result.ok, true);
@@ -165,4 +171,68 @@ test('rejects city that is not in allowedCityIDs', () => {
 
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'city_not_allowed');
+});
+
+// --- Free tier quota tests ---
+
+test('free tier: rejects second postcard to same friend from same city', () => {
+  const sent = [
+    { toUserID: 'u2', cityID: 'paris', status: 'sent', clientDraftID: 'd1' }
+  ];
+  const result = canSendPostcard({
+    sentPostcards: sent,
+    toUserID: 'u2',
+    cityID: 'paris',
+    clientDraftID: 'd2',
+    allowedCityIDs: ['paris'],
+    membershipTier: 'free'
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'city_friend_quota_exceeded');
+});
+
+test('free tier: rejects 4th unique friend for same city', () => {
+  const sent = [1, 2, 3].map((n) => ({
+    toUserID: `u${n}`, cityID: 'paris', status: 'sent', clientDraftID: `d${n}`
+  }));
+  const result = canSendPostcard({
+    sentPostcards: sent,
+    toUserID: 'u4',
+    cityID: 'paris',
+    clientDraftID: 'd4',
+    allowedCityIDs: ['paris'],
+    membershipTier: 'free'
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'city_total_quota_exceeded');
+});
+
+test('premium tier: allows second postcard to same friend from same city', () => {
+  const sent = [
+    { toUserID: 'u2', cityID: 'paris', status: 'sent', clientDraftID: 'd1' }
+  ];
+  const result = canSendPostcard({
+    sentPostcards: sent,
+    toUserID: 'u2',
+    cityID: 'paris',
+    clientDraftID: 'd2',
+    allowedCityIDs: ['paris'],
+    membershipTier: 'premium'
+  });
+  assert.equal(result.ok, true);
+});
+
+test('no membershipTier defaults to free quotas', () => {
+  const sent = [
+    { toUserID: 'u2', cityID: 'paris', status: 'sent', clientDraftID: 'd1' }
+  ];
+  const result = canSendPostcard({
+    sentPostcards: sent,
+    toUserID: 'u2',
+    cityID: 'paris',
+    clientDraftID: 'd2',
+    allowedCityIDs: ['paris']
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'city_friend_quota_exceeded');
 });

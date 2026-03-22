@@ -195,6 +195,9 @@ struct FriendsHubView: View {
     @State private var friendsListScrollPosition: String?
     @State private var didPerformInitialFeedRefresh = false
     @State private var showMembershipGate: MembershipGatedFeature? = nil
+    @State private var cachedFeedEvents: [FriendFeedEvent] = []
+    @State private var cachedFeedLikeSignature: String = ""
+    @State private var lastFeedSourceVersion: Int = -1
 
     private var sortedFriends: [FriendProfileSnapshot] {
         socialStore.friends.sorted { lhs, rhs in
@@ -247,12 +250,25 @@ struct FriendsHubView: View {
     }
 
     private var feedEvents: [FriendFeedEvent] {
-        buildFeedEvents(from: feedSourceProfiles)
+        cachedFeedEvents
     }
 
     private var feedLikeSignature: String {
-        FriendsFeedLikePresentation.statsPairs(
-            from: feedEvents.map { ($0.friendID, $0.journeyID) }
+        cachedFeedLikeSignature
+    }
+
+    private var feedSourceVersion: Int {
+        socialStore.friends.hashValue
+    }
+
+    private func updateCachedFeedEventsIfNeeded() {
+        let version = feedSourceVersion
+        guard version != lastFeedSourceVersion else { return }
+        lastFeedSourceVersion = version
+        let events = buildFeedEvents(from: feedSourceProfiles)
+        cachedFeedEvents = events
+        cachedFeedLikeSignature = FriendsFeedLikePresentation.statsPairs(
+            from: events.map { ($0.friendID, $0.journeyID) }
         )
             .map { feedLikeKey(friendID: $0.friendID, journeyID: $0.journeyID) }
             .sorted()
@@ -373,9 +389,16 @@ struct FriendsHubView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
+        .onAppear {
+            updateCachedFeedEventsIfNeeded()
+        }
+        .onChange(of: feedSourceVersion) { _, _ in
+            updateCachedFeedEventsIfNeeded()
+        }
         .task {
-            await refreshMyInviteIdentityIfNeeded()
-            await performInitialFeedRefreshIfNeeded()
+            async let profileTask: Void = refreshMyInviteIdentityIfNeeded()
+            async let feedTask: Void = performInitialFeedRefreshIfNeeded()
+            _ = await (profileTask, feedTask)
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 25 * 1_000_000_000)
                 await detectUnseenFeedUpdates()
@@ -393,9 +416,10 @@ struct FriendsHubView: View {
         }
         .onChange(of: sessionStore.currentAccessToken) { _, _ in
             Task {
-                await notificationStore.refresh(token: sessionStore.currentAccessToken)
-                await refreshFriendRequests()
-                await refreshMyInviteIdentityIfNeeded()
+                async let a: Void = notificationStore.refresh(token: sessionStore.currentAccessToken)
+                async let b: Void = refreshFriendRequests()
+                async let c: Void = refreshMyInviteIdentityIfNeeded()
+                _ = await (a, b, c)
                 await refreshRemoteFriends(showUnreadToast: false)
             }
         }
@@ -981,20 +1005,30 @@ struct FriendsHubView: View {
             }
 
             let grouped = Dictionary(grouping: pairs, by: \.friendID)
-            var next: [String: (likes: Int, likedByMe: Bool)] = [:]
             do {
-                for (friendID, items) in grouped {
-                    let ids = Array(Set(items.map(\.journeyID)))
-                    let stats = try await BackendAPIClient.shared.fetchJourneyLikeStats(
-                        token: token,
-                        journeyIDs: ids,
-                        ownerUserID: friendID
-                    )
-                    for (journeyID, value) in stats {
-                        next[feedLikeKey(friendID: friendID, journeyID: journeyID)] = value
+                let results = try await withThrowingTaskGroup(
+                    of: [(String, (likes: Int, likedByMe: Bool))].self
+                ) { group in
+                    for (friendID, items) in grouped {
+                        let ids = Array(Set(items.map(\.journeyID)))
+                        group.addTask {
+                            let stats = try await BackendAPIClient.shared.fetchJourneyLikeStats(
+                                token: token,
+                                journeyIDs: ids,
+                                ownerUserID: friendID
+                            )
+                            return stats.map { (journeyID, value) in
+                                ("\(friendID)|\(journeyID)", value)
+                            }
+                        }
                     }
+                    var all: [(String, (likes: Int, likedByMe: Bool))] = []
+                    for try await batch in group {
+                        all.append(contentsOf: batch)
+                    }
+                    return all
                 }
-                feedLikeStats = next
+                feedLikeStats = Dictionary(results, uniquingKeysWith: { _, last in last })
             } catch {
                 // Keep feed available even if like stats request fails.
             }
@@ -1101,11 +1135,13 @@ struct FriendsHubView: View {
             socialStore.restoreFriendsIfEmpty(previousFriends)
             didPerformInitialFeedRefresh = true
 
-            await notificationStore.refresh(
+            let toastCallback: ((String) -> Void)? = showUnreadToast ? { [self] msg in showFeedToast(msg, duration: 2.2) } : nil
+            async let notifTask: Void = notificationStore.refresh(
                 token: sessionStore.currentAccessToken,
-                showToastCallback: showUnreadToast ? { msg in showFeedToast(msg, duration: 2.2) } : nil
+                showToastCallback: toastCallback
             )
-            await refreshFriendRequests()
+            async let reqTask: Void = refreshFriendRequests()
+            _ = await (notifTask, reqTask)
         }
 
 

@@ -201,6 +201,9 @@
 "finish_confirm_finish" = "Confirmer";
 "finish_confirm_message" = "Si vous avez appuyé sur Terminer par erreur, vous pouvez continuer le trajet.";
 "finish_confirm_title" = "Terminer le trajet ?";
+"finish_no_city_title" = "Impossible d'identifier la ville";
+"finish_no_city_message" = "Le réseau est indisponible et la ville du trajet n'a pas pu être déterminée. Veuillez attendre le retour du réseau avant de terminer.";
+"finish_no_city_continue" = "Continuer le trajet";
 "finish_pending_memory_title" = "Signal GPS faible";
 "finish_pending_memory_message" = "Certains souvenirs n'ont pas pu obtenir de localisation. Terminer maintenant entraînera la perte de ces souvenirs. Vous pouvez attendre que le GPS se rétablisse.";
 "finish_pending_memory_finish_now" = "Terminer maintenant";
@@ -296,7 +299,7 @@
 "go_to_library" = "Aller à City Library";
 "got_it" = "D'accord";
 "gpx_import_choose_city_card" = "Choose city card to migrate into:";
-"gpx_import_choose_detected_city" = "Choose one detected city:";
+"gpx_import_choose_detected_city" = "Villes détectées :";
 "gpx_import_conversion_progress" = "Track Conversion Progress";
 "gpx_import_create_city_card" = "Create New City Card";
 "gpx_import_detected_cities" = "Detected by sampled reverse-geocode:";
@@ -859,6 +862,9 @@
 "membership_subscribe_button" = "S'abonner";
 "membership_restore_purchases" = "Restaurer les achats";
 "membership_auto_renew_note" = "L'abonnement se renouvelle automatiquement. Annulez à tout moment dans les Réglages.";
+"membership_welcome_bonus_title" = "Bonus de bienvenue !";
+"membership_welcome_bonus_message" = "Vous avez gagné %d pièces en cadeau de bienvenue Premium !";
+"membership_welcome_bonus_ok" = "Super !";
 "membership_products_unavailable" = "Produits actuellement indisponibles. Réessayez plus tard.";
 "activity_record_title" = "HISTORIQUE D'ACTIVITÉ";
 "activity_ring_help" = "Extérieur : Progression de niveau (voyages ≥1km comptent)\nMilieu : Collection de souvenirs (50 souvenirs par anneau)\nIntérieur : Progression des villes déverrouillées (10 villes par anneau)";

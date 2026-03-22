@@ -201,6 +201,9 @@
 "finish_confirm_finish" = "終了を確定";
 "finish_confirm_message" = "誤って「終了」を押した場合は、旅を続けられます。";
 "finish_confirm_title" = "旅を終了しますか？";
+"finish_no_city_title" = "都市を特定できません";
+"finish_no_city_message" = "ネットワークが利用できないため、旅の都市を特定できません。ネットワーク復旧後に終了してください。";
+"finish_no_city_continue" = "旅を続ける";
 "finish_pending_memory_title" = "GPS信号が弱い";
 "finish_pending_memory_message" = "一部のメモリーの位置情報を取得できませんでした。今すぐ終了すると、これらのメモリーは失われます。GPSが回復するまで待つことができます。";
 "finish_pending_memory_finish_now" = "今すぐ終了";
@@ -296,7 +299,7 @@
 "go_to_library" = "シティライブラリへ";
 "got_it" = "了解";
 "gpx_import_choose_city_card" = "Choose city card to migrate into:";
-"gpx_import_choose_detected_city" = "Choose one detected city:";
+"gpx_import_choose_detected_city" = "検出された都市：";
 "gpx_import_conversion_progress" = "Track Conversion Progress";
 "gpx_import_create_city_card" = "Create New City Card";
 "gpx_import_detected_cities" = "Detected by sampled reverse-geocode:";
@@ -859,6 +862,9 @@
 "membership_subscribe_button" = "登録する";
 "membership_restore_purchases" = "購入を復元";
 "membership_auto_renew_note" = "サブスクリプションは自動更新です。設定からいつでもキャンセルできます。";
+"membership_welcome_bonus_title" = "ウェルカムボーナス！";
+"membership_welcome_bonus_message" = "Premiumメンバーになった記念に %d コインを獲得しました！";
+"membership_welcome_bonus_ok" = "やった！";
 "membership_products_unavailable" = "現在ご利用いただけません。しばらくしてからお試しください。";
 "activity_record_title" = "アクティビティ記録";
 "activity_ring_help" = "外側：レベル進捗（1km以上の旅がカウント）\n中央：記憶収集（50個で1周）\n内側：都市解放進捗（10都市で1周）";

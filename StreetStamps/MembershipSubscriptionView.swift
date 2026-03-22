@@ -48,6 +48,14 @@ struct MembershipSubscriptionView: View {
                 selectedProductID = first.id
             }
         }
+        .alert(
+            L10n.t("membership_welcome_bonus_title"),
+            isPresented: $membership.showWelcomeBonusAlert
+        ) {
+            Button(L10n.t("membership_welcome_bonus_ok"), role: .cancel) {}
+        } message: {
+            Text(String(format: L10n.t("membership_welcome_bonus_message"), MembershipTierConfig.premiumWelcomeBonus))
+        }
     }
 
     // MARK: - Top Bar
