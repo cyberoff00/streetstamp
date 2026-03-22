@@ -83,6 +83,7 @@ struct StreetStampsApp: App {
     @State private var showSplash = true
     @State private var scheduledTileRebuild: DispatchWorkItem?
     @State private var trackTileRebuildTask: Task<Void, Never>?
+    @State private var profileSwitchTask: Task<Void, Never>?
 #if DEBUG
     @State private var showDebugFirstProfileSetupPreview = true
 #endif
@@ -376,13 +377,14 @@ struct StreetStampsApp: App {
                 maybeShowFirstAuthPromptIfNeeded()
             }
             .onChange(of: sessionStore.activeLocalProfileID) { oldUserID, uid in
-                Task {
+                profileSwitchTask?.cancel()
+                profileSwitchTask = Task {
                     UserScopedProfileStateStore.switchActiveUser(from: oldUserID, to: uid)
                     CityLevelPreferenceStore.shared.setCurrentUserID(uid)
                     let paths = StoragePath(userID: uid)
                     await sessionStore.bootstrapFileSystemAsync()
                     await LifelogMigrationService.migrateLegacyLifelogIfNeededAsync(paths: paths)
-                    guard sessionStore.activeLocalProfileID == uid else { return }
+                    guard !Task.isCancelled, sessionStore.activeLocalProfileID == uid else { return }
 
                     journeyStore.rebind(paths: paths)
                     cityCache.rebind(paths: paths)
@@ -392,8 +394,10 @@ struct StreetStampsApp: App {
                         failureStore: journeyDeletionSyncFailureStore
                     )
                     await journeyStore.loadAsync()
+                    guard !Task.isCancelled else { return }
                     lifelogStore.rebind(paths: paths)
                     await lifelogStore.loadAsync()
+                    guard !Task.isCancelled else { return }
                     cityRenderCache.rebind(rootDir: paths.thumbnailsDir)
                     let journeysSnapshot = journeyStore.journeys
                     let cachedCitiesSnapshot = cityCache.cachedCities
@@ -402,6 +406,7 @@ struct StreetStampsApp: App {
                     let cities = await Task.detached(priority: .userInitiated) {
                         CityLibraryVM.buildCities(journeys: journeysSnapshot, cachedCities: cachedCitiesSnapshot)
                     }.value
+                    guard !Task.isCancelled else { return }
                     StartupWarmupService.shared.start(
                         cities: cities,
                         appearanceRaw: appearanceRaw,
@@ -417,6 +422,7 @@ struct StreetStampsApp: App {
                         trackTileStore: trackTileStore
                     )
                     await awaitLifelogLoadThenRebuildTiles()
+                    guard !Task.isCancelled else { return }
                     lifelogRenderCache.scheduleWarmupRecentDays(
                         countryISO2: lifelogStore.countryISO2 ?? locationHub.countryISO2
                     )

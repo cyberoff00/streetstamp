@@ -68,12 +68,12 @@ enum RouteRenderingPipeline {
             .distance(from: CLLocation(latitude: b.latitude, longitude: b.longitude))
     }
 
-    /// Flight-like only when points are sparse AND the overall movement span is large.
-    /// This avoids promoting normal tracked routes to "flight" just because of one bad jump.
+    /// Flight-like only when points are extremely sparse AND the overall movement span is large.
+    /// Tightened to <= 3 points to avoid compressing real sparse GPS routes (bus/train with poor signal).
     private static func isFlightLike(_ coords: [CLLocationCoordinate2D]) -> Bool {
         guard let first = coords.first, let last = coords.last else { return false }
         let spanMeters = distanceMeters(first, last)
-        let sparsePoints = coords.count <= 8
+        let sparsePoints = coords.count <= 3
         let largeSpan = spanMeters >= 120_000
         return sparsePoints && largeSpan
     }

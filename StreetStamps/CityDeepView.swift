@@ -107,7 +107,7 @@ struct CityDeepView: View {
 
     private var effectiveCityName: String {
         if let cached = activeCachedCity {
-            return CityPlacemarkResolver.displayTitle(for: cached, locale: LanguagePreference.shared.displayLocale)
+            return cached.displayTitle
         }
         return city.localizedName
     }
@@ -984,8 +984,9 @@ struct CityDeepView: View {
     }
 
     private func headerBaseCityName() -> String {
-        let parentRegionKey = cityLevelParentRegionKey ?? activeCachedCity?.parentScopeKey
+        // When level picker is active, use live picker labels (may be fresher than stored).
         if !cityLevelOptionLabels.isEmpty {
+            let parentRegionKey = cityLevelParentRegionKey ?? activeCachedCity?.parentScopeKey
             return CityPlacemarkResolver.displayTitle(
                 cityKey: activeCityKey,
                 iso2: effectiveCountryISO2,
@@ -998,30 +999,8 @@ struct CityDeepView: View {
             )
         }
 
-        if let activeCachedCity {
-            return CityPlacemarkResolver.displayTitle(
-                cityKey: activeCachedCity.id,
-                iso2: activeCachedCity.countryISO2,
-                fallbackTitle: activeCachedCity.name,
-                availableLevelNamesRaw: activeCachedCity.availableLevelNames,
-                storedAvailableLevelNamesLocaleID: activeCachedCity.availableLevelNamesLocaleID,
-                parentRegionKey: parentRegionKey,
-                preferredLevel: activeCachedCity.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
-                localizedDisplayNameByLocale: activeCachedCity.localizedDisplayNameByLocale,
-                locale: LanguagePreference.shared.displayLocale
-            )
-        }
-
-        let fromKey = CityPlacemarkResolver.displayTitle(
-            cityKey: activeCityKey,
-            iso2: effectiveCountryISO2,
-            fallbackTitle: effectiveCityName,
-            parentRegionKey: parentRegionKey,
-            preferredLevel: cityLevelCurrentSelection,
-            locale: LanguagePreference.shared.displayLocale
-        )
-        let trimmed = fromKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? city.localizedName : trimmed
+        // Otherwise, use the single source of truth from CachedCity.
+        return effectiveCityName
     }
 
     private func formatHeaderTitle(baseName: String) -> String {
@@ -1049,18 +1028,9 @@ struct CityDeepView: View {
 
     private func cityName(from cityKey: String) -> String {
         if let cached = cache.cachedCities.first(where: { $0.id == cityKey && !($0.isTemporary ?? false) }) {
-            return CityPlacemarkResolver.displayTitle(for: cached, locale: LanguagePreference.shared.displayLocale)
+            return cached.displayTitle
         }
-
-        let fallbackTitle = cityKey.components(separatedBy: "|").first ?? cityKey
-        return CityPlacemarkResolver.displayTitle(
-            cityKey: cityKey,
-            iso2: isoFromCityKey(cityKey),
-            fallbackTitle: fallbackTitle,
-            parentRegionKey: cityLevelParentRegionKey ?? activeCachedCity?.parentScopeKey,
-            preferredLevel: cityLevelCurrentSelection,
-            locale: LanguagePreference.shared.displayLocale
-        )
+        return cityKey.components(separatedBy: "|").first ?? cityKey
     }
 
     private func canonicalWithRetry(for location: CLLocation) async -> ReverseGeocodeService.CanonicalResult? {

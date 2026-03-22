@@ -337,24 +337,16 @@ struct JourneyRouteDetailView: View {
         let key = journey.stableCityKey ?? ""
         guard !key.isEmpty, key != "Unknown|" else { return }
 
+        // Single source of truth: CachedCity.displayTitle
         if let cachedCity = cachedCitiesByKey[key] {
-            let title = CityPlacemarkResolver.displayTitle(
-                cityKey: cachedCity.id,
-                iso2: cachedCity.countryISO2,
-                fallbackTitle: cachedCity.name,
-                availableLevelNamesRaw: cachedCity.availableLevelNames,
-                storedAvailableLevelNamesLocaleID: cachedCity.availableLevelNamesLocaleID,
-                parentRegionKey: cachedCity.parentScopeKey,
-                preferredLevel: cachedCity.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
-                localizedDisplayNameByLocale: cachedCity.localizedDisplayNameByLocale,
-                locale: LanguagePreference.shared.displayLocale
-            )
+            let title = cachedCity.displayTitle
             if !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 await MainActor.run { localizedCityTitle = title }
                 return
             }
         }
 
+        // Fallback for journeys without a city card: async geocode
         let parentRegionKey = JourneyCityNamePresentation.parentRegionKey(for: journey, cachedCitiesByKey: cachedCitiesByKey)
 
         if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key, parentRegionKey: parentRegionKey),

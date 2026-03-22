@@ -33,6 +33,7 @@ struct ProfileView: View {
     @State private var showNotificationsSheet = false
     @State private var notificationsLoading = false
     @State private var showPostcardInboxFromNotification = false
+    @State private var lastPromptNotificationID: String?
     @State private var postcardInboxIntent = PostcardInboxIntent(box: "received", messageID: nil)
     @State private var showInviteFriendSheet = false
     @State private var myExclusiveID = ""
@@ -867,8 +868,10 @@ struct ProfileView: View {
             unreadSocialCount = unread.count
 
             if showToastForLatestUnread,
-               let latest = unread.first {
+               let latest = unread.first,
+               latest.id != lastPromptNotificationID {
                 showToastMessage(SocialNotificationPresentation.message(for: latest))
+                lastPromptNotificationID = latest.id
             }
         } catch {
             // Keep profile view responsive even if notification poll fails.
@@ -1897,17 +1900,7 @@ struct RecentJourneysView: View {
             let displayLocale = LanguagePreference.shared.displayLocale
 
             if let cachedCity = cachedCitiesByKey[key] {
-                let title = CityPlacemarkResolver.displayTitle(
-                    cityKey: cachedCity.id,
-                    iso2: cachedCity.countryISO2,
-                    fallbackTitle: cachedCity.name,
-                    availableLevelNamesRaw: cachedCity.availableLevelNames,
-                    storedAvailableLevelNamesLocaleID: cachedCity.availableLevelNamesLocaleID,
-                    parentRegionKey: cachedCity.parentScopeKey,
-                    preferredLevel: cachedCity.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
-                    localizedDisplayNameByLocale: cachedCity.localizedDisplayNameByLocale,
-                    locale: displayLocale
-                )
+                let title = cachedCity.displayTitle
                 if !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     await MainActor.run { localizedCityNameByKey[key] = title }
                     continue

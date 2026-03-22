@@ -187,6 +187,10 @@ enum JourneyFinalizer {
         }
     }
 
+    /// Minimum path distance that is clearly a real journey (not GPS drift).
+    /// Round trips can have tiny displacement but long path — protect them.
+    private static let driftPathDistanceSafeMeters: CLLocationDistance = 500
+
     private static func shouldTreatAsStationaryDrift(route: JourneyRoute) -> Bool {
         let effectiveCoords = (!route.correctedCoordinates.isEmpty ? route.correctedCoordinates : route.coordinates)
             .clCoords
@@ -204,6 +208,11 @@ enum JourneyFinalizer {
         let pathDistance = max(0, route.distance)
         if pathDistance <= driftLowCoverageDistanceMeters {
             return true
+        }
+
+        // A long enough path is a real journey even if start ≈ end (round trip).
+        if pathDistance >= driftPathDistanceSafeMeters {
+            return false
         }
 
         guard

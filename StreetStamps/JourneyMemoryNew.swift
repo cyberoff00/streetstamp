@@ -169,19 +169,9 @@ struct JourneyMemoryMainView: View {
         for (key, coord) in coordByKey {
             let displayLocale = LanguagePreference.shared.displayLocale
 
-            // Check persisted localized name from CachedCity first (no async needed).
+            // Single source of truth from CachedCity.
             if let cachedCity = cachedCitiesByKey[key] {
-                let title = CityPlacemarkResolver.displayTitle(
-                    cityKey: cachedCity.id,
-                    iso2: cachedCity.countryISO2,
-                    fallbackTitle: cachedCity.name,
-                    availableLevelNamesRaw: cachedCity.availableLevelNames,
-                    storedAvailableLevelNamesLocaleID: cachedCity.availableLevelNamesLocaleID,
-                    parentRegionKey: cachedCity.parentScopeKey,
-                    preferredLevel: cachedCity.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
-                    localizedDisplayNameByLocale: cachedCity.localizedDisplayNameByLocale,
-                    locale: displayLocale
-                )
+                let title = cachedCity.displayTitle
                 if !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     await MainActor.run { localizedCityNameByKey[key] = title }
                     continue

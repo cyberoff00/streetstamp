@@ -1039,17 +1039,19 @@ final class LifelogStore: ObservableObject {
         let baseDir = target.deletingLastPathComponent()
         let chunk = appended
         DispatchQueue.global(qos: .utility).async {
+            let fm = FileManager.default
             do {
-                try FileManager.default.createDirectory(at: baseDir, withIntermediateDirectories: true)
-                var data = try JSONEncoder().encode(chunk)
-                data.append(0x0A)
-                if FileManager.default.fileExists(atPath: target.path) {
-                    let handle = try FileHandle(forWritingTo: target)
-                    handle.seekToEndOfFile()
-                    handle.write(data)
-                    handle.closeFile()
+                try fm.createDirectory(at: baseDir, withIntermediateDirectories: true)
+                var newLine = try JSONEncoder().encode(chunk)
+                newLine.append(0x0A)
+                if fm.fileExists(atPath: target.path) {
+                    var existing = try Data(contentsOf: target)
+                    existing.append(newLine)
+                    let tmp = target.appendingPathExtension("tmp")
+                    try existing.write(to: tmp, options: .atomic)
+                    _ = try fm.replaceItemAt(target, withItemAt: tmp)
                 } else {
-                    try data.write(to: target, options: .atomic)
+                    try newLine.write(to: target, options: .atomic)
                 }
             } catch {
                 print("❌ lifelog delta append failed:", error)

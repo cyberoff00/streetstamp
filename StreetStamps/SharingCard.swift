@@ -597,7 +597,7 @@ struct PopSharingCard: View {
         guard !isGenerating else { return }
         isGenerating = true
 
-        let raw = journey.coordinates.clCoords
+        let raw = journey.displayRouteCoordinates.clCoords
         let safeCoords = raw.filter { CLLocationCoordinate2DIsValid($0) && abs($0.latitude) <= 90 && abs($0.longitude) <= 180 }
 
         let center = (safeCoords.last ?? fallbackCenter)
@@ -645,7 +645,7 @@ struct PopSharingCard: View {
     }
 
     private func resolveTitleIfNeeded(_ done: @escaping () -> Void) {
-        let raw = journey.coordinates.clCoords
+        let raw = journey.displayRouteCoordinates.clCoords
         let safe = raw.filter { CLLocationCoordinate2DIsValid($0) && abs($0.latitude) <= 90 && abs($0.longitude) <= 180 }
 
         guard !safe.isEmpty else { done(); return }
@@ -1038,7 +1038,7 @@ struct ShareCardGenerator {
         privacy: ShareMapPrivacyMode = .exact,
         completion: @escaping (UIImage) -> Void
     ) {
-        let raw = journey.coordinates.clCoords
+        let raw = journey.displayRouteCoordinates.clCoords
         let safeCoords = raw.filter { CLLocationCoordinate2DIsValid($0) && abs($0.latitude) <= 90 && abs($0.longitude) <= 180 }
 
         let center = safeCoords.last
@@ -1095,7 +1095,7 @@ struct ShareCardGenerator {
         size: CGSize = CGSize(width: 1200, height: 660),
         completion: @escaping (UIImage) -> Void
     ) {
-        let raw = journey.coordinates.clCoords
+        let raw = journey.displayRouteCoordinates.clCoords
         let safeCoords = raw.filter { CLLocationCoordinate2DIsValid($0) && abs($0.latitude) <= 90 && abs($0.longitude) <= 180 }
 
         let center = safeCoords.last

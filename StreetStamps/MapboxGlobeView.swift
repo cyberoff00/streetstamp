@@ -916,19 +916,7 @@ private func makeRoutesFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
             var f = Turf.Feature(geometry: .point(p))
             f.properties = [
                 "cityId": .string(c.id),
-                "name": .string(
-                    CityPlacemarkResolver.displayTitle(
-                        cityKey: c.id,
-                        iso2: c.countryISO2,
-                        fallbackTitle: c.name,
-                        availableLevelNamesRaw: c.availableLevelNames,
-                        storedAvailableLevelNamesLocaleID: c.availableLevelNamesLocaleID,
-                        parentRegionKey: c.parentScopeKey,
-                        preferredLevel: c.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
-                        localizedDisplayNameByLocale: c.localizedDisplayNameByLocale,
-                        locale: LanguagePreference.shared.displayLocale
-                    )
-                ),
+                "name": .string(c.displayTitle),
                 "iso2": .string(c.countryISO2 ?? "")
             ]
             feats.append(f)

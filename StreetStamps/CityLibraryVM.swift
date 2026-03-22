@@ -252,7 +252,7 @@ final class CityLibraryVM: ObservableObject {
     private func makeCity(from cached: CachedCity, journeysById: [String: JourneyRoute]) -> City {
         let js = cached.journeyIds.compactMap { journeysById[$0] }.filter { $0.isCompleted }
         return City(
-            displayName: CityPlacemarkResolver.displayTitle(for: cached, locale: LanguagePreference.shared.displayLocale),
+            displayName: cached.displayTitle,
             id: cached.id,
             name: cached.name,
             countryISO2: cached.countryISO2,
@@ -311,6 +311,8 @@ final class CityLibraryVM: ObservableObject {
             var availableLevelNames: [String: String]?
             var availableLevelNamesLocaleID: String?
             var localizedDisplayNameByLocale: [String: String]?
+            var resolvedDisplayName: String?
+            var resolvedDisplayNameLocaleID: String?
         }
 
         var grouped: [String: Aggregate] = [:]
@@ -339,6 +341,8 @@ final class CityLibraryVM: ObservableObject {
                 existing.availableLevelNames = existing.availableLevelNames ?? c.availableLevelNames
                 existing.availableLevelNamesLocaleID = existing.availableLevelNamesLocaleID ?? c.availableLevelNamesLocaleID
                 existing.localizedDisplayNameByLocale = existing.localizedDisplayNameByLocale ?? c.localizedDisplayNameByLocale
+                existing.resolvedDisplayName = existing.resolvedDisplayName ?? c.resolvedDisplayName
+                existing.resolvedDisplayNameLocaleID = existing.resolvedDisplayNameLocaleID ?? c.resolvedDisplayNameLocaleID
                 grouped[collectionKey] = existing
             } else {
                 grouped[collectionKey] = Aggregate(
@@ -358,18 +362,25 @@ final class CityLibraryVM: ObservableObject {
                     parentScopeKey: c.parentScopeKey,
                     availableLevelNames: c.availableLevelNames,
                     availableLevelNamesLocaleID: c.availableLevelNamesLocaleID,
-                    localizedDisplayNameByLocale: c.localizedDisplayNameByLocale
+                    localizedDisplayNameByLocale: c.localizedDisplayNameByLocale,
+                    resolvedDisplayName: c.resolvedDisplayName,
+                    resolvedDisplayNameLocaleID: c.resolvedDisplayNameLocaleID
                 )
             }
         }
 
         var out: [City] = grouped.values.map { aggregate in
-            City(
-                displayName: CityDisplayResolver.title(
-                    for: aggregate.collectionKey,
-                    fallbackTitle: aggregate.fallbackName,
-                    locale: LanguagePreference.shared.displayLocale
-                ),
+            let currentLocaleID = LanguagePreference.shared.effectiveLocaleIdentifier
+            let resolvedName: String = {
+                if let resolved = aggregate.resolvedDisplayName,
+                   !resolved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   aggregate.resolvedDisplayNameLocaleID == currentLocaleID {
+                    return resolved
+                }
+                return aggregate.fallbackName
+            }()
+            return City(
+                displayName: resolvedName,
                 id: aggregate.collectionKey,
                 name: aggregate.fallbackName,
                 countryISO2: aggregate.countryISO2 ?? CityDisplayResolver.iso2(from: aggregate.collectionKey),
@@ -417,17 +428,11 @@ final class CityLibraryVM: ObservableObject {
             let loc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
             let key = city.id
 
-            let unified = CityPlacemarkResolver.displayTitle(
-                cityKey: city.id,
-                iso2: city.countryISO2,
-                fallbackTitle: city.localizedName,
-                availableLevelNamesRaw: city.availableLevelNames,
-                storedAvailableLevelNamesLocaleID: city.availableLevelNamesLocaleID,
-                parentRegionKey: city.parentScopeKey,
-                preferredLevel: city.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
-                localizedDisplayNameByLocale: city.localizedDisplayNameByLocale,
-                locale: displayLocale
-            )
+            // Use resolvedDisplayName from CachedCity as immediate display value.
+            let cached = await MainActor.run {
+                self.cityCache?.cachedCities.first(where: { $0.id == city.id && !($0.isTemporary ?? false) })
+            }
+            let unified = cached?.displayTitle ?? city.localizedName
             if !unified.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 await MainActor.run {
                     if let idx = self.cities.firstIndex(where: { $0.id == city.id }) {
@@ -510,17 +515,10 @@ final class CityLibraryVM: ObservableObject {
         else { return }
 
         let key = city.id
-        let unified = CityPlacemarkResolver.displayTitle(
-            cityKey: city.id,
-            iso2: city.countryISO2,
-            fallbackTitle: city.displayName ?? city.name,
-            availableLevelNamesRaw: city.availableLevelNames,
-            storedAvailableLevelNamesLocaleID: city.availableLevelNamesLocaleID,
-            parentRegionKey: city.parentScopeKey,
-            preferredLevel: city.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
-            localizedDisplayNameByLocale: city.localizedDisplayNameByLocale,
-            locale: displayLocale
-        )
+        let cached = await MainActor.run {
+            self.cityCache?.cachedCities.first(where: { $0.id == key && !($0.isTemporary ?? false) })
+        }
+        let unified = cached?.displayTitle ?? city.displayName ?? city.name
         if !unified.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             await MainActor.run {
                 if let idx = self.cities.firstIndex(where: { $0.id == cityID }) {

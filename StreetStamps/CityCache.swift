@@ -87,7 +87,7 @@ extension JourneyRoute {
     }
 
     var allCLCoords: [CLLocationCoordinate2D] {
-        coordinates.map { $0.cl }.filter { $0.isValid }
+        displayRouteCoordinates.map { $0.cl }.filter { $0.isValid }
     }
 
     /// Lightweight polyline for overview UIs (city card / list / globe).
@@ -154,6 +154,12 @@ struct CachedCity: Identifiable, Codable {
     /// Populated by CityLibraryVM after successful reverse-geocode localization.
     var localizedDisplayNameByLocale: [String: String]? = nil
 
+    /// Single source of truth for the city's display name under the current locale.
+    /// Written by CityCache whenever locale, level, or geocode data changes.
+    /// All UI consumers should read `displayTitle` instead of computing names themselves.
+    var resolvedDisplayName: String? = nil
+    var resolvedDisplayNameLocaleID: String? = nil
+
     var isTemporary: Bool? = false
 
     init(
@@ -175,6 +181,8 @@ struct CachedCity: Identifiable, Codable {
         availableLevelNames: [String: String]? = nil,
         availableLevelNamesLocaleID: String? = nil,
         localizedDisplayNameByLocale: [String: String]? = nil,
+        resolvedDisplayName: String? = nil,
+        resolvedDisplayNameLocaleID: String? = nil,
         isTemporary: Bool? = false,
         reservedLevelRaw: String? = nil,
         reservedParentRegionKey: String? = nil,
@@ -199,7 +207,21 @@ struct CachedCity: Identifiable, Codable {
         self.availableLevelNames = availableLevelNames ?? reservedAvailableLevelNames
         self.availableLevelNamesLocaleID = availableLevelNamesLocaleID ?? reservedAvailableLevelNamesLocaleID
         self.localizedDisplayNameByLocale = localizedDisplayNameByLocale
+        self.resolvedDisplayName = resolvedDisplayName
+        self.resolvedDisplayNameLocaleID = resolvedDisplayNameLocaleID
         self.isTemporary = isTemporary
+    }
+
+    /// The single display name all UI consumers should use.
+    /// Returns resolvedDisplayName if it matches the current locale, otherwise falls back to `name`.
+    var displayTitle: String {
+        let currentLocaleID = LanguagePreference.shared.effectiveLocaleIdentifier
+        if let resolved = resolvedDisplayName,
+           !resolved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           resolvedDisplayNameLocaleID == currentLocaleID {
+            return resolved
+        }
+        return name
     }
 
     var reservedLevelRaw: String? {
@@ -241,6 +263,8 @@ struct CachedCity: Identifiable, Codable {
         case availableLevelNames
         case availableLevelNamesLocaleID
         case localizedDisplayNameByLocale
+        case resolvedDisplayName
+        case resolvedDisplayNameLocaleID
         case isTemporary
         case reservedLevelRaw
         case reservedParentRegionKey
@@ -272,6 +296,8 @@ struct CachedCity: Identifiable, Codable {
             availableLevelNames: try container.decodeIfPresent([String: String].self, forKey: .availableLevelNames),
             availableLevelNamesLocaleID: try container.decodeIfPresent(String.self, forKey: .availableLevelNamesLocaleID),
             localizedDisplayNameByLocale: try container.decodeIfPresent([String: String].self, forKey: .localizedDisplayNameByLocale),
+            resolvedDisplayName: try container.decodeIfPresent(String.self, forKey: .resolvedDisplayName),
+            resolvedDisplayNameLocaleID: try container.decodeIfPresent(String.self, forKey: .resolvedDisplayNameLocaleID),
             isTemporary: try container.decodeIfPresent(Bool.self, forKey: .isTemporary),
             reservedLevelRaw: try container.decodeIfPresent(String.self, forKey: .reservedLevelRaw),
             reservedParentRegionKey: try container.decodeIfPresent(String.self, forKey: .reservedParentRegionKey),
@@ -300,6 +326,8 @@ struct CachedCity: Identifiable, Codable {
         try container.encodeIfPresent(availableLevelNames, forKey: .availableLevelNames)
         try container.encodeIfPresent(availableLevelNamesLocaleID, forKey: .availableLevelNamesLocaleID)
         try container.encodeIfPresent(localizedDisplayNameByLocale, forKey: .localizedDisplayNameByLocale)
+        try container.encodeIfPresent(resolvedDisplayName, forKey: .resolvedDisplayName)
+        try container.encodeIfPresent(resolvedDisplayNameLocaleID, forKey: .resolvedDisplayNameLocaleID)
         try container.encodeIfPresent(isTemporary, forKey: .isTemporary)
     }
 }
@@ -773,6 +801,7 @@ final class CityCache: ObservableObject {
             self.cachedCities = []
         }
         backfillLocalizedNamesFromGeocodeDefaults()
+        refreshAllResolvedDisplayNames()
         invalidateThumbnailsIfStyleChanged()
     }
 
@@ -830,6 +859,7 @@ final class CityCache: ObservableObject {
                 var d = cachedCities[i].localizedDisplayNameByLocale ?? [:]
                 d[localeID] = title
                 cachedCities[i].localizedDisplayNameByLocale = d
+                refreshResolvedDisplayName(at: i)
                 changed = true
             }
         }
@@ -930,6 +960,8 @@ final class CityCache: ObservableObject {
                 availableLevelNames: cachedCities[targetIdx].availableLevelNames,
                 availableLevelNamesLocaleID: cachedCities[targetIdx].availableLevelNamesLocaleID,
                 localizedDisplayNameByLocale: cachedCities[targetIdx].localizedDisplayNameByLocale,
+                resolvedDisplayName: cachedCities[targetIdx].resolvedDisplayName,
+                resolvedDisplayNameLocaleID: cachedCities[targetIdx].resolvedDisplayNameLocaleID,
                 isTemporary: cachedCities[targetIdx].isTemporary
             )
         } else {
@@ -956,6 +988,9 @@ final class CityCache: ObservableObject {
             cachedCities.append(created)
         }
 
+        if let idx = cachedCities.firstIndex(where: { $0.id == targetCityKey }) {
+            refreshResolvedDisplayName(at: idx)
+        }
         generateRouteThumbnail(cityKey: targetCityKey)
         saveToDisk()
         notifyCitiesChanged()
@@ -1010,11 +1045,48 @@ final class CityCache: ObservableObject {
             cachedCities[idx].anchor = LatLon(anchor)
         }
 
+        refreshResolvedDisplayName(at: idx)
         saveToDisk()
         notifyCitiesChanged()
     }
 
     /// Persist a localized display name for the given city + locale.
+    // MARK: - Resolved display name (single source of truth)
+
+    /// Compute and store the resolved display name for a single city at the given index.
+    /// This is the ONLY function that writes `resolvedDisplayName`. All other paths funnel through here.
+    @MainActor
+    func refreshResolvedDisplayName(at idx: Int, locale: Locale = LanguagePreference.shared.displayLocale) {
+        guard cachedCities.indices.contains(idx) else { return }
+        let city = cachedCities[idx]
+        guard !(city.isTemporary ?? false) else { return }
+        let title = CityPlacemarkResolver.displayTitle(for: city, locale: locale)
+        let localeID = LanguagePreference.shared.effectiveLocaleIdentifier
+        cachedCities[idx].resolvedDisplayName = title
+        cachedCities[idx].resolvedDisplayNameLocaleID = localeID
+    }
+
+    /// Recompute resolved display names for ALL non-temporary cities.
+    /// Called on locale change and on load when locale differs from stored.
+    @MainActor
+    func refreshAllResolvedDisplayNames(locale: Locale = LanguagePreference.shared.displayLocale) {
+        let localeID = LanguagePreference.shared.effectiveLocaleIdentifier
+        var changed = false
+        for i in cachedCities.indices {
+            guard !(cachedCities[i].isTemporary ?? false) else { continue }
+            let title = CityPlacemarkResolver.displayTitle(for: cachedCities[i], locale: locale)
+            if cachedCities[i].resolvedDisplayName != title || cachedCities[i].resolvedDisplayNameLocaleID != localeID {
+                cachedCities[i].resolvedDisplayName = title
+                cachedCities[i].resolvedDisplayNameLocaleID = localeID
+                changed = true
+            }
+        }
+        if changed {
+            saveToDisk()
+            notifyCitiesChanged()
+        }
+    }
+
     /// Called by CityLibraryVM after a successful reverse-geocode localization.
     @MainActor
     func updateLocalizedDisplayName(cityKey: String, locale: Locale, displayName: String) {
@@ -1024,6 +1096,7 @@ final class CityCache: ObservableObject {
         guard dict[localeID] != displayName else { return }
         dict[localeID] = displayName
         cachedCities[idx].localizedDisplayNameByLocale = dict
+        refreshResolvedDisplayName(at: idx, locale: locale)
         saveToDisk()
     }
 
@@ -1038,6 +1111,7 @@ final class CityCache: ObservableObject {
             guard dict[localeID] != update.displayName else { continue }
             dict[localeID] = update.displayName
             cachedCities[idx].localizedDisplayNameByLocale = dict
+            refreshResolvedDisplayName(at: idx, locale: locale)
             changed = true
         }
         if changed { saveToDisk() }
@@ -1155,6 +1229,8 @@ final class CityCache: ObservableObject {
             availableLevelNames: previous?.availableLevelNames,
             availableLevelNamesLocaleID: previous?.availableLevelNamesLocaleID,
             localizedDisplayNameByLocale: previous?.localizedDisplayNameByLocale,
+            resolvedDisplayName: previous?.resolvedDisplayName,
+            resolvedDisplayNameLocaleID: previous?.resolvedDisplayNameLocaleID,
             isTemporary: false
         )
     }
@@ -1305,17 +1381,7 @@ final class CityCache: ObservableObject {
         return UnlockedPayload(
             id: c.id,
             kind: .city,
-            title: CityPlacemarkResolver.displayTitle(
-                cityKey: c.id,
-                iso2: c.countryISO2,
-                fallbackTitle: c.name,
-                availableLevelNamesRaw: c.availableLevelNames,
-                storedAvailableLevelNamesLocaleID: c.availableLevelNamesLocaleID,
-                parentRegionKey: c.parentScopeKey,
-                preferredLevel: c.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
-                localizedDisplayNameByLocale: c.localizedDisplayNameByLocale,
-                locale: LanguagePreference.shared.displayLocale
-            ),
+            title: c.displayTitle,
             subtitle: c.countryISO2,
             baseThumbPath: nil,
             routeThumbPath: nil
@@ -1493,6 +1559,9 @@ final class CityCache: ObservableObject {
         cachedCities.sort {
             if $0.explorations != $1.explorations { return $0.explorations > $1.explorations }
             return $0.name < $1.name
+        }
+        if let idx = cachedCities.firstIndex(where: { $0.id == cityKey }) {
+            refreshResolvedDisplayName(at: idx)
         }
         saveToDisk()
     }
@@ -1689,17 +1758,7 @@ final class CityCache: ObservableObject {
         pendingUnlock = UnlockedPayload(
             id: c.id,
             kind: .city,
-            title: CityPlacemarkResolver.displayTitle(
-                cityKey: c.id,
-                iso2: c.countryISO2,
-                fallbackTitle: c.name,
-                availableLevelNamesRaw: c.availableLevelNames,
-                storedAvailableLevelNamesLocaleID: c.availableLevelNamesLocaleID,
-                parentRegionKey: c.parentScopeKey,
-                preferredLevel: c.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
-                localizedDisplayNameByLocale: c.localizedDisplayNameByLocale,
-                locale: LanguagePreference.shared.displayLocale
-            ),
+            title: c.displayTitle,
             subtitle: c.countryISO2,
             baseThumbPath: nil,
             routeThumbPath: nil

@@ -65,21 +65,23 @@ final class JourneysFileStore {
 
     /// Append-only coordinate persistence for ongoing journeys.
     /// Writes one JSON array per line to keep decoding simple and IO minimal.
+    /// Uses read-all + append + atomic-write to avoid partial lines on crash.
     func appendDelta(journeyId: String, newCoords: [CoordinateCodable]) throws {
         guard !newCoords.isEmpty else { return }
         try ensureBaseDir()
 
         let target = urlDelta(for: journeyId)
-        var data = try JSONEncoder().encode(newCoords)
-        data.append(0x0A) // newline
+        var newLine = try JSONEncoder().encode(newCoords)
+        newLine.append(0x0A) // newline
 
         if fm.fileExists(atPath: target.path) {
-            let handle = try FileHandle(forWritingTo: target)
-            handle.seekToEndOfFile()
-            handle.write(data)
-            handle.closeFile()
+            var existing = try Data(contentsOf: target)
+            existing.append(newLine)
+            let tmp = target.appendingPathExtension("tmp")
+            try existing.write(to: tmp, options: .atomic)
+            _ = try fm.replaceItemAt(target, withItemAt: tmp)
         } else {
-            try data.write(to: target, options: .atomic)
+            try newLine.write(to: target, options: .atomic)
         }
     }
 
@@ -177,5 +179,22 @@ final class JourneysFileStore {
                 cont.resume(returning: result)
             }
         }
+    }
+
+    /// Find journey files on disk that are not in the index (orphans from crash between file write and index update).
+    func scanOrphanedIDs(knownIDs: Set<String>) -> [String] {
+        guard let files = try? fm.contentsOfDirectory(at: baseURL, includingPropertiesForKeys: nil) else { return [] }
+        var orphans: [String] = []
+        for file in files {
+            let name = file.lastPathComponent
+            guard name.hasSuffix(".json"),
+                  !name.contains(".meta."),
+                  !name.hasSuffix(".tmp.json") else { continue }
+            let id = String(name.dropLast(5)) // strip ".json"
+            if !knownIDs.contains(id) {
+                orphans.append(id)
+            }
+        }
+        return orphans
     }
 }

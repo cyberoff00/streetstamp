@@ -160,7 +160,16 @@ final class JourneyStore: ObservableObject {
         self.isLoading = true
         defer { self.isLoading = false }
 
-        let ids = await indexStore.loadJourneyIDsAsync()
+        var ids = await indexStore.loadJourneyIDsAsync()
+
+        // Recover orphaned journey files not listed in index (e.g. crash between file write and index update).
+        let orphanIDs = fileStore.scanOrphanedIDs(knownIDs: Set(ids))
+        if !orphanIDs.isEmpty {
+            ids = orphanIDs + ids
+            try? indexStore.replaceIDs(ids)
+            print("⚠️ recovered \(orphanIDs.count) orphaned journey(s)")
+        }
+
         guard !ids.isEmpty else {
             self.journeys = []
             self.latestOngoing = nil
@@ -305,16 +314,16 @@ final class JourneyStore: ObservableObject {
         ioQueue.async { [weak self] in
             guard let self else { return }
             do {
+                // Index first: an indexed ID whose file doesn't exist yet is safely skipped on load.
+                // A file without an index entry is an orphan that the user never sees.
+                try self.indexStore.upsertIDFirst(snapshot.id)
+
                 if snapshot.endTime != nil {
-                    // Completed (or edited completed): overwrite full snapshot and clean delta/meta.
                     try self.fileStore.finalizeJourney(snapshot)
-                    try self.indexStore.upsertIDFirst(snapshot.id)
                     return
                 }
 
-                // Ongoing: always keep a lightweight meta snapshot fresh (no huge coordinate rewrite).
                 try self.fileStore.saveMetaSnapshot(snapshot)
-                try self.indexStore.upsertIDFirst(snapshot.id)
 
                 if shouldWriteDelta {
                     try self.fileStore.appendDelta(journeyId: snapshot.id, newCoords: newCoords)
@@ -491,14 +500,14 @@ final class JourneyStore: ObservableObject {
         ioQueue.async { [weak self] in
             guard let self else { return }
             do {
+                // Index first: ensures no journey file becomes an invisible orphan on crash.
+                try self.indexStore.replaceIDs(snapshots.map(\.id))
                 for id in deletedSet {
-                    try self.fileStore.deleteJourney(id: id)
-                    try self.indexStore.removeID(id)
+                    try? self.fileStore.deleteJourney(id: id)
                 }
                 for route in upserts {
                     try self.fileStore.finalizeJourney(route)
                 }
-                try self.indexStore.replaceIDs(snapshots.map(\.id))
             } catch {
                 print("❌ merge cloud snapshots failed:", error)
             }

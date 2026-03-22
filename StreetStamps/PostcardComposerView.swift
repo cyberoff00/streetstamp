@@ -71,8 +71,7 @@ struct PostcardComposerView: View {
     private var cityOptions: [(id: String, name: String)] {
         PostcardCityOptionsPresentation.buildOptions(
             cachedCities: cityCache.cachedCities,
-            journeyCandidates: currentCityCandidates,
-            localizedCityNamesByID: localizedCityNamesByID
+            journeyCandidates: currentCityCandidates
         )
     }
 
@@ -102,10 +101,12 @@ struct PostcardComposerView: View {
     }
 
     private func localizedCityName(for city: CachedCity) -> String {
-        CityPlacemarkResolver.displayTitle(for: city, locale: LanguagePreference.shared.displayLocale)
+        city.displayTitle
     }
 
     private func normalizedPrefetchedCityName(for city: CachedCity, candidateTitle: String?) -> String {
+        // When we have a fresh geocode candidate, use it to produce a display title.
+        // This result will be written back to CachedCity and refreshResolvedDisplayName will fire.
         CityPlacemarkResolver.displayTitle(
             for: city,
             locale: LanguagePreference.shared.displayLocale,
@@ -118,18 +119,13 @@ struct PostcardComposerView: View {
             cityKey: journey.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
         )
         if let cachedCity = cityCache.cachedCities.first(where: { $0.id == key && !($0.isTemporary ?? false) }) {
-            return localizedCityName(for: cachedCity)
+            return cachedCity.displayTitle
         }
-
-        return CityDisplayResolver.title(
-            for: key,
-            fallbackTitle: journey.displayCityName,
-            locale: LanguagePreference.shared.displayLocale
-        )
+        return key.split(separator: "|", omittingEmptySubsequences: false).first.map(String.init) ?? journey.displayCityName
     }
 
     private func resolvedLocalizedCityName(for city: CachedCity) -> String {
-        localizedCityNamesByID[city.id] ?? localizedCityName(for: city)
+        localizedCityNamesByID[city.id] ?? city.displayTitle
     }
 
     private func resolvedLocalizedCityName(for journey: JourneyRoute) -> String {

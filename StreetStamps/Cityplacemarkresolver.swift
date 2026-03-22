@@ -949,28 +949,12 @@ enum JourneyCityNamePresentation {
             return localized
         }
         if let cachedCity = cachedCitiesByKey[rawKey] ?? cachedCitiesByKey[key] {
-            let fallbackTitle = CityCollectionResolver.configuredTitle(for: key) ?? cachedCity.name
-            let title = CityPlacemarkResolver.displayTitle(
-                cityKey: key,
-                iso2: cachedCity.countryISO2 ?? CityDisplayResolver.iso2(from: key),
-                fallbackTitle: fallbackTitle,
-                availableLevelNamesRaw: cachedCity.availableLevelNames,
-                storedAvailableLevelNamesLocaleID: cachedCity.availableLevelNamesLocaleID,
-                parentRegionKey: cachedCity.parentScopeKey,
-                preferredLevel: cachedCity.selectedDisplayLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) },
-                localizedDisplayNameByLocale: cachedCity.localizedDisplayNameByLocale,
-                locale: locale
-            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = cachedCity.displayTitle.trimmingCharacters(in: .whitespacesAndNewlines)
             if !title.isEmpty {
                 return title
             }
         }
-        let fallbackTitle = journey.displayCityName
-        return CityDisplayResolver.title(
-            for: key,
-            fallbackTitle: fallbackTitle,
-            locale: locale
-        )
+        return key.split(separator: "|", omittingEmptySubsequences: false).first.map(String.init) ?? journey.displayCityName
     }
 }
 
