@@ -666,27 +666,7 @@ struct FriendsHubView: View {
 
         private var header: some View {
             UnifiedTabPageHeader(title: L10n.t("friends_title"), titleLevel: .primary, horizontalPadding: 16, topPadding: 14, bottomPadding: 12) {
-                Color.clear
-            } trailing: {
-                if !sessionStore.isLoggedIn {
-                    Button {
-                        showAuthEntry = true
-                    } label: {
-                        Text(L10n.t("friends_go_login"))
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(FigmaTheme.text)
-                    }
-                    .buttonStyle(.plain)
-                } else if tab == .allFriends {
-                    Button {
-                        showInviteFriendSheet = true
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 24, weight: .bold))
-                            .foregroundColor(FigmaTheme.text)
-                    }
-                    .buttonStyle(.plain)
-                } else {
+                if sessionStore.isLoggedIn {
                     Button {
                         showSocialNotificationsSheet = true
                     } label: {
@@ -707,6 +687,19 @@ struct FriendsHubView: View {
                             }
                         }
                         .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Color.clear
+                }
+            } trailing: {
+                if sessionStore.isLoggedIn {
+                    Button {
+                        showInviteFriendSheet = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundColor(FigmaTheme.text)
                     }
                     .buttonStyle(.plain)
                 }
