@@ -832,6 +832,9 @@
 "friend_photo_stamp_subtitle" = "Friendship Snapshot";
 "friend_photo_retake" = "Retake";
 "friend_photo_save" = "Save";
+"friend_photo_saved" = "Saved!";
+"friend_photo_booth_hint" = "Tap the camera to take a photo!";
+"friend_photo_booth_camera_label" = "Your instant camera is ready";
 "friend_profile_stomp_success_format" = "You sat on %@'s sofa";
 "friend_profile_stomp_failed_format" = "Couldn't sit down: %@";
 "watch_status_permission_needed" = "Allow location access first";

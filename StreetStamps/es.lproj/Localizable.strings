@@ -226,6 +226,9 @@
 "friend_photo_stamp_subtitle" = "Friendship Snapshot";
 "friend_photo_retake" = "Retake";
 "friend_photo_save" = "Save";
+"friend_photo_saved" = "Saved!";
+"friend_photo_booth_hint" = "Tap the camera to take a photo!";
+"friend_photo_booth_camera_label" = "Your instant camera is ready";
 "friend_profile_cta_idle" = "Take a seat";
 "friend_profile_cta_loading" = "Sitting down...";
 "friend_profile_stat_cities" = "CIUDADES";

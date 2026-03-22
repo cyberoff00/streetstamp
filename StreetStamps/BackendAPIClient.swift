@@ -525,6 +525,13 @@ final class BackendAPIClient {
                 if http.statusCode == 401,
                    let resolvedToken,
                    !resolvedToken.isEmpty,
+                   !shouldSkipAutoRefresh(path: path) {
+                    print("[BackendAPI] 401 on \(path), attempting token refresh...")
+                }
+
+                if http.statusCode == 401,
+                   let resolvedToken,
+                   !resolvedToken.isEmpty,
                    !shouldSkipAutoRefresh(path: path),
                    let refreshedToken = await tokenRefreshGate.refresh(client: self, failedAccessToken: resolvedToken),
                    refreshedToken != resolvedToken {
@@ -660,6 +667,7 @@ final class BackendAPIClient {
 
     fileprivate func performTokenRefresh(failedAccessToken: String) async -> String? {
         guard await refreshBackoffGate.shouldAttemptRefresh(failedAccessToken: failedAccessToken) else {
+            print("[BackendAPI] token refresh BLOCKED by backoff gate")
             return nil
         }
         guard let snapshot = await currentSessionSnapshot() else { return nil }
@@ -673,6 +681,7 @@ final class BackendAPIClient {
             do {
                 let result = try await requestAccessTokenRefresh(refreshToken: refreshToken)
                 guard let refreshedAccessToken = result.accessToken else {
+                    print("[BackendAPI] token refresh FAILED: statusCode=\(result.statusCode ?? -1)")
                     if result.statusCode == 401 {
                         await MainActor.run {
                             sessionStore?.logoutToGuest(requireReauthenticationPrompt: true)
@@ -696,6 +705,7 @@ final class BackendAPIClient {
                     return refreshedAccessToken
                 }
             } catch {
+                print("[BackendAPI] token refresh threw: \(error)")
                 await refreshBackoffGate.markFailure(
                     failedAccessToken: failedAccessToken,
                     statusCode: nil,
@@ -873,7 +883,13 @@ final class BackendAPIClient {
 
     func fetchMyProfile(token: String) async throws -> BackendProfileDTO {
         let (data, _) = try await request(path: "/v1/profile/me", method: "GET", token: token)
-        return try decoder.decode(BackendProfileDTO.self, from: data)
+        do {
+            return try decoder.decode(BackendProfileDTO.self, from: data)
+        } catch {
+            let preview = String(data: data.prefix(500), encoding: .utf8) ?? "<non-utf8>"
+            print("[BackendAPI] fetchMyProfile decode FAILED: \(error)\n  response preview: \(preview)")
+            throw error
+        }
     }
 
     func fetchProfile(userID: String, token: String) async throws -> BackendProfileDTO {

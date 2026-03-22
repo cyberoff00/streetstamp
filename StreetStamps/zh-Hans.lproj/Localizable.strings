@@ -815,6 +815,9 @@
 "friend_photo_stamp_subtitle" = "友谊快照";
 "friend_photo_retake" = "重拍";
 "friend_photo_save" = "保存";
+"friend_photo_saved" = "已保存！";
+"friend_photo_booth_hint" = "点击相机拍一张合影吧！";
+"friend_photo_booth_camera_label" = "你的拍立得准备好了";
 "friend_profile_stomp_success_format" = "你在 %@ 的沙发上坐了一坐";
 "friend_profile_stomp_failed_format" = "坐一坐失败：%@";
 "watch_status_permission_needed" = "请先允许定位权限";

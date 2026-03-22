@@ -1800,6 +1800,7 @@ private struct SettingsDetailPage<Content: View>: View {
 private struct SettingsDebugToolsEntryView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var lifelogStore: LifelogStore
+    @ObservedObject private var weatherService = WeatherService.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1808,6 +1809,7 @@ private struct SettingsDebugToolsEntryView: View {
             }
             .padding()
             DebugChinaTestModule()
+            DebugWeatherOverrideSection(weatherService: weatherService)
         }
             .safeAreaInset(edge: .top, spacing: 0) {
                 UnifiedNavigationHeader(
@@ -1825,6 +1827,86 @@ private struct SettingsDebugToolsEntryView: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
+    }
+}
+
+private struct DebugWeatherOverrideSection: View {
+    @ObservedObject var weatherService: WeatherService
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Divider().padding(.vertical, 8)
+
+            Text("WEATHER DEBUG")
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 16)
+
+            if let real = weatherService.current {
+                HStack(spacing: 6) {
+                    Image(systemName: real.condition.sfSymbol)
+                        .foregroundStyle(.blue)
+                    Text("Real: \(real.condition.displayLabel), \(String(format: "%.0f", real.temperature))C")
+                        .font(.system(size: 13, design: .monospaced))
+                }
+                .padding(.horizontal, 16)
+            } else {
+                Text("No weather data yet")
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 16)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    // "Auto" button — clears override
+                    Button {
+                        weatherService.debugOverride = nil
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.system(size: 18))
+                                .frame(width: 36, height: 36)
+                            Text("Auto")
+                                .font(.system(size: 10))
+                        }
+                        .foregroundStyle(weatherService.debugOverride == nil ? .white : .primary)
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(weatherService.debugOverride == nil ? Color.blue : Color.secondary.opacity(0.15))
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    ForEach(WeatherCondition.allCases, id: \.displayLabel) { condition in
+                        Button {
+                            weatherService.debugOverride = condition
+                        } label: {
+                            VStack(spacing: 4) {
+                                Image(systemName: condition.sfSymbol)
+                                    .font(.system(size: 18))
+                                    .frame(width: 36, height: 36)
+                                Text(condition.displayLabel)
+                                    .font(.system(size: 10))
+                                    .lineLimit(1)
+                            }
+                            .foregroundStyle(weatherService.debugOverride == condition ? .white : .primary)
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(weatherService.debugOverride == condition ? Color.blue : Color.secondary.opacity(0.15))
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+        }
+        .padding(.bottom, 16)
     }
 }
 #endif

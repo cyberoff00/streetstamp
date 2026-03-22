@@ -25,6 +25,98 @@ private final class RouteThumbnailCache {
 }
 
 // =======================================================
+// MARK: - Memory Filter State
+// =======================================================
+
+final class MemoryFilterState: ObservableObject {
+    @Published var monthCursor = Date()
+    @Published var selectedStartDate: Date? = nil
+    @Published var selectedEndDate: Date? = nil
+    @Published var selectedActivityTag: String? = nil
+
+    var hasActiveFilters: Bool {
+        selectedStartDate != nil || selectedActivityTag != nil
+    }
+
+    func clearAll() {
+        selectedStartDate = nil
+        selectedEndDate = nil
+        selectedActivityTag = nil
+    }
+}
+
+// =======================================================
+// MARK: - Memory Filter Controls (Reusable)
+// =======================================================
+
+struct MemoryFilterControls: View {
+    @ObservedObject var filterState: MemoryFilterState
+    let availableActivityTags: [String]
+    let allJourneys: [JourneyRoute]
+    @State private var showFilterPopover = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if !availableActivityTags.isEmpty {
+                Menu {
+                    ForEach(availableActivityTags, id: \.self) { tag in
+                        Button {
+                            filterState.selectedActivityTag = (filterState.selectedActivityTag == tag) ? nil : tag
+                        } label: {
+                            HStack {
+                                Text(tag)
+                                if filterState.selectedActivityTag == tag {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                    if filterState.selectedActivityTag != nil {
+                        Divider()
+                        Button(L10n.t("clear")) {
+                            filterState.selectedActivityTag = nil
+                        }
+                    }
+                } label: {
+                    Image(systemName: filterState.selectedActivityTag == nil ? "tag" : "tag.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(filterState.selectedActivityTag == nil ? .black : FigmaTheme.primary)
+                }
+            }
+
+            Button {
+                showFilterPopover.toggle()
+            } label: {
+                Image(systemName: filterState.hasActiveFilters ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(filterState.hasActiveFilters ? FigmaTheme.primary : .black)
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showFilterPopover, attachmentAnchor: .point(.bottom), arrowEdge: .top) {
+                JourneyMemoryCalendarRangePopover(
+                    monthCursor: $filterState.monthCursor,
+                    selectedStartDate: $filterState.selectedStartDate,
+                    selectedEndDate: $filterState.selectedEndDate,
+                    journeys: allJourneys,
+                    onRangeCompleted: {
+                        showFilterPopover = false
+                    },
+                    onApply: {
+                        showFilterPopover = false
+                    },
+                    onClear: {
+                        filterState.selectedStartDate = nil
+                        filterState.selectedEndDate = nil
+                        showFilterPopover = false
+                    }
+                )
+                .presentationCompactAdaptation(.popover)
+            }
+        }
+    }
+}
+
+// =======================================================
 // MARK: - Main Journey Memory View (Screen 1 & 2)
 // =======================================================
 
@@ -37,10 +129,7 @@ struct JourneyMemoryMainView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var expandedCities: Set<String> = []
     @State private var showFilterPopover = false
-    @State private var monthCursor = Date()
-    @State private var selectedStartDate: Date? = nil
-    @State private var selectedEndDate: Date? = nil
-    @State private var selectedActivityTag: String? = nil
+    @ObservedObject private var filterState: MemoryFilterState
     /// Localized city display cache for this screen (cityKey -> localized title in current locale)
     @State private var localizedCityNameByKey: [String: String] = [:]
     @State private var cachedCityGroups: [CityGroupData] = []
@@ -63,7 +152,8 @@ struct JourneyMemoryMainView: View {
         readOnly: Bool = false,
         headerTitle: String? = nil,
         emptyTitleKey: String = "no_memories_yet",
-        emptySubtitleKey: String = "memory_empty_desc"
+        emptySubtitleKey: String = "memory_empty_desc",
+        filterState: MemoryFilterState? = nil
     ) {
         self._showSidebar = showSidebar
         self.usesSidebarHeader = usesSidebarHeader
@@ -73,6 +163,7 @@ struct JourneyMemoryMainView: View {
         self.headerTitle = headerTitle
         self.emptyTitleKey = emptyTitleKey
         self.emptySubtitleKey = emptySubtitleKey
+        self.filterState = filterState ?? MemoryFilterState()
     }
 
     private var allMemoryJourneys: [JourneyRoute] {
@@ -91,10 +182,10 @@ struct JourneyMemoryMainView: View {
     private var filteredMemoryJourneys: [JourneyRoute] {
         var result = allMemoryJourneys
 
-        if let startDate = selectedStartDate {
+        if let startDate = filterState.selectedStartDate {
             let cal = Calendar.current
             let start = cal.startOfDay(for: startDate)
-            let upperBase = selectedEndDate ?? startDate
+            let upperBase = filterState.selectedEndDate ?? startDate
             let endExclusive = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: upperBase)) ?? upperBase
             result = result.filter { j in
                 guard let date = j.endTime ?? j.startTime else { return false }
@@ -102,7 +193,7 @@ struct JourneyMemoryMainView: View {
             }
         }
 
-        if let tag = selectedActivityTag {
+        if let tag = filterState.selectedActivityTag {
             result = result.filter { j in
                 let jTag = (j.activityTag ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 return jTag == tag
@@ -110,10 +201,6 @@ struct JourneyMemoryMainView: View {
         }
 
         return result
-    }
-
-    private var hasActiveFilters: Bool {
-        selectedStartDate != nil || selectedActivityTag != nil
     }
 
     var body: some View {
@@ -170,16 +257,19 @@ struct JourneyMemoryMainView: View {
             cachedLocalizationFingerprint = rebuildLocalizationFingerprint()
             rebuildCityGroups()
         }
+        .onChange(of: store.trackTileRevision) { _, _ in
+            rebuildCityGroups()
+        }
         .onChange(of: localizedCityNameByKey) { _, _ in
             rebuildCityGroups()
         }
-        .onChange(of: selectedStartDate) { _, _ in
+        .onChange(of: filterState.selectedStartDate) { _, _ in
             rebuildCityGroups()
         }
-        .onChange(of: selectedEndDate) { _, _ in
+        .onChange(of: filterState.selectedEndDate) { _, _ in
             rebuildCityGroups()
         }
-        .onChange(of: selectedActivityTag) { _, _ in
+        .onChange(of: filterState.selectedActivityTag) { _, _ in
             rebuildCityGroups()
         }
         // Keep city names localized to current language (do NOT rely on persisted English titles).
@@ -286,65 +376,11 @@ struct JourneyMemoryMainView: View {
                 .buttonStyle(.plain)
             }
         } trailing: {
-            HStack(spacing: 6) {
-                if !availableActivityTags.isEmpty {
-                    Menu {
-                        ForEach(availableActivityTags, id: \.self) { tag in
-                            Button {
-                                selectedActivityTag = (selectedActivityTag == tag) ? nil : tag
-                                rebuildCityGroups()
-                            } label: {
-                                HStack {
-                                    Text(tag)
-                                    if selectedActivityTag == tag {
-                                        Image(systemName: "checkmark")
-                                    }
-                                }
-                            }
-                        }
-                        if selectedActivityTag != nil {
-                            Divider()
-                            Button(L10n.t("clear")) {
-                                selectedActivityTag = nil
-                                rebuildCityGroups()
-                            }
-                        }
-                    } label: {
-                        Image(systemName: selectedActivityTag == nil ? "tag" : "tag.fill")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(selectedActivityTag == nil ? .black : FigmaTheme.primary)
-                    }
-                }
-
-                Button {
-                    showFilterPopover.toggle()
-                } label: {
-                    Image(systemName: hasActiveFilters ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(hasActiveFilters ? FigmaTheme.primary : .black)
-                }
-                .buttonStyle(.plain)
-                .popover(isPresented: $showFilterPopover, attachmentAnchor: .point(.bottom), arrowEdge: .top) {
-                    JourneyMemoryCalendarRangePopover(
-                        monthCursor: $monthCursor,
-                        selectedStartDate: $selectedStartDate,
-                        selectedEndDate: $selectedEndDate,
-                        journeys: allMemoryJourneys,
-                        onRangeCompleted: {
-                            showFilterPopover = false
-                        },
-                        onApply: {
-                            showFilterPopover = false
-                        },
-                        onClear: {
-                            selectedStartDate = nil
-                            selectedEndDate = nil
-                            showFilterPopover = false
-                        }
-                    )
-                    .presentationCompactAdaptation(.popover)
-                }
-            }
+            MemoryFilterControls(
+                filterState: filterState,
+                availableActivityTags: availableActivityTags,
+                allJourneys: allMemoryJourneys
+            )
         }
     }
 
@@ -452,13 +488,13 @@ struct JourneyMemoryMainView: View {
     }
 }
 
-private struct JourneyMemoryCalendarDay: Identifiable {
+struct JourneyMemoryCalendarDay: Identifiable {
     let id = UUID()
     let date: Date?
     let number: Int
 }
 
-private struct JourneyMemoryCalendarRangePopover: View {
+struct JourneyMemoryCalendarRangePopover: View {
     @Binding var monthCursor: Date
     @Binding var selectedStartDate: Date?
     @Binding var selectedEndDate: Date?
@@ -1067,6 +1103,10 @@ struct JourneyMemoryDetailView: View {
     }
 
     private var journeyDisplayTitle: String {
+        // Prefer draft title (always up-to-date after save) over stale init param.
+        if let t = JourneyMemoryDetailTitlePresentation.normalizedCustomTitle(from: draftJourneyTitle) {
+            return t
+        }
         if let t = JourneyMemoryDetailTitlePresentation.normalizedCustomTitle(from: journey.customTitle) {
             return t
         }
@@ -1622,9 +1662,9 @@ struct JourneyMemoryDetailView: View {
                 }
             }
 
-            if !isEditing && (!journey.overallMemoryImagePaths.isEmpty || !journey.overallMemoryRemoteImageURLs.isEmpty) {
+            if !isEditing && (!draftOverallMemoryImagePaths.isEmpty || !journey.overallMemoryRemoteImageURLs.isEmpty) {
                 MemoryImagesView(
-                    imagePaths: journey.overallMemoryImagePaths,
+                    imagePaths: draftOverallMemoryImagePaths,
                     remoteImageURLs: journey.overallMemoryRemoteImageURLs,
                     userID: sessionStore.currentUserID
                 )

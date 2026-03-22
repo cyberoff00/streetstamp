@@ -16,7 +16,9 @@ private enum WorldoPage: Int, CaseIterable, Identifiable {
 
 struct CollectionTabView: View {
     @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
+    @EnvironmentObject private var store: JourneyStore
     @State private var page: WorldoPage = .cities
+    @StateObject private var memoryFilterState = MemoryFilterState()
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -37,11 +39,32 @@ struct CollectionTabView: View {
         .navigationBarBackButtonHidden(true)
     }
 
+    private var availableActivityTags: [String] {
+        let tags = store.journeys.compactMap { j -> String? in
+            let tag = (j.activityTag ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return tag.isEmpty ? nil : tag
+        }
+        return Array(Set(tags)).sorted()
+    }
+
+    private var allMemoryJourneys: [JourneyRoute] {
+        store.journeys
+            .sorted { ($0.endTime ?? $0.startTime ?? .distantPast) > ($1.endTime ?? $1.startTime ?? .distantPast) }
+    }
+
     private var header: some View {
         UnifiedTabPageHeader(title: L10n.t("collection_page_title"), titleLevel: .primary, horizontalPadding: 18, topPadding: 14, bottomPadding: 12) {
             Color.clear
         } trailing: {
-            Color.clear
+            if page == .memories {
+                MemoryFilterControls(
+                    filterState: memoryFilterState,
+                    availableActivityTags: availableActivityTags,
+                    allJourneys: allMemoryJourneys
+                )
+            } else {
+                Color.clear
+            }
         }
     }
 
@@ -93,7 +116,8 @@ struct CollectionTabView: View {
                 showSidebar: .constant(false),
                 usesSidebarHeader: false,
                 hideLeadingControl: true,
-                showHeader: false
+                showHeader: false,
+                filterState: memoryFilterState
             )
             .tag(WorldoPage.memories)
         }

@@ -432,6 +432,7 @@ enum LifelogFootprintProjector {
 }
 struct LifelogView: View {
     @ObservedObject private var tracking = TrackingService.shared
+    @ObservedObject private var weatherService = WeatherService.shared
     @EnvironmentObject private var lifelogStore: LifelogStore
     @EnvironmentObject private var trackTileStore: TrackTileStore
     @EnvironmentObject private var locationHub: LocationHub
@@ -559,6 +560,11 @@ struct LifelogView: View {
             ZStack {
                 mapLayer
                     .ignoresSafeArea()
+
+                WeatherOverlayView(
+                    weatherService: weatherService,
+                    location: locationHub.currentLocation
+                )
 
                 VStack(spacing: 0) {
                     VStack(spacing: 0) {
@@ -826,8 +832,7 @@ struct LifelogView: View {
     private var header: some View {
         ZStack {
             HStack {
-                Color.clear
-                    .frame(width: 42, height: 42)
+                weatherBadge
 
                 Spacer()
 
@@ -860,6 +865,43 @@ struct LifelogView: View {
     private var shouldShowMoodQuestionMark: Bool {
         let today = Calendar.current.startOfDay(for: Date())
         return lifelogStore.mood(for: today) == nil
+    }
+
+    private var weatherBadge: some View {
+        let condition = weatherService.effectiveCondition
+        let weather = weatherService.effectiveWeather
+
+        return HStack(spacing: 4) {
+            Image(systemName: condition.sfSymbol)
+                .font(.system(size: 14, weight: .medium))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(weatherIconColor(for: condition))
+
+            if let temp = weather?.temperature {
+                Text("\(Int(temp.rounded()))\u{00B0}")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(FigmaTheme.text.opacity(0.8))
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(.ultraThinMaterial, in: Capsule())
+        .frame(height: 42)
+        .opacity(weather != nil ? 1 : 0)
+        .animation(.easeInOut(duration: 0.6), value: weather != nil)
+    }
+
+    private func weatherIconColor(for condition: WeatherCondition) -> Color {
+        switch condition {
+        case .clear:        return .orange
+        case .cloudy:       return .gray
+        case .drizzle:      return .cyan
+        case .rain:         return .blue
+        case .heavyRain:    return .blue
+        case .thunderstorm: return .purple
+        case .snow:         return .mint
+        case .fog:          return .gray
+        }
     }
 
     private var recenterButton: some View {
