@@ -672,7 +672,7 @@ struct FriendsHubView: View {
                     } label: {
                         ZStack(alignment: .topTrailing) {
                             Image(systemName: "bell.badge.fill")
-                                .font(.system(size: 22, weight: .bold))
+                                .font(.system(size: 19, weight: .semibold))
                                 .foregroundColor(FigmaTheme.text)
 
                             if notificationStore.unreadCount > 0 {
@@ -698,7 +698,7 @@ struct FriendsHubView: View {
                         showInviteFriendSheet = true
                     } label: {
                         Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 24, weight: .bold))
+                            .font(.system(size: 20, weight: .semibold))
                             .foregroundColor(FigmaTheme.text)
                     }
                     .buttonStyle(.plain)
