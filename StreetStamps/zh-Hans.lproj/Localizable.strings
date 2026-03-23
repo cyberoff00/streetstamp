@@ -308,6 +308,8 @@
 "auth_remembered_password" = "想起密码了？";
 "auth_no_account" = "还没有账号？";
 "auth_password" = "密码";
+"auth_new_password" = "新密码";
+"auth_reset_password" = "重置密码";
 "auth_password_mismatch" = "两次密码不一致";
 "auth_sign_in" = "登录";
 "auth_sign_in_lower" = "登录";
@@ -527,6 +529,10 @@
 "postcard_retry" = "重试";
 "postcard_from_prefix" = "来自：";
 "postcard_send_to" = "寄给";
+"postcard_add_recipient" = "添加收件人";
+"postcard_change_recipient" = "更换";
+"postcard_add_button" = "添加";
+"postcard_select_recipient_title" = "选择收件人";
 "postcard_city" = "城市";
 "postcard_photo_limit" = "照片（1张）";
 "postcard_upload_local_photo" = "上传本地照片";
@@ -994,3 +1000,11 @@
 "membership_welcome_bonus_message" = "已赠送 %d 金币，快去买装备装扮自己吧！";
 "membership_welcome_bonus_ok" = "知道了";
 "membership_products_unavailable" = "产品暂不可用，请稍后再试。";
+
+"error_network_unavailable" = "网络不可用，请检查网络连接";
+"error_login_expired" = "登录已过期，请重新登录";
+"error_server_error" = "服务器错误，请稍后重试";
+"error_not_found" = "内容未找到，可能已被删除";
+"error_forbidden" = "没有权限执行此操作";
+"error_not_configured" = "服务配置异常，请稍后重试";
+"error_unknown" = "出了点问题，请重试";

@@ -934,3 +934,11 @@
 "friends_qr_upload_photo" = "QRコードをアップロード";
 "friends_section_my_friends" = "友だち";
 "friends_section_pending_approval" = "承認待ち";
+
+"error_network_unavailable" = "ネットワークに接続できません。接続を確認してください。";
+"error_login_expired" = "ログインの有効期限が切れました。再度ログインしてください。";
+"error_server_error" = "サーバーエラーが発生しました。しばらくしてからお試しください。";
+"error_not_found" = "コンテンツが見つかりません。削除された可能性があります。";
+"error_forbidden" = "この操作を行う権限がありません。";
+"error_not_configured" = "サービスの設定エラーです。しばらくしてからお試しください。";
+"error_unknown" = "エラーが発生しました。もう一度お試しください。";

@@ -1250,7 +1250,7 @@ function seedDemoCityCards() {
 }
 
 function makeAccessToken(uid, provider) {
-  return jwt.sign({ uid, prv: provider, typ: "access", sid: randHex(8) }, JWT_SECRET, { expiresIn: "2h" });
+  return jwt.sign({ uid, prv: provider, typ: "access", sid: randHex(8) }, JWT_SECRET, { expiresIn: "30d" });
 }
 
 function makeRefreshToken(uid, provider) {
@@ -3811,8 +3811,11 @@ async function main() {
         likes: record.likerIDs.length,
         likedByMe: true
       });
-    } catch {
-      return res.status(401).json({ message: "unauthorized" });
+    } catch (err) {
+      const isAuth = err && (err.name === "JsonWebTokenError" || err.name === "TokenExpiredError" || err.message === "missing bearer token");
+      if (isAuth) return res.status(401).json({ message: "unauthorized" });
+      console.error("[like] unexpected error:", err);
+      return res.status(500).json({ message: "internal error" });
     }
   });
 
@@ -3841,8 +3844,11 @@ async function main() {
         likes: (record.likerIDs || []).length,
         likedByMe: false
       });
-    } catch {
-      return res.status(401).json({ message: "unauthorized" });
+    } catch (err) {
+      const isAuth = err && (err.name === "JsonWebTokenError" || err.name === "TokenExpiredError" || err.message === "missing bearer token");
+      if (isAuth) return res.status(401).json({ message: "unauthorized" });
+      console.error("[unlike] unexpected error:", err);
+      return res.status(500).json({ message: "internal error" });
     }
   });
 

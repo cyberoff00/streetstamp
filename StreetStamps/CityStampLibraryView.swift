@@ -565,6 +565,10 @@ struct CityThumbnailView: View {
         self.routePath = routePath
     }
 
+    private var loadKey: String {
+        "\(city?.id ?? "")||\(routePath ?? "")||\(basePath ?? "")||\(mapAppearanceRaw)"
+    }
+
     var body: some View {
         let syncCachedImage = CityThumbnailLoader.existingCachedImage(
             city: city,
@@ -603,19 +607,7 @@ struct CityThumbnailView: View {
                     )
             }
         }
-        .onAppear {
-            loader.load(city: city, routePath: routePath, basePath: basePath, appearanceRaw: mapAppearanceRaw, renderCacheStore: renderCacheStore)
-        }
-        .onChange(of: routePath) { _ in
-            loader.load(city: city, routePath: routePath, basePath: basePath, appearanceRaw: mapAppearanceRaw, renderCacheStore: renderCacheStore)
-        }
-        .onChange(of: basePath) { _ in
-            loader.load(city: city, routePath: routePath, basePath: basePath, appearanceRaw: mapAppearanceRaw, renderCacheStore: renderCacheStore)
-        }
-        .onChange(of: city?.id ?? "") { _ in
-            loader.load(city: city, routePath: routePath, basePath: basePath, appearanceRaw: mapAppearanceRaw, renderCacheStore: renderCacheStore)
-        }
-        .onChange(of: mapAppearanceRaw) { _ in
+        .task(id: loadKey) {
             loader.load(city: city, routePath: routePath, basePath: basePath, appearanceRaw: mapAppearanceRaw, renderCacheStore: renderCacheStore)
         }
         .onDisappear {

@@ -10,7 +10,7 @@ enum AuthEntryMode: String {
         switch self {
         case .signIn: return L10n.t("auth_sign_in")
         case .register: return L10n.t("auth_create_account")
-        case .resetPassword: return "Reset Password"
+        case .resetPassword: return L10n.t("auth_reset_password")
         }
     }
 }
@@ -195,7 +195,7 @@ struct AuthEntryView: View {
                 )
             }
 
-            fieldLabel(mode == .resetPassword ? "New Password" : L10n.t("auth_password"))
+            fieldLabel(mode == .resetPassword ? L10n.t("auth_new_password") : L10n.t("auth_password"))
             fieldContainer(
                 icon: "lock",
                 placeholder: "••••••••",
@@ -582,7 +582,7 @@ struct AuthEntryView: View {
         case .register:
             return L10n.t("auth_sign_up")
         case .resetPassword:
-            return "Reset Password"
+            return L10n.t("auth_reset_password")
         }
     }
 

@@ -8,8 +8,6 @@ final class SocialNotificationStore: ObservableObject {
     @Published private(set) var isLoading = false
 
     private static let cutoffInterval: TimeInterval = 3 * 24 * 60 * 60
-    private static let pollingInterval: UInt64 = 25_000_000_000 // 25 seconds
-
     private var lastPromptNotificationID: String?
 
     // MARK: - Fetch
@@ -43,7 +41,15 @@ final class SocialNotificationStore: ObservableObject {
                 mergedByID[item.id] = item
             }
             for item in fetched {
-                mergedByID[item.id] = item
+                // Preserve optimistic read state: read is a one-way transition,
+                // so never let a stale backend response revert it to unread.
+                if let existing = mergedByID[item.id], existing.read, !item.read {
+                    var kept = item
+                    kept.read = true
+                    mergedByID[item.id] = kept
+                } else {
+                    mergedByID[item.id] = item
+                }
             }
 
             let merged = mergedByID.values

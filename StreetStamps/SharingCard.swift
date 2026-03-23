@@ -68,11 +68,7 @@ struct PopSharingCard: View {
     private let maxOverallMemoryPhotos = 3
 
     private var cachedCitiesByKey: [String: CachedCity] {
-        Dictionary(
-            uniqueKeysWithValues: cityCache.cachedCities
-                .filter { !($0.isTemporary ?? false) }
-                .map { ($0.id, $0) }
-        )
+        cityCache.cachedCitiesByKey
     }
 
     private var canAddOverallMemoryPhoto: Bool {

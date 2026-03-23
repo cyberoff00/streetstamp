@@ -127,12 +127,6 @@ struct PostcardInboxView: View {
             guard scenePhase == .active else { return }
             await refreshInbox()
         }
-        .task {
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 8 * 1_000_000_000)
-                await refreshInbox()
-            }
-        }
         .refreshable {
             await refreshInbox()
         }
@@ -279,21 +273,16 @@ struct PostcardInboxView: View {
     }
 
     private func displayCityName(for item: BackendPostcardMessageDTO) -> String {
-        let collectionKey = CityCollectionResolver.resolveCollectionKey(cityKey: item.cityID)
-        let keyName = collectionKey.split(separator: "|", omittingEmptySubsequences: false).first.map(String.init) ?? ""
-        return CityDisplayResolver.title(
-            for: collectionKey,
-            fallbackTitle: keyName.isEmpty ? item.cityName : keyName
-        )
+        let name = item.cityName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty { return name }
+        // Fallback: extract from cityID key "Name|ISO2"
+        return item.cityID.split(separator: "|", omittingEmptySubsequences: false).first.map(String.init) ?? ""
     }
 
     private func displayCityName(for draft: PostcardDraft) -> String {
-        let collectionKey = CityCollectionResolver.resolveCollectionKey(cityKey: draft.cityID)
-        let keyName = collectionKey.split(separator: "|", omittingEmptySubsequences: false).first.map(String.init) ?? ""
-        return CityDisplayResolver.title(
-            for: collectionKey,
-            fallbackTitle: keyName.isEmpty ? draft.cityName : keyName
-        )
+        let name = draft.cityName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty { return name }
+        return draft.cityID.split(separator: "|", omittingEmptySubsequences: false).first.map(String.init) ?? ""
     }
 
     private func autoFocusReceivedIfNeeded() {
@@ -554,10 +543,17 @@ private struct PostcardCardRow: View {
     private func sendReaction(_ emoji: String) async {
         guard let messageID, let token else { return }
         let req = PostcardReactionRequest(reactionEmoji: emoji, comment: nil)
-        try? await BackendAPIClient.shared.reactToPostcard(token: token, messageID: messageID, req: req)
-        await MainActor.run {
-            saveToastText = "已发送 \(emoji)"
-            clearSaveToastSoon()
+        do {
+            try await BackendAPIClient.shared.reactToPostcard(token: token, messageID: messageID, req: req)
+            await MainActor.run {
+                saveToastText = "已发送 \(emoji)"
+                clearSaveToastSoon()
+            }
+        } catch {
+            await MainActor.run {
+                saveToastText = L10n.t("postcard_send_failed")
+                clearSaveToastSoon()
+            }
         }
     }
 
@@ -648,6 +644,7 @@ private struct CommentInputSheet: View {
     let token: String
     @State private var commentText = ""
     @State private var isSending = false
+    @State private var sendFailed = false
 
     var body: some View {
         NavigationView {
@@ -660,6 +657,12 @@ private struct CommentInputSheet: View {
                 Text("\(commentText.count)/50")
                     .font(.system(size: 12))
                     .foregroundColor(commentText.count > 50 ? .red : FigmaTheme.subtext)
+
+                if sendFailed {
+                    Text(L10n.t("postcard_send_failed"))
+                        .font(.system(size: 13))
+                        .foregroundColor(.red)
+                }
 
                 Spacer()
             }
@@ -682,8 +685,15 @@ private struct CommentInputSheet: View {
     private func sendComment() async {
         isSending = true
         let req = PostcardReactionRequest(reactionEmoji: nil, comment: commentText)
-        try? await BackendAPIClient.shared.reactToPostcard(token: token, messageID: messageID, req: req)
-        await MainActor.run { dismiss() }
+        do {
+            try await BackendAPIClient.shared.reactToPostcard(token: token, messageID: messageID, req: req)
+            await MainActor.run { dismiss() }
+        } catch {
+            await MainActor.run {
+                isSending = false
+                sendFailed = true
+            }
+        }
     }
 }
 
@@ -693,7 +703,9 @@ private struct FullImageViewer: View {
     @Environment(\.dismiss) private var dismiss
     let imageURL: String
     @State private var image: UIImage?
+    @State private var loadFailed = false
     @State private var saveToast = false
+    @State private var loadAttempt = 0
 
     var body: some View {
         ZStack {
@@ -704,6 +716,27 @@ private struct FullImageViewer: View {
                     .resizable()
                     .scaledToFit()
                     .ignoresSafeArea()
+            } else if loadFailed {
+                VStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 36))
+                        .foregroundColor(.gray)
+                    Text(L10n.t("postcard_send_failed"))
+                        .foregroundColor(.gray)
+                        .font(.system(size: 14))
+                    Button {
+                        loadFailed = false
+                        loadAttempt += 1
+                    } label: {
+                        Text(L10n.t("retry"))
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(Color.blue)
+                            .clipShape(Capsule())
+                    }
+                }
             } else {
                 ProgressView()
                     .tint(.white)
@@ -761,12 +794,21 @@ private struct FullImageViewer: View {
                 }
             }
         }
-        .task {
-            guard let url = URL(string: imageURL) else { return }
+        .task(id: loadAttempt) {
+            guard let url = URL(string: imageURL) else {
+                loadFailed = true
+                return
+            }
             do {
                 let (data, _) = try await URLSession.shared.data(from: url)
-                image = UIImage(data: data)
-            } catch {}
+                if let loaded = UIImage(data: data) {
+                    image = loaded
+                } else {
+                    loadFailed = true
+                }
+            } catch {
+                loadFailed = true
+            }
         }
     }
 }

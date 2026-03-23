@@ -143,9 +143,6 @@ struct ProfileView: View {
             await refreshDisplayNameIfNeeded()
             await notificationStore.refresh(token: sessionStore.currentAccessToken, showToastCallback: { msg in showToastMessage(msg) })
         }
-        .onReceive(Timer.publish(every: 25, on: .main, in: .common).autoconnect()) { _ in
-            Task { await notificationStore.refresh(token: sessionStore.currentAccessToken, showToastCallback: { msg in showToastMessage(msg) }) }
-        }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             Task {
@@ -1789,11 +1786,7 @@ struct RecentJourneysView: View {
     }
 
     private var cachedCitiesByKey: [String: CachedCity] {
-        Dictionary(
-            uniqueKeysWithValues: cityCache.cachedCities
-                .filter { !($0.isTemporary ?? false) }
-                .map { ($0.id, $0) }
-        )
+        cityCache.cachedCitiesByKey
     }
 
     private func refreshCityLocalizations() async {
@@ -1944,11 +1937,7 @@ struct RecentJourneyCard: View {
     }
 
     private var cachedCitiesByKey: [String: CachedCity] {
-        Dictionary(
-            uniqueKeysWithValues: cityCache.cachedCities
-                .filter { !($0.isTemporary ?? false) }
-                .map { ($0.id, $0) }
-        )
+        cityCache.cachedCitiesByKey
     }
 
     var body: some View {

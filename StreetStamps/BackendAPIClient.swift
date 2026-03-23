@@ -342,12 +342,23 @@ enum BackendAPIError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .notConfigured: return "网络配置错误，请稍后重试"
-        case .unauthorized: return "登录已过期，请重新登录"
-        case .invalidResponse: return "网络异常，请检查网络连接"
-        case .server(let msg): return msg.isEmpty ? "操作失败，请重试" : msg
-        case .serverCode(_, let msg): return msg.isEmpty ? "操作失败，请重试" : msg
+        case .notConfigured: return L10n.t("error_not_configured")
+        case .unauthorized: return L10n.t("error_login_expired")
+        case .invalidResponse: return L10n.t("error_network_unavailable")
+        case .server(let msg): return Self.localizedServerMessage(msg)
+        case .serverCode(_, let msg): return Self.localizedServerMessage(msg)
         }
+    }
+
+    private static func localizedServerMessage(_ msg: String) -> String {
+        guard !msg.isEmpty else { return L10n.t("error_unknown") }
+        let lower = msg.lowercased()
+        if lower.contains("not found") { return L10n.t("error_not_found") }
+        if lower.contains("forbidden") { return L10n.t("error_forbidden") }
+        if lower.contains("unauthorized") { return L10n.t("error_login_expired") }
+        if lower.contains("internal error") || lower.contains("internal server") { return L10n.t("error_server_error") }
+        if lower.contains("too many requests") { return L10n.t("error_server_error") }
+        return L10n.t("error_server_error")
     }
 
     var serverMessage: String? {
@@ -368,6 +379,19 @@ enum BackendAPIError: LocalizedError {
         default:
             return nil
         }
+    }
+}
+
+enum LocalizedErrorHelper {
+    static func message(for error: Error) -> String {
+        if let apiError = error as? BackendAPIError {
+            return apiError.localizedDescription
+        }
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain {
+            return L10n.t("error_network_unavailable")
+        }
+        return L10n.t("error_unknown")
     }
 }
 
@@ -462,7 +486,7 @@ final class BackendAPIClient {
         return "\(text[methodRange]) \(text[pathRange])"
     }
 
-    private var decoder: JSONDecoder {
+    private static let sharedDecoder: JSONDecoder = {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .custom { decoder in
             let container = try decoder.singleValueContainer()
@@ -472,25 +496,29 @@ final class BackendAPIClient {
             throw DecodingError.dataCorruptedError(in: container, debugDescription: "invalid date: \(raw)")
         }
         return d
-    }
+    }()
 
-    private var encoder: JSONEncoder {
+    private static let sharedEncoder: JSONEncoder = {
         let e = JSONEncoder()
         e.dateEncodingStrategy = .custom { date, encoder in
             var c = encoder.singleValueContainer()
             try c.encode(ISO8601DateFormatter.withFractional.string(from: date))
         }
         return e
-    }
+    }()
+
+    private var decoder: JSONDecoder { Self.sharedDecoder }
+    private var encoder: JSONEncoder { Self.sharedEncoder }
 
     private func request(
         path: String,
         method: String,
         token: String? = nil,
         jsonBody: Data? = nil,
-        contentType: String = "application/json"
+        contentType: String = "application/json",
+        timeout: TimeInterval = 15
     ) async throws -> (Data, HTTPURLResponse) {
-        return try await request(path: path, method: method, token: token, jsonBody: jsonBody, contentType: contentType, queryItems: [])
+        return try await request(path: path, method: method, token: token, jsonBody: jsonBody, contentType: contentType, queryItems: [], timeout: timeout)
     }
 
     private func request(
@@ -499,12 +527,13 @@ final class BackendAPIClient {
         token: String? = nil,
         jsonBody: Data? = nil,
         contentType: String = "application/json",
-        queryItems: [URLQueryItem]
+        queryItems: [URLQueryItem],
+        timeout: TimeInterval = 15
     ) async throws -> (Data, HTTPURLResponse) {
         let url = try makeURL(path: path, queryItems: queryItems)
         var req = URLRequest(url: url)
         req.httpMethod = method
-        req.timeoutInterval = 15
+        req.timeoutInterval = timeout
         let resolvedToken = try await resolvedAuthorizationToken(explicitToken: token)
         if let resolvedToken, !resolvedToken.isEmpty {
             req.setValue("Bearer \(resolvedToken)", forHTTPHeaderField: "Authorization")
@@ -955,7 +984,8 @@ final class BackendAPIClient {
             method: "POST",
             token: token,
             jsonBody: body,
-            contentType: "multipart/form-data; boundary=\(boundary)"
+            contentType: "multipart/form-data; boundary=\(boundary)",
+            timeout: 60
         )
         return try decoder.decode(BackendMediaUploadResponse.self, from: respData)
     }

@@ -1517,22 +1517,39 @@ struct SettingsView: View {
         }
     }
 
+    private func applyLocalProfileFallback() {
+        let cachedName = UserDefaults.standard.string(forKey: "streetstamps.profile.displayName") ?? "Explorer"
+        if displayNameDraft.isEmpty { displayNameDraft = cachedName }
+        if displayNameInput.isEmpty { displayNameInput = cachedName }
+        if exclusiveIDDraft.isEmpty {
+            exclusiveIDDraft = UserDefaults.standard.string(forKey: "streetstamps.profile.exclusiveID") ?? ""
+        }
+        if accountEmail.isEmpty { accountEmail = sessionStore.currentEmail ?? "" }
+        profileVisibility = ProfileSharingSettings.visibility
+    }
+
     private func refreshAccountIfPossible(force: Bool = false) async {
         guard !didLoadAccountProfile || force else { return }
-        guard let token = sessionStore.currentAccessToken, !token.isEmpty else {
-            displayNameDraft = UserDefaults.standard.string(forKey: "streetstamps.profile.displayName") ?? "Explorer"
-            displayNameInput = displayNameDraft
-            accountEmail = sessionStore.currentEmail ?? ""
-            profileVisibility = ProfileSharingSettings.visibility
-            return
-        }
+
+        // Always load from local cache first — no network needed for display
+        applyLocalProfileFallback()
+        didLoadAccountProfile = true
+
+        guard let token = sessionStore.currentAccessToken, !token.isEmpty else { return }
+
+        // Only fetch from server if cache is incomplete or forced (e.g. after profile edit)
+        let hasName = !(UserDefaults.standard.string(forKey: "streetstamps.profile.displayName") ?? "").isEmpty
+        let hasID = !(UserDefaults.standard.string(forKey: "streetstamps.profile.exclusiveID") ?? "").isEmpty
+        guard force || !hasName || !hasID else { return }
+
         do {
             let me = try await BackendAPIClient.shared.fetchMyProfile(token: token)
-            didLoadAccountProfile = true
             displayNameDraft = me.displayName
             displayNameInput = displayNameDraft
             exclusiveIDDraft = me.resolvedExclusiveID ?? ""
             accountEmail = me.email ?? sessionStore.currentEmail ?? ""
+            UserDefaults.standard.set(me.displayName, forKey: "streetstamps.profile.displayName")
+            UserDefaults.standard.set(me.resolvedExclusiveID ?? "", forKey: "streetstamps.profile.exclusiveID")
             if let pv = me.profileVisibility {
                 profileVisibility = pv
                 ProfileSharingSettings.visibility = pv
@@ -1542,9 +1559,7 @@ struct SettingsView: View {
         } catch is CancellationError {
             // View disappeared mid-request; silently ignore
         } catch {
-            didLoadAccountProfile = true
             print("[SettingsView] fetchMyProfile failed: \(error)")
-            toastAccount(String(format: L10n.t("account_fetch_profile_failed_format"), error.localizedDescription))
         }
     }
 
@@ -1617,7 +1632,13 @@ struct SettingsView: View {
         }
 
         do {
-            let data = try Data(contentsOf: url)
+            let fileURL = url
+            let data = try await withThrowingTaskGroup(of: Data.self) { group in
+                group.addTask(priority: .userInitiated) {
+                    try Data(contentsOf: fileURL)
+                }
+                return try await group.next()!
+            }
             gpxImportProgress = 0.1
             let preview = try await GPXImportService.buildPreview(
                 data: data,

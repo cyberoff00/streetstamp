@@ -614,6 +614,19 @@ final class CityCache: ObservableObject {
     @Published private(set) var lastEvent: CityEvent? = nil
     @Published private(set) var pendingUnlock: UnlockedPayload? = nil
 
+    /// Keyed lookup excluding temporary cities. Lazily rebuilt when `cachedCities` changes.
+    var cachedCitiesByKey: [String: CachedCity] {
+        if let cached = _cachedCitiesByKey { return cached }
+        let dict = Dictionary(
+            uniqueKeysWithValues: cachedCities
+                .filter { !($0.isTemporary ?? false) }
+                .map { ($0.id, $0) }
+        )
+        _cachedCitiesByKey = dict
+        return dict
+    }
+    private var _cachedCitiesByKey: [String: CachedCity]?
+
     private let fm = FileManager.default
 
     /// `@Published` 只会在属性本身被重新赋值时触发更新。
@@ -651,6 +664,12 @@ final class CityCache: ObservableObject {
         self.migrationMarkerV6URL = paths.migrationMarkerV6_autoLevelRekey
         self.paths = paths
         // Disk I/O deferred to loadInitialData() to avoid blocking app launch.
+
+        $cachedCities
+            .sink { [weak self] _ in
+                self?._cachedCitiesByKey = nil
+            }
+            .store(in: &cancellables)
 
         journeyStore.$hasLoaded
             .receive(on: RunLoop.main)

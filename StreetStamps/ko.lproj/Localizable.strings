@@ -934,3 +934,11 @@
 "friends_qr_upload_photo" = "QR 코드 업로드";
 "friends_section_my_friends" = "내 친구";
 "friends_section_pending_approval" = "승인 대기";
+
+"error_network_unavailable" = "네트워크를 사용할 수 없습니다. 연결을 확인해 주세요.";
+"error_login_expired" = "로그인이 만료되었습니다. 다시 로그인해 주세요.";
+"error_server_error" = "서버 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.";
+"error_not_found" = "콘텐츠를 찾을 수 없습니다. 삭제되었을 수 있습니다.";
+"error_forbidden" = "이 작업을 수행할 권한이 없습니다.";
+"error_not_configured" = "서비스 구성 오류입니다. 잠시 후 다시 시도해 주세요.";
+"error_unknown" = "문제가 발생했습니다. 다시 시도해 주세요.";

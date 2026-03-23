@@ -295,11 +295,20 @@ extension FriendSharedJourney {
 @MainActor
 final class SocialGraphStore: ObservableObject {
     @Published private(set) var friends: [FriendProfileSnapshot] = []
+    @Published private(set) var cachedMyProfile: BackendProfileDTO?
 
     private var activeUserID: String
+    private var hasLoadedFromDisk = false
 
     init(userID: String) {
         self.activeUserID = userID
+        // Disk load is deferred until first access via ensureLoaded().
+    }
+
+    /// Triggers disk load on first call; subsequent calls are no-ops.
+    func ensureLoaded() {
+        guard !hasLoadedFromDisk else { return }
+        hasLoadedFromDisk = true
         Task { [weak self] in
             await self?.loadFromDiskAsync()
         }
@@ -308,6 +317,7 @@ final class SocialGraphStore: ObservableObject {
     func switchUser(_ userID: String) {
         guard activeUserID != userID else { return }
         activeUserID = userID
+        hasLoadedFromDisk = true
         Task { [weak self] in
             await self?.loadFromDiskAsync()
         }
@@ -384,11 +394,16 @@ final class SocialGraphStore: ObservableObject {
 
     func fetchFriendSnapshotsFromBackend(accessToken: String?) async -> [FriendProfileSnapshot]? {
         guard BackendConfig.isEnabled, let token = accessToken, !token.isEmpty else { return nil }
+        let t0 = CFAbsoluteTimeGetCurrent()
         do {
             let remote = try await BackendAPIClient.shared.fetchFriends(token: token)
-            return remote.map(Self.friendSnapshot(from:))
+            print("⏱ [SocialGraph] fetchFriends API: \(Int((CFAbsoluteTimeGetCurrent()-t0)*1000))ms  count=\(remote.count)")
+            let t1 = CFAbsoluteTimeGetCurrent()
+            let snapshots = remote.map(Self.friendSnapshot(from:))
+            print("⏱ [SocialGraph] map to snapshots: \(Int((CFAbsoluteTimeGetCurrent()-t1)*1000))ms")
+            return snapshots
         } catch {
-            print("❌ fetch friends failed:", error)
+            print("❌ fetch friends failed (\(Int((CFAbsoluteTimeGetCurrent()-t0)*1000))ms):", error)
             return nil
         }
     }
@@ -398,28 +413,51 @@ final class SocialGraphStore: ObservableObject {
         persistToDisk()
     }
 
+    func updateCachedMyProfile(_ profile: BackendProfileDTO?) {
+        cachedMyProfile = profile
+        persistMyProfileToDisk()
+    }
+
     private var fileURL: URL {
         let paths = StoragePath(userID: activeUserID)
         return paths.cachesDir.appendingPathComponent("friends_graph_v1.json")
     }
 
+    private var myProfileFileURL: URL {
+        let paths = StoragePath(userID: activeUserID)
+        return paths.cachesDir.appendingPathComponent("my_profile_cache.json")
+    }
+
     private func loadFromDiskAsync() async {
+        let t0 = CFAbsoluteTimeGetCurrent()
         let url = fileURL
+        let profileURL = myProfileFileURL
         let userID = activeUserID
-        let loaded: [FriendProfileSnapshot] = await Task.detached(priority: .userInitiated) {
-            do {
-                let paths = StoragePath(userID: userID)
-                try paths.ensureBaseDirectoriesExist()
-                guard FileManager.default.fileExists(atPath: url.path) else { return [] }
-                let data = try Data(contentsOf: url)
-                return try JSONDecoder().decode([FriendProfileSnapshot].self, from: data)
-            } catch {
-                print("❌ SocialGraph load failed:", error)
-                return []
+        let result: ([FriendProfileSnapshot], BackendProfileDTO?) = await Task.detached(priority: .userInitiated) {
+            let paths = StoragePath(userID: userID)
+            try? paths.ensureBaseDirectoriesExist()
+
+            var friends: [FriendProfileSnapshot] = []
+            if FileManager.default.fileExists(atPath: url.path),
+               let data = try? Data(contentsOf: url) {
+                let dataSize = data.count
+                let t1 = CFAbsoluteTimeGetCurrent()
+                friends = (try? JSONDecoder().decode([FriendProfileSnapshot].self, from: data)) ?? []
+                print("⏱ [SocialGraph] decode friends: \(Int((CFAbsoluteTimeGetCurrent()-t1)*1000))ms  count=\(friends.count) bytes=\(dataSize)")
             }
+
+            var profile: BackendProfileDTO?
+            if FileManager.default.fileExists(atPath: profileURL.path),
+               let data = try? Data(contentsOf: profileURL) {
+                profile = try? JSONDecoder().decode(BackendProfileDTO.self, from: data)
+            }
+
+            return (friends, profile)
         }.value
         guard activeUserID == userID else { return }
-        friends = loaded
+        friends = result.0
+        cachedMyProfile = result.1
+        print("⏱ [SocialGraph] loadFromDisk total: \(Int((CFAbsoluteTimeGetCurrent()-t0)*1000))ms  friends=\(friends.count)")
     }
 
     private func persistToDisk() {
@@ -430,6 +468,21 @@ final class SocialGraphStore: ObservableObject {
             try data.write(to: fileURL, options: .atomic)
         } catch {
             print("❌ SocialGraph save failed:", error)
+        }
+    }
+
+    private func persistMyProfileToDisk() {
+        do {
+            let paths = StoragePath(userID: activeUserID)
+            try paths.ensureBaseDirectoriesExist()
+            if let profile = cachedMyProfile {
+                let data = try JSONEncoder().encode(profile)
+                try data.write(to: myProfileFileURL, options: .atomic)
+            } else {
+                try? FileManager.default.removeItem(at: myProfileFileURL)
+            }
+        } catch {
+            print("❌ SocialGraph myProfile save failed:", error)
         }
     }
 

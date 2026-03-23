@@ -11,10 +11,12 @@ final class LifelogRenderCacheCoordinator: ObservableObject {
     private static let recentDayCount = 7
     private static let viewportCacheLimit = 24
     private static let todayRefreshDelayNanoseconds: UInt64 = 5_000_000_000
+    private static let diskCacheFilename = "lifelog_render_snapshot_cache.json"
 
     private var journeyStore: JourneyStore?
     private var lifelogStore: LifelogStore?
     private var trackTileStore: TrackTileStore?
+    private var diskCacheURL: URL?
 
     private var daySnapshots: [LifelogDaySnapshotKey: LifelogSegmentedDaySnapshot] = [:]
     private var viewportSnapshots: [LifelogViewportRenderKey: LifelogRenderSnapshot] = [:]
@@ -28,15 +30,23 @@ final class LifelogRenderCacheCoordinator: ObservableObject {
     private var pendingWarmupRequest: (anchorDay: Date, countryISO2: String?)?
     private var hasDirtyToday = false
     private var todayDirtyCountryISO2: String?
+    /// Snapshot restored from disk during bind(), available immediately
+    /// for the first cachedRenderSnapshot() call.
+    private var restoredDiskSnapshot: LifelogRenderSnapshot?
 
     func bind(
         journeyStore: JourneyStore,
         lifelogStore: LifelogStore,
-        trackTileStore: TrackTileStore
+        trackTileStore: TrackTileStore,
+        cachesDir: URL? = nil
     ) {
         self.journeyStore = journeyStore
         self.lifelogStore = lifelogStore
         self.trackTileStore = trackTileStore
+        if let cachesDir {
+            self.diskCacheURL = cachesDir.appendingPathComponent(Self.diskCacheFilename)
+            restoreFromDisk()
+        }
     }
 
     func reset() {
@@ -83,6 +93,12 @@ final class LifelogRenderCacheCoordinator: ObservableObject {
                 "existing=(j:\(fallback.key.journeyRevision),p:\(fallback.key.lifelogRevision))"
             )
             return fallback.renderSnapshot(in: viewport)
+        }
+        if let restored = restoredDiskSnapshot,
+           let restoredDay = restored.selectedDay,
+           Calendar.current.isDate(restoredDay, inSameDayAs: key.day) {
+            debugLog("disk cache hit day=\(debugDayString(key.day))")
+            return restored
         }
         debugLog("cache miss day=\(debugDayString(key.day)) j=\(key.journeyRevision) p=\(key.lifelogRevision)")
         return nil
@@ -281,6 +297,11 @@ final class LifelogRenderCacheCoordinator: ObservableObject {
         pruneOlderDaySnapshots(for: key)
         daySnapshots[key] = snapshot
         trimDayCache(anchorDay: key.day)
+        // Persist today's snapshot for instant cold-start restore.
+        if Calendar.current.isDateInToday(key.day) {
+            restoredDiskSnapshot = nil
+            saveToDisk(snapshot.allDayRenderSnapshot)
+        }
         return snapshot
     }
 
@@ -416,6 +437,121 @@ final class LifelogRenderCacheCoordinator: ObservableObject {
         guard let manifest else { return "nil" }
         return "(zoom:\(manifest.zoom),j:\(manifest.journeyRevision),p:\(manifest.passiveRevision))"
     }
+
+    // MARK: - Disk cache for cold-start restore
+
+    private func restoreFromDisk() {
+        guard let url = diskCacheURL else { return }
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        do {
+            let data = try Data(contentsOf: url)
+            let cached = try JSONDecoder.iso8601Lifelog.decode(LifelogRenderSnapshotDiskCache.self, from: data)
+            let snapshot = cached.toRenderSnapshot()
+            guard let day = snapshot.selectedDay,
+                  Calendar.current.isDateInToday(day) else {
+                debugLog("disk cache stale, discarding")
+                try? FileManager.default.removeItem(at: url)
+                return
+            }
+            restoredDiskSnapshot = snapshot
+            debugLog("disk cache restored day=\(debugDayString(day)) far=\(snapshot.farRouteSegments.count) footprints=\(snapshot.footprintRuns.count)")
+        } catch {
+            debugLog("disk cache restore failed: \(error)")
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    private func saveToDisk(_ snapshot: LifelogRenderSnapshot) {
+        guard let url = diskCacheURL else { return }
+        Task.detached(priority: .utility) {
+            do {
+                let cached = LifelogRenderSnapshotDiskCache(from: snapshot)
+                let data = try JSONEncoder.iso8601Lifelog.encode(cached)
+                try data.write(to: url, options: .atomic)
+            } catch {
+                // Best-effort; failure is not critical.
+            }
+        }
+    }
+}
+
+// MARK: - Codable disk cache format
+
+private struct LifelogRenderSnapshotDiskCache: Codable {
+    struct Coord: Codable {
+        let lat: Double
+        let lon: Double
+    }
+    struct Segment: Codable {
+        let id: String
+        let style: String
+        let coords: [Coord]
+    }
+
+    let selectedDay: Date?
+    let farRouteSegments: [Segment]
+    let footprintRuns: [[Coord]]
+    let centerLat: Double?
+    let centerLon: Double?
+
+    init(from snapshot: LifelogRenderSnapshot) {
+        self.selectedDay = snapshot.selectedDay
+        self.farRouteSegments = snapshot.farRouteSegments.map { seg in
+            Segment(
+                id: seg.id,
+                style: seg.style.rawValue,
+                coords: seg.coords.map { Coord(lat: $0.latitude, lon: $0.longitude) }
+            )
+        }
+        self.footprintRuns = snapshot.footprintRuns.map { run in
+            run.map { Coord(lat: $0.latitude, lon: $0.longitude) }
+        }
+        self.centerLat = snapshot.selectedDayCenterCoordinate?.latitude
+        self.centerLon = snapshot.selectedDayCenterCoordinate?.longitude
+    }
+
+    func toRenderSnapshot() -> LifelogRenderSnapshot {
+        let center: CLLocationCoordinate2D?
+        if let lat = centerLat, let lon = centerLon {
+            center = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+        } else {
+            center = nil
+        }
+        return LifelogRenderSnapshot(
+            selectedDay: selectedDay,
+            cachedPathCoordsWGS84: [],
+            farRouteSegments: farRouteSegments.map { seg in
+                RenderRouteSegment(
+                    id: seg.id,
+                    style: RenderRouteSegment.Style(rawValue: seg.style) ?? .solid,
+                    coords: seg.coords.map {
+                        CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon)
+                    }
+                )
+            },
+            footprintRuns: footprintRuns.map { run in
+                run.map { CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon) }
+            },
+            selectedDayCenterCoordinate: center,
+            isHighQuality: false
+        )
+    }
+}
+
+private extension JSONEncoder {
+    static let iso8601Lifelog: JSONEncoder = {
+        let e = JSONEncoder()
+        e.dateEncodingStrategy = .iso8601
+        return e
+    }()
+}
+
+private extension JSONDecoder {
+    static let iso8601Lifelog: JSONDecoder = {
+        let d = JSONDecoder()
+        d.dateDecodingStrategy = .iso8601
+        return d
+    }()
 }
 
 #if DEBUG

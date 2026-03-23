@@ -231,6 +231,9 @@ struct StreetStampsApp: App {
     }
 
     init() {
+        #if DEBUG
+        UserDefaults.standard.set(true, forKey: "streetstamps.debug.lifelog.mapDiagnosticsEnabled")
+        #endif
         #if canImport(FirebaseCore)
         if BackendConfig.firebaseBackupRuntimeEnabled,
            FirebaseApp.app() == nil,
@@ -385,15 +388,19 @@ struct StreetStampsApp: App {
                 lifelogRenderCache.bind(
                     journeyStore: journeyStore,
                     lifelogStore: lifelogStore,
-                    trackTileStore: trackTileStore
+                    trackTileStore: trackTileStore,
+                    cachesDir: StoragePath(userID: startupUserID).cachesDir
                 )
                 let journeysSnapshot = journeyStore.journeys
                 let cachedCitiesSnapshot = cityCache.cachedCities
                 let appearanceRaw = MapAppearanceSettings.current.rawValue
                 let renderCache = cityRenderCache
-                let cities = await Task.detached(priority: .userInitiated) {
-                    CityLibraryVM.buildCities(journeys: journeysSnapshot, cachedCities: cachedCitiesSnapshot)
-                }.value
+                let cities = await withTaskGroup(of: [City].self) { group in
+                    group.addTask(priority: .userInitiated) {
+                        CityLibraryVM.buildCities(journeys: journeysSnapshot, cachedCities: cachedCitiesSnapshot)
+                    }
+                    return await group.first { _ in true } ?? []
+                }
                 StartupWarmupService.shared.start(
                     cities: cities,
                     appearanceRaw: appearanceRaw,
@@ -429,9 +436,12 @@ struct StreetStampsApp: App {
                     let cc = cityCache.cachedCities
                     let ar = MapAppearanceSettings.current.rawValue
                     let rc = cityRenderCache
-                    let c = await Task.detached(priority: .utility) {
-                        CityLibraryVM.buildCities(journeys: js, cachedCities: cc)
-                    }.value
+                    let c = await withTaskGroup(of: [City].self) { group in
+                        group.addTask(priority: .utility) {
+                            CityLibraryVM.buildCities(journeys: js, cachedCities: cc)
+                        }
+                        return await group.first { _ in true } ?? []
+                    }
                     StartupWarmupService.shared.start(
                         cities: c, appearanceRaw: ar, renderCacheStore: rc, limit: 16
                     )
@@ -484,9 +494,12 @@ struct StreetStampsApp: App {
                     let cachedCitiesSnapshot = cityCache.cachedCities
                     let appearanceRaw = MapAppearanceSettings.current.rawValue
                     let renderCache = cityRenderCache
-                    let cities = await Task.detached(priority: .userInitiated) {
-                        CityLibraryVM.buildCities(journeys: journeysSnapshot, cachedCities: cachedCitiesSnapshot)
-                    }.value
+                    let cities = await withTaskGroup(of: [City].self) { group in
+                        group.addTask(priority: .userInitiated) {
+                            CityLibraryVM.buildCities(journeys: journeysSnapshot, cachedCities: cachedCitiesSnapshot)
+                        }
+                        return await group.first { _ in true } ?? []
+                    }
                     guard !Task.isCancelled else { return }
                     StartupWarmupService.shared.start(
                         cities: cities,
@@ -505,20 +518,23 @@ struct StreetStampsApp: App {
                     socialStore.switchUser(uid)
                     postcardCenter.switchUser(uid)
 
-                    // Deferred: remaining city warmup
-                    Task(priority: .utility) { @MainActor in
-                        try? await Task.sleep(nanoseconds: 2_000_000_000)
-                        let js = journeyStore.journeys
-                        let cc = cityCache.cachedCities
-                        let ar = MapAppearanceSettings.current.rawValue
-                        let rc = cityRenderCache
-                        let c = await Task.detached(priority: .utility) {
-                            CityLibraryVM.buildCities(journeys: js, cachedCities: cc)
-                        }.value
-                        StartupWarmupService.shared.start(
-                            cities: c, appearanceRaw: ar, renderCacheStore: rc, limit: 16
-                        )
+                    // Deferred: remaining city warmup (stays in structured task for cancellation)
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    guard !Task.isCancelled else { return }
+                    let deferredJS = journeyStore.journeys
+                    let deferredCC = cityCache.cachedCities
+                    let deferredAR = MapAppearanceSettings.current.rawValue
+                    let deferredRC = cityRenderCache
+                    let deferredCities = await withTaskGroup(of: [City].self) { group in
+                        group.addTask(priority: .utility) {
+                            CityLibraryVM.buildCities(journeys: deferredJS, cachedCities: deferredCC)
+                        }
+                        return await group.first { _ in true } ?? []
                     }
+                    guard !Task.isCancelled else { return }
+                    StartupWarmupService.shared.start(
+                        cities: deferredCities, appearanceRaw: deferredAR, renderCacheStore: deferredRC, limit: 16
+                    )
                 }
             }
             .onChange(of: sessionStore.reauthenticationPromptVersion) { _, version in
@@ -567,7 +583,9 @@ struct StreetStampsApp: App {
             }
             .onChange(of: flow.currentTab) { _, tab in
                 if trackTileDirty && TrackTileRebuildPolicy.shouldRebuild(for: tab) {
-                    scheduleTrackTileRebuild(delay: 0.25, force: true)
+                    // No delay — with manifest pre-loaded in TrackTileStore.init(),
+                    // rebuildTrackTiles() returns instantly when data is unchanged.
+                    scheduleTrackTileRebuild(delay: 0, force: true)
                 }
             }
             .onChange(of: lifelogBackgroundModeRaw) { _, _ in
@@ -670,6 +688,10 @@ struct StreetStampsApp: App {
            manifest.zoom == zoom,
            manifest.journeyRevision == journeyRevision,
            manifest.passiveRevision == passiveRevision {
+            // Manifest matches — no rebuild needed. But tile data may not
+            // be in memory yet (manifest was pre-loaded in init, tiles are
+            // lazy). Ensure they're loaded so tiles() returns data.
+            trackTileStore.ensureTilesLoaded(zoom: zoom)
             return
         }
 

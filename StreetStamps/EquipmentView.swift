@@ -602,19 +602,12 @@ struct EquipmentView: View {
             applySelection(category: category, item: item)
             showFeedback(L10n.t("equipment_equipped_feedback"))
         case .locked:
-            let price = itemPrice(for: category.id)
-            if economy.coins < price {
-                showInsufficientCoinsAlert = true
-                return
+            if !isTryOnMode {
+                isTryOnMode = true
+                tryOnLoadout = loadout
             }
-
-            pendingPurchase = PendingPurchase(
-                categoryId: category.id,
-                itemId: item.id,
-                itemName: L10n.t(item.nameKey),
-                price: price
-            )
-            showPurchaseConfirmAlert = true
+            applySelection(category: category, item: item)
+            showFeedback(L10n.t("equipment_trying_on"))
         }
     }
 

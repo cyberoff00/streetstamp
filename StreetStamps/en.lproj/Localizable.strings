@@ -312,6 +312,8 @@
 "auth_remembered_password" = "Remembered your password?";
 "auth_no_account" = "Don't have an account?";
 "auth_password" = "PASSWORD";
+"auth_new_password" = "NEW PASSWORD";
+"auth_reset_password" = "Reset Password";
 "auth_password_mismatch" = "Passwords do not match";
 "auth_sign_in" = "SIGN IN";
 "auth_sign_in_lower" = "Sign in";
@@ -538,6 +540,10 @@
 "postcard_retry" = "Retry";
 "postcard_from_prefix" = "From: ";
 "postcard_send_to" = "Send to";
+"postcard_add_recipient" = "Add recipient";
+"postcard_change_recipient" = "Change";
+"postcard_add_button" = "Add";
+"postcard_select_recipient_title" = "Select recipient";
 "postcard_city" = "City";
 "postcard_photo_limit" = "Photo (1)";
 "postcard_upload_local_photo" = "Upload local photo";
@@ -1000,3 +1006,11 @@
 "friends_qr_upload_photo" = "Upload QR Code";
 "friends_section_my_friends" = "My Friends";
 "friends_section_pending_approval" = "Pending Approval";
+
+"error_network_unavailable" = "Network unavailable. Please check your connection.";
+"error_login_expired" = "Login expired. Please sign in again.";
+"error_server_error" = "Server error. Please try again later.";
+"error_not_found" = "Content not found. It may have been deleted.";
+"error_forbidden" = "You do not have permission for this action.";
+"error_not_configured" = "Service configuration error. Please try again later.";
+"error_unknown" = "Something went wrong. Please try again.";

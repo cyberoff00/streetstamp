@@ -48,11 +48,13 @@ struct PostcardComposerView: View {
     @State private var localImagePath: String = ""
     @State private var showPreview = false
     @State private var loadingPhoto = false
+    @State private var photoErrorText: String?
     @ObservedObject private var languagePreference = LanguagePreference.shared
     @State private var localizedCityNamesByID: [String: String] = [:]
     @State private var sidebarHideToken = "\(PostcardSidebarVisibilityScope.composer.token)-\(UUID().uuidString)"
     @State private var selectedRecipient: PostcardRecipient?
     @State private var showRecipientPicker = false
+    @State private var messageLimitHit = false
 
     init(
         friendID: String? = nil,
@@ -81,10 +83,12 @@ struct PostcardComposerView: View {
         }) else {
             return 1
         }
-        let validJourneys = city.journeyIds.compactMap { journeyID in
-            journeyStore.journeys.first(where: { $0.id == journeyID })
-        }.filter { $0.distance >= 1000 }
-        return max(1, validJourneys.count)
+        let journeysByID = Dictionary(uniqueKeysWithValues: journeyStore.journeys.map { ($0.id, $0) })
+        let validCount = city.journeyIds.count(where: { journeyID in
+            guard let j = journeysByID[journeyID] else { return false }
+            return j.distance >= 1000
+        })
+        return max(1, validCount)
     }
 
     private var currentCityCandidates: [JourneyRoute] {
@@ -204,6 +208,7 @@ struct PostcardComposerView: View {
         content
         .background(FigmaTheme.background.ignoresSafeArea())
         .onAppear {
+            socialStore.ensureLoaded()
             guard PostcardSidebarVisibilityScope.composer.hidesGlobalSidebarButton else { return }
             flow.pushSidebarButtonHidden(token: sidebarHideToken)
         }
@@ -274,7 +279,8 @@ struct PostcardComposerView: View {
                     selectedImage = previewImage
                     localImagePath = url.path
                 } catch {
-                    // ignore picker failure, user can retry
+                    photoErrorText = L10n.t("postcard_send_failed")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { photoErrorText = nil }
                 }
             }
         }
@@ -292,7 +298,7 @@ struct PostcardComposerView: View {
                             .font(.system(size: 20, weight: .bold))
                             .foregroundColor(FigmaTheme.text)
                     } else {
-                        Text("添加收件人")
+                        Text(L10n.t("postcard_add_recipient"))
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundColor(FigmaTheme.subtext)
                     }
@@ -301,14 +307,14 @@ struct PostcardComposerView: View {
                 Spacer(minLength: 12)
 
                 if selectedRecipient != nil {
-                    Button("更换") {
+                    Button(L10n.t("postcard_change_recipient")) {
                         showRecipientPicker = true
                     }
                     .font(.system(size: 14, weight: .bold))
                     .foregroundColor(FigmaTheme.primary)
                     .buttonStyle(.plain)
                 } else {
-                    Button("添加") {
+                    Button(L10n.t("postcard_add_button")) {
                         showRecipientPicker = true
                     }
                     .font(.system(size: 14, weight: .bold))
@@ -372,6 +378,12 @@ struct PostcardComposerView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .disabled(loadingPhoto)
+
+            if let photoErrorText {
+                Text(photoErrorText)
+                    .font(.system(size: 13))
+                    .foregroundColor(.red)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
@@ -393,6 +405,11 @@ struct PostcardComposerView: View {
                 .onChange(of: messageText) { _, newValue in
                     if newValue.count > 80 {
                         messageText = String(newValue.prefix(80))
+                        messageLimitHit = true
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                            messageLimitHit = false
+                        }
                     }
                 }
 
@@ -400,7 +417,8 @@ struct PostcardComposerView: View {
                 Spacer()
                 Text("\(messageText.count)/80")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(FigmaTheme.subtext)
+                    .foregroundColor(messageLimitHit ? .red : FigmaTheme.subtext)
+                    .animation(.easeInOut(duration: 0.3), value: messageLimitHit)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -503,7 +521,7 @@ private struct RecipientPickerSheet: View {
                 }
                 .buttonStyle(.plain)
             }
-            .navigationTitle("选择收件人")
+            .navigationTitle(L10n.t("postcard_select_recipient_title"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

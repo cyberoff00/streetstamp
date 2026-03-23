@@ -28,6 +28,8 @@ final class LifelogStore: ObservableObject {
         var isEnabled: Bool
         var archivedJourneyIDs: [String]?
         var moodByDay: [String: String]?
+        var cachedDistanceMeters: Double?
+        var cachedAvailableDays: [Date]?
     }
 
     struct LifelogTrackPoint: Codable {
@@ -137,6 +139,7 @@ final class LifelogStore: ObservableObject {
     private var deletedMoodDayKeys = Set<String>()
     private var pendingSnapshotPersist: DispatchWorkItem?
     private let snapshotPersistDebounce: TimeInterval = 4.0
+    private let fileIOQueue = DispatchQueue(label: "com.streetstamps.lifelog.fileIO", qos: .utility)
     private var pendingTrackTileRevisionBump: DispatchWorkItem?
     private let trackTileRevisionDebounce: TimeInterval
     private var pendingDayIndexBuild: DispatchWorkItem?
@@ -303,6 +306,11 @@ final class LifelogStore: ObservableObject {
         DispatchQueue.global(qos: .utility).async(execute: work)
     }
 
+    private func incrementalDayIndexAppend(coord: CoordinateCodable, timestamp: Date) {
+        let key = Self.dayKeyString(for: timestamp)
+        dayCoordsCache[key, default: []].append(coord)
+    }
+
     private nonisolated static func loadState(from persistURL: URL, deltaURL: URL, moodURL: URL) async -> LoadedState {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
@@ -338,15 +346,22 @@ final class LifelogStore: ObservableObject {
 
                 let mergedPoints = replayDelta(base: loadedPoints, deltaURL: deltaURL, fallbackTimestamp: legacyFallbackTS)
                 let loadedCoordinates = mergedPoints.map(\.coord)
+                // Use cached distance/days if no delta was replayed (counts match).
+                let deltaApplied = mergedPoints.count != loadedPoints.count
+                let distance = (!deltaApplied && payload.cachedDistanceMeters != nil)
+                    ? payload.cachedDistanceMeters!
+                    : computeTotalDistanceMeters(coords: loadedCoordinates)
+                let days = (!deltaApplied && payload.cachedAvailableDays != nil)
+                    ? payload.cachedAvailableDays!
+                    : computeAvailableDays(from: mergedPoints)
                 continuation.resume(returning: LoadedState(
                     points: mergedPoints,
                     coordinates: loadedCoordinates,
                     isEnabled: payload.isEnabled,
                     archivedJourneyIDs: Set(payload.archivedJourneyIDs ?? []),
                     moodByDay: mergeMoodState(primary: payload.moodByDay, fallback: moodFallback),
-
-                    cachedDistanceMeters: computeTotalDistanceMeters(coords: loadedCoordinates),
-                    availableDays: computeAvailableDays(from: mergedPoints),
+                    cachedDistanceMeters: distance,
+                    availableDays: days,
                     countryISO2: nil
                 ))
             }
@@ -638,7 +653,7 @@ final class LifelogStore: ObservableObject {
             hadTrackedDays: hadTrackedDays,
             didInsertDay: didInsertDay
         )
-        scheduleBackgroundDayIndexBuild()
+        incrementalDayIndexAppend(coord: c, timestamp: loc.timestamp)
         appendDelta(points: [appendedPoint])
         persistAsync()
         scheduleTrackTileRevisionBump()
@@ -1056,7 +1071,7 @@ final class LifelogStore: ObservableObject {
         let target = deltaURL
         let baseDir = target.deletingLastPathComponent()
         let chunk = appended
-        DispatchQueue.global(qos: .utility).async {
+        fileIOQueue.async {
             do {
                 try FileManager.default.createDirectory(at: baseDir, withIntermediateDirectories: true)
                 var data = try JSONEncoder().encode(chunk)
@@ -1082,13 +1097,15 @@ final class LifelogStore: ObservableObject {
             coordinates: coordinates,
             isEnabled: isEnabled,
             archivedJourneyIDs: Array(archivedJourneyIDs),
-            moodByDay: moodByDay
+            moodByDay: moodByDay,
+            cachedDistanceMeters: cachedDistanceMeters,
+            cachedAvailableDays: availableDays
         )
         let url = persistURL
         let delta = deltaURL
         let moodURL = moodPersistURL
         let moodSnapshot = moodByDay
-        DispatchQueue.global(qos: .utility).async {
+        fileIOQueue.async {
             do {
                 let data = try JSONEncoder().encode(payload)
                 try FileManager.default.createDirectory(

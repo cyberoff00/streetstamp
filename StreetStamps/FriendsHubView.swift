@@ -144,7 +144,7 @@ enum FriendFeedLogic {
     }
 }
 
-private struct FriendFeedEvent: Identifiable {
+struct FriendFeedEvent: Identifiable {
     let id: String
     let kind: FriendFeedKind
     let friendID: String
@@ -160,11 +160,12 @@ struct FriendsHubView: View {
     @EnvironmentObject private var socialStore: SocialGraphStore
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var deepLinkStore: AppDeepLinkStore
-    @EnvironmentObject private var flow: AppFlowCoordinator
-    @EnvironmentObject private var journeyStore: JourneyStore
-    @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var publishStore: JourneyPublishStore
     @EnvironmentObject private var notificationStore: SocialNotificationStore
+    // NOTE: journeyStore, cityCache, flow removed from here to prevent
+    // spurious body recomputation. Those stores update frequently but are
+    // only used by child screens which obtain them via @EnvironmentObject
+    // from the inherited SwiftUI environment.
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
 
     @State private var tab: FriendsTopTab = .activity
@@ -191,21 +192,23 @@ struct FriendsHubView: View {
     @State private var myExclusiveID = ""
     @State private var myInviteCode = ""
     @State private var myRemoteProfile: BackendProfileDTO?
+    @State private var didSeedProfileFromCache = false
     @State private var showAuthEntry = false
     @State private var showQRScanner = false
     @State private var pendingFeedRefreshProfiles: [FriendProfileSnapshot]?
     @State private var feedScrollPosition: String?
     @State private var friendsListScrollPosition: String?
     @State private var didPerformInitialFeedRefresh = false
+    @State private var lastFeedRefreshTime: Date = .distantPast
     @State private var showMembershipGate: MembershipGatedFeature? = nil
     @State private var cachedFeedEvents: [FriendFeedEvent] = []
     @State private var cachedFeedLikeSignature: String = ""
+    @State private var cachedFeedProfileByID: [String: FriendProfileSnapshot] = [:]
+    @State private var cachedSortedFriends: [FriendProfileSnapshot] = []
     @State private var lastFeedSourceVersion: Int = -1
 
     private var sortedFriends: [FriendProfileSnapshot] {
-        socialStore.friends.sorted { lhs, rhs in
-            lastActiveDate(of: lhs) > lastActiveDate(of: rhs)
-        }
+        cachedSortedFriends
     }
 
     private func lastActiveDate(of friend: FriendProfileSnapshot) -> Date {
@@ -249,7 +252,7 @@ struct FriendsHubView: View {
     }
 
     private var feedProfileByID: [String: FriendProfileSnapshot] {
-        Dictionary(feedSourceProfiles.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        cachedFeedProfileByID
     }
 
     private var feedEvents: [FriendFeedEvent] {
@@ -261,21 +264,54 @@ struct FriendsHubView: View {
     }
 
     private var feedSourceVersion: Int {
-        socialStore.friends.hashValue
+        var h = Hasher()
+        h.combine(socialStore.friends.hashValue)
+        h.combine(myRemoteProfile?.id)
+        h.combine(myRemoteProfile?.journeys.hashValue)
+        h.combine(myRemoteProfile?.unlockedCityCards.hashValue)
+        return h.finalize()
     }
 
     private func updateCachedFeedEventsIfNeeded() {
         let version = feedSourceVersion
         guard version != lastFeedSourceVersion else { return }
         lastFeedSourceVersion = version
-        let events = buildFeedEvents(from: feedSourceProfiles)
-        cachedFeedEvents = events
-        cachedFeedLikeSignature = FriendsFeedLikePresentation.statsPairs(
-            from: events.map { ($0.friendID, $0.journeyID) }
-        )
-            .map { feedLikeKey(friendID: $0.friendID, journeyID: $0.journeyID) }
-            .sorted()
-            .joined(separator: ",")
+        let friends = socialStore.friends
+        let selfProfile = selfSnapshotForFeed
+        let buildStart = CFAbsoluteTimeGetCurrent()
+
+        Task(priority: .userInitiated) {
+            let cache = await Task.detached(priority: .userInitiated) {
+                FriendsFeedCacheBuilder.build(
+                    friends: friends,
+                    selfProfile: selfProfile,
+                    lastActiveDate: { friend in
+                        FriendListPresencePresentation.recentJourneyDate(for: friend) ?? friend.createdAt
+                    },
+                    formatDistance: { meters in
+                        String(format: L10n.t("friends_distance_compact_format"), meters / 1000.0)
+                    },
+                    formatDuration: { start, end in
+                        guard let start, let end else { return "--" }
+                        let sec = max(0, Int(end.timeIntervalSince(start)))
+                        let h = sec / 3600
+                        let m = (sec % 3600) / 60
+                        return "\(h)h \(m)m"
+                    }
+                )
+            }.value
+
+            print("⏱ [FriendsHub] feed cache built (bg): \(Int((CFAbsoluteTimeGetCurrent()-buildStart)*1000))ms  events=\(cache.feedEvents.count)")
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard feedSourceVersion == version else { return }
+                cachedFeedEvents = cache.feedEvents
+                cachedFeedProfileByID = cache.feedProfileByID
+                cachedSortedFriends = cache.sortedFriends
+                cachedFeedLikeSignature = cache.feedLikeSignature
+                print("⏱ [FriendsHub] feed cache applied (main): \(Int((CFAbsoluteTimeGetCurrent()-buildStart)*1000))ms")
+            }
+        }
     }
 
     private struct FeedLikesSheetContext: Identifiable {
@@ -393,17 +429,30 @@ struct FriendsHubView: View {
             }
         }
         .onAppear {
+            let t0 = CFAbsoluteTimeGetCurrent()
+            socialStore.ensureLoaded()
+            print("⏱ [FriendsHub] ensureLoaded: \(Int((CFAbsoluteTimeGetCurrent()-t0)*1000))ms")
+            if !didSeedProfileFromCache, let cached = socialStore.cachedMyProfile {
+                myRemoteProfile = cached
+                didSeedProfileFromCache = true
+            }
+            let t1 = CFAbsoluteTimeGetCurrent()
             updateCachedFeedEventsIfNeeded()
+            print("⏱ [FriendsHub] updateCachedFeedEvents (onAppear): \(Int((CFAbsoluteTimeGetCurrent()-t1)*1000))ms")
+            print("⏱ [FriendsHub] onAppear total: \(Int((CFAbsoluteTimeGetCurrent()-t0)*1000))ms  friends=\(socialStore.friends.count)")
         }
         .onChange(of: feedSourceVersion) { _, _ in
+            let t0 = CFAbsoluteTimeGetCurrent()
             updateCachedFeedEventsIfNeeded()
+            print("⏱ [FriendsHub] updateCachedFeedEvents (onChange): \(Int((CFAbsoluteTimeGetCurrent()-t0)*1000))ms  friends=\(socialStore.friends.count)")
         }
         .task {
-            async let profileTask: Void = refreshMyInviteIdentityIfNeeded()
-            async let feedTask: Void = performInitialFeedRefreshIfNeeded()
-            _ = await (profileTask, feedTask)
+            let t0 = CFAbsoluteTimeGetCurrent()
+            print("⏱ [FriendsHub] .task START")
+            await performInitialFeedRefreshIfNeeded()
+            print("⏱ [FriendsHub] .task feed done: \(Int((CFAbsoluteTimeGetCurrent()-t0)*1000))ms")
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 25 * 1_000_000_000)
+                try? await Task.sleep(nanoseconds: 300 * 1_000_000_000)
                 await detectUnseenFeedUpdates()
             }
         }
@@ -421,12 +470,17 @@ struct FriendsHubView: View {
             Task {
                 async let a: Void = notificationStore.refresh(token: sessionStore.currentAccessToken)
                 async let b: Void = refreshFriendRequests()
-                async let c: Void = refreshMyInviteIdentityIfNeeded()
-                _ = await (a, b, c)
+                _ = await (a, b)
                 await refreshRemoteFriends(showUnreadToast: false)
             }
         }
         .task(id: feedLikeSignature) {
+            // Minimal debounce: just coalesces sub-frame changes.
+            // Previously 300ms, which caused cold-start like stats to be
+            // repeatedly cancelled (disk load → network refresh → each
+            // cancels the prior .task and restarts the debounce).
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            guard !Task.isCancelled else { return }
             await loadFeedLikeStatsIfNeeded()
         }
         .onReceive(deepLinkStore.$pendingFriendInvite) { invite in
@@ -557,7 +611,7 @@ struct FriendsHubView: View {
             }
             .scrollPosition(id: $feedScrollPosition)
             .refreshable {
-                await refreshRemoteFriends()
+                await refreshRemoteFriends(force: true)
             }
         }
         .background(FigmaTheme.background)
@@ -598,7 +652,7 @@ struct FriendsHubView: View {
         }
         .scrollPosition(id: $friendsListScrollPosition)
         .refreshable {
-            await refreshRemoteFriends()
+            await refreshRemoteFriends(force: true)
         }
         .background(FigmaTheme.background)
     }
@@ -696,6 +750,7 @@ struct FriendsHubView: View {
                 if sessionStore.isLoggedIn {
                     Button {
                         showInviteFriendSheet = true
+                        Task { await fetchMyProfile(token: sessionStore.currentAccessToken) }
                     } label: {
                         Image(systemName: "plus.circle.fill")
                             .font(.system(size: 20, weight: .semibold))
@@ -830,85 +885,6 @@ struct FriendsHubView: View {
             return SocialGraphStore.generateInviteCode(source: source)
         }
 
-        private func buildFeedEvents(from friends: [FriendProfileSnapshot]) -> [FriendFeedEvent] {
-            var events: [FriendFeedEvent] = []
-
-            for friend in friends {
-                let visibleJourneys = friend.journeys
-                    .filter { FriendFeedLogic.isJourneyEligible($0) }
-                    .sorted {
-                        FriendFeedLogic.feedTimestamp(for: $0) > FriendFeedLogic.feedTimestamp(for: $1)
-                    }
-
-                guard !visibleJourneys.isEmpty else { continue }
-
-                let firstJourneyByCity: [String: String] = {
-                    var map: [String: String] = [:]
-                    let ascending = visibleJourneys.sorted {
-                        FriendFeedLogic.feedTimestamp(for: $0) < FriendFeedLogic.feedTimestamp(for: $1)
-                    }
-                    for journey in ascending {
-                        let cityKey = resolvedFriendCityID(for: journey, cards: friend.unlockedCityCards)
-                        guard !cityKey.isEmpty, map[cityKey] == nil else { continue }
-                        map[cityKey] = journey.id
-                    }
-                    return map
-                }()
-
-                for journey in visibleJourneys.prefix(12) {
-                    let eventDate = FriendFeedLogic.feedTimestamp(for: journey)
-                    let cityKey = resolvedFriendCityID(for: journey, cards: friend.unlockedCityCards)
-                    let cityName = resolvedFriendCityTitle(for: journey, cards: friend.unlockedCityCards)
-                    let memoryCount = journey.memories.count
-                    let photoCount = journey.memories.reduce(0) { $0 + $1.imageURLs.count }
-                    let unlockedNewCity = !cityKey.isEmpty && firstJourneyByCity[cityKey] == journey.id
-
-                    let kind: FriendFeedKind
-                    if unlockedNewCity {
-                        kind = .city
-                    } else if memoryCount > 0 {
-                        kind = .memory
-                    } else {
-                        kind = .journey
-                    }
-
-                    let eventTitle = FriendFeedLogic.eventTitle(
-                        kind: kind,
-                        cityName: cityName,
-                        memoryCount: memoryCount,
-                        journeyTitle: journey.title
-                    )
-                    let metaText: String
-                    switch kind {
-                    case .city:
-                        metaText = ""
-                    case .memory:
-                        metaText = String(format: L10n.t("friends_photos_count_format"), max(photoCount, memoryCount))
-                    case .journey:
-                        metaText = "\(formatDistance(journey.distance))  \(formatDuration(start: journey.startTime, end: journey.endTime))"
-                    }
-
-                    events.append(
-                        FriendFeedEvent(
-                            id: "feed_\(friend.id)_\(journey.id)",
-                            kind: kind,
-                            friendID: friend.id,
-                            timestamp: eventDate,
-                            journeyID: journey.id,
-                            title: eventTitle,
-                            location: FriendFeedLogic.locationTitle(cityName: cityName),
-                            meta: metaText
-                        )
-                    )
-                }
-            }
-
-            return events
-                .sorted { $0.timestamp > $1.timestamp }
-                .prefix(60)
-                .map { $0 }
-        }
-
         @MainActor
         private func performInitialFeedRefreshIfNeeded() async {
             guard !didPerformInitialFeedRefresh else { return }
@@ -922,7 +898,10 @@ struct FriendsHubView: View {
                 return
             }
 
-            let candidateEventIDs = buildFeedEvents(from: feedSourceProfiles(using: remoteSnapshots)).map(\.id)
+            let candidateEventIDs = FriendsFeedCacheBuilder.buildEventIDs(
+                friends: remoteSnapshots,
+                selfProfile: selfSnapshotForFeed
+            )
             let currentEventIDs = feedEvents.map(\.id)
             guard FriendsFeedUpdatePromptPolicy.hasUnseenEvents(
                 currentEventIDs: currentEventIDs,
@@ -939,19 +918,6 @@ struct FriendsHubView: View {
             guard let pendingFeedRefreshProfiles else { return }
             socialStore.replaceFriends(pendingFeedRefreshProfiles)
             self.pendingFeedRefreshProfiles = nil
-        }
-
-        private func resolvedFriendCityID(for journey: FriendSharedJourney, cards: [FriendCityCard]) -> String {
-            FriendJourneyCityIdentity.resolveCityID(for: journey, cards: cards)
-        }
-
-        private func resolvedFriendCityTitle(for journey: FriendSharedJourney, cards: [FriendCityCard]) -> String {
-            let cityID = resolvedFriendCityID(for: journey, cards: cards)
-            let fallback = cards.first(where: { $0.id == cityID })?.name ?? journey.title
-            return CityDisplayResolver.title(
-                for: cityID,
-                fallbackTitle: fallback
-            )
         }
 
         private func formatDistance(_ meters: Double) -> String {
@@ -987,6 +953,7 @@ struct FriendsHubView: View {
 
         @MainActor
         private func loadFeedLikeStatsIfNeeded() async {
+            let t0 = CFAbsoluteTimeGetCurrent()
             guard BackendConfig.isEnabled,
                   let token = sessionStore.currentAccessToken,
                   !token.isEmpty else {
@@ -1001,6 +968,7 @@ struct FriendsHubView: View {
                 feedLikeStats = [:]
                 return
             }
+            print("⏱ [FriendsHub] loadFeedLikeStats START pairs=\(pairs.count)")
 
             let grouped = Dictionary(grouping: pairs, by: \.friendID)
             do {
@@ -1027,8 +995,9 @@ struct FriendsHubView: View {
                     return all
                 }
                 feedLikeStats = Dictionary(results, uniquingKeysWith: { _, last in last })
+                print("⏱ [FriendsHub] loadFeedLikeStats DONE: \(Int((CFAbsoluteTimeGetCurrent()-t0)*1000))ms  groups=\(grouped.count)")
             } catch {
-                // Keep feed available even if like stats request fails.
+                print("⏱ [FriendsHub] loadFeedLikeStats FAILED: \(Int((CFAbsoluteTimeGetCurrent()-t0)*1000))ms  error=\(error)")
             }
         }
 
@@ -1051,9 +1020,11 @@ struct FriendsHubView: View {
                 return
             }
 
+            feedJourneyLikers = []
             feedJourneyLikersLoading = true
             feedJourneyLikersErrorMessage = nil
 
+            let expectedJourneyID = journeyID
             Task {
                 do {
                     let out: [JourneyLiker]
@@ -1069,12 +1040,14 @@ struct FriendsHubView: View {
                     }
 
                     await MainActor.run {
+                        guard activeFeedLikesSheet?.journeyID == expectedJourneyID else { return }
                         feedJourneyLikers = out
                         feedJourneyLikersErrorMessage = nil
                         feedJourneyLikersLoading = false
                     }
                 } catch {
                     await MainActor.run {
+                        guard activeFeedLikesSheet?.journeyID == expectedJourneyID else { return }
                         feedJourneyLikers = []
                         feedJourneyLikersErrorMessage = error.localizedDescription
                         feedJourneyLikersLoading = false
@@ -1114,46 +1087,76 @@ struct FriendsHubView: View {
                 }
                 feedLikeStats[key] = (likes: max(0, resp.likes), likedByMe: resp.likedByMe)
             } catch {
+                print("[FriendsHub] toggleFeedLike FAILED: friendID=\(friendID) journeyID=\(journeyID) error=\(error)")
                 feedLikeStats[key] = current
-                showFeedToast(L10n.t("operation_failed"))
+                showFeedToast(LocalizedErrorHelper.message(for: error))
             }
         }
 
+        private static let refreshCooldownSeconds: TimeInterval = 60
+
         @MainActor
-        private func refreshRemoteFriends(showUnreadToast: Bool = true) async {
+        private func refreshRemoteFriends(showUnreadToast: Bool = true, force: Bool = false) async {
             guard !loadingRemote else { return }
+            if !force, Date().timeIntervalSince(lastFeedRefreshTime) < Self.refreshCooldownSeconds {
+                print("⏱ [FriendsHub] refreshRemoteFriends skipped (cooldown)")
+                return
+            }
             loadingRemote = true
             defer { loadingRemote = false }
 
+            let t0 = CFAbsoluteTimeGetCurrent()
             let previousFriends = socialStore.friends
-            if let remoteSnapshots = await socialStore.fetchFriendSnapshotsFromBackend(accessToken: sessionStore.currentAccessToken) {
+            let token = sessionStore.currentAccessToken
+
+            // Fetch friends and own profile in parallel — both are needed for the feed.
+            async let friendsTask = socialStore.fetchFriendSnapshotsFromBackend(accessToken: token)
+            async let myProfileTask = fetchMyProfile(token: token)
+            let (remoteSnapshots, _) = await (friendsTask, myProfileTask)
+
+            if let remoteSnapshots {
+                print("⏱ [FriendsHub] fetchFriendSnapshots network: \(Int((CFAbsoluteTimeGetCurrent()-t0)*1000))ms  count=\(remoteSnapshots.count)")
+                let t1 = CFAbsoluteTimeGetCurrent()
                 socialStore.replaceFriends(remoteSnapshots)
+                print("⏱ [FriendsHub] replaceFriends: \(Int((CFAbsoluteTimeGetCurrent()-t1)*1000))ms")
                 pendingFeedRefreshProfiles = nil
+            } else {
+                print("⏱ [FriendsHub] fetchFriendSnapshots returned nil: \(Int((CFAbsoluteTimeGetCurrent()-t0)*1000))ms")
+                socialStore.restoreFriendsIfEmpty(previousFriends)
+                // Do NOT mark initial refresh done on failure — allow retry on next attempt.
+                return
             }
             socialStore.restoreFriendsIfEmpty(previousFriends)
             didPerformInitialFeedRefresh = true
+            lastFeedRefreshTime = Date()
 
             let toastCallback: ((String) -> Void)? = showUnreadToast ? { [self] msg in showFeedToast(msg, duration: 2.2) } : nil
             async let notifTask: Void = notificationStore.refresh(
-                token: sessionStore.currentAccessToken,
+                token: token,
                 showToastCallback: toastCallback
             )
             async let reqTask: Void = refreshFriendRequests()
             _ = await (notifTask, reqTask)
+            print("⏱ [FriendsHub] refreshRemoteFriends total: \(Int((CFAbsoluteTimeGetCurrent()-t0)*1000))ms")
         }
 
-
+        /// Single path for fetching the current user's own profile from backend.
+        /// Used by both feed refresh and invite sheet.
         @MainActor
-        private func refreshMyInviteIdentityIfNeeded() async {
+        private func fetchMyProfile(token: String?) async {
+            let t0 = CFAbsoluteTimeGetCurrent()
             guard BackendConfig.isEnabled,
-                  let token = sessionStore.currentAccessToken,
-                  !token.isEmpty else {
+                  let token, !token.isEmpty else {
                 myRemoteProfile = nil
+                socialStore.updateCachedMyProfile(nil)
+                print("⏱ [FriendsHub] fetchMyProfile skipped (no token)")
                 return
             }
             do {
                 let me = try await BackendAPIClient.shared.fetchMyProfile(token: token)
+                print("⏱ [FriendsHub] fetchMyProfile: \(Int((CFAbsoluteTimeGetCurrent()-t0)*1000))ms")
                 myRemoteProfile = me
+                socialStore.updateCachedMyProfile(me)
                 if let id = me.resolvedExclusiveID?.trimmingCharacters(in: .whitespacesAndNewlines),
                    !id.isEmpty {
                     myExclusiveID = id
@@ -1165,8 +1168,11 @@ struct FriendsHubView: View {
                     myInviteCode = SocialGraphStore.generateInviteCode(source: me.id)
                 }
             } catch {
-                myRemoteProfile = nil
-                // Keep invite entry available with local fallback.
+                // Keep cached profile on network error so feed still shows.
+                if myRemoteProfile == nil {
+                    myRemoteProfile = socialStore.cachedMyProfile
+                }
+                print("⏱ [FriendsHub] fetchMyProfile failed: \(Int((CFAbsoluteTimeGetCurrent()-t0)*1000))ms  error=\(error)")
             }
         }
 
@@ -1208,7 +1214,7 @@ struct FriendsHubView: View {
 
             do {
                 let resp = try await BackendAPIClient.shared.acceptFriendRequest(token: token, requestID: requestID)
-                await refreshRemoteFriends()
+                await refreshRemoteFriends(force: true)
                 showFeedToast(resp.message ?? L10n.t("friends_request_accepted"))
             } catch {
                 showFeedToast(String(format: L10n.t("friends_accept_failed_format"), error.localizedDescription))
@@ -1424,10 +1430,10 @@ private struct FriendActivityCard: View {
 
     private var agoText: String {
         let delta = max(1, Int(Date().timeIntervalSince(event.timestamp)))
-        if delta < 3600 { return "\(max(1, delta / 60))m ago" }
-        if delta < 86400 { return "\(max(1, delta / 3600))h ago" }
-        if delta < 7 * 86400 { return "\(max(1, delta / 86400))d ago" }
-        return "\(max(1, delta / (7 * 86400)))w ago"
+        if delta < 3600 { return String(format: L10n.t("friends_ago_minutes_format"), max(1, delta / 60)) }
+        if delta < 86400 { return String(format: L10n.t("friends_ago_hours_format"), max(1, delta / 3600)) }
+        if delta < 7 * 86400 { return String(format: L10n.t("friends_ago_days_format"), max(1, delta / 86400)) }
+        return String(format: L10n.t("friends_ago_weeks_format"), max(1, delta / (7 * 86400)))
     }
 
     var body: some View {
@@ -2743,7 +2749,7 @@ private final class FriendMirrorContext: ObservableObject {
                 cityKey: cityID,
                 name: primaryCard.name,
                 canonicalNameEN: primaryCard.name,
-                countryISO2: primaryCard.countryISO2 ?? CityDisplayResolver.iso2(from: cityID),
+                countryISO2: primaryCard.countryISO2 ?? (cityID.split(separator: "|", omittingEmptySubsequences: false).dropFirst().first.map(String.init) ?? ""),
                 journeyIds: js.map(\.id),
                 explorations: js.count,
                 memories: memories,
@@ -2776,15 +2782,14 @@ private final class FriendMirrorContext: ObservableObject {
 
     nonisolated private static func toJourneyRoute(friendJourney: FriendSharedJourney, cards: [FriendCityCard]) -> JourneyRoute {
         let routeCoords = friendJourney.routeCoordinates
-        let cityID = FriendJourneyCityIdentity.resolveCityID(for: friendJourney, cards: cards)
+        let cityID = friendJourney.cityID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let cityCard = cards.first(where: { $0.id == cityID })
 
-        let keyName = cityID.split(separator: "|", omittingEmptySubsequences: false).first.map(String.init) ?? ""
-        let cityFallback = keyName.isEmpty ? (cityCard?.name ?? friendJourney.title) : keyName
-        let cityName = CityDisplayResolver.title(
-            for: cityID,
-            fallbackTitle: cityFallback
-        )
+        let cityName: String = {
+            if let name = cityCard?.name, !name.isEmpty { return name }
+            let keyName = cityID.split(separator: "|", omittingEmptySubsequences: false).first.map(String.init) ?? ""
+            return keyName.isEmpty ? friendJourney.title : keyName
+        }()
 
         let fallbackCoordinate: CoordinateCodable = routeCoords.first ?? CoordinateCodable(lat: 0, lon: 0)
         let memories: [JourneyMemory] = friendJourney.memories.enumerated().map { idx, memory in
@@ -2817,10 +2822,15 @@ private final class FriendMirrorContext: ObservableObject {
             )
         }
 
+        // Ensure mirrored routes are always marked as completed so
+        // CityLibraryVM.buildCities (which filters by isCompleted) includes them.
+        let resolvedStart = friendJourney.startTime ?? friendJourney.endTime ?? Date()
+        let resolvedEnd = friendJourney.endTime ?? friendJourney.startTime ?? Date()
+
         return JourneyRoute(
             id: friendJourney.id,
-            startTime: friendJourney.startTime,
-            endTime: friendJourney.endTime,
+            startTime: resolvedStart,
+            endTime: resolvedEnd,
             distance: max(0, friendJourney.distance),
             elevationGain: 0,
             elevationLoss: 0,
@@ -2830,7 +2840,7 @@ private final class FriendMirrorContext: ObservableObject {
             coordinates: routeCoords,
             memories: memories,
             thumbnailCoordinates: routeCoords,
-            countryISO2: cityCard?.countryISO2 ?? CityDisplayResolver.iso2(from: cityID),
+            countryISO2: cityCard?.countryISO2 ?? (cityID.split(separator: "|", omittingEmptySubsequences: false).dropFirst().first.map(String.init) ?? ""),
             currentCity: cityName,
             cityName: cityName,
             startCityKey: cityID,

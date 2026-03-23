@@ -426,7 +426,7 @@ struct JourneyRoute: Codable {
         case countryISO2
         case currentCity, cityName, startCityKey, endCityKey
         case exploreMode, trackingMode
-        case visibility, customTitle, activityTag, overallMemory, overallMemoryImagePaths
+        case visibility, sharedAt, customTitle, activityTag, overallMemory, overallMemoryImagePaths, overallMemoryRemoteImageURLs
 
         // 兼容更老字段名（如果你确实历史里用过）
         case coords
@@ -473,10 +473,12 @@ struct JourneyRoute: Codable {
         exploreMode = try c.decodeIfPresent(ExploreMode.self, forKey: .exploreMode) ?? .city
         trackingMode = try c.decodeIfPresent(TrackingMode.self, forKey: .trackingMode) ?? .daily
         visibility = try c.decodeIfPresent(JourneyVisibility.self, forKey: .visibility) ?? .private
+        sharedAt = try c.decodeIfPresent(Date.self, forKey: .sharedAt)
         customTitle = try c.decodeIfPresent(String.self, forKey: .customTitle)
         activityTag = try c.decodeIfPresent(String.self, forKey: .activityTag)
         overallMemory = try c.decodeIfPresent(String.self, forKey: .overallMemory)
         overallMemoryImagePaths = try c.decodeIfPresent([String].self, forKey: .overallMemoryImagePaths) ?? []
+        overallMemoryRemoteImageURLs = try c.decodeIfPresent([String].self, forKey: .overallMemoryRemoteImageURLs) ?? []
     }
 
     // ✅ 自己实现 encode，修复 Encodable 合成失败（并且你可以选择写出 coords 兼容）
@@ -525,8 +527,12 @@ struct JourneyRoute: Codable {
         try c.encodeIfPresent(customTitle, forKey: .customTitle)
         try c.encodeIfPresent(activityTag, forKey: .activityTag)
         try c.encodeIfPresent(overallMemory, forKey: .overallMemory)
+        try c.encodeIfPresent(sharedAt, forKey: .sharedAt)
         if !overallMemoryImagePaths.isEmpty {
             try c.encode(overallMemoryImagePaths, forKey: .overallMemoryImagePaths)
+        }
+        if !overallMemoryRemoteImageURLs.isEmpty {
+            try c.encode(overallMemoryRemoteImageURLs, forKey: .overallMemoryRemoteImageURLs)
         }
     }
 }
@@ -826,11 +832,7 @@ struct MapView: View {
     @Binding var sharingJourney: JourneyRoute?
 
     private var cachedCitiesByKey: [String: CachedCity] {
-        Dictionary(
-            uniqueKeysWithValues: cityCache.cachedCities
-                .filter { !($0.isTemporary ?? false) }
-                .map { ($0.id, $0) }
-        )
+        cityCache.cachedCitiesByKey
     }
 
     init(

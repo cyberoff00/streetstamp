@@ -257,6 +257,14 @@ bash scripts/readonly_prod_check.sh
 
 ## Change Discipline
 
+### Rule: Think Critically, Not Obediently
+- The user is not a professional software engineer. Many requests are based on surface-level observations, other apps' UX patterns, or suggestions from prior AI conversations — not deep technical analysis.
+- Do NOT blindly execute instructions. Before implementing, evaluate whether the request actually makes sense for this codebase, this scale, and this product's real needs.
+- When a request introduces unnecessary complexity, solves a non-existent problem, or copies a pattern from apps operating at a fundamentally different scale, say so directly and propose a better alternative.
+- Back up every recommendation with concrete reasoning: code references, data structure analysis, or algorithmic complexity — not vague appeals to "best practices" or "clean architecture".
+- Never say something works or is correct without verifying it in code. Never give empty reassurance. If you are unsure, say so and investigate before answering.
+- If a previous AI conversation led to a bad direction, acknowledge the mistake clearly and course-correct rather than building on top of a flawed foundation.
+
 ### Rule: Think Globally Before Acting Locally
 - Before making any change, trace its impact across the full logic chain. A "simple fix" in one store can break downstream consumers, sync paths, or derived caches.
 - Specifically, ask these questions before editing:
@@ -304,6 +312,22 @@ bash scripts/readonly_prod_check.sh
 ### Rule: Correct Yourself Immediately
 - If you realize a previous assessment was wrong, retract it explicitly and explain why it was wrong.
 - Do not soften a retraction into "well, it's a low risk" — if the code already handles it, say so clearly.
+
+### Rule: Never Trust Agent Outputs Without Verification
+- When using subagents for code review or exploration, treat their findings as **leads, not conclusions**. Every claim from an agent must be verified against the actual code before reporting to the user.
+- Agents frequently make these specific errors:
+  1. **Reading a few lines and missing nearby context** — e.g., seeing `Task.detached` and reporting "no concurrency limit" while a `DispatchSemaphore(value: 2)` exists 20 lines away in the same file.
+  2. **Seeing an early `return` and concluding logic is skipped** — without checking that key state mutations happen BEFORE the return.
+  3. **Applying generic anti-patterns without tracing call sites** — e.g., flagging `DispatchSemaphore` as "deadlock risk" without verifying which thread the wait occurs on.
+  4. **Claiming "no cleanup" or "leak"** — without understanding Swift ARC basics like property reassignment releasing the old value.
+- Before including any agent finding in a report: read the function body yourself, check at least 10 lines of surrounding context, and actively try to disprove the claim.
+- When grepping for annotations like `@MainActor`, `@Published`, etc., remember they are often on the line ABOVE the declaration. Use multi-line patterns or grep with `-B 1` context to avoid false negatives.
+- When citing counts (e.g., "7 @EnvironmentObject"), always recount from the actual code before stating the number. Do not rely on memory or estimation.
+
+### Rule: Anti-Confirmation-Bias In Reviews
+- When the task is "find problems", the natural bias is to interpret everything as a problem. Actively counter this by asking: **"Why might this code be correct as written?"**
+- Seeing a known anti-pattern (semaphore, singleton closure, computed property) is not sufficient to report a bug. Trace the specific usage to confirm the anti-pattern actually causes harm in this context.
+- If you cannot construct a concrete scenario where the "problem" manifests (specific thread, specific timing, specific user action), downgrade it or drop it.
 
 ## Personal Preferences
 

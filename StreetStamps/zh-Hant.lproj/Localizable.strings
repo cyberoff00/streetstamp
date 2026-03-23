@@ -934,3 +934,11 @@
 "friends_qr_upload_photo" = "上傳二維碼";
 "friends_section_my_friends" = "我的好友";
 "friends_section_pending_approval" = "待你通過";
+
+"error_network_unavailable" = "網路不可用，請檢查網路連線";
+"error_login_expired" = "登入已過期，請重新登入";
+"error_server_error" = "伺服器錯誤，請稍後重試";
+"error_not_found" = "內容未找到，可能已被刪除";
+"error_forbidden" = "沒有權限執行此操作";
+"error_not_configured" = "服務配置異常，請稍後重試";
+"error_unknown" = "發生問題，請重試";

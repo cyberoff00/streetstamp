@@ -934,3 +934,11 @@
 "friends_qr_upload_photo" = "Subir código QR";
 "friends_section_my_friends" = "Mis amigos";
 "friends_section_pending_approval" = "Pendiente de aprobación";
+
+"error_network_unavailable" = "Red no disponible. Verifica tu conexión.";
+"error_login_expired" = "Sesión expirada. Por favor, inicia sesión de nuevo.";
+"error_server_error" = "Error del servidor. Inténtalo más tarde.";
+"error_not_found" = "Contenido no encontrado. Puede haber sido eliminado.";
+"error_forbidden" = "No tienes permiso para esta acción.";
+"error_not_configured" = "Error de configuración del servicio. Inténtalo más tarde.";
+"error_unknown" = "Algo salió mal. Inténtalo de nuevo.";

@@ -2,9 +2,17 @@ import Foundation
 import CoreLocation
 import MapKit
 
-struct LifelogFootprintProjectedMarker: Equatable {
+struct LifelogFootprintProjectedMarker: Equatable, Identifiable {
     let coordinate: CLLocationCoordinate2D
     let angleDegrees: Double
+
+    var id: Int {
+        var hasher = Hasher()
+        hasher.combine(Int(coordinate.latitude * 1_000_000))
+        hasher.combine(Int(coordinate.longitude * 1_000_000))
+        hasher.combine(Int(angleDegrees * 100))
+        return hasher.finalize()
+    }
 }
 
 final class LifelogFootprintViewportCache {
@@ -61,6 +69,18 @@ final class LifelogFootprintViewportCache {
         touch(key)
         trimIfNeeded()
         return built
+    }
+
+    func storage(for key: Key) -> [LifelogFootprintProjectedMarker]? {
+        guard let cached = storage[key] else { return nil }
+        touch(key)
+        return cached
+    }
+
+    func insert(_ markers: [LifelogFootprintProjectedMarker], for key: Key) {
+        storage[key] = markers
+        touch(key)
+        trimIfNeeded()
     }
 
     func removeAll() {

@@ -292,11 +292,7 @@ struct JourneyMemoryMainView: View {
     }
 
     private func buildCachedCitiesByKey() -> [String: CachedCity] {
-        Dictionary(
-            uniqueKeysWithValues: cityCache.cachedCities
-                .filter { !($0.isTemporary ?? false) }
-                .map { ($0.id, $0) }
-        )
+        cityCache.cachedCitiesByKey
     }
 
     /// Fetch localized city titles for the current locale, keyed by the *start city*.
@@ -1767,8 +1763,15 @@ struct JourneyMemoryDetailView: View {
 
     // MARK: - Draft persistence (Journey Memory Detail)
     private func persistDetailDraftIfNeeded(force: Bool = false) {
-        guard isEditing || force else { return }
         let uid = sessionStore.currentUserID
+        // If not editing, clear any stale draft rather than persisting a read-only snapshot.
+        guard isEditing else {
+            if force {
+                JourneyMemoryDetailDraftStore.clear(userID: uid, journeyID: journey.id)
+                JourneyMemoryDetailResumeStore.set(false, userID: uid, journeyID: journey.id)
+            }
+            return
+        }
         let draft = JourneyMemoryDetailDraft(
             memories: draftMemories,
             focusedMemoryID: focusedMemoryID,
@@ -2204,10 +2207,9 @@ private struct ExportMemoryTimelineItem: View {
                 .tracking(1.2)
                 .foregroundColor(Color(red: 0.60, green: 0.63, blue: 0.69))
 
-            if !memory.imagePaths.isEmpty || !memory.remoteImageURLs.isEmpty {
-                MemoryImagesView(
+            if !memory.imagePaths.isEmpty {
+                SyncMemoryImagesView(
                     imagePaths: memory.imagePaths,
-                    remoteImageURLs: memory.remoteImageURLs,
                     userID: userID
                 )
             }
@@ -2219,6 +2221,37 @@ private struct ExportMemoryTimelineItem: View {
                     .lineSpacing(8.75)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+}
+
+/// Synchronous image loading for ImageRenderer export (async .task won't fire in ImageRenderer).
+private struct SyncMemoryImagesView: View {
+    let imagePaths: [String]
+    let userID: String
+
+    var body: some View {
+        VStack(spacing: 12) {
+            ForEach(imagePaths, id: \.self) { path in
+                if let img = PhotoStore.loadImage(named: path, userID: userID) {
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity)
+                        .overlay(
+                            Rectangle()
+                                .inset(by: 0.5)
+                                .stroke(
+                                    Color(red: 0.90, green: 0.91, blue: 0.92),
+                                    lineWidth: 0.5
+                                )
+                        )
+                } else {
+                    Color(red: 0.95, green: 0.95, blue: 0.95)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 140)
+                }
             }
         }
     }
@@ -2717,9 +2750,8 @@ private struct JourneyMemoryDetailExportSnapshotView: View {
             }
 
             if !presentation.overallMemoryImagePaths.isEmpty {
-                MemoryImagesView(
+                SyncMemoryImagesView(
                     imagePaths: presentation.overallMemoryImagePaths,
-                    remoteImageURLs: [],
                     userID: userID
                 )
             }

@@ -22,9 +22,16 @@ final class TrackTileStore: ObservableObject {
     private var bucketsByZoom: [Int: [TrackTileKey: TrackTileBucket]] = [:]
     private var dayIndexByZoom: [Int: [String: [IndexedSegment]]] = [:]
     private var _currentManifest: TrackTileManifest?
+    /// Lightweight snapshot of _currentManifest, readable without blocking on
+    /// the (potentially barrier-locked) storageQueue. Updated inside every
+    /// barrier block that mutates _currentManifest.
+    private let _manifestLock = NSLock()
+    private var _manifestSnapshot: TrackTileManifest?
     @Published private(set) var refreshRevision: Int = 0
     var currentManifest: TrackTileManifest? {
-        storageQueue.sync { _currentManifest }
+        _manifestLock.lock()
+        defer { _manifestLock.unlock() }
+        return _manifestSnapshot
     }
 
     init(paths: StoragePath, fm: FileManager = .default) {
@@ -35,7 +42,10 @@ final class TrackTileStore: ObservableObject {
         self.encoder.outputFormatting = [.sortedKeys]
         self.encoder.dateEncodingStrategy = .iso8601
         self.decoder.dateDecodingStrategy = .iso8601
-        // Disk load deferred — refresh() lazy-loads when _currentManifest is nil.
+        // Eagerly load just the manifest so that rebuildTrackTiles() can
+        // compare revisions and skip the full rebuild when data is unchanged.
+        // Tile files are still lazy-loaded inside refresh().
+        _loadManifestOnly()
     }
 
     func rebind(paths: StoragePath) {
@@ -45,6 +55,7 @@ final class TrackTileStore: ObservableObject {
             self.dayIndexByZoom.removeAll(keepingCapacity: true)
             self._currentManifest = nil
             try? self._loadFromDisk()
+            self._syncManifestSnapshot()
         }
     }
 
@@ -63,7 +74,7 @@ final class TrackTileStore: ObservableObject {
                 try paths.ensureBaseDirectoriesExist()
                 try paths.ensureDirectory(paths.trackTilesDir)
 
-                if _currentManifest == nil {
+                if bucketsByZoom[z] == nil {
                     try _loadFromDisk()
                 }
 
@@ -126,6 +137,7 @@ final class TrackTileStore: ObservableObject {
                     updatedAt: Date()
                 )
                 _currentManifest = nextManifest
+                _syncManifestSnapshot()
                 try _persist(
                     tiles: merged,
                     previousTiles: previousTiles,
@@ -142,6 +154,17 @@ final class TrackTileStore: ObservableObject {
             }
         }
         if let caughtError { throw caughtError }
+    }
+
+    /// Loads tile files from disk if manifest exists but tiles haven't been
+    /// loaded yet.  Called from the early-return path in `rebuildTrackTiles()`
+    /// where manifest revisions already match so `refresh()` is skipped.
+    func ensureTilesLoaded(zoom: Int) {
+        let z = max(0, min(zoom, 22))
+        storageQueue.sync(flags: .barrier) {
+            guard bucketsByZoom[z] == nil, _currentManifest != nil else { return }
+            try? _loadFromDisk()
+        }
     }
 
     func tiles(
@@ -274,11 +297,32 @@ final class TrackTileStore: ObservableObject {
         try manifestData.write(to: paths.trackTileManifestURL, options: .atomic)
     }
 
+    /// Copies _currentManifest into the lock-guarded snapshot so that
+    /// `currentManifest` reads never block on the storageQueue barrier.
+    /// Must be called from within `storageQueue` (barrier or sync).
+    private func _syncManifestSnapshot() {
+        _manifestLock.lock()
+        _manifestSnapshot = _currentManifest
+        _manifestLock.unlock()
+    }
+
+    /// Reads only manifest.json (a few hundred bytes) without loading tile
+    /// files.  Called during init so that `currentManifest` is available for
+    /// early revision checks in `rebuildTrackTiles()`.
+    private func _loadManifestOnly() {
+        guard fm.fileExists(atPath: paths.trackTileManifestURL.path) else { return }
+        guard let data = try? Data(contentsOf: paths.trackTileManifestURL),
+              let manifest = try? decoder.decode(TrackTileManifest.self, from: data) else { return }
+        _currentManifest = manifest
+        _syncManifestSnapshot()
+    }
+
     private func _loadFromDisk() throws {
         guard fm.fileExists(atPath: paths.trackTileManifestURL.path) else { return }
         let manifestData = try Data(contentsOf: paths.trackTileManifestURL)
         let manifest = try decoder.decode(TrackTileManifest.self, from: manifestData)
         _currentManifest = manifest
+        _syncManifestSnapshot()
 
         var loaded: [TrackTileKey: TrackTileBucket] = [:]
         guard fm.fileExists(atPath: paths.trackTilesDir.path) else {
