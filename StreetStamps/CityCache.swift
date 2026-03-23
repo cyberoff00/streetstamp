@@ -650,16 +650,7 @@ final class CityCache: ObservableObject {
         self.migrationMarkerV4URL = paths.migrationMarkerV4_removeLegacyThumbnails
         self.migrationMarkerV6URL = paths.migrationMarkerV6_autoLevelRekey
         self.paths = paths
-        loadFromDisk()
-        loadMembershipIndexFromDisk()
-
-        // Migrate thumbnail paths from absolute to relative (V2 migration)
-        migrateThumbnailPathsIfNeeded()
-
-        // Migrate intercity routes to starting cities (V3 migration)
-        migrateInterCityRoutesToStartingCitiesIfNeeded()
-        removeLegacyDiskThumbnailsIfNeeded()
-        handleJourneyStoreLoadedState(journeyStore.hasLoaded)
+        // Disk I/O deferred to loadInitialData() to avoid blocking app launch.
 
         journeyStore.$hasLoaded
             .receive(on: RunLoop.main)
@@ -674,6 +665,18 @@ final class CityCache: ObservableObject {
                 self?.rebuildFromJourneyStore()
             }
             .store(in: &cancellables)
+    }
+
+    /// Load cached cities, membership index, and run any pending migrations.
+    /// Called during the async startup phase (while splash is visible) so that
+    /// init() stays lightweight and does not block the first frame.
+    func loadInitialData() {
+        loadFromDisk()
+        loadMembershipIndexFromDisk()
+        migrateThumbnailPathsIfNeeded()
+        migrateInterCityRoutesToStartingCitiesIfNeeded()
+        removeLegacyDiskThumbnailsIfNeeded()
+        handleJourneyStoreLoadedState(journeyStore.hasLoaded)
     }
 
     func rebind(paths: StoragePath) {

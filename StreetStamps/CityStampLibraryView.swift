@@ -778,7 +778,22 @@ final class CityThumbnailLoader: ObservableObject {
     }
 
     nonisolated static func renderCacheRelativePath(forKey key: String) -> String {
-        "city_\(safeFilenameComponent(key)).jpg"
+        let hash = stableHash(key)
+        // Extract a short human-readable prefix (city ID) for easier debugging.
+        let parts = key.split(separator: "|")
+        let prefix = parts.count >= 4 ? safeFilenameComponent(String(parts[2])) : "unknown"
+        return "city_\(prefix)_\(hash).jpg"
+    }
+
+    /// Stable 64-bit hash encoded as lowercase hex. Does not rely on Swift's
+    /// `Hashable` (which is randomised per process) — uses FNV-1a instead.
+    nonisolated private static func stableHash(_ string: String) -> String {
+        var hash: UInt64 = 14695981039346656037 // FNV offset basis
+        for byte in string.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1099511628211 // FNV prime
+        }
+        return String(hash, radix: 16, uppercase: false)
     }
 
     nonisolated static func existingPersistentCache(

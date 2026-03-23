@@ -356,22 +356,28 @@ struct StreetStampsApp: App {
                 BackendAPIClient.shared.bindSessionStore(sessionStore)
                 let startupUserID = sessionStore.activeLocalProfileID
                 await sessionStore.bootstrapFileSystemAsync()
-                await LifelogMigrationService.migrateLegacyLifelogIfNeededAsync(
-                    paths: StoragePath(userID: startupUserID)
-                )
 
-                // Phase 1: Load journey and lifelog in parallel.
-                // journeyStore must finish before Live Activity cleanup,
-                // so start lifelogStore first and await journeyStore immediately.
-                async let lifelogLoad: () = lifelogStore.loadAsync()
-                await journeyStore.loadAsync()
-                // Clean up Live Activities left over from a previous process
-                // if there is no ongoing journey to resume.
+                // Phase 1: All independent loads in parallel.
+                // bootstrapFS must finish first (ensures dirs exist), then
+                // everything else can run concurrently.
+                async let journeyLoad: () = journeyStore.loadAsync()
+                async let lifelogMigrationThenLoad: () = {
+                    await LifelogMigrationService.migrateLegacyLifelogIfNeededAsync(
+                        paths: StoragePath(userID: startupUserID)
+                    )
+                    await lifelogStore.loadAsync()
+                }()
+                // CityCache load runs on main thread but executes during
+                // await suspension gaps of the parallel loads above, so it
+                // does not add serial time.
+                cityCache.loadInitialData()
+
+                await journeyLoad
                 if !journeyStore.journeys.contains(where: { $0.endTime == nil }) {
                     LiveActivityManager.shared.endAllStaleActivities()
                 }
                 setupAutoEndHandler()
-                await lifelogLoad
+                await lifelogMigrationThenLoad
 
                 // Phase 2: Bind and reduced warmup (4 cities now, rest deferred)
                 lifelogStore.bind(to: locationHub)

@@ -35,7 +35,7 @@ final class TrackTileStore: ObservableObject {
         self.encoder.outputFormatting = [.sortedKeys]
         self.encoder.dateEncodingStrategy = .iso8601
         self.decoder.dateDecodingStrategy = .iso8601
-        try? _loadFromDisk()
+        // Disk load deferred — refresh() lazy-loads when _currentManifest is nil.
     }
 
     func rebind(paths: StoragePath) {
