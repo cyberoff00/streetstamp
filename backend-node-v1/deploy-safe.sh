@@ -22,6 +22,10 @@ cd "$ROOT_DIR"
 if [[ -n "$(git status --short 2>/dev/null || true)" ]]; then
   LOCAL_GIT_TREE_STATE="dirty"
   LOCAL_GIT_STATUS_LINES="$(git status --short 2>/dev/null | wc -l | tr -d ' ')"
+  if [[ "${ALLOW_DIRTY:-0}" != "1" ]]; then
+    fail "working tree is dirty (${LOCAL_GIT_STATUS_LINES} changed files). Commit first or set ALLOW_DIRTY=1 to override."
+  fi
+  echo "[WARN] deploying from dirty worktree (${LOCAL_GIT_STATUS_LINES} changed files)"
 fi
 
 [[ -f "backend-node-v1/server.js" ]] || fail "missing backend-node-v1/server.js"
@@ -31,6 +35,8 @@ fi
 [[ -f "backend-node-v1/Dockerfile" ]] || fail "missing backend-node-v1/Dockerfile"
 [[ -f "backend-node-v1/DEPLOY.md" ]] || fail "missing backend-node-v1/DEPLOY.md"
 [[ -f "backend-node-v1/db-relational.js" ]] || fail "missing backend-node-v1/db-relational.js"
+[[ -f "backend-node-v1/postcard-rules.js" ]] || fail "missing backend-node-v1/postcard-rules.js"
+[[ -f "backend-node-v1/apns.js" ]] || fail "missing backend-node-v1/apns.js"
 [[ -f "docs/ops/PRODUCTION_WORKFLOW.md" ]] || fail "missing docs/ops/PRODUCTION_WORKFLOW.md"
 [[ -f "docs/ops/SERVER_BOOTSTRAP.md" ]] || fail "missing docs/ops/SERVER_BOOTSTRAP.md"
 [[ -f "scripts/check_auth_mode.sh" ]] || fail "missing scripts/check_auth_mode.sh"
@@ -51,6 +57,8 @@ ssh -o StrictHostKeyChecking=no "$SERVER_HOST" "\
   cd '${REMOTE_DIR}'; \
   cp server.js docker-compose.yml package.json package-lock.json Dockerfile .env '${REMOTE_RELEASE_DIR}/'; \
   if [ -f db-relational.js ]; then cp db-relational.js '${REMOTE_RELEASE_DIR}/'; fi; \
+  if [ -f postcard-rules.js ]; then cp postcard-rules.js '${REMOTE_RELEASE_DIR}/'; fi; \
+  if [ -f apns.js ]; then cp apns.js '${REMOTE_RELEASE_DIR}/'; fi; \
   if [ -f .deployed-git-commit ]; then cp .deployed-git-commit '${REMOTE_RELEASE_DIR}/'; fi; \
   if [ -f DEPLOY.md ]; then cp DEPLOY.md '${REMOTE_RELEASE_DIR}/'; fi; \
   if [ -f check_auth_mode.sh ]; then cp check_auth_mode.sh '${REMOTE_RELEASE_DIR}/'; fi; \
@@ -65,6 +73,8 @@ pass "remote backup created"
 scp -o StrictHostKeyChecking=no \
   backend-node-v1/server.js \
   backend-node-v1/db-relational.js \
+  backend-node-v1/postcard-rules.js \
+  backend-node-v1/apns.js \
   backend-node-v1/docker-compose.yml \
   backend-node-v1/package.json \
   backend-node-v1/package-lock.json \

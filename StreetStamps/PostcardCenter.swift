@@ -194,7 +194,7 @@ final class PostcardCenter: ObservableObject {
             }
             // Keep local state stable but surface a concise sync error for UI diagnostics.
             let msg = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-            lastSyncError = msg.isEmpty ? "明信片同步失败" : msg
+            lastSyncError = msg.isEmpty ? L10n.t("postcard_sync_failed") : msg
         }
     }
 
@@ -209,7 +209,7 @@ final class PostcardCenter: ObservableObject {
         guard let token, !token.isEmpty else {
             var draft = drafts[idx]
             draft.status = .failed
-            draft.lastError = "请先登录"
+            draft.lastError = L10n.t("please_login_first")
             draft.updatedAt = Date()
             if increaseRetry { draft.retryCount += 1 }
             drafts[idx] = draft

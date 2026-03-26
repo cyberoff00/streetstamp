@@ -37,6 +37,7 @@ struct MainView: View {
     @State private var ripplePhase = false
     
     @StateObject private var cityLoc = CityLocationManager()
+    @AppStorage("streetstamps.hint.journey_just_saved") private var journeyJustSaved = false
     @State private var showLinkEmailPrompt = false
 
 #if DEBUG
@@ -136,16 +137,14 @@ struct MainView: View {
             }
         }
         .overlay(alignment: .bottom) {
-            if onboardingGuide.isCurrent(.startJourney) {
-                OnboardingCoachCard(
-                    message: OnboardingGuideStore.Step.startJourney.message,
-                    actionTitle: OnboardingGuideStore.Step.startJourney.actionTitle,
-                    onAction: { startOrContinueJourneyAndOpenMap() },
-                    onLater: { onboardingGuide.pauseForLater() },
-                    onSkip: { onboardingGuide.skipAll() }
+            if store.hasLoaded && store.journeys.isEmpty && !hasOngoingJourney && onboardingGuide.shouldShowHint(.startFirstJourney) {
+                ContextualHintBar(
+                    icon: "play.circle",
+                    message: L10n.t("hint_start_first_journey"),
+                    onDismiss: { onboardingGuide.dismissHint(.startFirstJourney) }
                 )
                 .padding(.horizontal, 18)
-                .padding(.bottom, 98)
+                .padding(.bottom, 24)
             }
         }
         .animation(.easeInOut(duration: 0.18), value: showSharingCard)
@@ -246,6 +245,7 @@ struct MainView: View {
     private func checkLinkEmailPrompt() {
         guard sessionStore.isLoggedIn,
               !sessionStore.hasEmailPassword,
+              sessionStore.hasEmailPasswordEverSynced,
               LinkEmailPromptPolicy.shouldShow()
         else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
@@ -257,10 +257,6 @@ struct MainView: View {
 
     // MARK: - UI Components
 
-    private var isGuideStartStep: Bool {
-        onboardingGuide.isCurrent(.startJourney)
-    }
-    
     private func startButton(circleSize: CGFloat) -> some View {
         Button(action: startOrContinueJourneyAndOpenMap) {
             ZStack {
@@ -272,13 +268,6 @@ struct MainView: View {
                     .fill(DesignTheme.accent)
                     .frame(width: circleSize, height: circleSize)
                     .shadow(color: DesignTheme.accent.opacity(0.30), radius: 24, y: 12)
-                    .overlay {
-                        if isGuideStartStep {
-                            Circle()
-                                .stroke(Color.white, lineWidth: 4)
-                                .shadow(color: Color.white.opacity(0.8), radius: 8)
-                        }
-                    }
 
                 Circle()
                     .stroke(DesignTheme.accent.opacity(0.22), lineWidth: 1.5)
@@ -307,8 +296,6 @@ struct MainView: View {
             .appFullSurfaceTapTarget(.circle)
         }
         .buttonStyle(.plain)
-        .scaleEffect(isGuideStartStep ? 1.03 : 1.0)
-        .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: isGuideStartStep)
     }
 
             // MARK: - Mode Selector Popup
@@ -331,6 +318,7 @@ struct MainView: View {
             
             private func startOrContinueJourneyAndOpenMap() {
                 onboardingGuide.advance(.startJourney)
+                onboardingGuide.dismissHint(.startFirstJourney)
                 locationHub.requestPermissionIfNeeded()
 
                 if !hasOngoingJourney {
@@ -418,6 +406,7 @@ struct MainView: View {
 
             private func completeJourneyAndSync(journey: JourneyRoute) {
                 ongoingJourney = journey
+                journeyJustSaved = true
                 JourneySaveCompletion.persistFinalizedJourney(journey, in: store)
                 publishStore.publish(
                     journey: journey,

@@ -185,12 +185,12 @@ struct PostcardPreviewView: View {
 
     private func saveCurrentFaceToPhotos() {
         guard #available(iOS 16.0, *), let image = renderFaceImage(isFront: isFrontShowing) else {
-            saveToastText = "保存失败"
+            saveToastText = L10n.t("save_failed")
             clearSaveToastSoon()
             return
         }
         UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
-        saveToastText = isFrontShowing ? "已保存明信片正面" : "已保存明信片反面"
+        saveToastText = isFrontShowing ? L10n.t("postcard_saved_front") : L10n.t("postcard_saved_back")
         clearSaveToastSoon()
     }
 

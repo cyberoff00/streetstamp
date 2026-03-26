@@ -39,6 +39,10 @@ final class StartupWarmupService {
         }
     }
 
+    func invalidateWarmedKeys() {
+        warmedRenderKeys.removeAll()
+    }
+
     nonisolated static func selectCities(from cities: [City], limit: Int) -> [City] {
         guard limit > 0 else { return [] }
 

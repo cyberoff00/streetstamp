@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_URL="${BASE_URL:-https://api.streetstamps.cyberkkk.cn}"
+BASE_URL="${BASE_URL:-https://worldo-api.cyberkkk.cn}"
 EXPECTED_AUTH_MODE="${EXPECTED_AUTH_MODE:-backend_jwt_only}"
 EXPECTED_WRITE_FROZEN="${EXPECTED_WRITE_FROZEN:-false}"
 

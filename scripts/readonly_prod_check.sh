@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_URL="${BASE_URL:-https://api.streetstamps.cyberkkk.cn}"
+BASE_URL="${BASE_URL:-https://worldo-api.cyberkkk.cn}"
 ALLOWED_ORIGIN="${ALLOWED_ORIGIN:-https://app.streetstamps.cyberkkk.cn}"
 
 pass() { echo "[PASS] $*"; }

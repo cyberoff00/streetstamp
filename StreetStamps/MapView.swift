@@ -861,6 +861,8 @@ struct MapView: View {
 
     @State private var editingMemory: JourneyMemory? = nil
     @State private var lastCoordinateSnapshotPersistAt: Date? = nil
+    @State private var activeMapHint: OnboardingGuideStore.Hint?
+    @State private var mapHintTask: Task<Void, Never>?
 
     private func mapCoord(_ c: CLLocationCoordinate2D) -> CLLocationCoordinate2D {
         tracking.mapReady(c)
@@ -982,6 +984,7 @@ struct MapView: View {
             Text(L10n.t("finish_confirm_message"))
         }
         .alert(L10n.t("finish_no_city_title"), isPresented: $showFinishNoCityWarning) {
+            Button(L10n.t("finish_no_city_finish_now"), role: .destructive) { finishJourney() }
             Button(L10n.t("finish_no_city_continue"), role: .cancel) {}
         } message: {
             Text(L10n.t("finish_no_city_message"))
@@ -1010,7 +1013,14 @@ struct MapView: View {
         .onChange(of: journeyRoute.memories) { _ in
             groupedMemoriesCache = computeGroupedMemories()
         }
+        .overlay {
+            if let hint = activeMapHint {
+                mapHintOverlay(hint)
+                    .animation(.easeOut(duration: 0.3), value: activeMapHint)
+            }
+        }
         .onDisappear {
+            mapHintTask?.cancel()
             tracking.deactivateMapRenderingSurface()
             if journeyRoute.endTime == nil { flushSnapshot(.exitToHome) }
         }
@@ -1063,6 +1073,7 @@ struct MapView: View {
             floatingActionButton(icon: "camera", label: "CAPTURE", dark: true) {
                 editingMemory = nil
                 showMemoryEditor = true
+                dismissMapHint(.mapMemoryIcon)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
@@ -1158,6 +1169,7 @@ struct MapView: View {
                 Spacer()
 
                 Button {
+                    dismissMapHint(.mapModeExplain)
                     withAnimation(.easeInOut(duration: 0.18)) {
                         showModeSelector = true
                     }
@@ -1398,6 +1410,90 @@ struct MapView: View {
                     }
                 }
             }
+        }
+
+        scheduleMapHints()
+    }
+
+    private func scheduleMapHints() {
+        guard journeyRoute.endTime == nil else { return }
+        mapHintTask?.cancel()
+        mapHintTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else { return }
+            if onboardingGuide.shouldShowHint(.mapModeExplain) {
+                activeMapHint = .mapModeExplain
+                try? await Task.sleep(nanoseconds: 8_000_000_000)
+                guard !Task.isCancelled else { return }
+                if activeMapHint == .mapModeExplain { dismissMapHint(.mapModeExplain) }
+            }
+
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else { return }
+            if onboardingGuide.shouldShowHint(.mapMemoryIcon) {
+                activeMapHint = .mapMemoryIcon
+                try? await Task.sleep(nanoseconds: 8_000_000_000)
+                guard !Task.isCancelled else { return }
+                if activeMapHint == .mapMemoryIcon { dismissMapHint(.mapMemoryIcon) }
+            }
+
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else { return }
+            if onboardingGuide.shouldShowHint(.mapFinish) {
+                activeMapHint = .mapFinish
+                try? await Task.sleep(nanoseconds: 8_000_000_000)
+                guard !Task.isCancelled else { return }
+                if activeMapHint == .mapFinish { dismissMapHint(.mapFinish) }
+            }
+        }
+    }
+
+    private func dismissMapHint(_ hint: OnboardingGuideStore.Hint) {
+        onboardingGuide.dismissHint(hint)
+        if activeMapHint == hint { activeMapHint = nil }
+    }
+
+    @ViewBuilder
+    private func mapHintOverlay(_ hint: OnboardingGuideStore.Hint) -> some View {
+        switch hint {
+        case .mapModeExplain:
+            // Near mode selector (top right area)
+            VStack {
+                ContextualHintBar(
+                    icon: "slider.horizontal.3",
+                    message: L10n.t("hint_map_mode"),
+                    onDismiss: { dismissMapHint(hint) }
+                )
+                .padding(.horizontal, 18)
+                .padding(.top, 100)
+                Spacer()
+            }
+        case .mapMemoryIcon:
+            // Near capture button (right side, middle)
+            HStack {
+                Spacer()
+                ContextualHintBar(
+                    icon: "camera",
+                    message: L10n.t("hint_map_memory"),
+                    onDismiss: { dismissMapHint(hint) }
+                )
+                .frame(maxWidth: 280)
+                .padding(.trailing, 18)
+            }
+        case .mapFinish:
+            // Near finish button (bottom area)
+            VStack {
+                Spacer()
+                ContextualHintBar(
+                    icon: "flag",
+                    message: L10n.t("hint_map_finish"),
+                    onDismiss: { dismissMapHint(hint) }
+                )
+                .padding(.horizontal, 18)
+                .padding(.bottom, 100)
+            }
+        default:
+            EmptyView()
         }
     }
 
@@ -1643,6 +1739,8 @@ struct MapView: View {
 
     private func finishJourney() {
         onboardingGuide.advance(.finishJourney)
+        dismissMapHint(.mapFinish)
+        mapHintTask?.cancel()
         syncTimingFields()
         journeyRoute.endTime = Date()
         hasOngoingJourney = false

@@ -1204,14 +1204,6 @@ final class CityCache: ObservableObject {
         if changed { saveToDisk() }
     }
 
-    func refreshThumbnailsForCurrentMapAppearance() {
-        let stableKeys = cachedCities
-            .filter { !($0.isTemporary ?? false) }
-            .map(\.id)
-        for key in stableKeys {
-            generateRouteThumbnail(cityKey: key)
-        }
-    }
 
     func rebuildFromJourneyStore() {
         guard journeyStore.hasLoaded else { return }

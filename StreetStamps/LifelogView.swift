@@ -547,6 +547,7 @@ struct LifelogView: View {
     @EnvironmentObject private var locationHub: LocationHub
     @EnvironmentObject private var lifelogRenderCache: LifelogRenderCacheCoordinator
     @EnvironmentObject private var flow: AppFlowCoordinator
+    @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
     @State private var position: MapCameraPosition = .automatic
     @State private var showGlobe = false
@@ -586,6 +587,8 @@ struct LifelogView: View {
     @AppStorage("streetstamps.lifelog.mood.prompted.day") private var moodPromptedDay = ""
     @State private var footprintViewportCache = LifelogFootprintViewportCache()
     @State private var computedFootprintMarkers: [LifelogFootprintProjectedMarker] = []
+    @State private var activeLifelogHint: LifelogHintItem? = nil
+    @State private var lifelogHintTask: Task<Void, Never>? = nil
     @State private var footprintMarkerTask: Task<Void, Never>? = nil
     @State private var pendingFootprintRefresh: DispatchWorkItem? = nil
 #if DEBUG
@@ -878,7 +881,22 @@ struct LifelogView: View {
         } message: {
             Text(L10n.t("lifelog_permission_settings_message"))
         }
+        .overlay(alignment: .bottom) {
+            if let hint = activeLifelogHint {
+                ContextualHintBar(
+                    icon: hint.icon,
+                    message: hint.message,
+                    onDismiss: { dismissLifelogHintSequence() }
+                )
+                .padding(.horizontal, 18)
+                .padding(.bottom, 16)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .id(hint.id)
+            }
+        }
+        .animation(.easeInOut(duration: 0.3), value: activeLifelogHint?.id)
         .onAppear {
+            startLifelogHintSequence()
 #if DEBUG
             if mapDiagnosticsEnabled {
                 diagnosticsAppearAt = Date()
@@ -1256,6 +1274,40 @@ struct LifelogView: View {
         @unknown default:
             locationHub.requestAlwaysPermissionIfNeeded()
         }
+    }
+
+    private struct LifelogHintItem: Equatable {
+        let id: String
+        let icon: String
+        let message: String
+    }
+
+    private static let lifelogHintSequence: [LifelogHintItem] = [
+        LifelogHintItem(id: "weather", icon: "cloud.sun", message: L10n.t("tour_lifelog_weather")),
+        LifelogHintItem(id: "globe", icon: "globe", message: L10n.t("tour_lifelog_globe")),
+        LifelogHintItem(id: "calendar", icon: "calendar", message: L10n.t("tooltip_lifelog_calendar")),
+    ]
+
+    private func startLifelogHintSequence() {
+        guard onboardingGuide.shouldShowHint(.lifelogTour) else { return }
+        lifelogHintTask?.cancel()
+        lifelogHintTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            for hint in Self.lifelogHintSequence {
+                guard !Task.isCancelled else { return }
+                activeLifelogHint = hint
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+            }
+            guard !Task.isCancelled else { return }
+            activeLifelogHint = nil
+            onboardingGuide.dismissHint(.lifelogTour)
+        }
+    }
+
+    private func dismissLifelogHintSequence() {
+        lifelogHintTask?.cancel()
+        activeLifelogHint = nil
+        onboardingGuide.dismissHint(.lifelogTour)
     }
 
     private func openEquipmentView() {

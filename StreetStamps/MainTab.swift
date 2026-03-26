@@ -100,38 +100,37 @@ struct MainTabView: View {
     @State private var didPromptResumeThisLaunch: Bool = false
     @ObservedObject private var tracking = TrackingService.shared
     @State private var showAutoEndedAlert: Bool = false
+    @AppStorage("streetstamps.hint.journey_just_saved") private var journeyJustSaved = false
+    @State private var savedHintDismissTask: Task<Void, Never>?
 
     var body: some View {
         tabContent
-        .overlay(alignment: .top) {
-            if onboardingGuide.canResume {
-                HStack {
-                    Spacer()
-                    Button(L10n.t("main_resume_onboarding")) {
-                        onboardingGuide.resume()
-                    }
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 14)
-                    .frame(height: 36)
-                    .background(Color.black)
-                    .clipShape(Capsule(style: .continuous))
-                    .padding(.top, 12)
-                    .padding(.trailing, 14)
-                }
-            }
-        }
         .overlay(alignment: .bottom) {
-            if let step = globalGuideStep {
-                OnboardingCoachCard(
-                    message: step.message,
-                    actionTitle: step.actionTitle,
-                    onAction: { runGlobalGuideAction(step) },
-                    onLater: { onboardingGuide.pauseForLater() },
-                    onSkip: { onboardingGuide.skipAll() }
+            if journeyJustSaved && onboardingGuide.shouldShowHint(.journeySavedToMemory) {
+                ContextualHintBar(
+                    icon: "checkmark.circle",
+                    message: L10n.t("hint_journey_saved"),
+                    actionTitle: L10n.t("hint_journey_saved_action"),
+                    onAction: {
+                        selectedTab = .cities
+                        onboardingGuide.dismissHint(.journeySavedToMemory)
+                        journeyJustSaved = false
+                    },
+                    onDismiss: {
+                        onboardingGuide.dismissHint(.journeySavedToMemory)
+                        journeyJustSaved = false
+                    }
                 )
                 .padding(.horizontal, 18)
                 .padding(.bottom, 90)
+                .onAppear {
+                    savedHintDismissTask = Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 8_000_000_000)
+                        guard !Task.isCancelled else { return }
+                        onboardingGuide.dismissHint(.journeySavedToMemory)
+                        journeyJustSaved = false
+                    }
+                }
             }
         }
         .onReceive(store.$hasLoaded) { loaded in
@@ -144,6 +143,12 @@ struct MainTabView: View {
             if tab == .cities {
                 onboardingGuide.advance(.openCityCards)
                 onboardingGuide.advance(.openMemory)
+            }
+            // Dismiss journey-saved hint on tab switch
+            if journeyJustSaved {
+                savedHintDismissTask?.cancel()
+                onboardingGuide.dismissHint(.journeySavedToMemory)
+                journeyJustSaved = false
             }
         }
         .onAppear {
@@ -295,31 +300,6 @@ struct MainTabView: View {
             case .inviteFriend:
                 SidebarInviteFriendEntryView()
             }
-        }
-    }
-
-    private var globalGuideStep: OnboardingGuideStore.Step? {
-        guard onboardingGuide.isActive, let step = onboardingGuide.currentStep else { return nil }
-        switch step {
-        case .openCityCards:
-            return selectedTab == .cities ? nil : .openCityCards
-        case .openMemory:
-            return selectedTab == .cities ? nil : .openMemory
-        default:
-            return nil
-        }
-    }
-
-    private func runGlobalGuideAction(_ step: OnboardingGuideStore.Step) {
-        switch step {
-        case .openCityCards:
-            selectedTab = .cities
-            onboardingGuide.advance(.openCityCards)
-        case .openMemory:
-            selectedTab = .cities
-            onboardingGuide.advance(.openMemory)
-        default:
-            break
         }
     }
 

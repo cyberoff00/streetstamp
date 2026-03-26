@@ -360,14 +360,6 @@ struct SettingsView: View {
         } message: {
             Text(accountMessage)
         }
-        .alert(L10n.t("settings_restore_from_icloud"), isPresented: $showRestoreConfirmation) {
-            Button(L10n.t("cancel"), role: .cancel) {}
-            Button(L10n.t("settings_restore_confirm_action"), role: .destructive) {
-                Task { await restoreFromICloudManually() }
-            }
-        } message: {
-            Text(L10n.t("settings_restore_confirm_message"))
-        }
         .alert(L10n.t("settings_lifelog_bg_mode_title"), isPresented: $showBackgroundModeInfo) {
             Button(L10n.t("got_it"), role: .cancel) {}
         } message: {
@@ -736,7 +728,8 @@ struct SettingsView: View {
                             }
                             appearance = targetStyle
                             MapAppearanceSettings.apply(targetStyle)
-                            cityCache.refreshThumbnailsForCurrentMapAppearance()
+                            CityImageMemoryCache.shared.removeAll()
+                            StartupWarmupService.shared.invalidateWarmedKeys()
                         }
                     )
                 )
@@ -973,6 +966,14 @@ struct SettingsView: View {
                 Button(L10n.t("ok"), role: .cancel) {}
             } message: {
                 Text(privateTransfer.alertMessage ?? "")
+            }
+            .alert(L10n.t("settings_restore_from_icloud"), isPresented: $showRestoreConfirmation) {
+                Button(L10n.t("cancel"), role: .cancel) {}
+                Button(L10n.t("settings_restore_confirm_action"), role: .destructive) {
+                    Task { await restoreFromICloudManually() }
+                }
+            } message: {
+                Text(L10n.t("settings_restore_confirm_message"))
             }
             .onDisappear {
                 privateTransfer.stopHosting()
@@ -1481,10 +1482,16 @@ struct SettingsView: View {
             writeManualStatus: true
         )
 
-        if restoreResult.totalCount > 0 {
+        if restoreResult.totalCount > 0 || restoreResult.hasAnyFailure {
             try? await Task.sleep(nanoseconds: 500_000_000)
-            print("🔄 iCloud restore: journeys=\(journeyStore.journeys.count), cities=\(cityCache.cachedCities.count), lifelogRestore=\(restoreResult.restoredLifelogCount)")
-            accountMessage = L10n.t("settings_restore_from_icloud_success") + "\n" + L10n.t("settings_restart_app_to_see_changes")
+            print("🔄 iCloud restore: journeys=\(restoreResult.restoredJourneyCount), photos=\(restoreResult.restoredPhotoCount), lifelog=\(restoreResult.restoredLifelogCount), failures=j:\(restoreResult.journeyFailed) l:\(restoreResult.lifelogFailed) p:\(restoreResult.photoFailed)")
+            if restoreResult.hasAnyFailure && restoreResult.totalCount > 0 {
+                accountMessage = L10n.t("settings_restore_partial_success")
+            } else if restoreResult.hasAnyFailure {
+                accountMessage = L10n.t("settings_restore_all_failed")
+            } else {
+                accountMessage = L10n.t("settings_restore_from_icloud_success")
+            }
         } else {
             accountMessage = L10n.t("settings_restore_from_icloud_no_backup")
         }
@@ -1508,6 +1515,8 @@ struct SettingsView: View {
             return String(format: L10n.t("settings_icloud_status_restore_success_format"), atText)
         case "restore_failed":
             return String(format: L10n.t("settings_icloud_status_restore_failed_format"), atText)
+        case "restore_partial":
+            return String(format: L10n.t("settings_icloud_status_restore_partial_format"), atText)
         case "no_backup":
             return L10n.t("settings_icloud_status_no_backup")
         case "already_latest":

@@ -1040,6 +1040,9 @@ struct JourneyMemoryDetailView: View {
     @State private var messageText = ""
     @State private var showMembershipGate: MembershipGatedFeature? = nil
     @ObservedObject private var membership = MembershipStore.shared
+    @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
+    @State private var activeMemoryHint: MemoryHintItem? = nil
+    @State private var memoryHintTask: Task<Void, Never>? = nil
 
     init(
         journey: JourneyRoute,
@@ -1182,6 +1185,20 @@ struct JourneyMemoryDetailView: View {
         // `navigationBarBackButtonHidden(true)` often disables interactive pop.
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
+        .overlay(alignment: .bottom) {
+            if let hint = activeMemoryHint {
+                ContextualHintBar(
+                    icon: hint.icon,
+                    message: hint.message,
+                    onDismiss: { dismissMemoryHintSequence() }
+                )
+                .padding(.horizontal, 18)
+                .padding(.bottom, 16)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .id(hint.id)
+            }
+        }
+        .animation(.easeInOut(duration: 0.3), value: activeMemoryHint?.id)
         .task {
             if let cached = RouteThumbnailCache.shared.get(journey.id) {
                 routeThumbnail = cached
@@ -1232,7 +1249,9 @@ struct JourneyMemoryDetailView: View {
                 snapshotOverallMemoryImagePathsBeforeEdit = journey.overallMemoryImagePaths
             }
         }
+        .onAppear { startMemoryHintSequence() }
         .onDisappear {
+            memoryHintTask?.cancel()
             flow.popSidebarButtonHidden(token: sidebarHideToken)
             // ✅ If user leaves while editing (e.g. switches to another tab), keep editing state.
             if !readOnly {
@@ -1912,6 +1931,42 @@ struct JourneyMemoryDetailView: View {
     }
 
     @MainActor
+    // MARK: - Memory Detail Hint Sequence
+
+    private struct MemoryHintItem: Equatable {
+        let id: String
+        let icon: String
+        let message: String
+    }
+
+    private static let memoryHintSequence: [MemoryHintItem] = [
+        MemoryHintItem(id: "edit", icon: "square.and.pencil", message: L10n.t("tour_memory_edit")),
+        MemoryHintItem(id: "export", icon: "square.and.arrow.up", message: L10n.t("tour_memory_export")),
+        MemoryHintItem(id: "visibility", icon: "lock.fill", message: L10n.t("tour_memory_visibility")),
+    ]
+
+    private func startMemoryHintSequence() {
+        guard !readOnly, onboardingGuide.shouldShowHint(.memoryDetailTour) else { return }
+        memoryHintTask?.cancel()
+        memoryHintTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            for hint in Self.memoryHintSequence {
+                guard !Task.isCancelled else { return }
+                activeMemoryHint = hint
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+            }
+            guard !Task.isCancelled else { return }
+            activeMemoryHint = nil
+            onboardingGuide.dismissHint(.memoryDetailTour)
+        }
+    }
+
+    private func dismissMemoryHintSequence() {
+        memoryHintTask?.cancel()
+        activeMemoryHint = nil
+        onboardingGuide.dismissHint(.memoryDetailTour)
+    }
+
     private func generateRouteThumbnail() async {
         let coords = journey.coordinates.clCoords
         guard coords.count >= 2 else {
@@ -2166,7 +2221,7 @@ struct JourneyMemoryDetailView: View {
         if let reason {
             messageText = L10n.t(reason.localizationKey)
         } else {
-            messageText = "无法修改 Journey 权限"
+            messageText = L10n.t("cannot_modify_journey_permission")
         }
         showMessage = true
     }

@@ -386,6 +386,10 @@ final class CityImageMemoryCache {
         cache.setObject(image, forKey: key as NSString, cost: cost(of: image))
     }
 
+    func removeAll() {
+        cache.removeAllObjects()
+    }
+
     private func cost(of image: UIImage) -> Int {
         let w = Int(image.size.width * image.scale)
         let h = Int(image.size.height * image.scale)

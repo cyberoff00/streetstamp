@@ -202,8 +202,9 @@
 "finish_confirm_message" = "Si pulsaste Finalizar por error, puedes continuar el viaje.";
 "finish_confirm_title" = "¿Finalizar el viaje?";
 "finish_no_city_title" = "No se puede identificar la ciudad";
-"finish_no_city_message" = "La red no está disponible y no se pudo determinar la ciudad del viaje. Espera a que se recupere la red antes de finalizar.";
-"finish_no_city_continue" = "Continuar viaje";
+"finish_no_city_message" = "La red no está disponible y no se pudo determinar la ciudad del viaje. Puedes esperar a que se recupere la red o finalizar ahora.";
+"finish_no_city_finish_now" = "Finalizar ahora";
+"finish_no_city_continue" = "Esperar red";
 "finish_pending_memory_title" = "Señal GPS débil";
 "finish_pending_memory_message" = "Algunos recuerdos no pudieron obtener ubicación. Si finalizas ahora, se perderán esos recuerdos. Puedes esperar a que el GPS se recupere.";
 "finish_pending_memory_finish_now" = "Finalizar ahora";
@@ -601,8 +602,9 @@
 "settings_icloud_status_already_latest" = "Already restored the latest iCloud backup.";
 "settings_icloud_status_idle" = "Status: Not synced yet.";
 "settings_icloud_status_no_backup" = "No iCloud backup found for this account.";
-"settings_icloud_status_restore_failed_format" = "Last restore failed: %@";
-"settings_icloud_status_restore_success_format" = "Last restore: %@";
+"settings_icloud_status_restore_failed_format" = "Última restauración fallida: %@";
+"settings_icloud_status_restore_partial_format" = "Última restauración parcial: %@";
+"settings_icloud_status_restore_success_format" = "Última restauración: %@";
 "settings_icloud_status_unknown_time" = "unknown";
 "settings_icloud_status_upload_failed_format" = "Last upload failed: %@";
 "settings_icloud_status_upload_success_format" = "Last upload: %@";
@@ -653,6 +655,8 @@
 "settings_restore_confirm_action" = "Restaurar";
 "settings_restore_confirm_message" = "Se restaurarán los datos desde la copia de seguridad de iCloud. Los datos locales actuales se fusionarán con la copia. ¿Desea continuar?";
 "settings_restore_from_icloud_success" = "Se restauró la última copia de seguridad de iCloud.";
+"settings_restore_partial_success" = "Algunos datos no pudieron restaurarse. Inténtelo de nuevo más tarde.";
+"settings_restore_all_failed" = "La restauración falló. Verifique su red e inténtelo de nuevo.";
 "settings_section_general" = "GENERAL";
 "settings_section_information" = "INFORMATION";
 "settings_section_level_rules" = "LEVEL RULES";
@@ -942,3 +946,53 @@
 "error_forbidden" = "No tienes permiso para esta acción.";
 "error_not_configured" = "Error de configuración del servicio. Inténtalo más tarde.";
 "error_unknown" = "Algo salió mal. Inténtalo de nuevo.";
+
+// Contextual Hints (Onboarding)
+"hint_start_first_journey" = "Toca START para comenzar tu primer viaje";
+"hint_map_mode" = "Cambia entre los modos Deporte y Diario aquí";
+"hint_map_memory" = "Toca para tomar una foto o agregar una nota en el camino";
+"hint_map_finish" = "Toca la bandera para finalizar y guardar tu viaje";
+"hint_visibility_toggle" = "Elige quién puede ver este viaje — Privado, Amigos o Público";
+"hint_journey_saved" = "¡Viaje guardado! Revisa tus viajes y tarjetas de ciudad en Memoria";
+"hint_journey_saved_action" = "Ir a Memoria";
+"hint_city_card_collect" = "¡Tu primera tarjeta de ciudad! Explora más para coleccionar más ciudades";
+
+// Tooltip Tour Buttons
+"tooltip_next" = "Siguiente";
+"tooltip_done" = "Entendido";
+
+// Memory Detail Tour
+"tour_memory_edit" = "Toca aquí para editar el nombre, notas y etiqueta de actividad";
+"tour_memory_export" = "Exporta una bella imagen larga de este viaje para compartir";
+"tour_memory_visibility" = "Cambia quién puede ver este viaje — Privado, Amigos o Público";
+
+// Lifelog Tour
+"tour_lifelog_weather" = "Clima y temperatura actual de tu ubicación";
+"tour_lifelog_globe" = "Ve tus huellas globales en un globo 3D interactivo";
+"tour_lifelog_mood" = "Registra tu estado de ánimo de hoy — toca para configurar o cambiar";
+"tooltip_lifelog_calendar" = "Desliza el calendario para explorar tu historial por día o mes";
+
+// Friends Tour
+"tour_friends_feed" = "Mira los viajes públicos y actividades de tus amigos aquí";
+"tour_friends_add" = "Toca para invitar amigos o encontrar usuarios de Worldo";
+"tour_friends_profile" = "Toca un amigo para ver su perfil, viajes y tarjetas de ciudad";
+"tooltip_friends_welcome" = "Los viajes públicos tuyos y de tus amigos aparecen aquí. ¡Agrega amigos para compartir recuerdos de viaje!";
+
+// Hardcoded string fixes
+"postcard_sync_failed" = "Error al sincronizar postales";
+"please_login_first" = "Inicia sesion primero";
+"reaction_sent" = "%@ enviado";
+"send_request_failed" = "Error al enviar: %@";
+"cannot_modify_journey_permission" = "No se puede modificar el permiso del viaje";
+"about_us_title" = "Sobre nosotros";
+"about_us_location" = "Londres";
+"about_us_traveler_needs" = "Lo que necesitan los viajeros";
+"about_us_intro" = "about_us_intro";
+"about_us_walking" = "about_us_walking";
+"about_us_gamification" = "about_us_gamification";
+"about_us_ai_era" = "about_us_ai_era";
+"about_us_traveler_needs_content" = "about_us_traveler_needs_content";
+"about_us_cyber_dog_title" = "about_us_cyber_dog_title";
+"about_us_cyber_dog_content" = "about_us_cyber_dog_content";
+"postcard_saved_front" = "Frente de la postal guardado";
+"postcard_saved_back" = "Reverso de la postal guardado";

@@ -73,8 +73,8 @@ struct AccountCenterView: View {
         .task {
             await refreshMeIfPossible()
         }
-        .alert("提示", isPresented: $showMessage) {
-            Button("好", role: .cancel) {}
+        .alert(L10n.t("prompt"), isPresented: $showMessage) {
+            Button(L10n.t("ok"), role: .cancel) {}
         } message: {
             Text(message)
         }

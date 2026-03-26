@@ -468,6 +468,14 @@ struct PopSharingCard: View {
                 }
             }
 
+            if onboardingGuide.shouldShowHint(.visibilityToggle) {
+                ContextualHintBar(
+                    icon: "lock.shield",
+                    message: L10n.t("hint_visibility_toggle"),
+                    onDismiss: { onboardingGuide.dismissHint(.visibilityToggle) }
+                )
+            }
+
             HStack(spacing: 10) {
                 Picker(L10n.t("visibility"), selection: visibilitySelection) {
                     ForEach(JourneyVisibility.frontendCases) { v in
@@ -536,6 +544,7 @@ struct PopSharingCard: View {
                     return
                 }
                 selectedVisibility = target
+                onboardingGuide.dismissHint(.visibilityToggle)
             }
         )
     }

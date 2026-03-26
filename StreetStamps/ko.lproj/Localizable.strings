@@ -202,8 +202,9 @@
 "finish_confirm_message" = "실수로 종료를 눌렀다면 여정을 계속할 수 있어요.";
 "finish_confirm_title" = "여정을 종료할까요?";
 "finish_no_city_title" = "도시를 식별할 수 없습니다";
-"finish_no_city_message" = "네트워크를 사용할 수 없어 여정의 도시를 확인할 수 없습니다. 네트워크 복구 후 종료해 주세요.";
-"finish_no_city_continue" = "여정 계속하기";
+"finish_no_city_message" = "네트워크를 사용할 수 없어 여정의 도시를 확인할 수 없습니다. 네트워크 복구를 기다리거나, 바로 종료할 수 있습니다.";
+"finish_no_city_finish_now" = "바로 종료";
+"finish_no_city_continue" = "네트워크 대기";
 "finish_pending_memory_title" = "GPS 신호가 약합니다";
 "finish_pending_memory_message" = "일부 기록의 위치를 가져오지 못했어요. 지금 종료하면 해당 기록이 유실됩니다. GPS가 복구될 때까지 기다릴 수 있어요.";
 "finish_pending_memory_finish_now" = "바로 종료";
@@ -601,8 +602,9 @@
 "settings_icloud_status_already_latest" = "Already restored the latest iCloud backup.";
 "settings_icloud_status_idle" = "Status: Not synced yet.";
 "settings_icloud_status_no_backup" = "No iCloud backup found for this account.";
-"settings_icloud_status_restore_failed_format" = "Last restore failed: %@";
-"settings_icloud_status_restore_success_format" = "Last restore: %@";
+"settings_icloud_status_restore_failed_format" = "최근 복원 실패: %@";
+"settings_icloud_status_restore_partial_format" = "최근 복원 부분 성공: %@";
+"settings_icloud_status_restore_success_format" = "최근 복원: %@";
 "settings_icloud_status_unknown_time" = "unknown";
 "settings_icloud_status_upload_failed_format" = "Last upload failed: %@";
 "settings_icloud_status_upload_success_format" = "Last upload: %@";
@@ -653,6 +655,8 @@
 "settings_restore_confirm_action" = "복원";
 "settings_restore_confirm_message" = "iCloud 백업에서 데이터를 복원합니다. 현재 로컬 데이터가 백업과 병합됩니다. 계속하시겠습니까?";
 "settings_restore_from_icloud_success" = "최신 iCloud 백업을 복원했습니다.";
+"settings_restore_partial_success" = "일부 데이터를 복원할 수 없습니다. 나중에 다시 시도해 주세요.";
+"settings_restore_all_failed" = "복원에 실패했습니다. 네트워크를 확인하고 다시 시도해 주세요.";
 "settings_section_general" = "GENERAL";
 "settings_section_information" = "INFORMATION";
 "settings_section_level_rules" = "LEVEL RULES";
@@ -942,3 +946,53 @@
 "error_forbidden" = "이 작업을 수행할 권한이 없습니다.";
 "error_not_configured" = "서비스 구성 오류입니다. 잠시 후 다시 시도해 주세요.";
 "error_unknown" = "문제가 발생했습니다. 다시 시도해 주세요.";
+
+// Contextual Hints (Onboarding)
+"hint_start_first_journey" = "START를 탭하여 첫 여행을 시작하세요";
+"hint_map_mode" = "여기서 스포츠 모드와 일상 모드를 전환하세요";
+"hint_map_memory" = "탭하여 사진을 찍거나 메모를 추가하세요";
+"hint_map_finish" = "깃발을 탭하여 여행을 완료하고 저장하세요";
+"hint_visibility_toggle" = "이 여행의 공개 범위를 선택하세요 — 비공개, 친구, 전체 공개";
+"hint_journey_saved" = "여행이 저장되었습니다! 메모리에서 여행과 도시 카드를 확인하세요";
+"hint_journey_saved_action" = "메모리로 이동";
+"hint_city_card_collect" = "첫 번째 도시 카드! 더 많은 여행으로 더 많은 도시를 모으세요";
+
+// Tooltip Tour Buttons
+"tooltip_next" = "다음";
+"tooltip_done" = "확인";
+
+// Memory Detail Tour
+"tour_memory_edit" = "여기를 탭하여 여행 이름, 메모, 활동 태그를 편집하세요";
+"tour_memory_export" = "이 여행의 멋진 롱 이미지를 내보내어 공유하세요";
+"tour_memory_visibility" = "이 여행의 공개 범위를 변경하세요 — 비공개, 친구, 전체 공개";
+
+// Lifelog Tour
+"tour_lifelog_weather" = "현재 위치의 날씨와 기온";
+"tour_lifelog_globe" = "인터랙티브 3D 지구본에서 전 세계 발자취를 확인";
+"tour_lifelog_mood" = "오늘의 기분을 기록하세요 — 탭하여 설정 또는 변경";
+"tooltip_lifelog_calendar" = "캘린더를 스와이프하여 일별 또는 월별 기록을 탐색하세요";
+
+// Friends Tour
+"tour_friends_feed" = "여기서 친구들의 공개 여행과 활동을 확인하세요";
+"tour_friends_add" = "탭하여 친구를 초대하거나 근처의 Worldo 사용자를 찾으세요";
+"tour_friends_profile" = "친구를 탭하여 프로필, 여행, 도시 카드를 확인하세요";
+"tooltip_friends_welcome" = "나와 친구들의 공개 여행이 여기에 표시됩니다. 친구를 추가해서 여행 추억을 함께 나눠요!";
+
+// Hardcoded string fixes
+"postcard_sync_failed" = "엽서 동기화 실패";
+"please_login_first" = "먼저 로그인해주세요";
+"reaction_sent" = "%@ 전송됨";
+"send_request_failed" = "전송 실패: %@";
+"cannot_modify_journey_permission" = "여행 권한을 수정할 수 없습니다";
+"about_us_title" = "소개";
+"about_us_location" = "런던";
+"about_us_traveler_needs" = "여행자의 필요";
+"about_us_intro" = "about_us_intro";
+"about_us_walking" = "about_us_walking";
+"about_us_gamification" = "about_us_gamification";
+"about_us_ai_era" = "about_us_ai_era";
+"about_us_traveler_needs_content" = "about_us_traveler_needs_content";
+"about_us_cyber_dog_title" = "about_us_cyber_dog_title";
+"about_us_cyber_dog_content" = "about_us_cyber_dog_content";
+"postcard_saved_front" = "엽서 앞면이 저장되었습니다";
+"postcard_saved_back" = "엽서 뒷면이 저장되었습니다";

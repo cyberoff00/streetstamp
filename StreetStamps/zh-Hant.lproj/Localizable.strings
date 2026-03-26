@@ -202,8 +202,9 @@
 "finish_confirm_message" = "如果你是不小心点到結束，可以選擇繼續旅程。";
 "finish_confirm_title" = "結束旅程？";
 "finish_no_city_title" = "無法識別城市";
-"finish_no_city_message" = "目前網路不可用，無法確定旅程所在城市。請等待網路恢復後再結束旅程。";
-"finish_no_city_continue" = "繼續旅程";
+"finish_no_city_message" = "目前網路不可用，無法確定旅程所在城市。你可以等待網路恢復，或立即結束（城市資訊稍後補全）。";
+"finish_no_city_finish_now" = "立即結束";
+"finish_no_city_continue" = "等待網路";
 "finish_pending_memory_title" = "GPS 訊號較差";
 "finish_pending_memory_message" = "部分記憶未能取得位置資訊，立即結束將遺失這些記憶。你可以等待 GPS 訊號恢復後再結束。";
 "finish_pending_memory_finish_now" = "立即結束";
@@ -607,6 +608,7 @@
 "settings_icloud_status_idle" = "状态：尚未发生同步。";
 "settings_icloud_status_no_backup" = "当前 iCloud 账号下没有可恢復備份。";
 "settings_icloud_status_restore_failed_format" = "最近恢復失敗：%@";
+"settings_icloud_status_restore_partial_format" = "最近恢復部分成功：%@";
 "settings_icloud_status_restore_success_format" = "最近恢復：%@";
 "settings_icloud_status_unknown_time" = "未知時間";
 "settings_icloud_status_upload_failed_format" = "最近上傳失敗：%@";
@@ -658,6 +660,8 @@
 "settings_restore_confirm_action" = "恢復";
 "settings_restore_confirm_message" = "將從 iCloud 備份恢復資料，目前本機資料會與備份合併。確定繼續嗎？";
 "settings_restore_from_icloud_success" = "已恢復最新 iCloud 備份。";
+"settings_restore_partial_success" = "部分資料未能恢復，請稍後再試。";
+"settings_restore_all_failed" = "恢復失敗，請檢查網路後重試。";
 "settings_restart_app_to_see_changes" = "請重啟 App 以查看裝備更新。";
 "settings_section_general" = "通用";
 "settings_section_information" = "信息";
@@ -942,3 +946,53 @@
 "error_forbidden" = "沒有權限執行此操作";
 "error_not_configured" = "服務配置異常，請稍後重試";
 "error_unknown" = "發生問題，請重試";
+
+// Contextual Hints (Onboarding)
+"hint_start_first_journey" = "點擊 START 開始你的第一次旅程";
+"hint_map_mode" = "在這裡切換運動模式和日常模式";
+"hint_map_memory" = "點擊拍照或新增筆記，記錄沿途點滴";
+"hint_map_finish" = "點擊旗幟結束並儲存旅程";
+"hint_visibility_toggle" = "選擇誰可以看到這次旅程 — 私密、好友或公開";
+"hint_journey_saved" = "旅程已儲存！前往「記憶」查看旅程和城市卡";
+"hint_journey_saved_action" = "去看看";
+"hint_city_card_collect" = "你的第一張城市軌跡卡！探索更多旅程，收集更多城市";
+
+// Tooltip Tour Buttons
+"tooltip_next" = "下一步";
+"tooltip_done" = "知道了";
+
+// Memory Detail Tour
+"tour_memory_edit" = "點擊這裡編輯旅程名稱、筆記和活動標籤";
+"tour_memory_export" = "匯出精美長圖，分享這次旅程";
+"tour_memory_visibility" = "設定誰可以看到這次旅程 — 私密、好友或公開";
+
+// Lifelog Tour
+"tour_lifelog_weather" = "目前位置的天氣和溫度";
+"tour_lifelog_globe" = "在3D地球上查看你的全球足跡";
+"tour_lifelog_mood" = "記錄今天的心情 — 點擊設定或更改";
+"tooltip_lifelog_calendar" = "滑動日曆按日或月瀏覽你的歷史紀錄";
+
+// Friends Tour
+"tour_friends_feed" = "在這裡查看好友的公開旅程和動態";
+"tour_friends_add" = "點擊邀請好友或發現附近的 Worldo 用戶";
+"tour_friends_profile" = "點擊好友查看主頁、旅程和城市卡";
+"tooltip_friends_welcome" = "你和好友的公開旅程會展示在這裡，添加好友一起共享旅途記憶吧！";
+
+// Hardcoded string fixes
+"postcard_sync_failed" = "明信片同步失敗";
+"please_login_first" = "請先登入";
+"reaction_sent" = "已發送 %@";
+"send_request_failed" = "傳送失敗：%@";
+"cannot_modify_journey_permission" = "無法修改旅程權限";
+"about_us_title" = "關於我們";
+"about_us_location" = "倫敦";
+"about_us_traveler_needs" = "旅行者的需求";
+"about_us_intro" = "Worldo是我獨立開發的第二款產品，沒有什麼靈光一閃的時刻，沒有什麼激動人心組建團隊大幹一場的氛圍，我只是想到了，然後就開始做了，或許別的個人開發者也是這樣。但我依然應該為這個產品寫點什麼，關於為什麼是Worldo。\n\n滿足\"我\"而不是想象的用戶。互聯網產品喜歡聊需求，聊用戶，用戶喜歡這個，不喜歡那個，用戶如何被討好，被引導。但當我不是一個資本家，我還應該帶著這樣的心去做產品嗎？在無數失去信心的時候，我只是提醒自己我需要無限逼近我，那我也會是很多人，於是所有的需求都變得一樣重要。";
+"about_us_walking" = "那我喜歡什麼。我喜歡散步，我在很多地方走來走去，拍一些照片，做一點記錄。這個市面上有很多高精運動軟件，數字讓我們產生對生活的掌控感，數字也讓我們焦慮。如果我不是一個跑者，我只是在一個城市，又到了另一個城市，我路過了一個公園，在夜路上遇到一隻狐狸，在一家咖啡店呆了一下午，城市裡，城市間，這樣的東西應該如何被悄無聲息得記錄下來。數字本身是沒有美感的，線條或許是有美滿的，記憶是真正重要的，帶著這樣的想法，我腦中幾乎立刻有了Worldo應有的樣子。我們的照片，文字，和一段段旅程軌跡如何被一個載體所容納，裝幀，而不是散落在過去。GoogleMap可以實現一些工具性的作用，我想實現互補的一面。";
+"about_us_gamification" = "其次我喜歡遊戲化的概念，我時常期望自己能夠喜歡遊戲，彷彿這樣生活會更簡單一點。但實際上我也並不玩遊戲，我只是在想象中覺得種花採蘑菇去朋友家竄門換裝都很有意思，但這也只不過是我對生活的一種期待投射。我希望Worldo能滿足我這樣的期待，記錄下我家到朋友家的路徑，我裝扮成怎樣出門，我買了一盆植物，朋友收養了一隻貓的故事，worldo理應存在於二點五次元，我如何為我的線下生活豐榮，都應該同時獲得線下線上雙份的滿足感，從而我更願意認真得對待我的生活。worldo今天除了最核心的世界軌跡城市記憶收集的功能以外，用到了像素小人，只是因為我和朋友們都很喜歡很萌的元素。我們為它配置了各種裝備，也特地做了社交功能，我希望即使我和朋友在不同城市，但我可以去好友的主頁坐一坐，看看他們最近的旅程。在未來我還會不遺餘力加入任何我想要的元素，例如和好友一起的旅行可以出現在一個電子地圖，收藏別人的記憶，地圖會配合天氣下雨，但你也可以去買一把雨傘，等等等等。";
+"about_us_ai_era" = "最後，AI時代app已死，這是我在整個開發過程中時常刷到的，每次都激起我的一陣恐慌，那我做的事情還有意義嗎，我所消耗的精力值得嗎？也許在科技巨頭眼裡都是沒有意義的，我也思考如果什麼都被ai化了，我們到底可以留下什麼。我想到了我很喜歡的一些物件，ccd，膠片機，cd機，ipod，因為音樂，照片的永恆實現了古早載體的迷人，而我同時喜歡著作品和創造作品的工具，worldo會是一個開始。";
+"about_us_traveler_needs_content" = "Worldo裡我最喜歡的板塊是很簡單的Journey Memory，也就是最後旅程被歸檔的圖文所呈現的形態。我認為做APP會時常感到氣餒的點是它並沒有那麼像創作，也並不像是一個人的遊戲，決定成功的因素絕不僅僅是產品本身，同時一款產品的產生卻會有成千上萬的競品隨之而來，那為什麼是我。想到最後我覺得可以回到我為什麼依然喜歡一個最簡單的記錄功能。我覺得新其實更多時候只是既有東西的組合，組合好了就會達成某種和諧，這種和諧會產生一些能量。也就是說它實現了我個人最核心的需求，旅行者的需求，後來在火車上飛機上我都自然開始寫點東西，拍點東西，就像是一種圖文和時空和諧的歸位，我覺得什麼都對了。初版Worldo被測試的時候我在濟州島，爬漢拿山那天我用它記錄了一路的旅程，後來我也經常和朋友炫耀導出的遊記，這世界還存在遊記嗎？";
+"about_us_cyber_dog_title" = "賽博遛狗的故事";
+"about_us_cyber_dog_content" = "一個朋友打算在裝備裡畫了一隻小狗，因為她想到她的小狗安迪以後死了，她散步的時候可以看到地圖裡自己帶著賽博小狗一起，然後還沒畫她就痛哭一場。很萌，我想要做的就是這種很萌的東西。又有一天我在為生活的一切，為這款app焦慮的時候，騎著車記錄著軌跡，我突然覺得沒關係，即使最後是自娛自樂也沒關係。我為朋友們建造了一個賽博空間，這個空間只有30個人也是另一種偉大的故事。";
+"postcard_saved_front" = "已保存明信片正面";
+"postcard_saved_back" = "已保存明信片反面";

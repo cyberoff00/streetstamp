@@ -42,8 +42,8 @@ services:
       UPLOAD_RATE_LIMIT_MAX: "${UPLOAD_RATE_LIMIT_MAX:-10}"
       DATA_FILE: "${DATA_FILE:-/app/data/data.json}"
       MEDIA_DIR: "${MEDIA_DIR:-/app/media}"
-      MEDIA_PUBLIC_BASE: "${MEDIA_PUBLIC_BASE:-https://api.streetstamps.cyberkkk.cn}"
-      AUTH_LINK_BASE: "${AUTH_LINK_BASE:-https://api.streetstamps.cyberkkk.cn}"
+      MEDIA_PUBLIC_BASE: "${MEDIA_PUBLIC_BASE:-https://worldo-api.cyberkkk.cn}"
+      AUTH_LINK_BASE: "${AUTH_LINK_BASE:-https://worldo-api.cyberkkk.cn}"
       RESEND_API_KEY: "${RESEND_API_KEY:-}"
       RESEND_FROM_EMAIL: "${RESEND_FROM_EMAIL:-}"
       RESEND_API_BASE: "${RESEND_API_BASE:-https://api.resend.com}"
@@ -56,6 +56,11 @@ services:
       R2_ENDPOINT: "${R2_ENDPOINT:-}"
       R2_REGION: "${R2_REGION:-auto}"
       R2_PUBLIC_BASE: "${R2_PUBLIC_BASE:-}"
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
     ports:
       - "127.0.0.1:18080:18080"
     volumes:

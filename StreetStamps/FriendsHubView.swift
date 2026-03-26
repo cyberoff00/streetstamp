@@ -162,6 +162,7 @@ struct FriendsHubView: View {
     @EnvironmentObject private var deepLinkStore: AppDeepLinkStore
     @EnvironmentObject private var publishStore: JourneyPublishStore
     @EnvironmentObject private var notificationStore: SocialNotificationStore
+    @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
     // NOTE: journeyStore, cityCache, flow removed from here to prevent
     // spurious body recomputation. Those stores update frequently but are
     // only used by child screens which obtain them via @EnvironmentObject
@@ -350,6 +351,17 @@ struct FriendsHubView: View {
             }
         }
         .background(FigmaTheme.background.ignoresSafeArea())
+        .overlay(alignment: .bottom) {
+            if sessionStore.isLoggedIn && onboardingGuide.shouldShowHint(.friendsTour) {
+                ContextualHintBar(
+                    icon: "person.2",
+                    message: L10n.t("tooltip_friends_welcome"),
+                    onDismiss: { onboardingGuide.dismissHint(.friendsTour) }
+                )
+                .padding(.horizontal, 18)
+                .padding(.bottom, 16)
+            }
+        }
         .background(SwipeBackEnabler())
         .navigationBarBackButtonHidden(true)
         .navigationBarHidden(true)

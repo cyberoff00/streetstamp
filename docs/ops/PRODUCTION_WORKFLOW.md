@@ -11,7 +11,7 @@ This is the canonical workflow for any change that may affect the live StreetSta
 - API container: `streetstamps-node-v1`
 - Database container: `streetstamps-postgres`
 - Internal health URL: `http://127.0.0.1:18080/v1/health`
-- Public API base URL: `https://api.streetstamps.cyberkkk.cn`
+- Public API base URL: `https://worldo-api.cyberkkk.cn`
 
 Do not deploy to any other path or container unless the production unit itself is intentionally migrated.
 
@@ -78,7 +78,7 @@ It always performs:
 Production verification command:
 
 ```bash
-BASE_URL=https://api.streetstamps.cyberkkk.cn \
+BASE_URL=https://worldo-api.cyberkkk.cn \
 EXPECTED_AUTH_MODE=backend_jwt_only \
 EXPECTED_FIREBASE_COMPAT=false \
 EXPECTED_WRITE_FROZEN=false \

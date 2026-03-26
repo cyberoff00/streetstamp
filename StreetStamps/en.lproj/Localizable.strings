@@ -143,8 +143,9 @@
 "finish_confirm_continue" = "Continue Journey";
 "finish_confirm_finish" = "Confirm Finish";
 "finish_no_city_title" = "Unable to identify city";
-"finish_no_city_message" = "Network is unavailable and the city for this journey could not be determined. Please wait for network to recover before finishing.";
-"finish_no_city_continue" = "Continue Journey";
+"finish_no_city_message" = "Network is unavailable and the city for this journey could not be determined. You can wait for network to recover, or finish now without city info.";
+"finish_no_city_finish_now" = "Finish Now";
+"finish_no_city_continue" = "Wait for Network";
 "finish_pending_memory_title" = "GPS signal is weak";
 "finish_pending_memory_message" = "Some memories could not get a location. Finishing now will lose those memories. You can wait for GPS to recover.";
 "finish_pending_memory_finish_now" = "Finish Now";
@@ -904,6 +905,8 @@
 "settings_icloud_sync_unavailable_desc" = "iCloud is unavailable. Sign in to iCloud in system settings to enable cloud sync.";
 "settings_restore_from_icloud" = "Restore From iCloud";
 "settings_restore_from_icloud_success" = "Restored latest iCloud backup.";
+"settings_restore_partial_success" = "Some data could not be restored. Please try again later.";
+"settings_restore_all_failed" = "Restore failed. Please check your network and try again.";
 "settings_restart_app_to_see_changes" = "Please restart the app to see equipment updates.";
 "settings_restore_from_icloud_no_backup" = "No newer iCloud backup was found.";
 "settings_restore_confirm_action" = "Restore";
@@ -916,6 +919,7 @@
 "settings_icloud_status_upload_failed_format" = "Last upload failed: %@";
 "settings_icloud_status_restore_success_format" = "Last restore: %@";
 "settings_icloud_status_restore_failed_format" = "Last restore failed: %@";
+"settings_icloud_status_restore_partial_format" = "Last restore partially succeeded: %@";
 "settings_icloud_status_no_backup" = "No iCloud backup found for this account.";
 "settings_icloud_status_already_latest" = "Already restored the latest iCloud backup.";
 
@@ -1014,3 +1018,53 @@
 "error_forbidden" = "You do not have permission for this action.";
 "error_not_configured" = "Service configuration error. Please try again later.";
 "error_unknown" = "Something went wrong. Please try again.";
+
+// Contextual Hints (Onboarding)
+"hint_start_first_journey" = "Tap START to begin your first journey";
+"hint_map_mode" = "Switch between Sport and Daily tracking modes here";
+"hint_map_memory" = "Tap to take a photo or add a note along the way";
+"hint_map_finish" = "Tap the flag to finish and save your journey";
+"hint_visibility_toggle" = "Choose who can see this journey — Private, Friends, or Public";
+"hint_journey_saved" = "Journey saved! Check your journeys and city cards in Memory";
+"hint_journey_saved_action" = "Go to Memory";
+"hint_city_card_collect" = "Your first city track card! Explore more to collect more cities";
+
+// Tooltip Tour Buttons
+"tooltip_next" = "Next";
+"tooltip_done" = "Got it";
+
+// Memory Detail Tour
+"tour_memory_edit" = "Tap here to edit your journey name, notes, and activity tag";
+"tour_memory_export" = "Export a beautiful long image of this journey to share";
+"tour_memory_visibility" = "Change who can see this journey — Private, Friends, or Public";
+
+// Lifelog Tour
+"tour_lifelog_weather" = "Today's weather and temperature at your location";
+"tour_lifelog_globe" = "View your global footprint on an interactive 3D globe";
+"tour_lifelog_mood" = "Record your mood for today — tap to set or change it";
+"tooltip_lifelog_calendar" = "Swipe the calendar to browse your history by day or month";
+
+// Friends Tour
+"tour_friends_feed" = "See your friends' public journeys and activities here";
+"tour_friends_add" = "Tap to invite friends or find Worldo users nearby";
+"tour_friends_profile" = "Tap a friend to view their profile, journeys, and city cards";
+"tooltip_friends_welcome" = "Public journeys from you and your friends appear here. Add friends to share your journey memories together!";
+
+// Hardcoded string fixes
+"postcard_sync_failed" = "Postcard sync failed";
+"please_login_first" = "Please log in first";
+"reaction_sent" = "Sent %@";
+"send_request_failed" = "Failed to send: %@";
+"cannot_modify_journey_permission" = "Unable to modify journey permission";
+"about_us_title" = "About Us";
+"about_us_location" = "London";
+"about_us_traveler_needs" = "What Travelers Need";
+"about_us_intro" = "about_us_intro";
+"about_us_walking" = "about_us_walking";
+"about_us_gamification" = "about_us_gamification";
+"about_us_ai_era" = "about_us_ai_era";
+"about_us_traveler_needs_content" = "about_us_traveler_needs_content";
+"about_us_cyber_dog_title" = "The Cyber Dog Story";
+"about_us_cyber_dog_content" = "about_us_cyber_dog_content";
+"postcard_saved_front" = "Postcard front saved";
+"postcard_saved_back" = "Postcard back saved";

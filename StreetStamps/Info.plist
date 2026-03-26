@@ -7,7 +7,7 @@
 	<key>MAPBOX_ACCESS_TOKEN</key>
 	<string>pk.eyJ1IjoiY3liZXJra2siLCJhIjoiY21rYXgybmR5MHBiMTNmc2Via2N4cXJwZyJ9.2cDXOLDImevZU6b_nRNt4A</string>
 	<key>API_BASE_URL</key>
-	<string>https://api.streetstamps.cyberkkk.cn</string>
+	<string>https://worldo-api.cyberkkk.cn</string>
 	<key>GOOGLE_IOS_CLIENT_ID</key>
 	<string>731829514501-t0hm8gg4rj83b8slf5cgodfb1adiohjq.apps.googleusercontent.com</string>
 	<key>CFBundleURLTypes</key>

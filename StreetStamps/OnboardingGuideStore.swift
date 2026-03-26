@@ -59,6 +59,20 @@ final class OnboardingGuideStore: ObservableObject {
         case saveActivityTag
     }
 
+    enum Hint: String, CaseIterable {
+        case startFirstJourney
+        case mapModeExplain
+        case mapMemoryIcon
+        case mapFinish
+        case visibilityToggle
+        case journeySavedToMemory
+        case cityCardCollect
+        // Tooltip-guided multi-step hints
+        case memoryDetailTour
+        case lifelogTour
+        case friendsTour
+    }
+
     @Published private(set) var currentStep: Step?
     @Published private(set) var status: Status = .active
 
@@ -66,12 +80,16 @@ final class OnboardingGuideStore: ObservableObject {
     var canResume: Bool { status == .paused && currentStep != nil }
     var isFinished: Bool { status == .completed || status == .skipped }
 
-    private let defaults: UserDefaults
+    let defaults: UserDefaults
     private let initializedKey = "streetstamps.onboarding.v1.initialized"
     private let stepKey = "streetstamps.onboarding.v1.step"
     private let statusKey = "streetstamps.onboarding.v1.status"
     private let lightweightTipsKey = "streetstamps.onboarding.v2.lightweightTips"
+    private let hintsKey = "streetstamps.onboarding.v3.hints"
+    private let hintsSchemaKey = "streetstamps.onboarding.v3.schema"
+    private static let currentHintsSchema = 1
     private var shownLightweightTips: Set<String> = []
+    private var shownHints: Set<String> = []
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -113,6 +131,16 @@ final class OnboardingGuideStore: ObservableObject {
         persistLightweightTips()
     }
 
+    func shouldShowHint(_ hint: Hint) -> Bool {
+        !shownHints.contains(hint.rawValue)
+    }
+
+    func dismissHint(_ hint: Hint) {
+        guard !shownHints.contains(hint.rawValue) else { return }
+        shownHints.insert(hint.rawValue)
+        persistHints()
+    }
+
     private func moveNext() {
         guard let step = currentStep else { return }
         if let next = Step(rawValue: step.rawValue + 1) {
@@ -138,6 +166,38 @@ final class OnboardingGuideStore: ObservableObject {
         } else {
             shownLightweightTips = []
         }
+
+        if let values = defaults.array(forKey: hintsKey) as? [String] {
+            shownHints = Set(values)
+        } else {
+            shownHints = []
+        }
+
+        migrateHintsSchemaIfNeeded()
+    }
+
+    /// Auto-dismiss tour hints for existing users who never had them.
+    /// New hint keys added after a user's first install would otherwise
+    /// appear as "not yet shown" even though the user is not new.
+    private func migrateHintsSchemaIfNeeded() {
+        let saved = defaults.integer(forKey: hintsSchemaKey)
+        guard saved < Self.currentHintsSchema else { return }
+        defer { defaults.set(Self.currentHintsSchema, forKey: hintsSchemaKey) }
+
+        // If the hints key already existed in UserDefaults, this is an
+        // existing user — auto-dismiss tour-type hints they shouldn't see.
+        let isExistingUser = defaults.object(forKey: hintsKey) != nil
+        guard isExistingUser else { return }
+
+        let toursToSkip: [Hint] = [.friendsTour, .lifelogTour, .memoryDetailTour]
+        var changed = false
+        for hint in toursToSkip {
+            if !shownHints.contains(hint.rawValue) {
+                shownHints.insert(hint.rawValue)
+                changed = true
+            }
+        }
+        if changed { persistHints() }
     }
 
     private func persist() {
@@ -151,5 +211,9 @@ final class OnboardingGuideStore: ObservableObject {
 
     private func persistLightweightTips() {
         defaults.set(Array(shownLightweightTips), forKey: lightweightTipsKey)
+    }
+
+    private func persistHints() {
+        defaults.set(Array(shownHints), forKey: hintsKey)
     }
 }

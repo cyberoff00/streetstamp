@@ -18,10 +18,10 @@
 - [ ] Deploy latest `backend-node-v1/server.js` and compose config to production container.
 - [ ] Run read-only production verification.
   Command:
-  `BASE_URL=https://api.streetstamps.cyberkkk.cn ALLOWED_ORIGIN=https://app.streetstamps.cyberkkk.cn ./scripts/readonly_prod_check.sh`
+  `BASE_URL=https://worldo-api.cyberkkk.cn ALLOWED_ORIGIN=https://app.streetstamps.cyberkkk.cn ./scripts/readonly_prod_check.sh`
 - [ ] Run mutating end-to-end regression only after read-only checks pass.
   Command:
-  `ALLOW_PROD_MUTATION=1 BASE_URL=https://api.streetstamps.cyberkkk.cn ./scripts/e2e_smoke.sh`
+  `ALLOW_PROD_MUTATION=1 BASE_URL=https://worldo-api.cyberkkk.cn ./scripts/e2e_smoke.sh`
 
 ## P1 - Quality Gate
 - [x] Add automated API regression script in repo (`scripts/e2e_smoke.sh`).

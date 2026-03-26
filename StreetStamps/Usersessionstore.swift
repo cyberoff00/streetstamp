@@ -216,6 +216,28 @@ final class UserSessionStore: ObservableObject {
         applyAuth(auth)
     }
 
+    /// Whether `hasEmailPassword` has been explicitly synced from the backend at least once.
+    var hasEmailPasswordEverSynced: Bool {
+        UserDefaults.standard.dictionaryRepresentation().keys.contains(Self.hasEmailPasswordKey)
+    }
+
+    /// Syncs `hasEmailPassword` from backend profile on startup for users
+    /// whose session was persisted before this field existed.
+    func syncHasEmailPasswordIfNeeded() async {
+        guard isLoggedIn,
+              !hasEmailPasswordEverSynced,
+              let token = currentAccessToken, !token.isEmpty
+        else { return }
+        do {
+            let me = try await BackendAPIClient.shared.fetchMyProfile(token: token)
+            if let hasEP = me.hasEmailPassword {
+                hasEmailPassword = hasEP
+            }
+        } catch {
+            // Best-effort; will retry on next launch or AccountCenter visit.
+        }
+    }
+
     func linkEmailPassword(email: String, password: String) async throws -> BackendLinkEmailPasswordResponse {
         try await BackendAPIClient.shared.linkEmailPassword(email: email, password: password)
     }

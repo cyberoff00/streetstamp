@@ -18,6 +18,7 @@ const { OAuth2Client } = require("google-auth-library");
 const { createRemoteJWKSet, jwtVerify } = require("jose");
 const { canSendPostcard } = require("./postcard-rules");
 const bcrypt = require("bcrypt");
+const morgan = require("morgan");
 const DB = require("./db-relational");
 const APNs = require("./apns");
 
@@ -318,13 +319,13 @@ function hashSHA256(raw) {
   return crypto.createHash("sha256").update(raw).digest("hex");
 }
 
-function hashPassword(pw) {
-  return bcrypt.hashSync(pw, 8);
+async function hashPassword(pw) {
+  return bcrypt.hash(pw, 10);
 }
 
-function verifyPassword(pw, hash) {
+async function verifyPassword(pw, hash) {
   try {
-    return bcrypt.compareSync(pw, hash);
+    return await bcrypt.compare(pw, hash);
   } catch {
     return false;
   }
@@ -1250,7 +1251,7 @@ function seedDemoCityCards() {
 }
 
 function makeAccessToken(uid, provider) {
-  return jwt.sign({ uid, prv: provider, typ: "access", sid: randHex(8) }, JWT_SECRET, { expiresIn: "30d" });
+  return jwt.sign({ uid, prv: provider, typ: "access", sid: randHex(8) }, JWT_SECRET, { expiresIn: "7d" });
 }
 
 function makeRefreshToken(uid, provider) {
@@ -2678,6 +2679,7 @@ async function main() {
     return next();
   });
   app.use(compression());
+  app.use(morgan(":remote-addr :method :url :status :res[content-length] - :response-time ms"));
   app.use(express.json({
     limit: `${Number.isFinite(JSON_BODY_LIMIT_MB) && JSON_BODY_LIMIT_MB > 0 ? JSON_BODY_LIMIT_MB : 6}mb`
   }));
@@ -2719,6 +2721,16 @@ async function main() {
     keyPrefix: "upload",
     windowMs: UPLOAD_RATE_LIMIT_WINDOW_MS,
     maxHits: UPLOAD_RATE_LIMIT_MAX
+  });
+  const profileWriteRateLimiter = makeRateLimiter({
+    keyPrefix: "profile-write",
+    windowMs: 60000,
+    maxHits: 15
+  });
+  const profileReadRateLimiter = makeRateLimiter({
+    keyPrefix: "profile-read",
+    windowMs: 60000,
+    maxHits: 60
   });
 
   app.get("/open/invite", (req, res) => {
@@ -2835,7 +2847,7 @@ async function main() {
           if (!existingUser) return res.status(409).json({ message: "email already exists" });
 
           const now = nowUnix();
-          const passwordHash = hashPassword(password);
+          const passwordHash = await hashPassword(password);
           existingEmailIdentity.passwordHash = passwordHash;
           existingEmailIdentity.updatedAt = now;
           existingUser.passwordHash = passwordHash;
@@ -2862,7 +2874,7 @@ async function main() {
 
       const uid = `u_${randHex(12)}`;
       const invite = genInviteCode();
-      const passwordHash = hashPassword(password);
+      const passwordHash = await hashPassword(password);
       const createdAt = nowUnix();
       const user = {
         id: uid,
@@ -2915,7 +2927,8 @@ async function main() {
         emailVerificationRequired: true,
         needsProfileSetup: true
       });
-    } catch {
+    } catch (err) {
+      console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(500).json({ message: "internal error" });
     }
   });
@@ -2925,7 +2938,8 @@ async function main() {
       const result = await consumeEmailVerificationToken(req.body?.token);
       if (!result.ok) return res.status(result.status).json({ message: result.message });
       return res.status(200).json({ ok: true, email: result.email });
-    } catch {
+    } catch (err) {
+      console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(500).json({ message: "internal error" });
     }
   });
@@ -2952,7 +2966,8 @@ async function main() {
         title: "Email verified",
         body: "Your StreetStamps email has been verified. You can return to the app and sign in."
       }));
-    } catch {
+    } catch (err) {
+      console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       res.status(500);
       res.type("html");
       return res.send(renderEmailVerificationHTML({
@@ -2987,7 +3002,8 @@ async function main() {
         body: "Continue in the StreetStamps app to choose a new password.",
         deepLink
       }));
-    } catch {
+    } catch (err) {
+      console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       res.status(500);
       res.type("html");
       return res.send(renderPasswordResetHTML({
@@ -3016,7 +3032,8 @@ async function main() {
       });
       await deliverVerificationEmail(email, token);
       return res.status(200).json({ ok: true });
-    } catch {
+    } catch (err) {
+      console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(500).json({ message: "internal error" });
     }
   });
@@ -3034,14 +3051,14 @@ async function main() {
       let passwordValid = false;
       if (identity.passwordHash.startsWith("$2")) {
         // bcrypt格式
-        passwordValid = verifyPassword(password, identity.passwordHash);
+        passwordValid = await verifyPassword(password, identity.passwordHash);
       } else {
         // 旧SHA256格式，自动升级
         const oldHash = hashSHA256(`StreetStamps::${password}`);
         if (identity.passwordHash === oldHash) {
           passwordValid = true;
           // 升级到bcrypt
-          identity.passwordHash = hashPassword(password);
+          identity.passwordHash = await hashPassword(password);
           identity.updatedAt = nowUnix();
           await persistPG(async () => {
             await DB.updateAuthIdentity(pgPool, identity.id, { passwordHash: identity.passwordHash, updatedAt: identity.updatedAt });
@@ -3067,7 +3084,8 @@ async function main() {
         accessToken,
         refreshToken
       ));
-    } catch {
+    } catch (err) {
+      console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(500).json({ message: "internal error" });
     }
   });
@@ -3086,7 +3104,8 @@ async function main() {
       return res.status(200).json({
         accessToken: makeAccessToken(user.id, user.provider || payload.prv || "email")
       });
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "refresh token invalid" });
     }
   });
@@ -3105,7 +3124,8 @@ async function main() {
         });
       }
       return res.status(200).json({ ok: true });
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "refresh token invalid" });
     }
   });
@@ -3127,7 +3147,8 @@ async function main() {
         await deliverPasswordResetEmail(email, token);
       }
       return res.status(200).json({ ok: true });
-    } catch {
+    } catch (err) {
+      console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(500).json({ message: "internal error" });
     }
   });
@@ -3154,7 +3175,7 @@ async function main() {
       ));
       if (!identity) return res.status(400).json({ message: "identity not found" });
 
-      const nextHash = hashPassword(newPassword);
+      const nextHash = await hashPassword(newPassword);
       identity.passwordHash = nextHash;
       identity.updatedAt = nowUnix();
       const user = db.users[tokenRecord.userID];
@@ -3168,7 +3189,8 @@ async function main() {
         await DB.revokeRefreshTokensForUser(pgPool, tokenRecord.userID);
       });
       return res.status(200).json({ ok: true });
-    } catch {
+    } catch (err) {
+      console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(500).json({ message: "internal error" });
     }
   });
@@ -3299,7 +3321,7 @@ async function main() {
         return res.status(409).json({ message: "email already in use by another account" });
       }
 
-      const passwordHash = hashPassword(password);
+      const passwordHash = await hashPassword(password);
       const now = nowUnix();
       const identityID = `aid_${randHex(12)}`;
       db.authIdentities[identityID] = {
@@ -3472,7 +3494,8 @@ async function main() {
         if (f) out.push(friendDTOForViewer(f, true));
       }
       return res.status(200).json(out);
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   });
@@ -3482,7 +3505,8 @@ async function main() {
       const uid = parseBearer(req);
       if (!db.users[uid]) return res.status(404).json({ message: "user not found" });
       return res.status(409).json({ message: "direct add disabled, use /v1/friends/requests" });
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   });
@@ -3500,7 +3524,8 @@ async function main() {
         allFriendRequests().filter((item) => item.fromUserID === uid).map(friendRequestDTO).filter(Boolean)
       );
       return res.status(200).json({ incoming, outgoing });
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   });
@@ -3578,7 +3603,8 @@ async function main() {
         request: friendRequestDTO(db.friendRequestsIndex[reqID]),
         message: "好友申请已发送，等待对方通过"
       });
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   });
@@ -3626,7 +3652,8 @@ async function main() {
         friend: friendDTOForViewer(fromUser, true),
         message: "已通过好友申请"
       });
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   });
@@ -3648,7 +3675,8 @@ async function main() {
         await DB.deleteFriendRequest(pgPool, requestID);
       });
       return res.status(200).json({ ok: true, message: "已拒绝好友申请" });
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   });
@@ -3671,7 +3699,8 @@ async function main() {
         for (const rid of deletedRequestIDs) await DB.deleteFriendRequest(client, rid);
       });
       return res.status(200).json({});
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   });
@@ -3693,7 +3722,8 @@ async function main() {
         await DB.replaceCityCards(pgPool, uid, me.cityCards);
       });
       return res.status(200).json({ journeys: me.journeys.length, cityCards: me.cityCards.length });
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   });
@@ -3735,7 +3765,8 @@ async function main() {
         });
       }
       return res.status(200).json({ items });
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   });
@@ -3771,7 +3802,8 @@ async function main() {
         .sort((a, b) => Date.parse(b.likedAt || "") - Date.parse(a.likedAt || ""));
 
       return res.status(200).json({ items });
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   });
@@ -3876,6 +3908,9 @@ async function main() {
       }
       if (!photoURL) {
         return res.status(400).json({ message: "photoURL required" });
+      }
+      if (!/^https?:\/\//i.test(photoURL)) {
+        return res.status(400).json({ message: "photoURL must be an HTTP(S) URL" });
       }
       if (messageText.length > 80) {
         return res.status(400).json({ code: "message_too_long", message: "messageText must be <= 80 chars" });
@@ -4013,7 +4048,8 @@ async function main() {
         })
         .sort((a, b) => Date.parse(b.sentAt || "") - Date.parse(a.sentAt || ""));
       return res.status(200).json({ items, cursor: null });
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   });
@@ -4051,7 +4087,8 @@ async function main() {
       }
 
       return res.status(200).json({ success: true });
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   });
@@ -4099,7 +4136,8 @@ async function main() {
       return res.status(200).json({
         reaction: sender.postcardReactions[messageID]
       });
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   });
@@ -4122,7 +4160,8 @@ async function main() {
         };
       });
       return res.status(200).json({ items });
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   });
@@ -4160,7 +4199,8 @@ async function main() {
         });
       }
       return res.status(200).json({ ok: true });
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   });
@@ -4176,7 +4216,8 @@ async function main() {
       if (!token) return res.status(400).json({ message: "token required" });
       await DB.upsertPushToken(pgPool, uid, token, platform);
       return res.status(200).json({ ok: true });
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   });
@@ -4188,7 +4229,8 @@ async function main() {
       if (!token) return res.status(400).json({ message: "token required" });
       await DB.deletePushToken(pgPool, uid, token);
       return res.status(200).json({ ok: true });
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   });
@@ -4199,7 +4241,8 @@ async function main() {
       const me = db.users[uid];
       if (!me) return res.status(404).json({ message: "user not found" });
       return res.status(200).json(profileDTOForViewer(me, true, true));
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   });
@@ -4221,8 +4264,11 @@ async function main() {
         await persistNotificationToPG(targetID);
       });
       return res.status(200).json({ ok: true, message: `已踩一踩 ${target.displayName} 的主页` });
-    } catch {
-      return res.status(401).json({ message: "unauthorized" });
+    } catch (err) {
+      const isAuth = err && (err.name === "JsonWebTokenError" || err.name === "TokenExpiredError" || err.message === "missing bearer" || err.message === "invalid token");
+      if (isAuth) return res.status(401).json({ message: "unauthorized" });
+      console.error("[stomp] unexpected error:", err);
+      return res.status(500).json({ message: "internal error" });
     }
   });
 
@@ -4261,15 +4307,16 @@ async function main() {
         await DB.updateUser(pgPool, uid, { handle: me.handle, handleChangeUsed: true });
       });
       return res.status(200).json(profileDTOForViewer(me, true, true));
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   };
 
-  app.patch("/v1/profile/exclusive-id", rejectWhenWriteFrozen, updateExclusiveID);
-  app.patch("/v1/profile/handle", rejectWhenWriteFrozen, updateExclusiveID);
+  app.patch("/v1/profile/exclusive-id", profileWriteRateLimiter, rejectWhenWriteFrozen, updateExclusiveID);
+  app.patch("/v1/profile/handle", profileWriteRateLimiter, rejectWhenWriteFrozen, updateExclusiveID);
 
-  app.patch("/v1/profile/display-name", rejectWhenWriteFrozen, async (req, res) => {
+  app.patch("/v1/profile/display-name", profileWriteRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -4286,12 +4333,13 @@ async function main() {
         await DB.updateUser(pgPool, uid, { displayName: nextName });
       });
       return res.status(200).json(profileDTOForViewer(me, true, true));
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   });
 
-  app.patch("/v1/profile/visibility", rejectWhenWriteFrozen, async (req, res) => {
+  app.patch("/v1/profile/visibility", profileWriteRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -4303,12 +4351,13 @@ async function main() {
         await DB.updateUser(pgPool, uid, { profileVisibility: next });
       });
       return res.status(200).json(profileDTOForViewer(me, true, true));
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   });
 
-  app.patch("/v1/profile/bio", rejectWhenWriteFrozen, async (req, res) => {
+  app.patch("/v1/profile/bio", profileWriteRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -4320,12 +4369,13 @@ async function main() {
         await DB.updateUser(pgPool, uid, { bio });
       });
       return res.status(200).json(profileDTOForViewer(me, true, true));
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   });
 
-  app.patch("/v1/profile/loadout", rejectWhenWriteFrozen, async (req, res) => {
+  app.patch("/v1/profile/loadout", profileWriteRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -4341,12 +4391,13 @@ async function main() {
         await DB.updateUser(pgPool, uid, { loadout: me.loadout });
       });
       return res.status(200).json(profileDTOForViewer(me, true, true));
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   });
 
-  app.post("/v1/profile/setup", rejectWhenWriteFrozen, async (req, res) => {
+  app.post("/v1/profile/setup", profileWriteRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
       const me = db.users[uid];
@@ -4370,12 +4421,13 @@ async function main() {
         await DB.updateUser(pgPool, uid, { displayName: nextName, loadout: me.loadout, profileSetupCompleted: true });
       });
       return res.status(200).json(profileDTOForViewer(me, true, true));
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   });
 
-  app.get("/v1/profile/:userID", (req, res) => {
+  app.get("/v1/profile/:userID", profileReadRateLimiter, (req, res) => {
     try {
       const viewerID = parseBearer(req);
       const targetID = String(req.params.userID || "").trim();
@@ -4392,7 +4444,8 @@ async function main() {
       const isSelf = viewerID === targetID;
       const isFriend = isFriendOf(viewer, targetID);
       return res.status(200).json(profileDTOForViewer(target, isSelf, isFriend));
-    } catch {
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   });
@@ -4463,15 +4516,42 @@ async function main() {
     return res.status(500).json({ message: "internal error" });
   });
 
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`[streetstamps-node-v1] listening on :${PORT}`);
-    setInterval(() => {
+    const memoryTimer = setInterval(() => {
       const mem = process.memoryUsage();
       console.log(`[memory] rss=${(mem.rss/1024/1024).toFixed(0)}MB heap=${(mem.heapUsed/1024/1024).toFixed(0)}MB`);
       if (mem.heapUsed > 1500 * 1024 * 1024) {
         console.warn('[memory] high memory usage detected');
       }
     }, 60000);
+
+    let shutdownStarted = false;
+    const gracefulShutdown = (signal) => {
+      if (shutdownStarted) return;
+      shutdownStarted = true;
+      console.log(`[shutdown] ${signal} received, draining connections...`);
+      clearInterval(memoryTimer);
+      server.close(async () => {
+        console.log("[shutdown] HTTP server closed");
+        try {
+          if (pgPool) {
+            await pgPool.end();
+            console.log("[shutdown] PostgreSQL pool closed");
+          }
+        } catch (e) {
+          console.error("[shutdown] pool close error:", e.message);
+        }
+        process.exit(0);
+      });
+      // Force exit after 15s if connections don't drain
+      setTimeout(() => {
+        console.error("[shutdown] forced exit after timeout");
+        process.exit(1);
+      }, 15000).unref();
+    };
+    process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+    process.on("SIGINT", () => gracefulShutdown("SIGINT"));
   });
 }
 

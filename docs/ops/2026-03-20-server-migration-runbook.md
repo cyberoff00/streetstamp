@@ -225,14 +225,14 @@ Minimum acceptance gates:
 Suggested auth mode verification commands:
 
 ```bash
-BASE_URL="https://api.streetstamps.cyberkkk.cn" \
+BASE_URL="https://worldo-api.cyberkkk.cn" \
 EXPECTED_AUTH_MODE="backend_jwt_only" \
 EXPECTED_FIREBASE_COMPAT="false" \
 ./scripts/check_auth_mode.sh
 ```
 
 ```bash
-BASE_URL="https://api.streetstamps.cyberkkk.cn" \
+BASE_URL="https://worldo-api.cyberkkk.cn" \
 ALLOWED_ORIGIN="https://app.streetstamps.cyberkkk.cn" \
 EXPECTED_AUTH_MODE="backend_jwt_only" \
 EXPECTED_FIREBASE_COMPAT="false" \

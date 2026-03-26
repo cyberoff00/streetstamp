@@ -351,10 +351,10 @@ bash scripts/readonly_prod_check.sh
 - API container: `streetstamps-node-v1`
 - DB container: `streetstamps-postgres`
 - Internal health: `http://127.0.0.1:18080/v1/health`
-- Public API: `https://api.streetstamps.cyberkkk.cn`
+- Public API: `https://worldo-api.cyberkkk.cn`
 - Deploy command: `./backend-node-v1/deploy-safe.sh` (the only supported entry point)
 - Rollback: `./backend-node-v1/rollback.sh /opt/streetstamps/backups/release/<timestamp>`
-- Production check: `BASE_URL=https://api.streetstamps.cyberkkk.cn EXPECTED_AUTH_MODE=backend_jwt_only EXPECTED_FIREBASE_COMPAT=false EXPECTED_WRITE_FROZEN=false ./scripts/readonly_prod_check.sh`
+- Production check: `BASE_URL=https://worldo-api.cyberkkk.cn EXPECTED_AUTH_MODE=backend_jwt_only EXPECTED_FIREBASE_COMPAT=false EXPECTED_WRITE_FROZEN=false ./scripts/readonly_prod_check.sh`
 - Full workflow docs: `docs/ops/PRODUCTION_WORKFLOW.md`, `docs/ops/SERVER_BOOTSTRAP.md`
 - No silent production syncs — always report changes and wait for approval before deploying.
 

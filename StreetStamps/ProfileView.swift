@@ -1214,7 +1214,7 @@ struct InviteFriendSheet: View {
             showRequestMessage = true
             requestInput = ""
         } catch {
-            requestMessage = "发送失败：\(error.localizedDescription)"
+            requestMessage = String(format: L10n.t("send_request_failed"), error.localizedDescription)
             showRequestMessage = true
         }
     }

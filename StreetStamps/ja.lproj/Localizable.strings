@@ -202,8 +202,9 @@
 "finish_confirm_message" = "誤って「終了」を押した場合は、旅を続けられます。";
 "finish_confirm_title" = "旅を終了しますか？";
 "finish_no_city_title" = "都市を特定できません";
-"finish_no_city_message" = "ネットワークが利用できないため、旅の都市を特定できません。ネットワーク復旧後に終了してください。";
-"finish_no_city_continue" = "旅を続ける";
+"finish_no_city_message" = "ネットワークが利用できないため、旅の都市を特定できません。ネットワーク復旧を待つか、今すぐ終了できます。";
+"finish_no_city_finish_now" = "今すぐ終了";
+"finish_no_city_continue" = "ネットワークを待つ";
 "finish_pending_memory_title" = "GPS信号が弱い";
 "finish_pending_memory_message" = "一部のメモリーの位置情報を取得できませんでした。今すぐ終了すると、これらのメモリーは失われます。GPSが回復するまで待つことができます。";
 "finish_pending_memory_finish_now" = "今すぐ終了";
@@ -601,8 +602,9 @@
 "settings_icloud_status_already_latest" = "Already restored the latest iCloud backup.";
 "settings_icloud_status_idle" = "Status: Not synced yet.";
 "settings_icloud_status_no_backup" = "No iCloud backup found for this account.";
-"settings_icloud_status_restore_failed_format" = "Last restore failed: %@";
-"settings_icloud_status_restore_success_format" = "Last restore: %@";
+"settings_icloud_status_restore_failed_format" = "前回の復元に失敗：%@";
+"settings_icloud_status_restore_partial_format" = "前回の復元は一部成功：%@";
+"settings_icloud_status_restore_success_format" = "前回の復元：%@";
 "settings_icloud_status_unknown_time" = "unknown";
 "settings_icloud_status_upload_failed_format" = "Last upload failed: %@";
 "settings_icloud_status_upload_success_format" = "Last upload: %@";
@@ -653,6 +655,8 @@
 "settings_restore_confirm_action" = "復元";
 "settings_restore_confirm_message" = "iCloudバックアップからデータを復元します。現在のローカルデータはバックアップと統合されます。続行しますか？";
 "settings_restore_from_icloud_success" = "最新のiCloudバックアップを復元しました。";
+"settings_restore_partial_success" = "一部のデータを復元できませんでした。後でもう一度お試しください。";
+"settings_restore_all_failed" = "復元に失敗しました。ネットワークを確認してもう一度お試しください。";
 "settings_section_general" = "GENERAL";
 "settings_section_information" = "INFORMATION";
 "settings_section_level_rules" = "LEVEL RULES";
@@ -942,3 +946,53 @@
 "error_forbidden" = "この操作を行う権限がありません。";
 "error_not_configured" = "サービスの設定エラーです。しばらくしてからお試しください。";
 "error_unknown" = "エラーが発生しました。もう一度お試しください。";
+
+// Contextual Hints (Onboarding)
+"hint_start_first_journey" = "STARTをタップして最初の旅を始めましょう";
+"hint_map_mode" = "ここでスポーツモードとデイリーモードを切り替え";
+"hint_map_memory" = "タップして写真やメモを道中に記録";
+"hint_map_finish" = "旗をタップして旅を終了・保存";
+"hint_visibility_toggle" = "この旅の公開範囲を選択 — 非公開・友達のみ・公開";
+"hint_journey_saved" = "旅が保存されました！「メモリー」で旅とシティカードを確認";
+"hint_journey_saved_action" = "メモリーへ";
+"hint_city_card_collect" = "初めてのシティカード！もっと旅をして都市を集めよう";
+
+// Tooltip Tour Buttons
+"tooltip_next" = "次へ";
+"tooltip_done" = "了解";
+
+// Memory Detail Tour
+"tour_memory_edit" = "ここをタップして旅の名前やメモ、アクティビティタグを編集";
+"tour_memory_export" = "この旅のロング画像をエクスポートしてシェア";
+"tour_memory_visibility" = "この旅の公開範囲を変更 — 非公開・友達のみ・公開";
+
+// Lifelog Tour
+"tour_lifelog_weather" = "現在地の天気と気温";
+"tour_lifelog_globe" = "インタラクティブな3Dグローブで世界の足跡を確認";
+"tour_lifelog_mood" = "今日の気分を記録 — タップして設定・変更";
+"tooltip_lifelog_calendar" = "カレンダーをスワイプして日別・月別の履歴を閲覧";
+
+// Friends Tour
+"tour_friends_feed" = "ここで友達の公開旅やアクティビティを確認";
+"tour_friends_add" = "タップして友達を招待、またはWorldoユーザーを探す";
+"tour_friends_profile" = "友達をタップしてプロフィール・旅・シティカードを確認";
+"tooltip_friends_welcome" = "あなたと友達の公開旅がここに表示されます。友達を追加して旅の思い出をシェアしよう！";
+
+// Hardcoded string fixes
+"postcard_sync_failed" = "ポストカードの同期に失敗しました";
+"please_login_first" = "先にログインしてください";
+"reaction_sent" = "%@ を送信しました";
+"send_request_failed" = "送信に失敗しました：%@";
+"cannot_modify_journey_permission" = "旅の権限を変更できません";
+"about_us_title" = "私たちについて";
+"about_us_location" = "ロンドン";
+"about_us_traveler_needs" = "旅行者のニーズ";
+"about_us_intro" = "about_us_intro";
+"about_us_walking" = "about_us_walking";
+"about_us_gamification" = "about_us_gamification";
+"about_us_ai_era" = "about_us_ai_era";
+"about_us_traveler_needs_content" = "about_us_traveler_needs_content";
+"about_us_cyber_dog_title" = "about_us_cyber_dog_title";
+"about_us_cyber_dog_content" = "about_us_cyber_dog_content";
+"postcard_saved_front" = "ポストカードの表面を保存しました";
+"postcard_saved_back" = "ポストカードの裏面を保存しました";

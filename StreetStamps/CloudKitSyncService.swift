@@ -22,8 +22,17 @@ struct CloudKitRestoreResult {
     var restoredSettingsCount: Int = 0
     var restoredPhotoCount: Int = 0
 
+    var journeyFailed: Bool = false
+    var lifelogFailed: Bool = false
+    var settingsFailed: Bool = false
+    var photoFailed: Bool = false
+
     var totalCount: Int {
         restoredJourneyCount + restoredLifelogCount + restoredSettingsCount + restoredPhotoCount
+    }
+
+    var hasAnyFailure: Bool {
+        journeyFailed || lifelogFailed || settingsFailed || photoFailed
     }
 }
 
@@ -177,7 +186,7 @@ actor CloudKitSyncService {
             return upserts.count + deletedIDs.count
         } catch {
             print("☁️ restore incremental journeys failed:", error)
-            return 0
+            return -1
         }
     }
 
@@ -245,7 +254,7 @@ actor CloudKitSyncService {
             return dayBatches.count + moodByDay.count + deletedDayKeys.count + deletedMoodDayKeys.count
         } catch {
             print("☁️ restore incremental lifelog failed:", error)
-            return 0
+            return -1
         }
     }
 
@@ -263,7 +272,7 @@ actor CloudKitSyncService {
             return restored.count
         } catch {
             print("☁️ restore settings failed:", error)
-            return 0
+            return -1
         }
     }
 
@@ -286,38 +295,66 @@ actor CloudKitSyncService {
             return CloudKitRestoreResult()
         }
 
-        let restoredJourneyCount = await restoreJourneySnapshot(
+        var rawJourneyCount = await restoreJourneySnapshot(
             into: journeyStore,
             userID: userID,
             forceFull: forceFull
         )
-        let restoredLifelogCount = await restoreLifelogSnapshot(
+        var rawLifelogCount = await restoreLifelogSnapshot(
             into: lifelogStore,
             userID: userID,
             forceFull: forceFull
         )
-        let restoredSettingsCount = await restoreSettingsSnapshot()
-        let restoredPhotoCount = await restorePhotos(
+        var rawSettingsCount = await restoreSettingsSnapshot()
+        var rawPhotoCount = await restorePhotos(
             localUserID: localUserID ?? userID,
             forceFull: forceFull
         )
 
+        // Retry failed domains once after a short delay
+        let failedDomains = (rawJourneyCount < 0, rawLifelogCount < 0, rawSettingsCount < 0, rawPhotoCount < 0)
+        if failedDomains.0 || failedDomains.1 || failedDomains.2 || failedDomains.3 {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if failedDomains.0 {
+                let retry = await restoreJourneySnapshot(into: journeyStore, userID: userID, forceFull: forceFull)
+                if retry >= 0 { rawJourneyCount = retry }
+            }
+            if failedDomains.1 {
+                let retry = await restoreLifelogSnapshot(into: lifelogStore, userID: userID, forceFull: forceFull)
+                if retry >= 0 { rawLifelogCount = retry }
+            }
+            if failedDomains.2 {
+                let retry = await restoreSettingsSnapshot()
+                if retry >= 0 { rawSettingsCount = retry }
+            }
+            if failedDomains.3 {
+                let retry = await restorePhotos(localUserID: localUserID ?? userID, forceFull: forceFull)
+                if retry >= 0 { rawPhotoCount = retry }
+            }
+        }
+
         let result = CloudKitRestoreResult(
-            restoredJourneyCount: restoredJourneyCount,
-            restoredLifelogCount: restoredLifelogCount,
-            restoredSettingsCount: restoredSettingsCount,
-            restoredPhotoCount: restoredPhotoCount
+            restoredJourneyCount: max(0, rawJourneyCount),
+            restoredLifelogCount: max(0, rawLifelogCount),
+            restoredSettingsCount: max(0, rawSettingsCount),
+            restoredPhotoCount: max(0, rawPhotoCount),
+            journeyFailed: rawJourneyCount < 0,
+            lifelogFailed: rawLifelogCount < 0,
+            settingsFailed: rawSettingsCount < 0,
+            photoFailed: rawPhotoCount < 0
         )
 
         await MainActor.run {
             Self.rebuildDerivedCityStateIfNeeded(
-                restoredJourneyCount: restoredJourneyCount,
+                restoredJourneyCount: result.restoredJourneyCount,
                 cityCache: cityCache
             )
         }
 
         if writeManualStatus {
-            if result.totalCount > 0 {
+            if result.hasAnyFailure {
+                writeStatus(userID: userID, status: "restore_partial")
+            } else if result.totalCount > 0 {
                 writeStatus(userID: userID, status: "restore_success")
             } else {
                 writeStatus(userID: userID, status: forceFull ? "no_backup" : "already_latest")
@@ -493,7 +530,7 @@ actor CloudKitSyncService {
             return wrote
         } catch {
             print("☁️ restore photos failed:", error)
-            return 0
+            return -1
         }
     }
 

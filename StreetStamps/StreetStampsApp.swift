@@ -421,6 +421,7 @@ struct StreetStampsApp: App {
                     VoiceBroadcastService.shared.start()
                     onboardingGuide.startIfNeeded()
                     maybeShowFirstAuthPromptIfNeeded()
+                    await sessionStore.syncHasEmailPasswordIfNeeded()
                 }
 
                 Task { @MainActor in

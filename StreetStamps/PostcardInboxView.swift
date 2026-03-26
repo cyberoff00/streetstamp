@@ -546,7 +546,7 @@ private struct PostcardCardRow: View {
         do {
             try await BackendAPIClient.shared.reactToPostcard(token: token, messageID: messageID, req: req)
             await MainActor.run {
-                saveToastText = "已发送 \(emoji)"
+                saveToastText = String(format: L10n.t("reaction_sent"), emoji)
                 clearSaveToastSoon()
             }
         } catch {
@@ -560,7 +560,7 @@ private struct PostcardCardRow: View {
     private func saveCurrentFaceToPhotos() async {
         guard #available(iOS 16.0, *) else {
             await MainActor.run {
-                saveToastText = "保存失败"
+                saveToastText = L10n.t("save_failed")
                 clearSaveToastSoon()
             }
             return
@@ -578,7 +578,7 @@ private struct PostcardCardRow: View {
 
         guard let image = renderFaceImage(isFront: isFront, photoSource: loadedSource) else {
             await MainActor.run {
-                saveToastText = "保存失败"
+                saveToastText = L10n.t("save_failed")
                 clearSaveToastSoon()
             }
             return
@@ -586,7 +586,7 @@ private struct PostcardCardRow: View {
 
         await MainActor.run {
             UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
-            saveToastText = isFront ? "已保存明信片正面" : "已保存明信片反面"
+            saveToastText = isFront ? L10n.t("postcard_saved_front") : L10n.t("postcard_saved_back")
             clearSaveToastSoon()
         }
     }
