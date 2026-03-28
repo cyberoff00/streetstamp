@@ -56,6 +56,10 @@ services:
       R2_ENDPOINT: "${R2_ENDPOINT:-}"
       R2_REGION: "${R2_REGION:-auto}"
       R2_PUBLIC_BASE: "${R2_PUBLIC_BASE:-}"
+      APNS_KEY_PATH: "${APNS_KEY_PATH:-/opt/streetstamps/apns/AuthKey.p8}"
+      APNS_KEY_ID: "${APNS_KEY_ID:-}"
+      APNS_TEAM_ID: "${APNS_TEAM_ID:-}"
+      APNS_USE_SANDBOX: "${APNS_USE_SANDBOX:-false}"
     logging:
       driver: json-file
       options:
@@ -66,6 +70,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./media:/app/media
+      - /opt/streetstamps/apns:/opt/streetstamps/apns:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:18080/v1/health >/dev/null 2>&1 || exit 1"]
       interval: 10s

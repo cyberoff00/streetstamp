@@ -863,16 +863,181 @@ async function getPushTokens(pool, userID) {
 }
 
 // ============================================================
+// Extended Queries (for direct-PG mode)
+// ============================================================
+
+async function deleteFriendRequestsBetween(pool, userA, userB) {
+  await pool.query(
+    "DELETE FROM friend_requests WHERE (from_user_id = $1 AND to_user_id = $2) OR (from_user_id = $2 AND to_user_id = $1)",
+    [userA, userB]
+  );
+}
+
+async function collectFriendRequestIDsBetween(pool, userA, userB) {
+  const { rows } = await pool.query(
+    "SELECT id FROM friend_requests WHERE (from_user_id = $1 AND to_user_id = $2) OR (from_user_id = $2 AND to_user_id = $1)",
+    [userA, userB]
+  );
+  return rows.map((r) => r.id);
+}
+
+async function isEmptyAccount(pool, uid) {
+  const { rows } = await pool.query(`
+    SELECT
+      EXISTS(SELECT 1 FROM journeys WHERE user_id = $1) AS has_journeys,
+      EXISTS(SELECT 1 FROM city_cards WHERE user_id = $1) AS has_cities,
+      EXISTS(SELECT 1 FROM friendships WHERE user_id = $1) AS has_friends,
+      EXISTS(SELECT 1 FROM postcards WHERE from_user_id = $1 OR to_user_id = $1) AS has_postcards,
+      EXISTS(SELECT 1 FROM journey_likes WHERE owner_user_id = $1 OR liker_user_id = $1) AS has_likes,
+      EXISTS(SELECT 1 FROM friend_requests WHERE from_user_id = $1 OR to_user_id = $1) AS has_requests
+  `, [uid]);
+  const r = rows[0];
+  return !r.has_journeys && !r.has_cities && !r.has_friends
+    && !r.has_postcards && !r.has_likes && !r.has_requests;
+}
+
+async function getPostcardReactionsForSender(pool, senderUID) {
+  const { rows } = await pool.query(`
+    SELECT pr.* FROM postcard_reactions pr
+    JOIN postcards p ON p.message_id = pr.postcard_message_id
+    WHERE p.from_user_id = $1
+  `, [senderUID]);
+  const map = {};
+  for (const r of rows) {
+    map[r.postcard_message_id] = {
+      id: r.id,
+      postcardMessageID: r.postcard_message_id,
+      fromUserID: r.from_user_id,
+      viewedAt: r.viewed_at instanceof Date ? r.viewed_at.toISOString() : r.viewed_at,
+      reactionEmoji: r.reaction_emoji,
+      comment: r.comment,
+      reactedAt: r.reacted_at instanceof Date ? r.reacted_at.toISOString() : r.reacted_at,
+    };
+  }
+  return map;
+}
+
+async function getUserExists(pool, uid) {
+  const { rows } = await pool.query("SELECT 1 FROM users WHERE id = $1", [uid]);
+  return rows.length > 0;
+}
+
+async function deleteUserByID(pool, uid) {
+  // Cascade delete across all related tables
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("DELETE FROM journey_likes WHERE owner_user_id = $1 OR liker_user_id = $1", [uid]);
+    await client.query("DELETE FROM postcard_reactions WHERE from_user_id = $1", [uid]);
+    await client.query("DELETE FROM postcards WHERE from_user_id = $1 OR to_user_id = $1", [uid]);
+    await client.query("DELETE FROM notifications WHERE user_id = $1", [uid]);
+    await client.query("DELETE FROM friendships WHERE user_id = $1 OR friend_id = $1", [uid]);
+    await client.query("DELETE FROM friend_requests WHERE from_user_id = $1 OR to_user_id = $1", [uid]);
+    await client.query("DELETE FROM city_cards WHERE user_id = $1", [uid]);
+    await client.query("DELETE FROM journeys WHERE user_id = $1", [uid]);
+    await client.query("DELETE FROM push_tokens WHERE user_id = $1", [uid]);
+    await client.query("DELETE FROM refresh_tokens WHERE user_id = $1", [uid]);
+    await client.query("DELETE FROM email_verification_tokens WHERE user_id = $1", [uid]);
+    await client.query("DELETE FROM password_reset_tokens WHERE user_id = $1", [uid]);
+    await client.query("DELETE FROM auth_identities WHERE user_id = $1", [uid]);
+    await client.query("DELETE FROM oauth_index WHERE user_id = $1", [uid]);
+    await client.query("DELETE FROM user_blocks WHERE blocker_user_id = $1 OR blocked_user_id = $1", [uid]);
+    await client.query("DELETE FROM reports WHERE reporter_user_id = $1", [uid]);
+    await client.query("DELETE FROM users WHERE id = $1", [uid]);
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+// ============================================================
 // Schema Init
 // ============================================================
+
+// ============================================================
+// User Blocks
+// ============================================================
+
+async function blockUser(pool, blockerUserID, blockedUserID) {
+  await pool.query(
+    `INSERT INTO user_blocks (blocker_user_id, blocked_user_id, created_at)
+     VALUES ($1, $2, $3)
+     ON CONFLICT DO NOTHING`,
+    [blockerUserID, blockedUserID, Math.floor(Date.now() / 1000)]
+  );
+}
+
+async function unblockUser(pool, blockerUserID, blockedUserID) {
+  await pool.query(
+    "DELETE FROM user_blocks WHERE blocker_user_id = $1 AND blocked_user_id = $2",
+    [blockerUserID, blockedUserID]
+  );
+}
+
+async function getBlockedUserIDs(pool, blockerUserID) {
+  const { rows } = await pool.query(
+    "SELECT blocked_user_id FROM user_blocks WHERE blocker_user_id = $1",
+    [blockerUserID]
+  );
+  return rows.map((r) => r.blocked_user_id);
+}
+
+async function isBlocked(pool, blockerUserID, blockedUserID) {
+  const { rows } = await pool.query(
+    "SELECT 1 FROM user_blocks WHERE blocker_user_id = $1 AND blocked_user_id = $2",
+    [blockerUserID, blockedUserID]
+  );
+  return rows.length > 0;
+}
+
+async function isBlockedEitherDirection(pool, userA, userB) {
+  const { rows } = await pool.query(
+    `SELECT 1 FROM user_blocks
+     WHERE (blocker_user_id = $1 AND blocked_user_id = $2)
+        OR (blocker_user_id = $2 AND blocked_user_id = $1)`,
+    [userA, userB]
+  );
+  return rows.length > 0;
+}
+
+// ============================================================
+// Reports
+// ============================================================
+
+async function insertReport(pool, report) {
+  await pool.query(
+    `INSERT INTO reports (id, reporter_user_id, reported_user_id, content_type, content_id, reason, detail, status, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [
+      report.id,
+      report.reporterUserID,
+      report.reportedUserID,
+      report.contentType,
+      report.contentID || null,
+      report.reason,
+      report.detail || "",
+      "pending",
+      Math.floor(Date.now() / 1000),
+    ]
+  );
+}
 
 async function ensureSchema(pool) {
   const fs = require("fs");
   const path = require("path");
-  const schemaPath = path.join(__dirname, "migrations", "001-create-tables.sql");
-  if (fs.existsSync(schemaPath)) {
-    const sql = fs.readFileSync(schemaPath, "utf8");
-    await pool.query(sql);
+  const migrationFiles = [
+    "001-create-tables.sql",
+    "003-user-blocks-reports.sql",
+  ];
+  for (const file of migrationFiles) {
+    const schemaPath = path.join(__dirname, "migrations", file);
+    if (fs.existsSync(schemaPath)) {
+      const sql = fs.readFileSync(schemaPath, "utf8");
+      await pool.query(sql);
+    }
   }
 }
 
@@ -978,6 +1143,24 @@ module.exports = {
   upsertPushToken,
   deletePushToken,
   getPushTokens,
+
+  // User Blocks
+  blockUser,
+  unblockUser,
+  getBlockedUserIDs,
+  isBlocked,
+  isBlockedEitherDirection,
+
+  // Reports
+  insertReport,
+
+  // Extended Queries
+  deleteFriendRequestsBetween,
+  collectFriendRequestIDsBetween,
+  isEmptyAccount,
+  getPostcardReactionsForSender,
+  getUserExists,
+  deleteUserByID,
 
   // Schema
   ensureSchema,

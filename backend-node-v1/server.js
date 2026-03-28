@@ -34,7 +34,6 @@ const PGUSER = (process.env.PGUSER || "").trim();
 const PGPASSWORD = (process.env.PGPASSWORD || "").trim();
 const PGDATABASE = (process.env.PGDATABASE || "").trim();
 const PGSSL = String(process.env.PGSSL || "").trim().toLowerCase();
-const PG_STATE_KEY = (process.env.PG_STATE_KEY || "global").trim();
 const PG_MAX_CLIENTS = Number(process.env.PG_MAX_CLIENTS || 20);
 const JSON_BODY_LIMIT_MB = Number(process.env.JSON_BODY_LIMIT_MB || 3);
 const MEDIA_UPLOAD_MAX_BYTES = Number(process.env.MEDIA_UPLOAD_MAX_BYTES || 10 * 1024 * 1024);
@@ -62,7 +61,6 @@ const R2_SECRET_ACCESS_KEY = (process.env.R2_SECRET_ACCESS_KEY || "").trim();
 const R2_BUCKET = (process.env.R2_BUCKET || "").trim();
 const R2_ENDPOINT = (process.env.R2_ENDPOINT || (R2_ACCOUNT_ID ? `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com` : "")).trim();
 const R2_REGION = (process.env.R2_REGION || "auto").trim();
-const R2_PUBLIC_BASE = (process.env.R2_PUBLIC_BASE || "").trim();
 const GOOGLE_CLIENT_ID = (process.env.GOOGLE_CLIENT_ID || "").trim();
 const APPLE_AUDIENCES = (process.env.APPLE_AUDIENCES || process.env.APPLE_BUNDLE_ID || "").trim();
 const APPSTORE_FALLBACK_URL = (process.env.APPSTORE_FALLBACK_URL || "https://apps.apple.com/us/search?term=StreetStamps").trim();
@@ -614,38 +612,6 @@ function renderPasswordResetHTML({ ok, title, body, deepLink = "" }) {
 </html>`;
 }
 
-function issueEmailVerificationToken(userID, email) {
-  const rawToken = randHex(24);
-  const tokenID = `evt_${randHex(12)}`;
-  issueEmailVerificationToken._lastID = tokenID;
-  db.emailVerificationTokens[tokenID] = {
-    id: tokenID,
-    userID,
-    email,
-    tokenHash: hashSHA256(rawToken),
-    expiresAt: emailVerificationExpiresAt(),
-    usedAt: null,
-    createdAt: nowUnix()
-  };
-  return rawToken;
-}
-
-function issuePasswordResetToken(userID, email) {
-  const rawToken = randHex(24);
-  const tokenID = `prt_${randHex(12)}`;
-  issuePasswordResetToken._lastID = tokenID;
-  db.passwordResetTokens[tokenID] = {
-    id: tokenID,
-    userID,
-    email,
-    tokenHash: hashSHA256(rawToken),
-    expiresAt: emailVerificationExpiresAt(),
-    usedAt: null,
-    createdAt: nowUnix()
-  };
-  return rawToken;
-}
-
 function revokeRefreshTokensForUser(userID) {
   const revokedAt = nowUnix();
   for (const record of Object.values(db.refreshTokens || {})) {
@@ -653,22 +619,6 @@ function revokeRefreshTokensForUser(userID) {
       record.revokedAt = revokedAt;
     }
   }
-}
-
-function issueStoredRefreshToken(userID, provider, deviceInfo = null) {
-  const rawToken = makeRefreshToken(userID, provider);
-  const tokenID = `rft_${randHex(12)}`;
-  issueStoredRefreshToken._lastID = tokenID;
-  db.refreshTokens[tokenID] = {
-    id: tokenID,
-    userID,
-    tokenHash: hashSHA256(rawToken),
-    deviceInfo: deviceInfo || null,
-    expiresAt: nowUnix() + (30 * 24 * 60 * 60),
-    revokedAt: null,
-    createdAt: nowUnix()
-  };
-  return rawToken;
 }
 
 function findRefreshTokenRecord(rawToken) {
@@ -911,17 +861,6 @@ function canUseDisplayName(displayName, excludedUserID = "") {
   return !owner || owner === excludedUserID;
 }
 
-function allocateUniqueDisplayName(displayName, excludedUserID = "") {
-  const base = baseDisplayName(displayName);
-  if (canUseDisplayName(base, excludedUserID)) return base;
-  let suffix = 2;
-  while (suffix < 1000000) {
-    const candidate = `${base}${suffix}`;
-    if (canUseDisplayName(candidate, excludedUserID)) return candidate;
-    suffix += 1;
-  }
-  return `${base}${nowUnix()}`;
-}
 
 function normalizeHistoricalDisplayNames() {
   const users = Object.values(db.users || {})
@@ -970,18 +909,6 @@ function resolvedProfileSetupCompleted(user, defaultValue = true) {
     return user.profileSetupCompleted;
   }
   return Boolean(defaultValue);
-}
-
-function authSuccessPayload(user, provider, email, accessToken, refreshToken) {
-  return {
-    userId: user.id,
-    provider,
-    email: email || null,
-    accessToken,
-    refreshToken,
-    needsProfileSetup: !resolvedProfileSetupCompleted(user, true),
-    hasEmailPassword: userHasEmailPassword(user.id)
-  };
 }
 
 function normalizeISOTime(raw) {
@@ -1218,38 +1145,6 @@ function profileStatsFrom(user) {
   };
 }
 
-function seedDemoJourneys() {
-  const now = Date.now();
-  const t1 = new Date(now - 48 * 60 * 60 * 1000).toISOString();
-  const t2 = new Date(now - 47.5 * 60 * 60 * 1000).toISOString();
-  const m1 = new Date(now - 47 * 60 * 60 * 1000).toISOString();
-  return [
-    {
-      id: `j_${randHex(8)}`,
-      title: "City Walk",
-      activityTag: "步行",
-      overallMemory: "在城市里慢慢走，拍到了很多街角光影。",
-      distance: 6200,
-      startTime: t1,
-      endTime: t2,
-      visibility: visibilityPublic,
-      routeCoordinates: [
-        { lat: 31.2304, lon: 121.4737 },
-        { lat: 31.2320, lon: 121.4801 },
-        { lat: 31.2343, lon: 121.4858 }
-      ],
-      memories: [{ id: `m_${randHex(8)}`, title: "街边咖啡", notes: "转角那家店的拿铁很稳。", timestamp: m1, imageURLs: [] }]
-    }
-  ];
-}
-
-function seedDemoCityCards() {
-  return [
-    { id: "Shanghai|CN", name: "Shanghai", countryISO2: "CN" },
-    { id: "Hangzhou|CN", name: "Hangzhou", countryISO2: "CN" }
-  ];
-}
-
 function makeAccessToken(uid, provider) {
   return jwt.sign({ uid, prv: provider, typ: "access", sid: randHex(8) }, JWT_SECRET, { expiresIn: "7d" });
 }
@@ -1319,25 +1214,6 @@ function normalizeDBShape(parsed) {
   };
 }
 
-function hasPersistedData(parsed) {
-  const src = parsed || {};
-  const keys = [
-    "users",
-    "emailIndex",
-    "inviteIndex",
-    "oauthIndex",
-    "authIdentities",
-    "emailVerificationTokens",
-    "passwordResetTokens",
-    "refreshTokens",
-    "handleIndex",
-    "likesIndex",
-    "friendRequestsIndex",
-    "postcardsIndex"
-  ];
-  return keys.some((k) => src[k] && Object.keys(src[k]).length > 0);
-}
-
 async function ensureDirForFile(filePath) {
   await fsp.mkdir(path.dirname(filePath), { recursive: true });
 }
@@ -1368,514 +1244,6 @@ async function ensurePGSchema() {
   pgSchemaReady = true;
 }
 
-async function loadDBFromPostgres() {
-  if (!pgPool) return null;
-  await ensurePGSchema();
-
-  // Try loading from relational tables first
-  const usersResult = await pgPool.query("SELECT COUNT(*) AS c FROM users");
-  const hasRelationalData = Number(usersResult.rows[0].c) > 0;
-
-  if (hasRelationalData) {
-    console.log("[db] loading from relational tables");
-    return loadDBFromRelationalTables();
-  }
-
-  // Fall back to legacy app_state blob
-  const result = await pgPool.query("SELECT state FROM app_state WHERE key = $1 LIMIT 1", [PG_STATE_KEY]);
-  if (!result.rows.length) return null;
-  return normalizeDBShape(result.rows[0]?.state || {});
-}
-
-async function loadDBFromRelationalTables() {
-  const loaded = emptyDB();
-
-  // Users
-  const { rows: userRows } = await pgPool.query("SELECT * FROM users");
-  for (const row of userRows) {
-    const user = {
-      id: row.id,
-      email: row.email,
-      provider: row.provider,
-      displayName: row.display_name,
-      handle: row.handle,
-      inviteCode: row.invite_code,
-      profileVisibility: row.profile_visibility,
-      profileSetupCompleted: row.profile_setup_completed,
-      handleChangeUsed: row.handle_change_used,
-      bio: row.bio,
-      loadout: row.loadout || null,
-      createdAt: Number(row.created_at),
-      journeys: [],
-      cityCards: [],
-      friendIDs: [],
-      notifications: [],
-      sentPostcards: [],
-      receivedPostcards: [],
-    };
-    loaded.users[row.id] = user;
-    if (row.email) loaded.emailIndex[row.email] = row.id;
-    if (row.handle) loaded.handleIndex[row.handle] = row.id;
-    if (row.invite_code) loaded.inviteIndex[row.invite_code] = row.id;
-  }
-
-  // Journeys
-  const { rows: journeyRows } = await pgPool.query("SELECT user_id, data FROM journeys");
-  for (const row of journeyRows) {
-    if (loaded.users[row.user_id]) {
-      loaded.users[row.user_id].journeys.push(row.data);
-    }
-  }
-
-  // City cards
-  const { rows: cityRows } = await pgPool.query("SELECT * FROM city_cards");
-  for (const row of cityRows) {
-    if (loaded.users[row.user_id]) {
-      loaded.users[row.user_id].cityCards.push({
-        id: row.city_id,
-        name: row.city_name,
-        countryISO2: row.country_iso2,
-      });
-    }
-  }
-
-  // Friendships
-  const { rows: friendRows } = await pgPool.query("SELECT user_id, friend_id FROM friendships");
-  for (const row of friendRows) {
-    if (loaded.users[row.user_id]) {
-      loaded.users[row.user_id].friendIDs.push(row.friend_id);
-    }
-  }
-
-  // Notifications
-  const { rows: notifRows } = await pgPool.query(
-    "SELECT * FROM notifications ORDER BY created_at DESC"
-  );
-  for (const row of notifRows) {
-    if (loaded.users[row.user_id]) {
-      loaded.users[row.user_id].notifications.push({
-        id: row.id,
-        type: row.type,
-        fromUserID: row.from_user_id,
-        fromDisplayName: row.from_display_name,
-        journeyID: row.journey_id,
-        journeyTitle: row.journey_title,
-        message: row.message,
-        read: row.read,
-        createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
-      });
-    }
-  }
-
-  // Auth identities
-  const { rows: authRows } = await pgPool.query("SELECT * FROM auth_identities");
-  for (const row of authRows) {
-    loaded.authIdentities[row.id] = {
-      id: row.id,
-      userID: row.user_id,
-      provider: row.provider,
-      providerSubject: row.provider_subject,
-      email: row.email,
-      passwordHash: row.password_hash,
-      emailVerified: row.email_verified,
-      createdAt: Number(row.created_at),
-      updatedAt: Number(row.updated_at),
-    };
-  }
-
-  // OAuth index
-  const { rows: oauthRows } = await pgPool.query("SELECT * FROM oauth_index");
-  for (const row of oauthRows) {
-    loaded.oauthIndex[row.oauth_key] = row.user_id;
-  }
-
-  // Email verification tokens
-  const { rows: evtRows } = await pgPool.query("SELECT * FROM email_verification_tokens");
-  for (const row of evtRows) {
-    loaded.emailVerificationTokens[row.id] = {
-      id: row.id,
-      userID: row.user_id,
-      email: row.email,
-      tokenHash: row.token_hash,
-      expiresAt: Number(row.expires_at),
-      usedAt: row.used_at ? Number(row.used_at) : null,
-      createdAt: Number(row.created_at),
-    };
-  }
-
-  // Password reset tokens
-  const { rows: prtRows } = await pgPool.query("SELECT * FROM password_reset_tokens");
-  for (const row of prtRows) {
-    loaded.passwordResetTokens[row.id] = {
-      id: row.id,
-      userID: row.user_id,
-      email: row.email,
-      tokenHash: row.token_hash,
-      expiresAt: Number(row.expires_at),
-      usedAt: row.used_at ? Number(row.used_at) : null,
-      createdAt: Number(row.created_at),
-    };
-  }
-
-  // Refresh tokens
-  const { rows: rtRows } = await pgPool.query("SELECT * FROM refresh_tokens");
-  for (const row of rtRows) {
-    loaded.refreshTokens[row.id] = {
-      id: row.id,
-      userID: row.user_id,
-      tokenHash: row.token_hash,
-      deviceInfo: row.device_info,
-      expiresAt: Number(row.expires_at),
-      revokedAt: row.revoked_at ? Number(row.revoked_at) : null,
-      createdAt: Number(row.created_at),
-    };
-  }
-
-  // Friend requests
-  const { rows: frRows } = await pgPool.query("SELECT * FROM friend_requests");
-  for (const row of frRows) {
-    loaded.friendRequestsIndex[row.id] = {
-      id: row.id,
-      fromUserID: row.from_user_id,
-      toUserID: row.to_user_id,
-      note: row.note,
-      createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
-      updatedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at),
-    };
-  }
-
-  // Likes
-  const { rows: likeRows } = await pgPool.query("SELECT * FROM journey_likes");
-  for (const row of likeRows) {
-    const key = `${row.owner_user_id}:${row.journey_id}`;
-    if (!loaded.likesIndex[key]) {
-      loaded.likesIndex[key] = {
-        ownerUserID: row.owner_user_id,
-        journeyID: row.journey_id,
-        likerIDs: [],
-        likedAtByUserID: {},
-        updatedAt: new Date().toISOString(),
-      };
-    }
-    loaded.likesIndex[key].likerIDs.push(row.liker_user_id);
-    loaded.likesIndex[key].likedAtByUserID[row.liker_user_id] =
-      row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at);
-  }
-
-  // Postcards
-  const { rows: pcRows } = await pgPool.query("SELECT * FROM postcards ORDER BY sent_at DESC");
-  for (const row of pcRows) {
-    const pc = {
-      messageID: row.message_id,
-      type: "postcard",
-      fromUserID: row.from_user_id,
-      fromDisplayName: row.from_display_name,
-      toUserID: row.to_user_id,
-      toDisplayName: row.to_display_name,
-      cityID: row.city_id,
-      cityName: row.city_name,
-      photoURL: row.photo_url,
-      messageText: row.message_text,
-      clientDraftID: row.client_draft_id,
-      status: row.status,
-      sentAt: row.sent_at instanceof Date ? row.sent_at.toISOString() : String(row.sent_at),
-    };
-    loaded.postcardsIndex[row.message_id] = pc;
-    if (loaded.users[row.from_user_id]) {
-      loaded.users[row.from_user_id].sentPostcards.push(pc);
-    }
-    if (loaded.users[row.to_user_id]) {
-      loaded.users[row.to_user_id].receivedPostcards.push(pc);
-    }
-  }
-
-  // Postcard reactions → stored on user.postcardReactions
-  const { rows: prRows } = await pgPool.query(
-    `SELECT pr.*, p.from_user_id AS sender_uid
-     FROM postcard_reactions pr
-     JOIN postcards p ON p.message_id = pr.postcard_message_id`
-  );
-  for (const row of prRows) {
-    const senderUID = row.sender_uid;
-    if (loaded.users[senderUID]) {
-      if (!loaded.users[senderUID].postcardReactions) {
-        loaded.users[senderUID].postcardReactions = {};
-      }
-      loaded.users[senderUID].postcardReactions[row.postcard_message_id] = {
-        id: row.id,
-        postcardMessageID: row.postcard_message_id,
-        fromUserID: row.from_user_id,
-        viewedAt: row.viewed_at instanceof Date ? row.viewed_at.toISOString() : row.viewed_at,
-        reactionEmoji: row.reaction_emoji,
-        comment: row.comment,
-        reactedAt: row.reacted_at instanceof Date ? row.reacted_at.toISOString() : row.reacted_at,
-      };
-    }
-  }
-
-  return loaded;
-}
-
-async function saveDBToRelationalTables(nextDB) {
-  if (!pgPool) return;
-  const client = await pgPool.connect();
-  try {
-    await client.query("BEGIN");
-
-    // Users — upsert all
-    for (const [uid, user] of Object.entries(nextDB.users || {})) {
-      await client.query(
-        `INSERT INTO users (id, email, display_name, handle, invite_code,
-          profile_visibility, profile_setup_completed, handle_change_used,
-          bio, loadout, provider, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-         ON CONFLICT (id) DO UPDATE SET
-           email = EXCLUDED.email,
-           display_name = EXCLUDED.display_name,
-           handle = EXCLUDED.handle,
-           invite_code = EXCLUDED.invite_code,
-           profile_visibility = EXCLUDED.profile_visibility,
-           profile_setup_completed = EXCLUDED.profile_setup_completed,
-           handle_change_used = EXCLUDED.handle_change_used,
-           bio = EXCLUDED.bio,
-           loadout = EXCLUDED.loadout,
-           provider = EXCLUDED.provider`,
-        [
-          uid,
-          user.email || null,
-          user.displayName || "Explorer",
-          user.handle || null,
-          user.inviteCode || null,
-          user.profileVisibility || "friendsOnly",
-          user.profileSetupCompleted ?? false,
-          user.handleChangeUsed ?? false,
-          user.bio || "",
-          user.loadout ? JSON.stringify(user.loadout) : null,
-          user.provider || null,
-          user.createdAt || 0,
-        ]
-      );
-
-      // Journeys — replace for this user
-      await client.query("DELETE FROM journeys WHERE user_id = $1", [uid]);
-      for (const j of user.journeys || []) {
-        if (!j || !j.id) continue;
-        await client.query(
-          `INSERT INTO journeys (id, user_id, title, city_id, distance,
-            start_time, end_time, visibility, data, created_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-           ON CONFLICT DO NOTHING`,
-          [
-            j.id, uid, j.title || null,
-            j.cityID || j.cityId || null,
-            j.distance || 0,
-            j.startTime ? new Date(j.startTime).toISOString() : null,
-            j.endTime ? new Date(j.endTime).toISOString() : null,
-            j.visibility || "friendsOnly",
-            JSON.stringify(j),
-            j.createdAt || user.createdAt || 0,
-          ]
-        );
-      }
-
-      // City cards — replace for this user
-      await client.query("DELETE FROM city_cards WHERE user_id = $1", [uid]);
-      for (const card of user.cityCards || []) {
-        if (!card || !card.id) continue;
-        await client.query(
-          `INSERT INTO city_cards (user_id, city_id, city_name, country_iso2, created_at)
-           VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
-          [uid, card.id, card.name || card.id, card.countryISO2 || null, user.createdAt || 0]
-        );
-      }
-
-      // Friendships — replace for this user
-      await client.query("DELETE FROM friendships WHERE user_id = $1", [uid]);
-      for (const fid of user.friendIDs || []) {
-        await client.query(
-          `INSERT INTO friendships (user_id, friend_id, created_at)
-           VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
-          [uid, fid, user.createdAt || 0]
-        );
-      }
-
-      // Notifications — replace for this user
-      await client.query("DELETE FROM notifications WHERE user_id = $1", [uid]);
-      for (const n of user.notifications || []) {
-        if (!n || !n.id) continue;
-        await client.query(
-          `INSERT INTO notifications (id, user_id, type, from_user_id, from_display_name,
-            journey_id, journey_title, message, read, created_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO NOTHING`,
-          [
-            n.id, uid, n.type || "unknown", n.fromUserID || null,
-            n.fromDisplayName || null, n.journeyID || null,
-            n.journeyTitle || null, n.message || "",
-            n.read ?? false,
-            n.createdAt ? new Date(n.createdAt).toISOString() : new Date().toISOString(),
-          ]
-        );
-      }
-
-      // Postcard reactions
-      for (const [messageID, r] of Object.entries(user.postcardReactions || {})) {
-        if (!r) continue;
-        await client.query(
-          `INSERT INTO postcard_reactions (id, postcard_message_id, from_user_id,
-            viewed_at, reaction_emoji, comment, reacted_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7)
-           ON CONFLICT (postcard_message_id, from_user_id) DO UPDATE SET
-             viewed_at = COALESCE(postcard_reactions.viewed_at, EXCLUDED.viewed_at),
-             reaction_emoji = COALESCE(EXCLUDED.reaction_emoji, postcard_reactions.reaction_emoji),
-             comment = COALESCE(EXCLUDED.comment, postcard_reactions.comment),
-             reacted_at = COALESCE(EXCLUDED.reacted_at, postcard_reactions.reacted_at)`,
-          [
-            r.id || `pr_migrated_${uid}_${messageID}`,
-            messageID, r.fromUserID || uid,
-            r.viewedAt ? new Date(r.viewedAt).toISOString() : null,
-            r.reactionEmoji || null, r.comment || null,
-            r.reactedAt ? new Date(r.reactedAt).toISOString() : null,
-          ]
-        );
-      }
-    }
-
-    // Auth identities
-    for (const [aid, identity] of Object.entries(nextDB.authIdentities || {})) {
-      if (!identity || !identity.userID) continue;
-      await client.query(
-        `INSERT INTO auth_identities (id, user_id, provider, provider_subject,
-          email, password_hash, email_verified, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-         ON CONFLICT (id) DO UPDATE SET
-           user_id = EXCLUDED.user_id,
-           email = EXCLUDED.email,
-           password_hash = EXCLUDED.password_hash,
-           email_verified = EXCLUDED.email_verified,
-           updated_at = EXCLUDED.updated_at`,
-        [
-          aid, identity.userID, identity.provider || "unknown",
-          identity.providerSubject || null, identity.email || null,
-          identity.passwordHash || null, identity.emailVerified ?? false,
-          identity.createdAt || 0, identity.updatedAt || identity.createdAt || 0,
-        ]
-      );
-    }
-
-    // OAuth index
-    for (const [key, userID] of Object.entries(nextDB.oauthIndex || {})) {
-      if (!key || !userID) continue;
-      await client.query(
-        `INSERT INTO oauth_index (oauth_key, user_id) VALUES ($1, $2)
-         ON CONFLICT (oauth_key) DO UPDATE SET user_id = EXCLUDED.user_id`,
-        [key, userID]
-      );
-    }
-
-    // Email verification tokens
-    for (const [tid, token] of Object.entries(nextDB.emailVerificationTokens || {})) {
-      if (!token || !token.userID) continue;
-      await client.query(
-        `INSERT INTO email_verification_tokens (id, user_id, email, token_hash, expires_at, used_at, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)
-         ON CONFLICT (id) DO UPDATE SET used_at = EXCLUDED.used_at`,
-        [tid, token.userID, token.email || "", token.tokenHash || "", token.expiresAt || 0, token.usedAt || null, token.createdAt || 0]
-      );
-    }
-
-    // Password reset tokens
-    for (const [tid, token] of Object.entries(nextDB.passwordResetTokens || {})) {
-      if (!token || !token.userID) continue;
-      await client.query(
-        `INSERT INTO password_reset_tokens (id, user_id, email, token_hash, expires_at, used_at, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)
-         ON CONFLICT (id) DO UPDATE SET used_at = EXCLUDED.used_at`,
-        [tid, token.userID, token.email || "", token.tokenHash || "", token.expiresAt || 0, token.usedAt || null, token.createdAt || 0]
-      );
-    }
-
-    // Refresh tokens
-    for (const [tid, token] of Object.entries(nextDB.refreshTokens || {})) {
-      if (!token || !token.userID) continue;
-      await client.query(
-        `INSERT INTO refresh_tokens (id, user_id, token_hash, device_info, expires_at, revoked_at, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)
-         ON CONFLICT (id) DO UPDATE SET revoked_at = EXCLUDED.revoked_at`,
-        [tid, token.userID, token.tokenHash || "", token.deviceInfo || null, token.expiresAt || 0, token.revokedAt || null, token.createdAt || 0]
-      );
-    }
-
-    // Friend requests
-    for (const [rid, req] of Object.entries(nextDB.friendRequestsIndex || {})) {
-      if (!req || !req.fromUserID || !req.toUserID) continue;
-      await client.query(
-        `INSERT INTO friend_requests (id, from_user_id, to_user_id, note, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6)
-         ON CONFLICT (id) DO NOTHING`,
-        [
-          rid, req.fromUserID, req.toUserID, req.note || null,
-          req.createdAt ? new Date(req.createdAt).toISOString() : new Date().toISOString(),
-          req.updatedAt ? new Date(req.updatedAt).toISOString() : new Date().toISOString(),
-        ]
-      );
-    }
-    // Delete removed friend requests
-    const frIDs = Object.keys(nextDB.friendRequestsIndex || {});
-    if (frIDs.length > 0) {
-      await client.query(
-        "DELETE FROM friend_requests WHERE id != ALL($1::text[])",
-        [frIDs]
-      );
-    } else {
-      await client.query("DELETE FROM friend_requests");
-    }
-
-    // Likes
-    await client.query("DELETE FROM journey_likes");
-    for (const [, record] of Object.entries(nextDB.likesIndex || {})) {
-      if (!record || !record.ownerUserID || !record.journeyID) continue;
-      for (const likerID of record.likerIDs || []) {
-        const likedAt = record.likedAtByUserID?.[likerID];
-        await client.query(
-          `INSERT INTO journey_likes (owner_user_id, journey_id, liker_user_id, created_at)
-           VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
-          [
-            record.ownerUserID, record.journeyID, likerID,
-            likedAt ? new Date(likedAt).toISOString() : new Date().toISOString(),
-          ]
-        );
-      }
-    }
-
-    // Postcards
-    for (const [, pc] of Object.entries(nextDB.postcardsIndex || {})) {
-      if (!pc || !pc.messageID) continue;
-      await client.query(
-        `INSERT INTO postcards (message_id, from_user_id, from_display_name,
-          to_user_id, to_display_name, city_id, city_name, photo_url,
-          message_text, client_draft_id, status, sent_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-         ON CONFLICT (message_id) DO NOTHING`,
-        [
-          pc.messageID, pc.fromUserID, pc.fromDisplayName || null,
-          pc.toUserID, pc.toDisplayName || null,
-          pc.cityID || "", pc.cityName || "",
-          pc.photoURL || null, pc.messageText || "",
-          pc.clientDraftID || null, pc.status || "sent",
-          pc.sentAt ? new Date(pc.sentAt).toISOString() : new Date().toISOString(),
-        ]
-      );
-    }
-
-    await client.query("COMMIT");
-  } catch (e) {
-    await client.query("ROLLBACK");
-    throw e;
-  } finally {
-    client.release();
-  }
-}
-
 async function saveDBToPostgres(nextDB) {
   if (!pgPool) return;
   await ensurePGSchema();
@@ -1889,14 +1257,12 @@ async function saveDBToPostgres(nextDB) {
 
 async function loadDB() {
   if (!pgPool) return loadDBFromFile();
-  const fromPG = await loadDBFromPostgres();
-  if (fromPG) return fromPG;
 
-  const fromFile = await loadDBFromFile();
-  if (hasPersistedData(fromFile)) {
-    await saveDBToPostgres(fromFile);
-  }
-  return fromFile;
+  // PG mode: only ensure schema, do NOT load all data into memory.
+  // All route handlers now query PG directly.
+  await ensurePGSchema();
+  console.log("[db] PG-direct mode — skipping full memory load");
+  return emptyDB();
 }
 
 let db = emptyDB();
@@ -1949,38 +1315,6 @@ async function persistPGTx(pgAction) {
   } finally {
     client.release();
   }
-}
-
-async function persistNotificationToPG(ownerID) {
-  if (!pgPool) return;
-  const owner = db.users[ownerID];
-  if (!owner?.notifications?.length) return;
-  const n = owner.notifications[0];
-  await DB.insertNotification(pgPool, {
-    id: n.id, userID: ownerID, type: n.type || "unknown",
-    fromUserID: n.fromUserID || null, fromDisplayName: n.fromDisplayName || null,
-    journeyID: n.journeyID || null, journeyTitle: n.journeyTitle || null,
-    message: n.message || "", read: n.read ?? false,
-    createdAt: n.createdAt || new Date().toISOString(),
-  });
-}
-
-async function persistEmailVerificationTokenToPG(tokenID) {
-  if (!pgPool || !tokenID) return;
-  const t = db.emailVerificationTokens[tokenID];
-  if (t) await DB.insertEmailVerificationToken(pgPool, t);
-}
-
-async function persistPasswordResetTokenToPG(tokenID) {
-  if (!pgPool || !tokenID) return;
-  const t = db.passwordResetTokens[tokenID];
-  if (t) await DB.insertPasswordResetToken(pgPool, t);
-}
-
-async function persistRefreshTokenToPG(tokenID) {
-  if (!pgPool || !tokenID) return;
-  const t = db.refreshTokens[tokenID];
-  if (t) await DB.insertRefreshToken(pgPool, t);
 }
 
 function filterJourneys(journeys, isSelf, isFriend) {
@@ -2059,6 +1393,510 @@ function existingUserID(rawUID) {
   const uid = String(rawUID || "").trim();
   if (!uid) return "";
   return db.users[uid] ? uid : "";
+}
+
+async function existingUserIDAsync(rawUID) {
+  const uid = String(rawUID || "").trim();
+  if (!uid) return "";
+  if (!pgPool) return existingUserID(rawUID);
+  return (await DB.getUserExists(pgPool, uid)) ? uid : "";
+}
+
+// ---------------------------------------------------------------------------
+// Async PG-aware data access layer
+// When pgPool is available, reads go to PG. Otherwise fallback to in-memory db.
+// ---------------------------------------------------------------------------
+
+async function getUser(uid) {
+  if (!pgPool) return db.users[uid] || null;
+  return DB.getUserByID(pgPool, uid);
+}
+
+async function getUserJourneys(uid) {
+  if (!pgPool) return (db.users[uid]?.journeys) || [];
+  return DB.getJourneysByUser(pgPool, uid);
+}
+
+async function getUserFriendIDs(uid) {
+  if (!pgPool) return (db.users[uid]?.friendIDs) || [];
+  return DB.getFriendIDs(pgPool, uid);
+}
+
+async function checkAreFriends(uid1, uid2) {
+  if (!pgPool) {
+    const u = db.users[uid1];
+    return u ? (u.friendIDs || []).includes(uid2) : false;
+  }
+  return DB.areFriends(pgPool, uid1, uid2);
+}
+
+async function getUserNotifications(uid) {
+  if (!pgPool) {
+    const u = db.users[uid];
+    return u?.notifications || [];
+  }
+  return DB.getNotifications(pgPool, uid);
+}
+
+async function getUserByEmailAsync(email) {
+  if (!pgPool) {
+    const uid = db.emailIndex[email];
+    return uid ? (db.users[uid] || null) : null;
+  }
+  return DB.getUserByEmail(pgPool, email);
+}
+
+async function getUserByHandleAsync(handle) {
+  if (!pgPool) {
+    const uid = db.handleIndex[handle];
+    return uid ? (db.users[uid] || null) : null;
+  }
+  return DB.getUserByHandle(pgPool, handle);
+}
+
+async function findAuthIdentityByProviderSubjectAsync(provider, providerSubject) {
+  if (!pgPool) return findAuthIdentityByProviderSubject(provider, providerSubject);
+  return DB.findAuthIdentityByProviderSubject(pgPool, provider, providerSubject);
+}
+
+async function findEmailPasswordIdentityAsync(email) {
+  if (!pgPool) return findEmailPasswordIdentity(email);
+  return DB.findEmailPasswordIdentity(pgPool, email);
+}
+
+async function findVerifiedEmailPasswordIdentityAsync(email) {
+  if (!pgPool) return findVerifiedEmailPasswordIdentity(email);
+  return DB.findVerifiedEmailPasswordIdentity(pgPool, email);
+}
+
+async function userHasEmailPasswordAsync(userID) {
+  if (!pgPool) return userHasEmailPassword(userID);
+  const identities = await DB.findAuthIdentitiesByUserID(pgPool, userID);
+  return identities.some((item) => item.provider === "email_password");
+}
+
+async function findRefreshTokenRecordAsync(rawToken) {
+  if (!pgPool) return findRefreshTokenRecord(rawToken);
+  const tokenHash = hashSHA256(String(rawToken || "").trim());
+  return DB.findRefreshTokenByHash(pgPool, tokenHash);
+}
+
+async function getOAuthUserAsync(key) {
+  if (!pgPool) return db.oauthIndex[key] || null;
+  return DB.getOAuthUser(pgPool, key);
+}
+
+async function resolveUserByAnyIDAsync(rawID) {
+  const candidate = String(rawID || "").trim();
+  if (!candidate) return null;
+  if (!pgPool) return resolveUserByAnyID(rawID);
+  let user = await DB.getUserByID(pgPool, candidate);
+  if (user) return user;
+  if (candidate.startsWith("account_")) {
+    user = await DB.getUserByID(pgPool, candidate.slice("account_".length));
+    if (user) return user;
+  } else {
+    user = await DB.getUserByID(pgPool, `account_${candidate}`);
+    if (user) return user;
+  }
+  return null;
+}
+
+async function resolveUserByInviteCodeAsync(rawCode) {
+  const code = normalizeInviteCode(rawCode);
+  if (!code) return null;
+  if (!pgPool) return resolveUserByInviteCode(rawCode);
+  return DB.getUserByInviteCode(pgPool, code);
+}
+
+async function canUseDisplayNameAsync(displayName, excludedUserID = "") {
+  if (!pgPool) return canUseDisplayName(displayName, excludedUserID);
+  const exists = await DB.displayNameExists(pgPool, displayName, excludedUserID);
+  return !exists;
+}
+
+async function isSafeEmptyOAuthAccountAsync(uid) {
+  if (!pgPool) return isSafeEmptyOAuthAccount(uid);
+  const user = await DB.getUserByID(pgPool, uid);
+  if (!user) return false;
+  if (user.provider !== "google" && user.provider !== "apple") return false;
+  return DB.isEmptyAccount(pgPool, uid);
+}
+
+async function profileDTOForViewerAsync(target, isSelf, isFriend) {
+  const visibility = target.profileVisibility || visibilityFriendsOnly;
+  const blocked = !isSelf && visibility === visibilityPrivate;
+
+  let journeys, cards;
+  if (pgPool) {
+    journeys = blocked ? [] : await DB.getJourneysByUser(pgPool, target.id);
+    cards = blocked ? [] : await DB.getCityCardsByUser(pgPool, target.id);
+  } else {
+    journeys = blocked ? [] : (target.journeys || []);
+    cards = blocked ? [] : (target.cityCards || []);
+  }
+
+  journeys = filterJourneys(journeys, isSelf, isFriend);
+  if (!isSelf && !isFriend) cards = [];
+
+  if (!isSelf && cards.length > 0 && journeys.length > 0) {
+    const visibleCityIDs = new Set();
+    for (const j of journeys) {
+      const ck = (j.cityID || j.startCityKey || j.cityKey || "").trim();
+      if (ck) visibleCityIDs.add(ck);
+    }
+    cards = cards.filter((c) => visibleCityIDs.has((c.id || "").trim()));
+  } else if (!isSelf) {
+    cards = [];
+  }
+
+  const hasEmailPwd = isSelf ? await userHasEmailPasswordAsync(target.id) : undefined;
+
+  return {
+    id: target.id,
+    handle: target.handle || null,
+    exclusiveID: target.handle || null,
+    inviteCode: target.inviteCode,
+    profileVisibility: visibility,
+    displayName: target.displayName,
+    profileSetupCompleted: resolvedProfileSetupCompleted(target, true),
+    email: isSelf ? (target.email || null) : null,
+    bio: target.bio,
+    loadout: normalizeLoadout(target.loadout),
+    handleChangeUsed: Boolean(target.handleChangeUsed),
+    canUpdateHandleOneTime: !target.handleChangeUsed,
+    hasEmailPassword: hasEmailPwd,
+    stats: isSelf ? profileStatsFrom(target) : {
+      totalJourneys: journeys.length,
+      totalDistance: journeys.reduce((acc, j) => acc + Number(j.distance || 0), 0),
+      totalMemories: journeys.reduce((acc, j) => acc + ((j.memories || []).length), 0),
+      totalUnlockedCities: cards.length
+    },
+    journeys,
+    unlockedCityCards: cards
+  };
+}
+
+async function friendDTOForViewerAsync(u, isFriend) {
+  return profileDTOForViewerAsync(u, false, isFriend);
+}
+
+async function friendRequestDTOAsync(request) {
+  const from = pgPool ? await DB.getUserByID(pgPool, request.fromUserID) : db.users[request.fromUserID];
+  const to = pgPool ? await DB.getUserByID(pgPool, request.toUserID) : db.users[request.toUserID];
+  if (!from || !to) return null;
+  return {
+    id: request.id,
+    fromUserID: request.fromUserID,
+    toUserID: request.toUserID,
+    fromUser: friendRequestUserDTO(from),
+    toUser: friendRequestUserDTO(to),
+    note: request.note || "",
+    createdAt: request.createdAt
+  };
+}
+
+async function isBlockedEitherDirectionSafe(userA, userB) {
+  if (!pgPool) return false; // blocking not supported in file mode
+  return DB.isBlockedEitherDirection(pgPool, userA, userB);
+}
+
+async function canViewJourneyAsync(viewerID, ownerID, journey) {
+  if (viewerID === ownerID) return true;
+  const isFriend = await checkAreFriends(viewerID, ownerID);
+  const v = normalizeVisibility(journey?.visibility);
+  if (v === visibilityPublic) return true;
+  if (v === visibilityFriendsOnly && isFriend) return true;
+  return false;
+}
+
+// Notification helpers that write directly to PG (no in-memory mutation needed in PG mode)
+async function insertNotificationDirect(ownerID, notification) {
+  if (pgPool) {
+    await DB.insertNotification(pgPool, {
+      id: notification.id,
+      userID: ownerID,
+      type: notification.type || "unknown",
+      fromUserID: notification.fromUserID || null,
+      fromDisplayName: notification.fromDisplayName || null,
+      journeyID: notification.journeyID || null,
+      journeyTitle: notification.journeyTitle || null,
+      message: notification.message || "",
+      read: notification.read ?? false,
+      createdAt: notification.createdAt || new Date().toISOString(),
+    });
+  } else {
+    const user = db.users[ownerID];
+    if (user) {
+      ensureUserNotifications(user);
+      user.notifications.unshift(notification);
+      if (user.notifications.length > 400) user.notifications = user.notifications.slice(0, 400);
+    }
+  }
+}
+
+async function pushNotificationAndPersist(ownerID, notification, pushAlert, pushData) {
+  await insertNotificationDirect(ownerID, notification);
+  fireRemotePush(ownerID, pushAlert, pushData);
+}
+
+async function postcardReactionPayloadForViewerAsync(viewerID, item, box) {
+  const messageID = String(item?.messageID || "").trim();
+  if (!messageID) return { reaction: null, myReaction: null, peerReaction: null };
+
+  if (pgPool) {
+    let myReaction = null;
+    let peerReaction = null;
+    if (box === "received") {
+      myReaction = await DB.getPostcardReaction(pgPool, messageID, viewerID);
+    } else {
+      const receiverID = item.toUserID;
+      if (receiverID) peerReaction = await DB.getPostcardReaction(pgPool, messageID, receiverID);
+    }
+    return {
+      reaction: box === "received" ? myReaction : peerReaction,
+      myReaction,
+      peerReaction
+    };
+  }
+  return postcardReactionPayloadForViewer(viewerID, item, box);
+}
+
+// Issue tokens and persist directly to PG (no in-memory storage in PG mode)
+async function issueEmailVerificationTokenAsync(userID, email) {
+  const rawToken = randHex(24);
+  const tokenID = `evt_${randHex(12)}`;
+  const tokenData = {
+    id: tokenID,
+    userID,
+    email,
+    tokenHash: hashSHA256(rawToken),
+    expiresAt: emailVerificationExpiresAt(),
+    usedAt: null,
+    createdAt: nowUnix()
+  };
+  if (pgPool) {
+    await DB.insertEmailVerificationToken(pgPool, tokenData);
+  } else {
+    db.emailVerificationTokens[tokenID] = tokenData;
+  }
+  return rawToken;
+}
+
+async function issuePasswordResetTokenAsync(userID, email) {
+  const rawToken = randHex(24);
+  const tokenID = `prt_${randHex(12)}`;
+  const tokenData = {
+    id: tokenID,
+    userID,
+    email,
+    tokenHash: hashSHA256(rawToken),
+    expiresAt: emailVerificationExpiresAt(),
+    usedAt: null,
+    createdAt: nowUnix()
+  };
+  if (pgPool) {
+    await DB.insertPasswordResetToken(pgPool, tokenData);
+  } else {
+    db.passwordResetTokens[tokenID] = tokenData;
+  }
+  return rawToken;
+}
+
+async function issueStoredRefreshTokenAsync(userID, provider, deviceInfo = null) {
+  const rawToken = makeRefreshToken(userID, provider);
+  const tokenID = `rft_${randHex(12)}`;
+  const tokenData = {
+    id: tokenID,
+    userID,
+    tokenHash: hashSHA256(rawToken),
+    deviceInfo: deviceInfo || null,
+    expiresAt: nowUnix() + (30 * 24 * 60 * 60),
+    revokedAt: null,
+    createdAt: nowUnix()
+  };
+  if (pgPool) {
+    await DB.insertRefreshToken(pgPool, tokenData);
+  } else {
+    db.refreshTokens[tokenID] = tokenData;
+  }
+  return rawToken;
+}
+
+async function consumeEmailVerificationTokenAsync(rawToken) {
+  const token = String(rawToken || "").trim();
+  if (!token) return { ok: false, status: 400, message: "token required" };
+  if (!pgPool) return consumeEmailVerificationToken(rawToken);
+
+  const tokenHash = hashSHA256(token);
+  const tokenRecord = await DB.findEmailVerificationByHash(pgPool, tokenHash);
+  if (!tokenRecord) return { ok: false, status: 400, message: "invalid token" };
+  if (tokenRecord.usedAt) return { ok: false, status: 400, message: "token already used" };
+  if (Number(tokenRecord.expiresAt || 0) < nowUnix()) return { ok: false, status: 400, message: "token expired" };
+
+  const identities = await DB.findAuthIdentitiesByUserID(pgPool, tokenRecord.userID);
+  const identity = identities.find((item) =>
+    item.provider === "email_password" && item.email === tokenRecord.email
+  );
+  if (!identity) return { ok: false, status: 400, message: "identity not found" };
+
+  const usedAt = nowUnix();
+  await DB.markEmailVerificationUsed(pgPool, tokenRecord.id, usedAt);
+  await DB.updateAuthIdentity(pgPool, identity.id, { emailVerified: true, updatedAt: nowUnix() });
+  return { ok: true, status: 200, email: tokenRecord.email };
+}
+
+async function inspectPasswordResetTokenAsync(rawToken) {
+  const token = String(rawToken || "").trim();
+  if (!token) return { ok: false, status: 400, message: "token required" };
+  if (!pgPool) return inspectPasswordResetToken(rawToken);
+
+  const tokenHash = hashSHA256(token);
+  const tokenRecord = await DB.findPasswordResetByHash(pgPool, tokenHash);
+  if (!tokenRecord) return { ok: false, status: 400, message: "invalid token" };
+  if (tokenRecord.usedAt) return { ok: false, status: 400, message: "token already used" };
+  if (Number(tokenRecord.expiresAt || 0) < nowUnix()) return { ok: false, status: 400, message: "token expired" };
+  return { ok: true, status: 200, token, tokenRecord };
+}
+
+async function authSuccessPayloadAsync(user, provider, email, accessToken, refreshToken) {
+  return {
+    userId: user.id,
+    provider,
+    email: email || null,
+    accessToken,
+    refreshToken,
+    needsProfileSetup: !resolvedProfileSetupCompleted(user, true),
+    hasEmailPassword: await userHasEmailPasswordAsync(user.id)
+  };
+}
+
+async function setUserHandleAsync(uid, rawHandle, options = { strict: false }) {
+  if (!pgPool) return setUserHandle(uid, rawHandle, options);
+  const user = await DB.getUserByID(pgPool, uid);
+  if (!user) return { ok: false, code: "user_not_found" };
+
+  let next = "";
+  if (options.strict) {
+    next = normalizeHandle(rawHandle);
+    if (!next) return { ok: false, code: "invalid_handle" };
+    if (await DB.handleExists(pgPool, next, uid)) return { ok: false, code: "handle_taken" };
+  } else {
+    // For auto-assign, try preferred, then random
+    const preferred = normalizeHandle(rawHandle);
+    if (preferred && !(await DB.handleExists(pgPool, preferred, uid))) {
+      next = preferred;
+    } else {
+      for (let i = 0; i < 500; i++) {
+        const numeric = genAutoNumericHandle();
+        if (!(await DB.handleExists(pgPool, numeric, uid))) { next = numeric; break; }
+      }
+      if (!next) next = `${nowUnix()}${Math.floor(Math.random() * 10)}`.slice(-8);
+    }
+  }
+
+  await DB.updateUser(pgPool, uid, { handle: next });
+  return { ok: true, handle: next };
+}
+
+async function createDefaultUserAsync(provider, email = "") {
+  if (!pgPool) return createDefaultUser(provider, email);
+  const uid = `u_${randHex(12)}`;
+  const invite = genInviteCode();
+  const user = {
+    id: uid,
+    provider,
+    email: normalizeEmail(email) || null,
+    inviteCode: invite,
+    handle: null,
+    handleChangeUsed: false,
+    profileVisibility: visibilityFriendsOnly,
+    displayName: "Explorer",
+    profileSetupCompleted: false,
+    bio: "Travel Enthusiastic",
+    loadout: defaultLoadout(),
+    createdAt: nowUnix()
+  };
+  await DB.insertUser(pgPool, user);
+  const handleResult = await setUserHandleAsync(uid, null, { strict: false });
+  user.handle = handleResult.handle || user.handle;
+  return user;
+}
+
+async function oauthCandidateScoreAsync(uid, source) {
+  if (!(await existingUserIDAsync(uid))) return -1;
+  const sourceBase = source === "modern" ? 3 : source === "legacy" ? 2 : 1;
+  return sourceBase + (await isSafeEmptyOAuthAccountAsync(uid) ? 0 : 100);
+}
+
+async function chooseCanonicalOAuthUserIDAsync(candidates) {
+  if (!pgPool) return chooseCanonicalOAuthUserID(candidates);
+  const seen = new Set();
+  let bestUID = "";
+  let bestScore = -1;
+  for (const candidate of candidates) {
+    const uid = await existingUserIDAsync(candidate?.uid);
+    if (!uid || seen.has(uid)) continue;
+    seen.add(uid);
+    const score = await oauthCandidateScoreAsync(uid, candidate?.source);
+    if (score > bestScore) {
+      bestUID = uid;
+      bestScore = score;
+    }
+  }
+  return bestUID;
+}
+
+async function mergeEmptyOAuthAccountIntoAsync(sourceUID, targetUID) {
+  if (!pgPool) return mergeEmptyOAuthAccountInto(sourceUID, targetUID);
+  const fromUID = await existingUserIDAsync(sourceUID);
+  const toUID = await existingUserIDAsync(targetUID);
+  if (!fromUID || !toUID || fromUID === toUID) return false;
+  if (!(await isSafeEmptyOAuthAccountAsync(fromUID))) return false;
+
+  const source = await DB.getUserByID(pgPool, fromUID);
+  const target = await DB.getUserByID(pgPool, toUID);
+  if (!source || !target) return false;
+
+  if (!target.email && source.email) {
+    await DB.updateUser(pgPool, toUID, { email: source.email });
+  }
+  // Reassign oauth/email indexes pointing to source → target
+  await DB.transferOAuthEntries(pgPool, fromUID, toUID);
+  await DB.deleteUserByID(pgPool, fromUID);
+  return true;
+}
+
+async function upsertAppleAuthIdentityAsync(userID, subject, email, emailVerified) {
+  if (!pgPool) return upsertAppleAuthIdentity(userID, subject, email, emailVerified);
+  const normalizedSubject = String(subject || "").trim();
+  const normalizedEmail = normalizeEmail(email);
+  const identity = await findAuthIdentityByProviderSubjectAsync("apple", normalizedSubject);
+  if (!identity) {
+    const identityID = `aid_${randHex(12)}`;
+    const newIdentity = {
+      id: identityID,
+      userID,
+      provider: "apple",
+      providerSubject: normalizedSubject,
+      email: normalizedEmail || null,
+      emailVerified: parseTruthy(emailVerified),
+      passwordHash: null,
+      createdAt: nowUnix(),
+      updatedAt: nowUnix()
+    };
+    await DB.insertAuthIdentity(pgPool, newIdentity);
+    return newIdentity;
+  }
+  const updatedAt = nowUnix();
+  const updates = {
+    userID,
+    email: normalizedEmail || identity.email || null,
+    emailVerified: parseTruthy(emailVerified) || parseTruthy(identity.emailVerified),
+    updatedAt
+  };
+  await DB.updateAuthIdentity(pgPool, identity.id, updates);
+  return { ...identity, ...updates };
 }
 
 function hasUserLikesOrLikeOwnership(uid) {
@@ -2288,155 +2126,6 @@ function reconcilePostcardsForUser(user, uid) {
   return changed;
 }
 
-function pushJourneyLikeNotification(owner, fromUser, journey) {
-  ensureUserNotifications(owner);
-  owner.notifications.unshift({
-    id: `n_${randHex(10)}`,
-    type: "journey_like",
-    fromUserID: fromUser.id,
-    fromDisplayName: fromUser.displayName,
-    journeyID: journey.id,
-    journeyTitle: journey.title,
-    message: `${fromUser.displayName} liked your journey "${journey.title}"`,
-    createdAt: new Date().toISOString(),
-    read: false
-  });
-  if (owner.notifications.length > 400) {
-    owner.notifications = owner.notifications.slice(0, 400);
-  }
-  fireRemotePush(owner.id, {
-    title: fromUser.displayName,
-    body: `liked your journey "${journey.title}"`
-  });
-}
-
-function pushProfileStompNotification(owner, fromUser) {
-  ensureUserNotifications(owner);
-  owner.notifications.unshift({
-    id: `n_${randHex(10)}`,
-    type: "profile_stomp",
-    fromUserID: fromUser.id,
-    fromDisplayName: fromUser.displayName,
-    journeyID: null,
-    journeyTitle: null,
-    message: `${fromUser.displayName}在你的沙发上坐了一坐`,
-    createdAt: new Date().toISOString(),
-    read: false
-  });
-  if (owner.notifications.length > 400) {
-    owner.notifications = owner.notifications.slice(0, 400);
-  }
-  fireRemotePush(owner.id, {
-    title: "StreetStamps",
-    body: `${fromUser.displayName}在你的沙发上坐了一坐`
-  });
-}
-
-function pushFriendRequestNotification(owner, fromUser) {
-  ensureUserNotifications(owner);
-  owner.notifications.unshift({
-    id: `n_${randHex(10)}`,
-    type: "friend_request",
-    fromUserID: fromUser.id,
-    fromDisplayName: fromUser.displayName,
-    journeyID: null,
-    journeyTitle: null,
-    message: `${fromUser.displayName} 向你发送了好友申请`,
-    createdAt: new Date().toISOString(),
-    read: false
-  });
-  if (owner.notifications.length > 400) {
-    owner.notifications = owner.notifications.slice(0, 400);
-  }
-  fireRemotePush(owner.id, {
-    title: "StreetStamps",
-    body: `${fromUser.displayName} 向你发送了好友申请`
-  });
-}
-
-function pushFriendRequestAcceptedNotification(owner, fromUser) {
-  ensureUserNotifications(owner);
-  owner.notifications.unshift({
-    id: `n_${randHex(10)}`,
-    type: "friend_request_accepted",
-    fromUserID: fromUser.id,
-    fromDisplayName: fromUser.displayName,
-    journeyID: null,
-    journeyTitle: null,
-    message: `${fromUser.displayName} 通过了你的好友申请`,
-    createdAt: new Date().toISOString(),
-    read: false
-  });
-  if (owner.notifications.length > 400) {
-    owner.notifications = owner.notifications.slice(0, 400);
-  }
-  fireRemotePush(owner.id, {
-    title: "StreetStamps",
-    body: `${fromUser.displayName} 通过了你的好友申请`
-  });
-}
-
-function pushPostcardReceivedNotification(owner, fromUser, postcard) {
-  ensureUserNotifications(owner);
-  owner.notifications.unshift({
-    id: `n_${randHex(10)}`,
-    type: "postcard_received",
-    fromUserID: fromUser.id,
-    fromDisplayName: fromUser.displayName,
-    journeyID: null,
-    journeyTitle: null,
-    message: `${fromUser.displayName} 给你寄来了一张来自 ${postcard.cityName || postcard.cityID} 的明信片`,
-    createdAt: new Date().toISOString(),
-    read: false,
-    postcardMessageID: postcard.messageID,
-    cityID: postcard.cityID,
-    cityName: postcard.cityName || postcard.cityID,
-    photoURL: postcard.photoURL || null,
-    messageText: postcard.messageText || ""
-  });
-  if (owner.notifications.length > 400) {
-    owner.notifications = owner.notifications.slice(0, 400);
-  }
-  fireRemotePush(owner.id, {
-    title: fromUser.displayName,
-    body: `给你寄来了一张来自 ${postcard.cityName || postcard.cityID} 的明信片`
-  }, { type: "postcard_received", postcardMessageID: postcard.messageID });
-}
-
-function pushPostcardReactionNotification(owner, fromUser, postcard, reactionEmoji, comment) {
-  ensureUserNotifications(owner);
-  let message = `${fromUser.displayName} `;
-  if (reactionEmoji) {
-    message += `${reactionEmoji} 了你的明信片`;
-  } else if (comment) {
-    message += `评论了你的明信片`;
-  } else {
-    message += `查看了你的明信片`;
-  }
-
-  owner.notifications.unshift({
-    id: `n_${randHex(10)}`,
-    type: "postcard_reaction",
-    fromUserID: fromUser.id,
-    fromDisplayName: fromUser.displayName,
-    journeyID: null,
-    journeyTitle: null,
-    message: message,
-    createdAt: new Date().toISOString(),
-    read: false,
-    postcardMessageID: postcard.messageID,
-    reactionEmoji: reactionEmoji || null,
-    comment: comment || null
-  });
-  if (owner.notifications.length > 400) {
-    owner.notifications = owner.notifications.slice(0, 400);
-  }
-  fireRemotePush(owner.id, {
-    title: fromUser.displayName,
-    body: message
-  });
-}
-
 /**
  * Fire an APNs remote push to a user (non-blocking, best-effort).
  * @param {string} ownerID - target user ID
@@ -2487,27 +2176,8 @@ function friendRequestUserDTO(user) {
   };
 }
 
-function friendRequestDTO(request) {
-  const from = db.users[request.fromUserID];
-  const to = db.users[request.toUserID];
-  if (!from || !to) return null;
-  return {
-    id: request.id,
-    fromUserID: request.fromUserID,
-    toUserID: request.toUserID,
-    fromUser: friendRequestUserDTO(from),
-    toUser: friendRequestUserDTO(to),
-    note: request.note || "",
-    createdAt: request.createdAt
-  };
-}
-
 function allFriendRequests() {
   return Object.values(db.friendRequestsIndex || {}).filter((x) => x && x.id && x.fromUserID && x.toUserID);
-}
-
-function sortByCreatedDesc(requests) {
-  return requests.sort((a, b) => Date.parse(b.createdAt || "") - Date.parse(a.createdAt || ""));
 }
 
 function findPendingFriendRequest(fromUserID, toUserID) {
@@ -2541,55 +2211,6 @@ function collectFriendRequestIDsBetween(userA, userB) {
   return ids;
 }
 
-function profileDTOForViewer(target, isSelf, isFriend) {
-  const visibility = target.profileVisibility || visibilityFriendsOnly;
-  const blocked = !isSelf && visibility === visibilityPrivate;
-  const journeys = blocked ? [] : filterJourneys(target.journeys || [], isSelf, isFriend);
-  let cards = blocked ? [] : (isSelf || isFriend ? (target.cityCards || []) : []);
-
-  // When viewing another user's profile, only include city cards that have
-  // at least one visible journey so deleted/private journeys don't leave
-  // empty ghost city cards.
-  if (!isSelf && cards.length > 0 && journeys.length > 0) {
-    const visibleCityIDs = new Set();
-    for (const j of journeys) {
-      const ck = (j.cityID || j.startCityKey || j.cityKey || "").trim();
-      if (ck) visibleCityIDs.add(ck);
-    }
-    cards = cards.filter((c) => visibleCityIDs.has((c.id || "").trim()));
-  } else if (!isSelf) {
-    cards = [];
-  }
-
-  return {
-    id: target.id,
-    handle: target.handle || null,
-    exclusiveID: target.handle || null,
-    inviteCode: target.inviteCode,
-    profileVisibility: visibility,
-    displayName: target.displayName,
-    profileSetupCompleted: resolvedProfileSetupCompleted(target, true),
-    email: isSelf ? (target.email || null) : null,
-    bio: target.bio,
-    loadout: normalizeLoadout(target.loadout),
-    handleChangeUsed: Boolean(target.handleChangeUsed),
-    canUpdateHandleOneTime: !target.handleChangeUsed,
-    hasEmailPassword: isSelf ? userHasEmailPassword(target.id) : undefined,
-    stats: isSelf ? profileStatsFrom(target) : {
-      totalJourneys: journeys.length,
-      totalDistance: journeys.reduce((acc, j) => acc + Number(j.distance || 0), 0),
-      totalMemories: journeys.reduce((acc, j) => acc + ((j.memories || []).length), 0),
-      totalUnlockedCities: cards.length
-    },
-    journeys,
-    unlockedCityCards: cards
-  };
-}
-
-function friendDTOForViewer(u, isFriend) {
-  return profileDTOForViewer(u, false, isFriend);
-}
-
 async function uploadToR2OrThrow(objectKey, body, contentType) {
   if (!r2Client) throw new Error("r2 disabled");
   await r2Client.send(new PutObjectCommand({
@@ -2600,58 +2221,54 @@ async function uploadToR2OrThrow(objectKey, body, contentType) {
   }));
 }
 
-function r2PublicURL(objectKey) {
-  const base = R2_PUBLIC_BASE || R2_ENDPOINT;
-  if (!base) return null;
-  const b = base.replace(/\/$/, "");
-  if (R2_PUBLIC_BASE) return `${b}/${objectKey}`;
-  return `${b}/${R2_BUCKET}/${objectKey}`;
-}
-
 async function main() {
   const prodConfigError = productionConfigError();
   if (prodConfigError) {
     throw new Error(prodConfigError);
   }
   db = await loadDB();
-  console.log(`[streetstamps-node-v1] storage=${pgPool ? "postgresql-relational" : "file"}`);
-  db.handleIndex = {};
-  db.inviteIndex = {};
-  let shouldPersistMigration = false;
-  if (!db.likesIndex || typeof db.likesIndex !== "object") {
-    db.likesIndex = {};
-  }
-  if (!db.friendRequestsIndex || typeof db.friendRequestsIndex !== "object") {
-    db.friendRequestsIndex = {};
-  }
-  ensurePostcardIndex();
-  for (const [uid, user] of Object.entries(db.users || {})) {
-    setUserHandle(uid, user.handle || user.displayName || uid, { strict: false });
-    ensureUserInviteCode(uid, user);
-    if (!user.profileVisibility) user.profileVisibility = visibilityFriendsOnly;
-    if (typeof user.handleChangeUsed !== "boolean") {
-      user.handleChangeUsed = false;
+  console.log(`[streetstamps-node-v1] storage=${pgPool ? "postgresql-direct" : "file"}`);
+
+  if (!pgPool) {
+    // In-memory mode: run post-load migrations on the loaded data
+    db.handleIndex = {};
+    db.inviteIndex = {};
+    let shouldPersistMigration = false;
+    if (!db.likesIndex || typeof db.likesIndex !== "object") {
+      db.likesIndex = {};
     }
-    shouldPersistMigration = ensureProfileSetupCompleted(user, true) || shouldPersistMigration;
-    user.loadout = normalizeLoadout(user.loadout);
-    ensureUserNotifications(user);
-    ensurePostcardCollections(user);
-    for (const item of user.sentPostcards) upsertPostcard(item);
-    for (const item of user.receivedPostcards) upsertPostcard(item);
-  }
-  for (const [uid, user] of Object.entries(db.users || {})) {
-    reconcilePostcardsForUser(user, uid);
-  }
-  shouldPersistMigration = normalizeHistoricalDisplayNames() || shouldPersistMigration;
-  for (const req of allFriendRequests()) {
-    const from = db.users[req.fromUserID];
-    const to = db.users[req.toUserID];
-    if (!from || !to || from.id === to.id || isFriendOf(from, to.id)) {
-      delete db.friendRequestsIndex[req.id];
+    if (!db.friendRequestsIndex || typeof db.friendRequestsIndex !== "object") {
+      db.friendRequestsIndex = {};
     }
-  }
-  if (shouldPersistMigration) {
-    await saveDB();
+    ensurePostcardIndex();
+    for (const [uid, user] of Object.entries(db.users || {})) {
+      setUserHandle(uid, user.handle || user.displayName || uid, { strict: false });
+      ensureUserInviteCode(uid, user);
+      if (!user.profileVisibility) user.profileVisibility = visibilityFriendsOnly;
+      if (typeof user.handleChangeUsed !== "boolean") {
+        user.handleChangeUsed = false;
+      }
+      shouldPersistMigration = ensureProfileSetupCompleted(user, true) || shouldPersistMigration;
+      user.loadout = normalizeLoadout(user.loadout);
+      ensureUserNotifications(user);
+      ensurePostcardCollections(user);
+      for (const item of user.sentPostcards) upsertPostcard(item);
+      for (const item of user.receivedPostcards) upsertPostcard(item);
+    }
+    for (const [uid, user] of Object.entries(db.users || {})) {
+      reconcilePostcardsForUser(user, uid);
+    }
+    shouldPersistMigration = normalizeHistoricalDisplayNames() || shouldPersistMigration;
+    for (const req of allFriendRequests()) {
+      const from = db.users[req.fromUserID];
+      const to = db.users[req.toUserID];
+      if (!from || !to || from.id === to.id || isFriendOf(from, to.id)) {
+        delete db.friendRequestsIndex[req.id];
+      }
+    }
+    if (shouldPersistMigration) {
+      await saveDB();
+    }
   }
   await fsp.mkdir(MEDIA_DIR, { recursive: true });
 
@@ -2683,7 +2300,7 @@ async function main() {
   app.use(express.json({
     limit: `${Number.isFinite(JSON_BODY_LIMIT_MB) && JSON_BODY_LIMIT_MB > 0 ? JSON_BODY_LIMIT_MB : 6}mb`
   }));
-  app.use("/media", express.static(MEDIA_DIR));
+  app.use("/media", express.static(MEDIA_DIR, { maxAge: "30d", immutable: true }));
   app.use((req, _res, next) => {
     const header = String(req.headers.authorization || "");
     if (!header.startsWith("Bearer ")) {
@@ -2840,28 +2457,38 @@ async function main() {
       if (!isStrongPassword(password)) {
         return res.status(400).json({ message: "password must be at least 8 characters and include a letter, number, and special character" });
       }
-      const existingEmailIdentity = findEmailPasswordIdentity(email);
-      if (db.emailIndex[email] && !canRecoverLegacyEmailRegistration(email)) {
+      const existingEmailIdentity = await findEmailPasswordIdentityAsync(email);
+      const existingEmailUser = pgPool
+        ? await DB.getUserByEmail(pgPool, email)
+        : (db.emailIndex[email] ? db.users[db.emailIndex[email]] : null);
+      const canRecover = !existingEmailUser || (pgPool
+        ? !(existingEmailIdentity)
+        : canRecoverLegacyEmailRegistration(email));
+
+      if (existingEmailUser && !canRecover) {
         if (existingEmailIdentity && !parseTruthy(existingEmailIdentity.emailVerified)) {
-          const existingUser = db.users?.[existingEmailIdentity.userID];
+          const existingUser = await getUser(existingEmailIdentity.userID);
           if (!existingUser) return res.status(409).json({ message: "email already exists" });
 
           const now = nowUnix();
           const passwordHash = await hashPassword(password);
-          existingEmailIdentity.passwordHash = passwordHash;
-          existingEmailIdentity.updatedAt = now;
-          existingUser.passwordHash = passwordHash;
+          let updatedDisplayName = existingUser.displayName;
           if (displayName) {
             const normalized = normalizeDisplayName(displayName);
-            if (normalized && canUseDisplayName(normalized, existingEmailIdentity.userID)) {
-              existingUser.displayName = normalized;
+            if (normalized && await canUseDisplayNameAsync(normalized, existingEmailIdentity.userID)) {
+              updatedDisplayName = normalized;
             }
           }
-          const verificationToken = issueEmailVerificationToken(existingEmailIdentity.userID, email);
+          if (!pgPool) {
+            existingEmailIdentity.passwordHash = passwordHash;
+            existingEmailIdentity.updatedAt = now;
+            existingUser.passwordHash = passwordHash;
+            existingUser.displayName = updatedDisplayName;
+          }
+          const verificationToken = await issueEmailVerificationTokenAsync(existingEmailIdentity.userID, email);
           await persistPG(async () => {
-            await DB.updateAuthIdentity(pgPool, existingEmailIdentity.id, { passwordHash: existingEmailIdentity.passwordHash, updatedAt: existingEmailIdentity.updatedAt });
-            await DB.updateUser(pgPool, existingEmailIdentity.userID, { displayName: existingUser.displayName });
-            await persistEmailVerificationTokenToPG(issueEmailVerificationToken._lastID);
+            await DB.updateAuthIdentity(pgPool, existingEmailIdentity.id, { passwordHash, updatedAt: now });
+            await DB.updateUser(pgPool, existingEmailIdentity.userID, { displayName: updatedDisplayName });
           });
           await deliverVerificationEmail(email, verificationToken);
 
@@ -2900,12 +2527,15 @@ async function main() {
         receivedPostcards: [],
         createdAt
       };
-      db.users[uid] = user;
-      setUserHandle(uid, null, { strict: false });
-      db.emailIndex[email] = uid;
-      db.inviteIndex[invite] = uid;
+      if (!pgPool) {
+        db.users[uid] = user;
+        db.emailIndex[email] = uid;
+        db.inviteIndex[invite] = uid;
+      }
+      const handleResult = await setUserHandleAsync(uid, null, { strict: false });
+      user.handle = handleResult.handle || user.handle;
       const identityID = `aid_${randHex(12)}`;
-      db.authIdentities[identityID] = {
+      const identityObj = {
         id: identityID,
         userID: uid,
         provider: "email_password",
@@ -2916,11 +2546,13 @@ async function main() {
         createdAt,
         updatedAt: createdAt
       };
-      const verificationToken = issueEmailVerificationToken(uid, email);
+      if (!pgPool) {
+        db.authIdentities[identityID] = identityObj;
+      }
+      const verificationToken = await issueEmailVerificationTokenAsync(uid, email);
       await persistPG(async () => {
-        await DB.insertUser(pgPool, db.users[uid]);
-        await DB.insertAuthIdentity(pgPool, db.authIdentities[identityID]);
-        await persistEmailVerificationTokenToPG(issueEmailVerificationToken._lastID);
+        await DB.insertUser(pgPool, user);
+        await DB.insertAuthIdentity(pgPool, identityObj);
       });
       await deliverVerificationEmail(email, verificationToken);
 
@@ -2938,7 +2570,7 @@ async function main() {
 
   app.post("/v1/auth/verify-email", authRateLimiter, async (req, res) => {
     try {
-      const result = await consumeEmailVerificationToken(req.body?.token);
+      const result = await consumeEmailVerificationTokenAsync(req.body?.token);
       if (!result.ok) return res.status(result.status).json({ message: result.message });
       return res.status(200).json({ ok: true, email: result.email });
     } catch (err) {
@@ -2950,7 +2582,7 @@ async function main() {
   app.get("/verify-email", async (req, res) => {
     try {
       applyHTMLSecurityHeaders(res);
-      const result = await consumeEmailVerificationToken(req.query?.token);
+      const result = await consumeEmailVerificationTokenAsync(req.query?.token);
       if (!result.ok) {
         res.status(result.status);
         res.type("html");
@@ -2981,10 +2613,10 @@ async function main() {
     }
   });
 
-  app.get("/reset-password", (req, res) => {
+  app.get("/reset-password", async (req, res) => {
     try {
       applyHTMLSecurityHeaders(res);
-      const result = inspectPasswordResetToken(req.query?.token);
+      const result = await inspectPasswordResetTokenAsync(req.query?.token);
       if (!result.ok) {
         res.status(result.status);
         res.type("html");
@@ -3022,17 +2654,12 @@ async function main() {
       const email = normalizeEmail(req.body?.email);
       if (!email) return res.status(200).json({ ok: true });
 
-      const identity = Object.values(db.authIdentities || {}).find((item) => (
-        item.provider === "email_password" && item.email === email
-      ));
+      const identity = await findEmailPasswordIdentityAsync(email);
       if (!identity || parseTruthy(identity.emailVerified)) {
         return res.status(200).json({ ok: true });
       }
 
-      const token = issueEmailVerificationToken(identity.userID, email);
-      await persistPG(async () => {
-        await persistEmailVerificationTokenToPG(issueEmailVerificationToken._lastID);
-      });
+      const token = await issueEmailVerificationTokenAsync(identity.userID, email);
       await deliverVerificationEmail(email, token);
       return res.status(200).json({ ok: true });
     } catch (err) {
@@ -3045,9 +2672,7 @@ async function main() {
     try {
       const email = String(req.body?.email || "").trim().toLowerCase();
       const password = String(req.body?.password || "");
-      const identity = Object.values(db.authIdentities || {}).find((item) => (
-        item.provider === "email_password" && item.email === email
-      ));
+      const identity = await findEmailPasswordIdentityAsync(email);
       if (!identity) return res.status(404).json({ message: "account not found" });
 
       // 验证密码（支持旧SHA256和新bcrypt）
@@ -3061,10 +2686,11 @@ async function main() {
         if (identity.passwordHash === oldHash) {
           passwordValid = true;
           // 升级到bcrypt
-          identity.passwordHash = await hashPassword(password);
-          identity.updatedAt = nowUnix();
+          const newHash = await hashPassword(password);
+          const updatedAt = nowUnix();
+          if (!pgPool) { identity.passwordHash = newHash; identity.updatedAt = updatedAt; }
           await persistPG(async () => {
-            await DB.updateAuthIdentity(pgPool, identity.id, { passwordHash: identity.passwordHash, updatedAt: identity.updatedAt });
+            await DB.updateAuthIdentity(pgPool, identity.id, { passwordHash: newHash, updatedAt });
           });
         }
       }
@@ -3072,15 +2698,12 @@ async function main() {
       if (!passwordValid) return res.status(401).json({ message: "wrong email or password" });
       if (!identity.emailVerified) return res.status(403).json({ message: "email not verified" });
 
-      const user = db.users[identity.userID];
+      const user = await getUser(identity.userID);
       if (!user) return res.status(404).json({ message: "account not found" });
 
       const accessToken = makeAccessToken(user.id, user.provider || "email");
-      const refreshToken = issueStoredRefreshToken(user.id, user.provider || "email");
-      await persistPG(async () => {
-        await persistRefreshTokenToPG(issueStoredRefreshToken._lastID);
-      });
-      return res.status(200).json(authSuccessPayload(
+      const refreshToken = await issueStoredRefreshTokenAsync(user.id, user.provider || "email");
+      return res.status(200).json(await authSuccessPayloadAsync(
         user,
         user.provider || "email",
         user.email || identity.email || null,
@@ -3097,11 +2720,11 @@ async function main() {
     try {
       const rawToken = String(req.body?.refreshToken || "").trim();
       const payload = parseRefreshToken(rawToken);
-      const record = findRefreshTokenRecord(rawToken);
+      const record = await findRefreshTokenRecordAsync(rawToken);
       if (!record || record.revokedAt) return res.status(401).json({ message: "refresh token invalid" });
       if (Number(record.expiresAt || 0) < nowUnix()) return res.status(401).json({ message: "refresh token expired" });
 
-      const user = db.users[payload.uid];
+      const user = await getUser(payload.uid);
       if (!user) return res.status(401).json({ message: "account not found" });
 
       return res.status(200).json({
@@ -3118,10 +2741,10 @@ async function main() {
       const rawToken = String(req.body?.refreshToken || "").trim();
       if (!rawToken) return res.status(400).json({ message: "refresh token required" });
       parseRefreshToken(rawToken);
-      const record = findRefreshTokenRecord(rawToken);
+      const record = await findRefreshTokenRecordAsync(rawToken);
       if (!record) return res.status(401).json({ message: "refresh token invalid" });
       if (!record.revokedAt) {
-        record.revokedAt = nowUnix();
+        if (!pgPool) record.revokedAt = nowUnix();
         await persistPG(async () => {
           await DB.revokeRefreshToken(pgPool, record.id);
         });
@@ -3139,14 +2762,9 @@ async function main() {
       if (!email.includes("@")) {
         return res.status(200).json({ ok: true });
       }
-      const identity = Object.values(db.authIdentities || {}).find((item) => (
-        item.provider === "email_password" && item.email === email
-      ));
+      const identity = await findEmailPasswordIdentityAsync(email);
       if (identity) {
-        const token = issuePasswordResetToken(identity.userID, email);
-        await persistPG(async () => {
-          await persistPasswordResetTokenToPG(issuePasswordResetToken._lastID);
-        });
+        const token = await issuePasswordResetTokenAsync(identity.userID, email);
         await deliverPasswordResetEmail(email, token);
       }
       return res.status(200).json({ ok: true });
@@ -3165,30 +2783,40 @@ async function main() {
         return res.status(400).json({ message: "password must be at least 8 characters and include a letter, number, and special character" });
       }
 
-      const tokenHash = hashSHA256(rawToken);
-      const tokenRecord = Object.values(db.passwordResetTokens || {}).find((item) => item.tokenHash === tokenHash);
-      if (!tokenRecord) return res.status(400).json({ message: "invalid token" });
-      if (tokenRecord.usedAt) return res.status(400).json({ message: "token already used" });
-      if (Number(tokenRecord.expiresAt || 0) < nowUnix()) return res.status(400).json({ message: "token expired" });
+      const inspectResult = await inspectPasswordResetTokenAsync(rawToken);
+      if (!inspectResult.ok) return res.status(inspectResult.status).json({ message: inspectResult.message });
+      const tokenRecord = inspectResult.tokenRecord;
 
-      const identity = Object.values(db.authIdentities || {}).find((item) => (
-        item.provider === "email_password"
-          && item.userID === tokenRecord.userID
-          && item.email === tokenRecord.email
-      ));
+      // Find the identity for this password reset
+      let identity;
+      if (pgPool) {
+        const identities = await DB.findAuthIdentitiesByUserID(pgPool, tokenRecord.userID);
+        identity = identities.find((item) =>
+          item.provider === "email_password" && item.email === tokenRecord.email
+        );
+      } else {
+        identity = Object.values(db.authIdentities || {}).find((item) => (
+          item.provider === "email_password"
+            && item.userID === tokenRecord.userID
+            && item.email === tokenRecord.email
+        ));
+      }
       if (!identity) return res.status(400).json({ message: "identity not found" });
 
       const nextHash = await hashPassword(newPassword);
-      identity.passwordHash = nextHash;
-      identity.updatedAt = nowUnix();
-      const user = db.users[tokenRecord.userID];
-      if (user) user.passwordHash = nextHash;
-      tokenRecord.usedAt = nowUnix();
-      revokeRefreshTokensForUser(tokenRecord.userID);
+      const updatedAt = nowUnix();
+      const usedAt = nowUnix();
+      if (!pgPool) {
+        identity.passwordHash = nextHash;
+        identity.updatedAt = updatedAt;
+        const user = db.users[tokenRecord.userID];
+        if (user) user.passwordHash = nextHash;
+        tokenRecord.usedAt = usedAt;
+        revokeRefreshTokensForUser(tokenRecord.userID);
+      }
       await persistPG(async () => {
-        await DB.updateAuthIdentity(pgPool, identity.id, { passwordHash: nextHash, updatedAt: identity.updatedAt });
-        // passwordHash is stored in auth_identities, not users table
-        await DB.markPasswordResetUsed(pgPool, tokenRecord.id, tokenRecord.usedAt);
+        await DB.updateAuthIdentity(pgPool, identity.id, { passwordHash: nextHash, updatedAt });
+        await DB.markPasswordResetUsed(pgPool, tokenRecord.id, usedAt);
         await DB.revokeRefreshTokensForUser(pgPool, tokenRecord.userID);
       });
       return res.status(200).json({ ok: true });
@@ -3206,87 +2834,74 @@ async function main() {
       const identity = await verifyAppleIdentity(idToken);
       const modernKey = oauthSubjectKey("apple", identity.subject);
       const legacyKey = oauthLegacyKey("apple", idToken);
-      const existingAppleIdentity = findAuthIdentityByProviderSubject("apple", identity.subject);
+      const existingAppleIdentity = await findAuthIdentityByProviderSubjectAsync("apple", identity.subject);
       const relayEmail = isApplePrivateRelayEmail(identity.email);
       const verifiedEmailIdentity = identity.email && identity.emailVerified && !relayEmail
-        ? findVerifiedEmailPasswordIdentity(identity.email)
+        ? await findVerifiedEmailPasswordIdentityAsync(identity.email)
         : null;
 
-      const modernUID = existingUserID(existingAppleIdentity?.userID || db.oauthIndex[modernKey]);
-      const legacyUID = existingUserID(db.oauthIndex[legacyKey]);
-      const emailUID = existingUserID(verifiedEmailIdentity?.userID);
+      const modernOAuthUID = await getOAuthUserAsync(modernKey);
+      const legacyOAuthUID = await getOAuthUserAsync(legacyKey);
+      const modernUID = await existingUserIDAsync(existingAppleIdentity?.userID || modernOAuthUID);
+      const legacyUID = await existingUserIDAsync(legacyOAuthUID);
+      const emailUID = await existingUserIDAsync(verifiedEmailIdentity?.userID);
 
-      let uid = chooseCanonicalOAuthUserID([
+      let uid = await chooseCanonicalOAuthUserIDAsync([
         { uid: modernUID, source: "modern" },
         { uid: legacyUID, source: "legacy" },
         { uid: emailUID, source: "email" }
       ]);
-      let changed = false;
 
-      if (modernUID && modernUID !== uid && mergeEmptyOAuthAccountInto(modernUID, uid)) {
-        changed = true;
-      }
-      if (legacyUID && legacyUID !== uid && mergeEmptyOAuthAccountInto(legacyUID, uid)) {
-        changed = true;
-      }
-      if (emailUID && emailUID !== uid && mergeEmptyOAuthAccountInto(emailUID, uid)) {
-        changed = true;
-      }
+      if (modernUID && modernUID !== uid) await mergeEmptyOAuthAccountIntoAsync(modernUID, uid);
+      if (legacyUID && legacyUID !== uid) await mergeEmptyOAuthAccountIntoAsync(legacyUID, uid);
+      if (emailUID && emailUID !== uid) await mergeEmptyOAuthAccountIntoAsync(emailUID, uid);
 
       if (!uid) {
-        const user = createDefaultUser("apple", identity.email);
-        uid = user.id;
-        changed = true;
+        const newUser = await createDefaultUserAsync("apple", identity.email);
+        uid = newUser.id;
       }
 
       if (!uid) return res.status(500).json({ message: "user not found after apple login" });
 
-      const user = db.users[uid];
+      let user = await getUser(uid);
       if (!user) return res.status(500).json({ message: "user not found after apple login" });
 
-      if (modernKey && db.oauthIndex[modernKey] !== uid) {
-        db.oauthIndex[modernKey] = uid;
-        changed = true;
+      if (modernKey) {
+        if (pgPool) {
+          await DB.setOAuthUser(pgPool, modernKey, uid);
+        } else if (db.oauthIndex[modernKey] !== uid) {
+          db.oauthIndex[modernKey] = uid;
+        }
       }
 
+      let emailToUpdate = null;
       if (!relayEmail && identity.email && identity.emailVerified) {
-        const currentEmailUID = existingUserID(db.emailIndex[identity.email]);
+        const currentEmailUser = await getUserByEmailAsync(identity.email);
+        const currentEmailUID = currentEmailUser?.id || "";
         if (!user.email && (!currentEmailUID || currentEmailUID === uid)) {
-          user.email = identity.email;
-          changed = true;
+          emailToUpdate = identity.email;
         }
-        if ((!currentEmailUID || currentEmailUID === uid) && db.emailIndex[identity.email] !== uid) {
+        if (!pgPool && (!currentEmailUID || currentEmailUID === uid) && db.emailIndex[identity.email] !== uid) {
           db.emailIndex[identity.email] = uid;
-          changed = true;
         }
       } else if (!user.email && identity.email) {
-        user.email = identity.email;
-        changed = true;
+        emailToUpdate = identity.email;
       }
 
-      const appleIdentity = upsertAppleAuthIdentity(uid, identity.subject, identity.email, identity.emailVerified);
-      if (appleIdentity.userID !== uid) {
-        appleIdentity.userID = uid;
-        appleIdentity.updatedAt = nowUnix();
-        changed = true;
-      } else {
-        changed = true;
+      if (emailToUpdate) {
+        if (!pgPool) user.email = emailToUpdate;
+        await persistPG(async () => {
+          await DB.updateUser(pgPool, uid, { email: emailToUpdate });
+        });
       }
+
+      const appleIdentity = await upsertAppleAuthIdentityAsync(uid, identity.subject, identity.email, identity.emailVerified);
 
       const accessToken = makeAccessToken(uid, "apple");
-      const refreshToken = issueStoredRefreshToken(uid, "apple");
-      await persistPG(async () => {
-        const user = db.users[uid];
-        if (user) await DB.updateUser(pgPool, uid, { email: user.email, provider: user.provider });
-        if (modernKey) await DB.setOAuthUser(pgPool, modernKey, uid);
-        const appleIdent = findAuthIdentityByProviderSubject("apple", identity.subject);
-        if (appleIdent) {
-          try { await DB.insertAuthIdentity(pgPool, appleIdent); } catch { await DB.updateAuthIdentity(pgPool, appleIdent.id, { userID: uid, email: appleIdent.email, emailVerified: appleIdent.emailVerified, updatedAt: appleIdent.updatedAt }); }
-        }
-        await persistRefreshTokenToPG(issueStoredRefreshToken._lastID);
-      });
+      const refreshToken = await issueStoredRefreshTokenAsync(uid, "apple");
 
-      return res.status(200).json(authSuccessPayload(
+      user = await getUser(uid);
+      return res.status(200).json(await authSuccessPayloadAsync(
         user,
         "apple",
         user.email || appleIdentity.email || null,
@@ -3305,7 +2920,7 @@ async function main() {
   app.post("/v1/auth/link-email-password", authRateLimiter, async (req, res) => {
     try {
       const uid = parseBearer(req);
-      const user = db.users[uid];
+      const user = await getUser(uid);
       if (!user) return res.status(404).json({ message: "account not found" });
 
       const email = normalizeEmail(req.body?.email);
@@ -3315,11 +2930,11 @@ async function main() {
         return res.status(400).json({ message: "password must be at least 8 characters and include a letter, number, and special character" });
       }
 
-      if (userHasEmailPassword(uid)) {
+      if (await userHasEmailPasswordAsync(uid)) {
         return res.status(409).json({ message: "email password already linked" });
       }
 
-      const existingEmailIdentity = findEmailPasswordIdentity(email);
+      const existingEmailIdentity = await findEmailPasswordIdentityAsync(email);
       if (existingEmailIdentity && existingEmailIdentity.userID !== uid) {
         return res.status(409).json({ message: "email already in use by another account" });
       }
@@ -3327,7 +2942,7 @@ async function main() {
       const passwordHash = await hashPassword(password);
       const now = nowUnix();
       const identityID = `aid_${randHex(12)}`;
-      db.authIdentities[identityID] = {
+      const identityObj = {
         id: identityID,
         userID: uid,
         provider: "email_password",
@@ -3339,16 +2954,19 @@ async function main() {
         updatedAt: now
       };
 
-      if (!user.email) user.email = email;
-      if (!db.emailIndex[email]) db.emailIndex[email] = uid;
+      if (!pgPool) {
+        db.authIdentities[identityID] = identityObj;
+        if (!user.email) user.email = email;
+        if (!db.emailIndex[email]) db.emailIndex[email] = uid;
+      }
 
-      const verificationToken = issueEmailVerificationToken(uid, email);
+      const userEmail = user.email || email;
+      const verificationToken = await issueEmailVerificationTokenAsync(uid, email);
       await persistPG(async () => {
-        await DB.insertAuthIdentity(pgPool, db.authIdentities[identityID]);
-        await DB.updateUser(pgPool, uid, { email: user.email });
-        await persistEmailVerificationTokenToPG(issueEmailVerificationToken._lastID);
+        await DB.insertAuthIdentity(pgPool, identityObj);
+        await DB.updateUser(pgPool, uid, { email: userEmail });
       });
-      await saveDB();
+      if (!pgPool) await saveDB();
       await deliverVerificationEmail(email, verificationToken);
 
       return res.status(200).json({
@@ -3387,90 +3005,59 @@ async function main() {
       const identity = await verifyOAuthIdentity(provider, idToken);
       const modernKey = oauthSubjectKey(provider, identity.subject);
       const legacyKey = oauthLegacyKey(provider, idToken);
-      const modernUID = existingUserID(db.oauthIndex[modernKey]);
-      const legacyUID = existingUserID(db.oauthIndex[legacyKey]);
-      const emailUID = identity.email && identity.emailVerified
-        ? existingUserID(db.emailIndex[identity.email])
-        : "";
-      let uid = chooseCanonicalOAuthUserID([
+      const modernOAuthUID = await getOAuthUserAsync(modernKey);
+      const legacyOAuthUID = await getOAuthUserAsync(legacyKey);
+      const modernUID = await existingUserIDAsync(modernOAuthUID);
+      const legacyUID = await existingUserIDAsync(legacyOAuthUID);
+      const emailUser = identity.email && identity.emailVerified
+        ? await getUserByEmailAsync(identity.email)
+        : null;
+      const emailUID = emailUser ? await existingUserIDAsync(emailUser.id) : "";
+
+      let uid = await chooseCanonicalOAuthUserIDAsync([
         { uid: modernUID, source: "modern" },
         { uid: legacyUID, source: "legacy" },
         { uid: emailUID, source: "email" }
       ]);
-      let changed = false;
 
-      if (modernUID && modernUID !== uid && mergeEmptyOAuthAccountInto(modernUID, uid)) {
-        changed = true;
-      }
-      if (legacyUID && legacyUID !== uid && mergeEmptyOAuthAccountInto(legacyUID, uid)) {
-        changed = true;
-      }
-      if (emailUID && emailUID !== uid && mergeEmptyOAuthAccountInto(emailUID, uid)) {
-        changed = true;
-      }
+      if (modernUID && modernUID !== uid) await mergeEmptyOAuthAccountIntoAsync(modernUID, uid);
+      if (legacyUID && legacyUID !== uid) await mergeEmptyOAuthAccountIntoAsync(legacyUID, uid);
+      if (emailUID && emailUID !== uid) await mergeEmptyOAuthAccountIntoAsync(emailUID, uid);
 
       if (!uid) {
-        uid = `u_${randHex(12)}`;
-        const invite = genInviteCode();
-        db.users[uid] = {
-          id: uid,
-          provider,
-          inviteCode: invite,
-          handle: null,
-          handleChangeUsed: false,
-          profileVisibility: visibilityFriendsOnly,
-          displayName: "Explorer",
-          bio: "Travel Enthusiastic",
-          loadout: defaultLoadout(),
-          journeys: [],
-          cityCards: [],
-          friendIDs: [],
-          notifications: [],
-          sentPostcards: [],
-          receivedPostcards: [],
-          createdAt: nowUnix()
-        };
-        setUserHandle(uid, null, { strict: false });
-        db.inviteIndex[invite] = uid;
-        changed = true;
+        const newUser = await createDefaultUserAsync(provider);
+        uid = newUser.id;
       }
 
-      if (modernKey && db.oauthIndex[modernKey] !== uid) {
-        db.oauthIndex[modernKey] = uid;
-        changed = true;
+      if (modernKey) {
+        if (pgPool) {
+          await DB.setOAuthUser(pgPool, modernKey, uid);
+        } else if (db.oauthIndex[modernKey] !== uid) {
+          db.oauthIndex[modernKey] = uid;
+        }
       }
 
-      const u = db.users[uid];
+      let u = await getUser(uid);
       if (!u) return res.status(500).json({ message: "user not found after oauth login" });
 
       if (identity.email && identity.emailVerified) {
-        const currentEmailUID = existingUserID(db.emailIndex[identity.email]);
+        const currentEmailUser = await getUserByEmailAsync(identity.email);
+        const currentEmailUID = currentEmailUser?.id || "";
         if (!u.email && (!currentEmailUID || currentEmailUID === uid)) {
-          u.email = identity.email;
-          changed = true;
+          if (pgPool) {
+            await DB.updateUser(pgPool, uid, { email: identity.email });
+          } else {
+            u.email = identity.email;
+          }
         }
-        if ((!currentEmailUID || currentEmailUID === uid) && db.emailIndex[identity.email] !== uid) {
+        if (!pgPool && (!currentEmailUID || currentEmailUID === uid) && db.emailIndex[identity.email] !== uid) {
           db.emailIndex[identity.email] = uid;
-          changed = true;
         }
       }
 
-      const refreshToken = issueStoredRefreshToken(uid, u.provider);
-      if (changed) {
-        await persistPG(async () => {
-          const user = db.users[uid];
-          if (user) {
-            try { await DB.insertUser(pgPool, user); } catch { await DB.updateUser(pgPool, uid, { email: user.email, provider: user.provider }); }
-          }
-          if (modernKey) await DB.setOAuthUser(pgPool, modernKey, uid);
-          await persistRefreshTokenToPG(issueStoredRefreshToken._lastID);
-        });
-      } else {
-        await persistPG(async () => {
-          await persistRefreshTokenToPG(issueStoredRefreshToken._lastID);
-        });
-      }
-      return res.status(200).json(authSuccessPayload(
+      const refreshToken = await issueStoredRefreshTokenAsync(uid, u.provider);
+      u = await getUser(uid);
+      return res.status(200).json(await authSuccessPayloadAsync(
         u,
         u.provider,
         u.email || null,
@@ -3486,15 +3073,16 @@ async function main() {
     }
   });
 
-  app.get("/v1/friends", (req, res) => {
+  app.get("/v1/friends", async (req, res) => {
     try {
       const uid = parseBearer(req);
-      const me = db.users[uid];
+      const me = await getUser(uid);
       if (!me) return res.status(404).json({ message: "user not found" });
+      const friendIDs = await getUserFriendIDs(uid);
       const out = [];
-      for (const fid of me.friendIDs || []) {
-        const f = db.users[fid];
-        if (f) out.push(friendDTOForViewer(f, true));
+      for (const fid of friendIDs) {
+        const f = await getUser(fid);
+        if (f) out.push(await friendDTOForViewerAsync(f, true));
       }
       return res.status(200).json(out);
     } catch (err) {
@@ -3506,7 +3094,8 @@ async function main() {
   app.post("/v1/friends", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
-      if (!db.users[uid]) return res.status(404).json({ message: "user not found" });
+      const postFriendsUser = await getUser(uid);
+      if (!postFriendsUser) return res.status(404).json({ message: "user not found" });
       return res.status(409).json({ message: "direct add disabled, use /v1/friends/requests" });
     } catch (err) {
       if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
@@ -3514,18 +3103,22 @@ async function main() {
     }
   });
 
-  app.get("/v1/friends/requests", (req, res) => {
+  app.get("/v1/friends/requests", async (req, res) => {
     try {
       const uid = parseBearer(req);
-      const me = db.users[uid];
+      const me = await getUser(uid);
       if (!me) return res.status(404).json({ message: "user not found" });
 
-      const incoming = sortByCreatedDesc(
-        allFriendRequests().filter((item) => item.toUserID === uid).map(friendRequestDTO).filter(Boolean)
-      );
-      const outgoing = sortByCreatedDesc(
-        allFriendRequests().filter((item) => item.fromUserID === uid).map(friendRequestDTO).filter(Boolean)
-      );
+      let incomingRaw, outgoingRaw;
+      if (pgPool) {
+        incomingRaw = await DB.getFriendRequestsTo(pgPool, uid);
+        outgoingRaw = await DB.getFriendRequestsFrom(pgPool, uid);
+      } else {
+        incomingRaw = allFriendRequests().filter((item) => item.toUserID === uid);
+        outgoingRaw = allFriendRequests().filter((item) => item.fromUserID === uid);
+      }
+      const incoming = (await Promise.all(incomingRaw.map(friendRequestDTOAsync))).filter(Boolean);
+      const outgoing = (await Promise.all(outgoingRaw.map(friendRequestDTOAsync))).filter(Boolean);
       return res.status(200).json({ incoming, outgoing });
     } catch (err) {
       if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
@@ -3536,7 +3129,7 @@ async function main() {
   app.post("/v1/friends/requests", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
-      const me = db.users[uid];
+      const me = await getUser(uid);
       if (!me) return res.status(404).json({ message: "user not found" });
 
       const displayName = String(req.body?.displayName || "").trim();
@@ -3549,12 +3142,11 @@ async function main() {
 
       let target = null;
       if (inviteCodeRaw) {
-        target = resolveUserByInviteCode(inviteCodeRaw);
+        target = await resolveUserByInviteCodeAsync(inviteCodeRaw);
       }
       const requestedHandle = normalizeHandle(handleRaw || displayName);
       if (!target && requestedHandle) {
-        const targetID = db.handleIndex[requestedHandle];
-        if (targetID) target = db.users[targetID] || null;
+        target = await getUserByHandleAsync(requestedHandle);
       }
 
       if (!target) {
@@ -3571,24 +3163,40 @@ async function main() {
         return res.status(400).json({ message: "cannot add yourself" });
       }
 
-      if ((me.friendIDs || []).includes(target.id)) {
+      // Block check — silently reject as "not found" so blockers stay invisible
+      if (await isBlockedEitherDirectionSafe(uid, target.id)) {
+        return res.status(404).json({ message: "user not found" });
+      }
+
+      const areFriends = await checkAreFriends(uid, target.id);
+      if (areFriends) {
         return res.status(409).json({ message: "already friends" });
       }
 
-      const existing = findPendingFriendRequest(uid, target.id);
+      let existing;
+      if (pgPool) {
+        existing = await DB.findPendingFriendRequest(pgPool, uid, target.id);
+      } else {
+        existing = findPendingFriendRequest(uid, target.id);
+      }
       if (existing) {
-        const dto = friendRequestDTO(existing);
+        const dto = await friendRequestDTOAsync(existing);
         return res.status(200).json({ ok: true, request: dto, message: "好友申请已发送，等待对方通过" });
       }
 
-      const reverse = findPendingFriendRequest(target.id, uid);
+      let reverse;
+      if (pgPool) {
+        reverse = await DB.findPendingFriendRequest(pgPool, target.id, uid);
+      } else {
+        reverse = findPendingFriendRequest(target.id, uid);
+      }
       if (reverse) {
         return res.status(409).json({ message: "对方已向你发送申请，请在申请列表中通过" });
       }
 
       const reqID = `fr_${randHex(10)}`;
       const createdAt = new Date().toISOString();
-      db.friendRequestsIndex[reqID] = {
+      const frObj = {
         id: reqID,
         fromUserID: uid,
         toUserID: target.id,
@@ -3596,14 +3204,30 @@ async function main() {
         createdAt,
         updatedAt: createdAt
       };
-      pushFriendRequestNotification(target, me);
+      if (!pgPool) db.friendRequestsIndex[reqID] = frObj;
       await persistPG(async () => {
-        await DB.insertFriendRequest(pgPool, db.friendRequestsIndex[reqID]);
-        await persistNotificationToPG(target.id);
+        await DB.insertFriendRequest(pgPool, frObj);
       });
+
+      const notif = {
+        id: `n_${randHex(10)}`,
+        type: "friend_request",
+        fromUserID: me.id,
+        fromDisplayName: me.displayName,
+        journeyID: null,
+        journeyTitle: null,
+        message: `${me.displayName} 向你发送了好友申请`,
+        createdAt: new Date().toISOString(),
+        read: false
+      };
+      await pushNotificationAndPersist(target.id, notif, {
+        title: "StreetStamps",
+        body: `${me.displayName} 向你发送了好友申请`
+      });
+
       return res.status(200).json({
         ok: true,
-        request: friendRequestDTO(db.friendRequestsIndex[reqID]),
+        request: await friendRequestDTOAsync(frObj),
         message: "好友申请已发送，等待对方通过"
       });
     } catch (err) {
@@ -3615,44 +3239,78 @@ async function main() {
   app.post("/v1/friends/requests/:requestID/accept", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
-      const me = db.users[uid];
+      const me = await getUser(uid);
       if (!me) return res.status(404).json({ message: "user not found" });
       const requestID = String(req.params.requestID || "").trim();
       if (!requestID) return res.status(400).json({ message: "request id required" });
 
-      const pending = db.friendRequestsIndex[requestID];
+      const pending = pgPool
+        ? await DB.getFriendRequest(pgPool, requestID)
+        : db.friendRequestsIndex[requestID];
       if (!pending) return res.status(404).json({ message: "request not found" });
       if (pending.toUserID !== uid) return res.status(403).json({ message: "forbidden" });
 
-      const fromUser = db.users[pending.fromUserID];
+      const fromUser = await getUser(pending.fromUserID);
       if (!fromUser) {
-        removeFriendRequestByID(requestID);
+        if (!pgPool) removeFriendRequestByID(requestID);
         await persistPG(async () => {
           await DB.deleteFriendRequest(pgPool, requestID);
         });
         return res.status(404).json({ message: "request sender not found" });
       }
 
-      const deletedRequestIDs = collectFriendRequestIDsBetween(me.id, fromUser.id);
-      appendUnique(me.friendIDs, fromUser.id);
-      appendUnique(fromUser.friendIDs, me.id);
-      removeFriendRequestsBetween(me.id, fromUser.id);
-      pushFriendRequestAcceptedNotification(fromUser, me);
+      if (await isBlockedEitherDirectionSafe(uid, fromUser.id)) {
+        if (!pgPool) removeFriendRequestsBetween(me.id, fromUser.id);
+        await persistPG(async () => {
+          await DB.deleteFriendRequestsBetween(pgPool, me.id, fromUser.id);
+        });
+        return res.status(404).json({ message: "request not found" });
+      }
+
+      const deletedRequestIDs = pgPool
+        ? await DB.collectFriendRequestIDsBetween(pgPool, me.id, fromUser.id)
+        : collectFriendRequestIDsBetween(me.id, fromUser.id);
+      if (!pgPool) {
+        appendUnique(me.friendIDs, fromUser.id);
+        appendUnique(fromUser.friendIDs, me.id);
+        removeFriendRequestsBetween(me.id, fromUser.id);
+      }
+
+      const notif = {
+        id: `n_${randHex(10)}`,
+        type: "friend_request_accepted",
+        fromUserID: me.id,
+        fromDisplayName: me.displayName,
+        journeyID: null,
+        journeyTitle: null,
+        message: `${me.displayName} 通过了你的好友申请`,
+        createdAt: new Date().toISOString(),
+        read: false
+      };
+
       await persistPGTx(async (client) => {
         await DB.addFriendship(client, me.id, fromUser.id);
         for (const rid of deletedRequestIDs) await DB.deleteFriendRequest(client, rid);
-        const n = (fromUser.notifications || [])[0];
-        if (n) await DB.insertNotification(client, {
-          id: n.id, userID: fromUser.id, type: n.type || "unknown",
-          fromUserID: n.fromUserID || null, fromDisplayName: n.fromDisplayName || null,
-          journeyID: n.journeyID || null, journeyTitle: n.journeyTitle || null,
-          message: n.message || "", read: n.read ?? false,
-          createdAt: n.createdAt || new Date().toISOString(),
+        await DB.insertNotification(client, {
+          id: notif.id, userID: fromUser.id, type: notif.type,
+          fromUserID: notif.fromUserID, fromDisplayName: notif.fromDisplayName,
+          journeyID: null, journeyTitle: null,
+          message: notif.message, read: false,
+          createdAt: notif.createdAt,
         });
       });
+      if (!pgPool) {
+        ensureUserNotifications(fromUser);
+        fromUser.notifications.unshift(notif);
+      }
+      fireRemotePush(fromUser.id, {
+        title: "StreetStamps",
+        body: `${me.displayName} 通过了你的好友申请`
+      });
+
       return res.status(200).json({
         ok: true,
-        friend: friendDTOForViewer(fromUser, true),
+        friend: await friendDTOForViewerAsync(fromUser, true),
         message: "已通过好友申请"
       });
     } catch (err) {
@@ -3664,16 +3322,18 @@ async function main() {
   app.post("/v1/friends/requests/:requestID/reject", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
-      const me = db.users[uid];
+      const me = await getUser(uid);
       if (!me) return res.status(404).json({ message: "user not found" });
       const requestID = String(req.params.requestID || "").trim();
       if (!requestID) return res.status(400).json({ message: "request id required" });
 
-      const pending = db.friendRequestsIndex[requestID];
+      const pending = pgPool
+        ? await DB.getFriendRequest(pgPool, requestID)
+        : db.friendRequestsIndex[requestID];
       if (!pending) return res.status(404).json({ message: "request not found" });
       if (pending.toUserID !== uid) return res.status(403).json({ message: "forbidden" });
 
-      removeFriendRequestByID(requestID);
+      if (!pgPool) removeFriendRequestByID(requestID);
       await persistPG(async () => {
         await DB.deleteFriendRequest(pgPool, requestID);
       });
@@ -3687,16 +3347,20 @@ async function main() {
   app.delete("/v1/friends/:friendID", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
-      const me = db.users[uid];
+      const me = await getUser(uid);
       if (!me) return res.status(404).json({ message: "user not found" });
       const fid = String(req.params.friendID || "").trim();
       if (!fid) return res.status(400).json({ message: "friend id required" });
 
-      const deletedRequestIDs = collectFriendRequestIDsBetween(uid, fid);
-      me.friendIDs = removeID(me.friendIDs || [], fid);
-      const f = db.users[fid];
-      if (f) f.friendIDs = removeID(f.friendIDs || [], uid);
-      removeFriendRequestsBetween(uid, fid);
+      const deletedRequestIDs = pgPool
+        ? await DB.collectFriendRequestIDsBetween(pgPool, uid, fid)
+        : collectFriendRequestIDsBetween(uid, fid);
+      if (!pgPool) {
+        me.friendIDs = removeID(me.friendIDs || [], fid);
+        const f = db.users[fid];
+        if (f) f.friendIDs = removeID(f.friendIDs || [], uid);
+        removeFriendRequestsBetween(uid, fid);
+      }
       await persistPGTx(async (client) => {
         await DB.removeFriendship(client, uid, fid);
         for (const rid of deletedRequestIDs) await DB.deleteFriendRequest(client, rid);
@@ -3708,38 +3372,140 @@ async function main() {
     }
   });
 
-  app.post("/v1/journeys/migrate", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
+  // ── Block / Unblock ─────────────────────────────────────────
+  app.post("/v1/users/:userID/block", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
-      const me = db.users[uid];
-      if (!me) return res.status(404).json({ message: "user not found" });
-      const journeys = Array.isArray(req.body?.journeys) ? req.body.journeys : [];
-      const unlockedCityCards = Array.isArray(req.body?.unlockedCityCards) ? req.body.unlockedCityCards : [];
-      const removedJourneyIDs = Array.isArray(req.body?.removedJourneyIDs) ? req.body.removedJourneyIDs : [];
-      const snapshotComplete = parseTruthy(req.body?.snapshotComplete);
-      me.journeys = mergeJourneyPayloads(me.journeys || [], journeys, removedJourneyIDs, snapshotComplete, uid);
-      me.cityCards = mergeCityCardPayloads(me.cityCards || [], unlockedCityCards, snapshotComplete);
-      await persistPG(async () => {
-        for (const j of journeys) await DB.upsertJourney(pgPool, uid, j);
-        if (removedJourneyIDs.length) await DB.deleteJourneys(pgPool, uid, removedJourneyIDs);
-        await DB.replaceCityCards(pgPool, uid, me.cityCards);
+      const targetID = String(req.params.userID || "").trim();
+      if (!targetID || targetID === uid) return res.status(400).json({ message: "invalid target" });
+      if (!pgPool) return res.status(501).json({ message: "blocking requires PG" });
+      await DB.blockUser(pgPool, uid, targetID);
+      await persistPGTx(async (client) => {
+        await DB.removeFriendship(client, uid, targetID);
+        await DB.deleteFriendRequestsBetween(client, uid, targetID);
       });
-      return res.status(200).json({ journeys: me.journeys.length, cityCards: me.cityCards.length });
+      return res.status(200).json({});
     } catch (err) {
       if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   });
 
-  app.post("/v1/journeys/likes/batch", writeRateLimiter, rejectWhenWriteFrozen, (req, res) => {
+  app.delete("/v1/users/:userID/block", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const targetID = String(req.params.userID || "").trim();
+      if (!targetID) return res.status(400).json({ message: "invalid target" });
+      if (!pgPool) return res.status(501).json({ message: "blocking requires PG" });
+      await DB.unblockUser(pgPool, uid, targetID);
+      return res.status(200).json({});
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.get("/v1/blocks", async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      if (!pgPool) return res.status(200).json({ blocks: [] });
+      const blockedIDs = await DB.getBlockedUserIDs(pgPool, uid);
+      const blockedUsers = blockedIDs.length ? await DB.getUsersByIDs(pgPool, blockedIDs) : {};
+      const list = blockedIDs.map((id) => {
+        const u = blockedUsers[id];
+        return { id, displayName: u?.displayName || "Unknown", handle: u?.handle || null };
+      });
+      return res.status(200).json({ blocks: list });
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  // ── Reports ────────────────────────────────────────────────
+  app.post("/v1/reports", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const reportedUserID = String(req.body?.reportedUserID || "").trim();
+      const contentType = String(req.body?.contentType || "user").trim();
+      const contentID = String(req.body?.contentID || "").trim() || null;
+      const reason = String(req.body?.reason || "").trim();
+      const detail = String(req.body?.detail || "").trim();
+
+      if (!reportedUserID) return res.status(400).json({ message: "reportedUserID required" });
+      const allowedTypes = ["user", "journey", "postcard"];
+      if (!allowedTypes.includes(contentType)) return res.status(400).json({ message: "invalid contentType" });
+      const allowedReasons = ["spam", "harassment", "inappropriate", "other"];
+      if (!allowedReasons.includes(reason)) return res.status(400).json({ message: "invalid reason" });
+      if (!pgPool) return res.status(501).json({ message: "reports require PG" });
+
+      const reportID = `rpt_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
+      await DB.insertReport(pgPool, {
+        id: reportID,
+        reporterUserID: uid,
+        reportedUserID,
+        contentType,
+        contentID,
+        reason,
+        detail,
+      });
+      return res.status(200).json({ reportID });
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.post("/v1/journeys/migrate", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = await getUser(uid);
+      if (!me) return res.status(404).json({ message: "user not found" });
+      const journeys = Array.isArray(req.body?.journeys) ? req.body.journeys : [];
+      const unlockedCityCards = Array.isArray(req.body?.unlockedCityCards) ? req.body.unlockedCityCards : [];
+      const removedJourneyIDs = Array.isArray(req.body?.removedJourneyIDs) ? req.body.removedJourneyIDs : [];
+      const snapshotComplete = parseTruthy(req.body?.snapshotComplete);
+
+      if (!pgPool) {
+        me.journeys = mergeJourneyPayloads(me.journeys || [], journeys, removedJourneyIDs, snapshotComplete, uid);
+        me.cityCards = mergeCityCardPayloads(me.cityCards || [], unlockedCityCards, snapshotComplete);
+      }
+
+      let finalJourneyCount, finalCityCardCount;
+      if (pgPool) {
+        for (const j of journeys) await DB.upsertJourney(pgPool, uid, j);
+        if (removedJourneyIDs.length) await DB.deleteJourneys(pgPool, uid, removedJourneyIDs);
+        // For city cards, merge with existing then replace
+        const existingCards = await DB.getCityCardsByUser(pgPool, uid);
+        const mergedCards = mergeCityCardPayloads(existingCards, unlockedCityCards, snapshotComplete);
+        await DB.replaceCityCards(pgPool, uid, mergedCards);
+        finalJourneyCount = (await DB.getJourneysByUser(pgPool, uid)).length;
+        finalCityCardCount = mergedCards.length;
+      } else {
+        await persistPG(async () => {
+          for (const j of journeys) await DB.upsertJourney(pgPool, uid, j);
+          if (removedJourneyIDs.length) await DB.deleteJourneys(pgPool, uid, removedJourneyIDs);
+          await DB.replaceCityCards(pgPool, uid, me.cityCards);
+        });
+        finalJourneyCount = me.journeys.length;
+        finalCityCardCount = me.cityCards.length;
+      }
+      return res.status(200).json({ journeys: finalJourneyCount, cityCards: finalCityCardCount });
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.post("/v1/journeys/likes/batch", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const viewerID = parseBearer(req);
-      const viewer = db.users[viewerID];
+      const viewer = await getUser(viewerID);
       if (!viewer) return res.status(404).json({ message: "user not found" });
 
       const ownerUserIDRaw = String(req.body?.ownerUserID || "").trim();
       const ownerUserID = ownerUserIDRaw || viewerID;
-      const owner = db.users[ownerUserID];
+      const owner = await getUser(ownerUserID);
       if (!owner) return res.status(404).json({ message: "user not found" });
 
       const ids = Array.isArray(req.body?.journeyIDs)
@@ -3747,15 +3513,43 @@ async function main() {
         : [];
       const uniqIDs = [...new Set(ids)];
 
-      const ownerJourneyByID = new Map((owner.journeys || []).map((j) => [String(j.id), j]));
+      const ownerJourneys = await getUserJourneys(ownerUserID);
+      const ownerJourneyByID = new Map(ownerJourneys.map((j) => [String(j.id), j]));
+
+      if (pgPool) {
+        // Batch fetch likes from PG
+        const viewableJIDs = [];
+        for (const jid of uniqIDs) {
+          const journey = ownerJourneyByID.get(jid);
+          if (journey && await canViewJourneyAsync(viewerID, ownerUserID, journey)) viewableJIDs.push(jid);
+        }
+        const keys = viewableJIDs.map((jid) => ({ ownerUserID, journeyID: jid }));
+        const likesBatch = await DB.batchGetJourneyLikes(pgPool, keys);
+        const viewableSet = new Set(viewableJIDs);
+
+        const items = [];
+        for (const journeyID of uniqIDs) {
+          const journey = ownerJourneyByID.get(journeyID);
+          if (!journey || !viewableSet.has(journeyID)) {
+            items.push({ journeyID, likes: 0, likedByMe: false });
+            continue;
+          }
+          const record = likesBatch[`${ownerUserID}:${journeyID}`];
+          const likerIDs = record ? record.likerIDs : [];
+          items.push({
+            journeyID,
+            likes: likerIDs.length,
+            likedByMe: likerIDs.includes(viewerID)
+          });
+        }
+        return res.status(200).json({ items });
+      }
+
+      // Fallback: in-memory
       const items = [];
       for (const journeyID of uniqIDs) {
         const journey = ownerJourneyByID.get(journeyID);
-        if (!journey) {
-          items.push({ journeyID, likes: 0, likedByMe: false });
-          continue;
-        }
-        if (!canViewJourney(viewer, owner, journey)) {
+        if (!journey || !canViewJourney(viewer, owner, journey)) {
           items.push({ journeyID, likes: 0, likedByMe: false });
           continue;
         }
@@ -3774,21 +3568,45 @@ async function main() {
     }
   });
 
-  app.get("/v1/journeys/:ownerUserID/:journeyID/likes", writeRateLimiter, (req, res) => {
+  app.get("/v1/journeys/:ownerUserID/:journeyID/likes", writeRateLimiter, async (req, res) => {
     try {
       const viewerID = parseBearer(req);
       const ownerUserID = String(req.params.ownerUserID || "").trim();
       const journeyID = String(req.params.journeyID || "").trim();
       if (!ownerUserID || !journeyID) return res.status(400).json({ message: "ownerUserID and journeyID required" });
 
-      const viewer = db.users[viewerID];
-      const owner = db.users[ownerUserID];
+      const viewer = await getUser(viewerID);
+      const owner = await getUser(ownerUserID);
       if (!viewer || !owner) return res.status(404).json({ message: "user not found" });
+      if (viewerID !== ownerUserID && await isBlockedEitherDirectionSafe(viewerID, ownerUserID)) {
+        return res.status(404).json({ message: "user not found" });
+      }
 
-      const journey = (owner.journeys || []).find((x) => String(x.id) === journeyID);
+      const ownerJourneys = await getUserJourneys(ownerUserID);
+      const journey = ownerJourneys.find((x) => String(x.id) === journeyID);
       if (!journey) return res.status(404).json({ message: "journey not found" });
-      if (!canViewJourney(viewer, owner, journey)) return res.status(403).json({ message: "forbidden" });
+      if (pgPool) {
+        if (!(await canViewJourneyAsync(viewerID, ownerUserID, journey))) return res.status(403).json({ message: "forbidden" });
+        const likers = await DB.getJourneyLikers(pgPool, ownerUserID, journeyID);
+        const likerIDs = likers.map((l) => l.likerUserID);
+        const likerUsers = likerIDs.length ? await DB.getUsersByIDs(pgPool, likerIDs) : {};
+        const items = likers
+          .map((l) => {
+            const liker = likerUsers[l.likerUserID];
+            if (!liker) return null;
+            return {
+              userID: l.likerUserID,
+              displayName: String(liker.displayName || l.likerUserID),
+              likedAt: l.createdAt
+            };
+          })
+          .filter(Boolean)
+          .sort((a, b) => Date.parse(b.likedAt || "") - Date.parse(a.likedAt || ""));
+        return res.status(200).json({ items });
+      }
 
+      // Fallback: in-memory
+      if (!canViewJourney(viewer, owner, journey)) return res.status(403).json({ message: "forbidden" });
       const record = ensureLikeRecord(ownerUserID, journeyID);
       const likedAtByUserID = record.likedAtByUserID || {};
       const items = (record.likerIDs || [])
@@ -3818,32 +3636,59 @@ async function main() {
       const journeyID = String(req.params.journeyID || "").trim();
       if (!ownerUserID || !journeyID) return res.status(400).json({ message: "ownerUserID and journeyID required" });
 
-      const viewer = db.users[viewerID];
-      const owner = db.users[ownerUserID];
+      const viewer = await getUser(viewerID);
+      const owner = await getUser(ownerUserID);
       if (!viewer || !owner) return res.status(404).json({ message: "user not found" });
-      const journey = (owner.journeys || []).find((x) => String(x.id) === journeyID);
+      if (viewerID !== ownerUserID && await isBlockedEitherDirectionSafe(viewerID, ownerUserID)) {
+        return res.status(404).json({ message: "user not found" });
+      }
+      const ownerJourneys = await getUserJourneys(ownerUserID);
+      const journey = ownerJourneys.find((x) => String(x.id) === journeyID);
       if (!journey) return res.status(404).json({ message: "journey not found" });
-      if (!canViewJourney(viewer, owner, journey)) return res.status(403).json({ message: "forbidden" });
+      if (pgPool) {
+        if (!(await canViewJourneyAsync(viewerID, ownerUserID, journey))) return res.status(403).json({ message: "forbidden" });
+      } else {
+        if (!canViewJourney(viewer, owner, journey)) return res.status(403).json({ message: "forbidden" });
+      }
 
-      const record = ensureLikeRecord(ownerUserID, journeyID);
-      if (!record.likerIDs.includes(viewerID)) {
-        record.likerIDs.push(viewerID);
-        const now = new Date().toISOString();
-        record.likedAtByUserID[viewerID] = now;
-        record.updatedAt = now;
-        if (viewerID !== ownerUserID) {
-          pushJourneyLikeNotification(owner, viewer, journey);
+      if (pgPool) {
+        await DB.addJourneyLike(pgPool, ownerUserID, journeyID, viewerID);
+      } else {
+        const record = ensureLikeRecord(ownerUserID, journeyID);
+        if (!record.likerIDs.includes(viewerID)) {
+          record.likerIDs.push(viewerID);
+          const now = new Date().toISOString();
+          record.likedAtByUserID[viewerID] = now;
+          record.updatedAt = now;
         }
-        await persistPG(async () => {
-          await DB.addJourneyLike(pgPool, ownerUserID, journeyID, viewerID);
-          if (viewerID !== ownerUserID) await persistNotificationToPG(ownerUserID);
+      }
+
+      if (viewerID !== ownerUserID) {
+        const notif = {
+          id: `n_${randHex(10)}`,
+          type: "journey_like",
+          fromUserID: viewerID,
+          fromDisplayName: viewer.displayName,
+          journeyID,
+          journeyTitle: journey.title || journey.name || null,
+          message: `${viewer.displayName} 赞了你的旅程`,
+          createdAt: new Date().toISOString(),
+          read: false
+        };
+        await pushNotificationAndPersist(ownerUserID, notif, {
+          title: "StreetStamps",
+          body: `${viewer.displayName} 赞了你的旅程`
         });
       }
+
+      const likeCount = pgPool
+        ? await DB.getJourneyLikeCount(pgPool, ownerUserID, journeyID)
+        : ensureLikeRecord(ownerUserID, journeyID).likerIDs.length;
 
       return res.status(200).json({
         ownerUserID,
         journeyID,
-        likes: record.likerIDs.length,
+        likes: likeCount,
         likedByMe: true
       });
     } catch (err) {
@@ -3861,22 +3706,29 @@ async function main() {
       const journeyID = String(req.params.journeyID || "").trim();
       if (!ownerUserID || !journeyID) return res.status(400).json({ message: "ownerUserID and journeyID required" });
 
-      const owner = db.users[ownerUserID];
+      const owner = await getUser(ownerUserID);
       if (!owner) return res.status(404).json({ message: "user not found" });
-      const record = ensureLikeRecord(ownerUserID, journeyID);
-      const next = (record.likerIDs || []).filter((x) => x !== viewerID);
-      if (next.length !== (record.likerIDs || []).length) {
-        record.likerIDs = next;
+      if (viewerID !== ownerUserID && await isBlockedEitherDirectionSafe(viewerID, ownerUserID)) {
+        return res.status(404).json({ message: "user not found" });
+      }
+
+      if (pgPool) {
+        await DB.removeJourneyLike(pgPool, ownerUserID, journeyID, viewerID);
+      } else {
+        const record = ensureLikeRecord(ownerUserID, journeyID);
+        record.likerIDs = (record.likerIDs || []).filter((x) => x !== viewerID);
         delete record.likedAtByUserID[viewerID];
         record.updatedAt = new Date().toISOString();
-        await persistPG(async () => {
-          await DB.removeJourneyLike(pgPool, ownerUserID, journeyID, viewerID);
-        });
       }
+
+      const likeCount = pgPool
+        ? await DB.getJourneyLikeCount(pgPool, ownerUserID, journeyID)
+        : ensureLikeRecord(ownerUserID, journeyID).likerIDs.length;
+
       return res.status(200).json({
         ownerUserID,
         journeyID,
-        likes: (record.likerIDs || []).length,
+        likes: likeCount,
         likedByMe: false
       });
     } catch (err) {
@@ -3891,7 +3743,7 @@ async function main() {
     const requestStartedAt = timingNowNs();
     try {
       const uid = parseBearer(req);
-      const me = db.users[uid];
+      const me = await getUser(uid);
       if (!me) return res.status(404).json({ message: "user not found" });
 
       const toUserID = String(req.body?.toUserID || "").trim();
@@ -3919,17 +3771,20 @@ async function main() {
         return res.status(400).json({ code: "message_too_long", message: "messageText must be <= 80 chars" });
       }
 
-      const target = resolveUserByAnyID(toUserID);
+      const target = await resolveUserByAnyIDAsync(toUserID);
       if (!target) return res.status(404).json({ message: "target user not found" });
       if (uid === target.id) return res.status(400).json({ message: "cannot send postcard to yourself" });
-      if (!isFriendOf(me, target.id)) return res.status(403).json({ message: "friends only" });
+      if (await isBlockedEitherDirectionSafe(uid, target.id)) return res.status(403).json({ message: "blocked" });
+      if (!(await checkAreFriends(uid, target.id))) return res.status(403).json({ message: "friends only" });
 
-      ensurePostcardCollections(me);
-      ensurePostcardCollections(target);
+      // Get sent postcards for quota check
+      const sentPostcards = pgPool
+        ? await DB.getPostcardsForUser(pgPool, uid, "sent")
+        : (ensurePostcardCollections(me), me.sentPostcards);
 
       const membershipTier = String(req.body?.membershipTier || "free").trim();
       const rule = canSendPostcard({
-        sentPostcards: me.sentPostcards,
+        sentPostcards,
         toUserID,
         cityID,
         cityJourneyCount,
@@ -3967,7 +3822,7 @@ async function main() {
       }
 
       const nowISO = new Date().toISOString();
-      const message = {
+      const canonicalMessage = {
         messageID: `pm_${randHex(12)}`,
         type: "postcard",
         fromUserID: me.id,
@@ -3982,25 +3837,47 @@ async function main() {
         clientDraftID,
         status: "sent"
       };
-      const canonicalMessage = upsertPostcard(message) || message;
 
-      me.sentPostcards.unshift(canonicalMessage);
-      target.receivedPostcards.unshift(canonicalMessage);
-      if (me.sentPostcards.length > 1000) me.sentPostcards = me.sentPostcards.slice(0, 1000);
-      if (target.receivedPostcards.length > 1000) target.receivedPostcards = target.receivedPostcards.slice(0, 1000);
+      if (!pgPool) {
+        upsertPostcard(canonicalMessage);
+        ensurePostcardCollections(me);
+        ensurePostcardCollections(target);
+        me.sentPostcards.unshift(canonicalMessage);
+        target.receivedPostcards.unshift(canonicalMessage);
+        if (me.sentPostcards.length > 1000) me.sentPostcards = me.sentPostcards.slice(0, 1000);
+        if (target.receivedPostcards.length > 1000) target.receivedPostcards = target.receivedPostcards.slice(0, 1000);
+      }
 
-      pushPostcardReceivedNotification(target, me, canonicalMessage);
+      const notif = {
+        id: `n_${randHex(10)}`,
+        type: "postcard_received",
+        fromUserID: me.id,
+        fromDisplayName: me.displayName,
+        journeyID: null,
+        journeyTitle: null,
+        message: `${me.displayName} 给你寄了一张明信片`,
+        createdAt: nowISO,
+        read: false
+      };
+
       const saveStartedAt = timingNowNs();
       await persistPGTx(async (client) => {
         await DB.insertPostcard(client, canonicalMessage);
-        const n = (target.notifications || [])[0];
-        if (n) await DB.insertNotification(client, {
-          id: n.id, userID: target.id, type: n.type || "unknown",
-          fromUserID: n.fromUserID || null, fromDisplayName: n.fromDisplayName || null,
-          journeyID: n.journeyID || null, journeyTitle: n.journeyTitle || null,
-          message: n.message || "", read: n.read ?? false,
-          createdAt: n.createdAt || new Date().toISOString(),
+        await DB.insertNotification(client, {
+          id: notif.id, userID: target.id, type: notif.type,
+          fromUserID: notif.fromUserID, fromDisplayName: notif.fromDisplayName,
+          journeyID: null, journeyTitle: null,
+          message: notif.message, read: false,
+          createdAt: notif.createdAt,
         });
+      });
+      if (!pgPool) {
+        ensureUserNotifications(target);
+        target.notifications.unshift(notif);
+      }
+      fireRemotePush(target.id, {
+        title: "StreetStamps",
+        body: `${me.displayName} 给你寄了一张明信片`
       });
       const saveDurationMs = elapsedMs(saveStartedAt);
 
@@ -4025,31 +3902,40 @@ async function main() {
     }
   });
 
-  app.get("/v1/postcards", (req, res) => {
+  app.get("/v1/postcards", async (req, res) => {
     try {
       const uid = parseBearer(req);
-      const me = db.users[uid];
+      const me = await getUser(uid);
       if (!me) return res.status(404).json({ message: "user not found" });
-      ensurePostcardCollections(me);
 
       const boxRaw = String(req.query?.box || "sent").trim().toLowerCase();
       const box = boxRaw === "received" ? "received" : "sent";
-      const source = box === "received" ? (me.receivedPostcards || []) : (me.sentPostcards || []);
-      const items = source
-        .map((item) => normalizePostcardMessage(item))
-        .filter(Boolean)
-        .filter((item) => String(item.photoURL || "").trim().length > 0)
-        .map((item) => {
-          const reactionPayload = postcardReactionPayloadForViewer(uid, item, box);
-          return {
-            ...item,
-            photoURL: absolutizePostcardPhotoURL(item.photoURL, req),
-            reaction: reactionPayload.reaction,
-            myReaction: reactionPayload.myReaction,
-            peerReaction: reactionPayload.peerReaction
-          };
-        })
-        .sort((a, b) => Date.parse(b.sentAt || "") - Date.parse(a.sentAt || ""));
+
+      let source;
+      if (pgPool) {
+        source = await DB.getPostcardsForUser(pgPool, uid, box);
+      } else {
+        ensurePostcardCollections(me);
+        source = box === "received" ? (me.receivedPostcards || []) : (me.sentPostcards || []);
+      }
+
+      const items = await Promise.all(
+        source
+          .map((item) => normalizePostcardMessage(item))
+          .filter(Boolean)
+          .filter((item) => String(item.photoURL || "").trim().length > 0)
+          .map(async (item) => {
+            const reactionPayload = await postcardReactionPayloadForViewerAsync(uid, item, box);
+            return {
+              ...item,
+              photoURL: absolutizePostcardPhotoURL(item.photoURL, req),
+              reaction: reactionPayload.reaction,
+              myReaction: reactionPayload.myReaction,
+              peerReaction: reactionPayload.peerReaction
+            };
+          })
+      );
+      items.sort((a, b) => Date.parse(b.sentAt || "") - Date.parse(a.sentAt || ""));
       return res.status(200).json({ items, cursor: null });
     } catch (err) {
       if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
@@ -4060,22 +3946,40 @@ async function main() {
   app.post("/v1/postcards/:messageID/view", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
-      const me = db.users[uid];
+      const me = await getUser(uid);
       if (!me) return res.status(404).json({ message: "user not found" });
 
       const messageID = String(req.params.messageID || "").trim();
       if (!messageID) return res.status(400).json({ message: "messageID required" });
 
-      ensurePostcardCollections(me);
-      const postcard = (me.receivedPostcards || []).find((p) => p.messageID === messageID);
+      // Find the postcard
+      let postcard;
+      if (pgPool) {
+        postcard = await DB.getPostcardByID(pgPool, messageID);
+        if (!postcard || postcard.toUserID !== uid) postcard = null;
+      } else {
+        ensurePostcardCollections(me);
+        postcard = (me.receivedPostcards || []).find((p) => p.messageID === messageID);
+      }
       if (!postcard) return res.status(404).json({ message: "postcard not found" });
 
-      const sender = db.users[postcard.fromUserID];
+      const sender = await getUser(postcard.fromUserID);
       if (!sender) return res.status(404).json({ message: "sender not found" });
 
-      if (!sender.postcardReactions) sender.postcardReactions = {};
-      if (!sender.postcardReactions[messageID]) {
-        sender.postcardReactions[messageID] = {
+      if (await isBlockedEitherDirectionSafe(uid, postcard.fromUserID)) {
+        return res.status(404).json({ message: "postcard not found" });
+      }
+
+      // Check if reaction already exists
+      let existingReaction;
+      if (pgPool) {
+        existingReaction = await DB.getPostcardReaction(pgPool, messageID, me.id);
+      } else {
+        existingReaction = sender.postcardReactions?.[messageID];
+      }
+
+      if (!existingReaction) {
+        const reactionObj = {
           id: `pr_${randHex(12)}`,
           postcardMessageID: messageID,
           fromUserID: me.id,
@@ -4084,8 +3988,12 @@ async function main() {
           comment: null,
           reactedAt: null
         };
+        if (!pgPool) {
+          if (!sender.postcardReactions) sender.postcardReactions = {};
+          sender.postcardReactions[messageID] = reactionObj;
+        }
         await persistPG(async () => {
-          await DB.upsertPostcardReaction(pgPool, sender.postcardReactions[messageID]);
+          await DB.upsertPostcardReaction(pgPool, reactionObj);
         });
       }
 
@@ -4099,7 +4007,7 @@ async function main() {
   app.post("/v1/postcards/:messageID/react", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
-      const me = db.users[uid];
+      const me = await getUser(uid);
       if (!me) return res.status(404).json({ message: "user not found" });
 
       const messageID = String(req.params.messageID || "").trim();
@@ -4109,18 +4017,35 @@ async function main() {
       if (!messageID) return res.status(400).json({ message: "messageID required" });
       if (comment.length > 50) return res.status(400).json({ message: "comment too long (max 50 chars)" });
 
-      ensurePostcardCollections(me);
-      const postcard = (me.receivedPostcards || []).find((p) => p.messageID === messageID);
+      // Find the postcard
+      let postcard;
+      if (pgPool) {
+        postcard = await DB.getPostcardByID(pgPool, messageID);
+        if (!postcard || postcard.toUserID !== uid) postcard = null;
+      } else {
+        ensurePostcardCollections(me);
+        postcard = (me.receivedPostcards || []).find((p) => p.messageID === messageID);
+      }
       if (!postcard) return res.status(404).json({ message: "postcard not found" });
 
-      const sender = db.users[postcard.fromUserID];
+      const sender = await getUser(postcard.fromUserID);
       if (!sender) return res.status(404).json({ message: "sender not found" });
 
-      if (!sender.postcardReactions) sender.postcardReactions = {};
-      const existing = sender.postcardReactions[messageID];
+      if (await isBlockedEitherDirectionSafe(uid, postcard.fromUserID)) {
+        return res.status(404).json({ message: "postcard not found" });
+      }
+
+      // Get existing reaction
+      let existing;
+      if (pgPool) {
+        existing = await DB.getPostcardReaction(pgPool, messageID, me.id);
+      } else {
+        if (!sender.postcardReactions) sender.postcardReactions = {};
+        existing = sender.postcardReactions[messageID];
+      }
       const nowISO = new Date().toISOString();
 
-      sender.postcardReactions[messageID] = {
+      const reactionObj = {
         id: existing?.id || `pr_${randHex(12)}`,
         postcardMessageID: messageID,
         fromUserID: me.id,
@@ -4130,14 +4055,36 @@ async function main() {
         reactedAt: nowISO
       };
 
-      pushPostcardReactionNotification(sender, me, postcard, reactionEmoji, comment);
+      if (!pgPool) {
+        sender.postcardReactions[messageID] = reactionObj;
+      }
+
+      // Build and persist notification
+      const notifBody = reactionEmoji
+        ? `${me.displayName} 回应了你的明信片 ${reactionEmoji}`
+        : `${me.displayName} 回复了你的明信片`;
+      const notif = {
+        id: `n_${randHex(10)}`,
+        type: "postcard_reaction",
+        fromUserID: me.id,
+        fromDisplayName: me.displayName,
+        journeyID: null,
+        journeyTitle: null,
+        message: notifBody,
+        createdAt: nowISO,
+        read: false
+      };
+
       await persistPG(async () => {
-        await DB.upsertPostcardReaction(pgPool, sender.postcardReactions[messageID]);
-        await persistNotificationToPG(sender.id);
+        await DB.upsertPostcardReaction(pgPool, reactionObj);
+      });
+      await pushNotificationAndPersist(sender.id, notif, {
+        title: "StreetStamps",
+        body: notifBody
       });
 
       return res.status(200).json({
-        reaction: sender.postcardReactions[messageID]
+        reaction: reactionObj
       });
     } catch (err) {
       if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
@@ -4145,15 +4092,14 @@ async function main() {
     }
   });
 
-  app.get("/v1/notifications", (req, res) => {
+  app.get("/v1/notifications", async (req, res) => {
     try {
       const uid = parseBearer(req);
-      const me = db.users[uid];
+      const me = await getUser(uid);
       if (!me) return res.status(404).json({ message: "user not found" });
-      ensureUserNotifications(me);
+      const source = await getUserNotifications(uid);
       const unreadOnlyRaw = String(req.query.unreadOnly || "1").trim().toLowerCase();
       const unreadOnly = !(unreadOnlyRaw === "0" || unreadOnlyRaw === "false" || unreadOnlyRaw === "no");
-      const source = me.notifications || [];
       const filtered = unreadOnly ? source.filter((x) => !x.read) : source;
       const items = filtered.map((item) => {
         if (!item || item.type !== "postcard_received") return item;
@@ -4172,34 +4118,29 @@ async function main() {
   app.post("/v1/notifications/read", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
-      const me = db.users[uid];
+      const me = await getUser(uid);
       if (!me) return res.status(404).json({ message: "user not found" });
-      ensureUserNotifications(me);
 
       const markAll = Boolean(req.body?.all);
       const ids = Array.isArray(req.body?.ids)
         ? req.body.ids.map((x) => String(x || "").trim()).filter(Boolean)
         : [];
-      const idSet = new Set(ids);
 
-      let changed = false;
-      me.notifications = (me.notifications || []).map((item) => {
-        const shouldRead = markAll || idSet.has(String(item.id));
-        if (shouldRead && !item.read) {
-          changed = true;
-          return { ...item, read: true };
+      if (pgPool) {
+        if (markAll) {
+          await DB.markAllNotificationsRead(pgPool, uid);
+        } else if (ids.length) {
+          await DB.markNotificationsRead(pgPool, uid, ids);
         }
-        return item;
-      });
-
-      if (changed) {
-        await persistPG(async () => {
-          if (markAll) {
-            await DB.markAllNotificationsRead(pgPool, uid);
-          } else {
-            await DB.markNotificationsRead(pgPool, uid, ids);
-          }
+      } else {
+        ensureUserNotifications(me);
+        const idSet = new Set(ids);
+        me.notifications = (me.notifications || []).map((item) => {
+          const shouldRead = markAll || idSet.has(String(item.id));
+          if (shouldRead && !item.read) return { ...item, read: true };
+          return item;
         });
+        await saveDB();
       }
       return res.status(200).json({ ok: true });
     } catch (err) {
@@ -4212,7 +4153,7 @@ async function main() {
   app.put("/v1/push-token", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
-      const me = db.users[uid];
+      const me = await getUser(uid);
       if (!me) return res.status(404).json({ message: "user not found" });
       const token = String(req.body?.token || "").trim();
       const platform = String(req.body?.platform || "ios").trim();
@@ -4238,12 +4179,12 @@ async function main() {
     }
   });
 
-  app.get("/v1/profile/me", (req, res) => {
+  app.get("/v1/profile/me", async (req, res) => {
     try {
       const uid = parseBearer(req);
-      const me = db.users[uid];
+      const me = await getUser(uid);
       if (!me) return res.status(404).json({ message: "user not found" });
-      return res.status(200).json(profileDTOForViewer(me, true, true));
+      return res.status(200).json(await profileDTOForViewerAsync(me, true, true));
     } catch (err) {
       if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
@@ -4256,15 +4197,26 @@ async function main() {
       const targetID = String(req.params.userID || "").trim();
       if (!targetID) return res.status(400).json({ message: "target user id required" });
 
-      const viewer = db.users[viewerID];
-      const target = db.users[targetID];
+      const viewer = await getUser(viewerID);
+      const target = await getUser(targetID);
       if (!viewer || !target) return res.status(404).json({ message: "user not found" });
       if (viewerID === targetID) return res.status(400).json({ message: "cannot stomp yourself" });
-      if (!isFriendOf(viewer, targetID)) return res.status(403).json({ message: "friends only" });
+      if (!(await checkAreFriends(viewerID, targetID))) return res.status(403).json({ message: "friends only" });
 
-      pushProfileStompNotification(target, viewer);
-      await persistPG(async () => {
-        await persistNotificationToPG(targetID);
+      const notification = {
+        id: `n_${randHex(10)}`,
+        type: "profile_stomp",
+        fromUserID: viewer.id,
+        fromDisplayName: viewer.displayName,
+        journeyID: null,
+        journeyTitle: null,
+        message: `${viewer.displayName}在你的沙发上坐了一坐`,
+        createdAt: new Date().toISOString(),
+        read: false
+      };
+      await pushNotificationAndPersist(targetID, notification, {
+        title: "StreetStamps",
+        body: `${viewer.displayName}在你的沙发上坐了一坐`
       });
       return res.status(200).json({ ok: true, message: `已踩一踩 ${target.displayName} 的主页` });
     } catch (err) {
@@ -4278,7 +4230,7 @@ async function main() {
   const updateExclusiveID = async (req, res) => {
     try {
       const uid = parseBearer(req);
-      const me = db.users[uid];
+      const me = await getUser(uid);
       if (!me) return res.status(404).json({ message: "user not found" });
 
       const incoming = String(req.body?.exclusiveID || req.body?.handle || "").trim();
@@ -4288,28 +4240,29 @@ async function main() {
         return res.status(400).json({ message: "invalid exclusive id" });
       }
       if (next === current) {
-        return res.status(200).json(profileDTOForViewer(me, true, true));
+        return res.status(200).json(await profileDTOForViewerAsync(me, true, true));
       }
       if (me.handleChangeUsed) {
         return res.status(403).json({ message: "exclusive id can only be changed once" });
       }
 
-      const updated = setUserHandle(uid, incoming, { strict: true });
-      if (!updated.ok) {
-        if (updated.code === "invalid_handle") {
+      const result = await setUserHandleAsync(uid, incoming, { strict: true });
+      if (!result.ok) {
+        if (result.code === "invalid_handle") {
           return res.status(400).json({ message: "invalid exclusive id" });
         }
-        if (updated.code === "handle_taken") {
+        if (result.code === "handle_taken") {
           return res.status(409).json({ message: "exclusive id already taken" });
         }
         return res.status(400).json({ message: "exclusive id update failed" });
       }
 
-      me.handleChangeUsed = true;
+      if (!pgPool) me.handleChangeUsed = true;
       await persistPG(async () => {
-        await DB.updateUser(pgPool, uid, { handle: me.handle, handleChangeUsed: true });
+        await DB.updateUser(pgPool, uid, { handleChangeUsed: true });
       });
-      return res.status(200).json(profileDTOForViewer(me, true, true));
+      const updated = await getUser(uid);
+      return res.status(200).json(await profileDTOForViewerAsync(updated, true, true));
     } catch (err) {
       if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
@@ -4322,20 +4275,21 @@ async function main() {
   app.patch("/v1/profile/display-name", profileWriteRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
-      const me = db.users[uid];
+      const me = await getUser(uid);
       if (!me) return res.status(404).json({ message: "user not found" });
 
       const nextName = normalizeDisplayName(req.body?.displayName);
       if (!nextName) return res.status(400).json({ message: "invalid display name" });
-      if (!canUseDisplayName(nextName, uid)) {
+      if (!(await canUseDisplayNameAsync(nextName, uid))) {
         return res.status(409).json({ message: "display name already taken" });
       }
 
-      me.displayName = nextName;
+      if (!pgPool) me.displayName = nextName;
       await persistPG(async () => {
         await DB.updateUser(pgPool, uid, { displayName: nextName });
       });
-      return res.status(200).json(profileDTOForViewer(me, true, true));
+      const updated = await getUser(uid);
+      return res.status(200).json(await profileDTOForViewerAsync(updated, true, true));
     } catch (err) {
       if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
@@ -4345,15 +4299,16 @@ async function main() {
   app.patch("/v1/profile/visibility", profileWriteRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
-      const me = db.users[uid];
+      const me = await getUser(uid);
       if (!me) return res.status(404).json({ message: "user not found" });
 
       const next = normalizeVisibility(req.body?.profileVisibility);
-      me.profileVisibility = next;
+      if (!pgPool) me.profileVisibility = next;
       await persistPG(async () => {
         await DB.updateUser(pgPool, uid, { profileVisibility: next });
       });
-      return res.status(200).json(profileDTOForViewer(me, true, true));
+      const updated = await getUser(uid);
+      return res.status(200).json(await profileDTOForViewerAsync(updated, true, true));
     } catch (err) {
       if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
@@ -4363,15 +4318,16 @@ async function main() {
   app.patch("/v1/profile/bio", profileWriteRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
-      const me = db.users[uid];
+      const me = await getUser(uid);
       if (!me) return res.status(404).json({ message: "user not found" });
 
       const bio = String(req.body?.bio || "").slice(0, 200);
-      me.bio = bio;
+      if (!pgPool) me.bio = bio;
       await persistPG(async () => {
         await DB.updateUser(pgPool, uid, { bio });
       });
-      return res.status(200).json(profileDTOForViewer(me, true, true));
+      const updated = await getUser(uid);
+      return res.status(200).json(await profileDTOForViewerAsync(updated, true, true));
     } catch (err) {
       if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
@@ -4381,7 +4337,7 @@ async function main() {
   app.patch("/v1/profile/loadout", profileWriteRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
-      const me = db.users[uid];
+      const me = await getUser(uid);
       if (!me) return res.status(404).json({ message: "user not found" });
 
       const incoming = req.body?.loadout;
@@ -4389,11 +4345,13 @@ async function main() {
         return res.status(400).json({ message: "invalid loadout" });
       }
 
-      me.loadout = normalizeLoadout(incoming, me.loadout);
+      const newLoadout = normalizeLoadout(incoming, me.loadout);
+      if (!pgPool) me.loadout = newLoadout;
       await persistPG(async () => {
-        await DB.updateUser(pgPool, uid, { loadout: me.loadout });
+        await DB.updateUser(pgPool, uid, { loadout: newLoadout });
       });
-      return res.status(200).json(profileDTOForViewer(me, true, true));
+      const updated = await getUser(uid);
+      return res.status(200).json(await profileDTOForViewerAsync(updated, true, true));
     } catch (err) {
       if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
@@ -4403,12 +4361,12 @@ async function main() {
   app.post("/v1/profile/setup", profileWriteRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
     try {
       const uid = parseBearer(req);
-      const me = db.users[uid];
+      const me = await getUser(uid);
       if (!me) return res.status(404).json({ message: "user not found" });
 
       const nextName = normalizeDisplayName(req.body?.displayName);
       if (!nextName) return res.status(400).json({ message: "invalid display name" });
-      if (!canUseDisplayName(nextName, uid)) {
+      if (!(await canUseDisplayNameAsync(nextName, uid))) {
         return res.status(409).json({ message: "display name already taken" });
       }
 
@@ -4417,36 +4375,44 @@ async function main() {
         return res.status(400).json({ message: "invalid loadout" });
       }
 
-      me.displayName = nextName;
-      me.loadout = normalizeLoadout(incoming, me.loadout);
-      me.profileSetupCompleted = true;
+      const newLoadout = normalizeLoadout(incoming, me.loadout);
+      if (!pgPool) {
+        me.displayName = nextName;
+        me.loadout = newLoadout;
+        me.profileSetupCompleted = true;
+      }
       await persistPG(async () => {
-        await DB.updateUser(pgPool, uid, { displayName: nextName, loadout: me.loadout, profileSetupCompleted: true });
+        await DB.updateUser(pgPool, uid, { displayName: nextName, loadout: newLoadout, profileSetupCompleted: true });
       });
-      return res.status(200).json(profileDTOForViewer(me, true, true));
+      const updated = await getUser(uid);
+      return res.status(200).json(await profileDTOForViewerAsync(updated, true, true));
     } catch (err) {
       if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
     }
   });
 
-  app.get("/v1/profile/:userID", profileReadRateLimiter, (req, res) => {
+  app.get("/v1/profile/:userID", profileReadRateLimiter, async (req, res) => {
     try {
       const viewerID = parseBearer(req);
       const targetID = String(req.params.userID || "").trim();
       if (!targetID || targetID === "me") {
-        const me = db.users[viewerID];
+        const me = await getUser(viewerID);
         if (!me) return res.status(404).json({ message: "user not found" });
-        return res.status(200).json(profileDTOForViewer(me, true, true));
+        return res.status(200).json(await profileDTOForViewerAsync(me, true, true));
       }
 
-      const viewer = db.users[viewerID];
-      const target = db.users[targetID];
+      const viewer = await getUser(viewerID);
+      const target = await getUser(targetID);
       if (!viewer || !target) return res.status(404).json({ message: "user not found" });
 
+      if (await isBlockedEitherDirectionSafe(viewerID, targetID)) {
+        return res.status(404).json({ message: "user not found" });
+      }
+
       const isSelf = viewerID === targetID;
-      const isFriend = isFriendOf(viewer, targetID);
-      return res.status(200).json(profileDTOForViewer(target, isSelf, isFriend));
+      const isFriend = await checkAreFriends(viewerID, targetID);
+      return res.status(200).json(await profileDTOForViewerAsync(target, isSelf, isFriend));
     } catch (err) {
       if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
@@ -4457,19 +4423,37 @@ async function main() {
     const requestStartedAt = timingNowNs();
     try {
       const uid = parseBearer(req);
-      if (!db.users[uid]) return res.status(404).json({ message: "user not found" });
+      const mediaUser = await getUser(uid);
+      if (!mediaUser) return res.status(404).json({ message: "user not found" });
       if (!req.file || !req.file.buffer) return res.status(400).json({ message: "file required" });
 
       const ext = safeExt(req.file.originalname);
-      const objectKey = `${uid}/${randHex(16)}${ext}`;
+      const contentHash = crypto.createHash("md5").update(req.file.buffer).digest("hex");
+      const objectKey = `${uid}/${contentHash}${ext}`;
+
+      // Content-hash dedup: if the exact same file already exists, return immediately.
+      const fullPath = path.join(MEDIA_DIR, objectKey);
+      const base = derivePublicBase(req);
+      const url = base ? `${base}/media/${objectKey}` : `/media/${objectKey}`;
+      try {
+        await fsp.access(fullPath);
+        // File exists — skip write, return existing URL.
+        logTiming("media_upload", {
+          userID: uid,
+          backend: "dedup",
+          bytes: req.file.buffer.length,
+          writeDurationMs: 0,
+          totalDurationMs: elapsedMs(requestStartedAt)
+        });
+        return res.status(200).json({ objectKey, url });
+      } catch {
+        // File does not exist — proceed with write.
+      }
 
       // Always write to local disk first (fast, reliable)
-      const fullPath = path.join(MEDIA_DIR, objectKey);
       const diskWriteStartedAt = timingNowNs();
       await fsp.mkdir(path.dirname(fullPath), { recursive: true });
       await fsp.writeFile(fullPath, req.file.buffer);
-      const base = derivePublicBase(req);
-      const url = base ? `${base}/media/${objectKey}` : `/media/${objectKey}`;
       const fileBytes = req.file.buffer.length;
       const fileMime = req.file.mimetype;
       logTiming("media_upload", {
