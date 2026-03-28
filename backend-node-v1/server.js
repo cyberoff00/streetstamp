@@ -45,7 +45,7 @@ const AUTH_LOGIN_RATE_LIMIT_MAX = Number(process.env.AUTH_LOGIN_RATE_LIMIT_MAX |
 const AUTH_REFRESH_RATE_LIMIT_WINDOW_MS = Number(process.env.AUTH_REFRESH_RATE_LIMIT_WINDOW_MS || 5 * 60 * 1000);
 const AUTH_REFRESH_RATE_LIMIT_MAX = Number(process.env.AUTH_REFRESH_RATE_LIMIT_MAX || 80);
 const WRITE_RATE_LIMIT_WINDOW_MS = Number(process.env.WRITE_RATE_LIMIT_WINDOW_MS || 60 * 1000);
-const WRITE_RATE_LIMIT_MAX = Number(process.env.WRITE_RATE_LIMIT_MAX || 40);
+const WRITE_RATE_LIMIT_MAX = Number(process.env.WRITE_RATE_LIMIT_MAX || 80);
 const UPLOAD_RATE_LIMIT_WINDOW_MS = Number(process.env.UPLOAD_RATE_LIMIT_WINDOW_MS || 60 * 1000);
 const UPLOAD_RATE_LIMIT_MAX = Number(process.env.UPLOAD_RATE_LIMIT_MAX || 10);
 const TEST_EMAIL_OUTBOX_FILE = (process.env.TEST_EMAIL_OUTBOX_FILE || "").trim();
@@ -2339,6 +2339,11 @@ async function main() {
     windowMs: UPLOAD_RATE_LIMIT_WINDOW_MS,
     maxHits: UPLOAD_RATE_LIMIT_MAX
   });
+  const readRateLimiter = makeRateLimiter({
+    keyPrefix: "read",
+    windowMs: WRITE_RATE_LIMIT_WINDOW_MS,
+    maxHits: 120
+  });
   const profileWriteRateLimiter = makeRateLimiter({
     keyPrefix: "profile-write",
     windowMs: 60000,
@@ -3497,7 +3502,7 @@ async function main() {
     }
   });
 
-  app.post("/v1/journeys/likes/batch", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
+  app.post("/v1/journeys/likes/batch", readRateLimiter, async (req, res) => {
     try {
       const viewerID = parseBearer(req);
       const viewer = await getUser(viewerID);
@@ -3568,7 +3573,7 @@ async function main() {
     }
   });
 
-  app.get("/v1/journeys/:ownerUserID/:journeyID/likes", writeRateLimiter, async (req, res) => {
+  app.get("/v1/journeys/:ownerUserID/:journeyID/likes", readRateLimiter, async (req, res) => {
     try {
       const viewerID = parseBearer(req);
       const ownerUserID = String(req.params.ownerUserID || "").trim();
