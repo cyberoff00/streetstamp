@@ -1,8 +1,11 @@
 import Foundation
 
 enum UserScopedProfileStateStore {
+    static let activeLocalProfileIDKey = "streetstamps.active_local_profile_id.v1"
     static let globalDisplayNameKey = "streetstamps.profile.displayName"
     static let globalAvatarLoadoutKey = "avatar.loadout.v2"
+    static let globalEconomyKey = "equipment.economy.v1"
+    static let globalWelcomeBonusKey = MembershipStore.welcomeBonusGrantedKey
 
     static func displayNameKey(for userID: String) -> String {
         "streetstamps.profile.displayName.user.\(userID)"
@@ -10,6 +13,14 @@ enum UserScopedProfileStateStore {
 
     static func avatarLoadoutKey(for userID: String) -> String {
         "avatar.loadout.v2.user.\(userID)"
+    }
+
+    static func economyKey(for userID: String) -> String {
+        "equipment.economy.v1.user.\(userID)"
+    }
+
+    static func welcomeBonusKey(for userID: String) -> String {
+        "\(globalWelcomeBonusKey).user.\(userID)"
     }
 
     static func pendingAvatarLoadoutKey(for userID: String) -> String {
@@ -42,6 +53,40 @@ enum UserScopedProfileStateStore {
 
         defaults.set(data, forKey: globalAvatarLoadoutKey)
         defaults.set(data, forKey: avatarLoadoutKey(for: userID))
+    }
+
+    static func saveCurrentEconomy(_ economy: EquipmentEconomy, for userID: String, defaults: UserDefaults = .standard) {
+        guard !userID.isEmpty else { return }
+        guard let data = try? JSONEncoder().encode(economy) else { return }
+        defaults.set(data, forKey: globalEconomyKey)
+        defaults.set(data, forKey: economyKey(for: userID))
+    }
+
+    static func activeLocalProfileID(defaults: UserDefaults = .standard) -> String? {
+        let userID = defaults.string(forKey: activeLocalProfileIDKey)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let userID, !userID.isEmpty else { return nil }
+        return userID
+    }
+
+    static func currentWelcomeBonusGranted(defaults: UserDefaults = .standard) -> Bool {
+        guard let userID = activeLocalProfileID(defaults: defaults) else {
+            return defaults.bool(forKey: globalWelcomeBonusKey)
+        }
+
+        let scopedKey = welcomeBonusKey(for: userID)
+        guard defaults.object(forKey: scopedKey) != nil else {
+            return false
+        }
+        return defaults.bool(forKey: scopedKey)
+    }
+
+    static func saveCurrentWelcomeBonusGranted(_ granted: Bool, defaults: UserDefaults = .standard) {
+        guard let userID = activeLocalProfileID(defaults: defaults) else {
+            defaults.set(granted, forKey: globalWelcomeBonusKey)
+            return
+        }
+        defaults.set(granted, forKey: globalWelcomeBonusKey)
+        defaults.set(granted, forKey: welcomeBonusKey(for: userID))
     }
 
     static func markPendingLoadout(_ loadout: RobotLoadout, for userID: String, defaults: UserDefaults = .standard) {
@@ -88,6 +133,17 @@ enum UserScopedProfileStateStore {
            let normalized = normalizedLoadoutData(globalLoadoutData) {
             defaults.set(normalized, forKey: userLoadoutKey)
         }
+
+        let userEconomyKey = economyKey(for: userID)
+        if defaults.data(forKey: userEconomyKey) == nil,
+           let globalEconomyData = defaults.data(forKey: globalEconomyKey) {
+            defaults.set(globalEconomyData, forKey: userEconomyKey)
+        }
+
+        let userBonusKey = welcomeBonusKey(for: userID)
+        if defaults.object(forKey: userBonusKey) == nil {
+            defaults.set(defaults.bool(forKey: globalWelcomeBonusKey), forKey: userBonusKey)
+        }
     }
 
     private static func persistCurrentGlobalState(for userID: String, defaults: UserDefaults) {
@@ -105,6 +161,16 @@ enum UserScopedProfileStateStore {
         } else {
             defaults.removeObject(forKey: userLoadoutKey)
         }
+
+        let userEconomyKey = economyKey(for: userID)
+        if let globalEconomyData = defaults.data(forKey: globalEconomyKey) {
+            defaults.set(globalEconomyData, forKey: userEconomyKey)
+        } else {
+            defaults.removeObject(forKey: userEconomyKey)
+        }
+
+        let userBonusKey = welcomeBonusKey(for: userID)
+        defaults.set(defaults.bool(forKey: globalWelcomeBonusKey), forKey: userBonusKey)
     }
 
     private static func restoreGlobalState(for userID: String, defaults: UserDefaults) {
@@ -121,6 +187,20 @@ enum UserScopedProfileStateStore {
             defaults.set(normalized, forKey: globalAvatarLoadoutKey)
         } else {
             defaults.removeObject(forKey: globalAvatarLoadoutKey)
+        }
+
+        let userEconomyKey = economyKey(for: userID)
+        if let scopedEconomyData = defaults.data(forKey: userEconomyKey) {
+            defaults.set(scopedEconomyData, forKey: globalEconomyKey)
+        } else {
+            defaults.removeObject(forKey: globalEconomyKey)
+        }
+
+        let userBonusKey = welcomeBonusKey(for: userID)
+        if defaults.object(forKey: userBonusKey) != nil {
+            defaults.set(defaults.bool(forKey: userBonusKey), forKey: globalWelcomeBonusKey)
+        } else {
+            defaults.set(false, forKey: globalWelcomeBonusKey)
         }
     }
 

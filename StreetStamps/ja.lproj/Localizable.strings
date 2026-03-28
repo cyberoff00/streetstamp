@@ -886,6 +886,7 @@
 "membership_products_unavailable" = "現在ご利用いただけません。しばらくしてからお試しください。";
 "activity_record_title" = "アクティビティ記録";
 "activity_ring_help" = "外側：レベル進捗（1km以上の旅がカウント）\n中央：記憶収集（50個で1周）\n内側：都市解放進捗（10都市で1周）";
+"activity_ring_next_level_hint" = "次のレベルまであと %d 旅";
 "activity_stat_cards" = "カード";
 "activity_stat_distance_km" = "距離（km）";
 "activity_stat_journeys" = "旅程";

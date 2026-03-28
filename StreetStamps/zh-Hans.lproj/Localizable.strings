@@ -658,7 +658,16 @@
 "profile_setup_edit_look" = "去换装";
 "profile_setup_nickname_label" = "昵称";
 "profile_setup_nickname_placeholder" = "SKYWALKER";
-"profile_setup_nickname_hint" = "昵称现在不能和别人重复，选一个最像你的吧。";
+"profile_setup_nickname_hint" = "最多24个字符，仅支持字母、数字、_ . -，不能重复";
+"auth_password_hint" = "至少8位，需包含字母、数字和特殊字符";
+"auth_confirm_password" = "确认密码";
+"auth_confirm_new_password" = "确认新密码";
+"auth_reset_email_sent" = "重置密码邮件已发送";
+"auth_reset_link_invalid" = "重置链接缺失或无效";
+"auth_enter_confirm_new_password" = "请输入并确认新密码";
+"auth_password_updated" = "密码已更新，请使用新密码登录";
+"auth_reset_subtitle" = "为你的账号设置一个新密码";
+"auth_reenter_credentials" = "请重新输入邮箱和密码后再继续";
 "profile_setup_ready_title" = "差最后一步";
 "profile_setup_ready_body" = "保存后，你的昵称和穿搭会同步到账号里，好友看到的就是这一版。";
 "profile_setup_skip" = "跳过";
@@ -883,6 +892,7 @@
 "profile_activity_record" = "活动记录";
 "profile_stats_format" = "%d 旅程 · %d 记忆 · %d 卡片";
 "activity_ring_help" = "外圈：等级进度（完成1公里以上的旅程升级）\n中圈：记忆收集进度（每50个记忆满环）\n内圈：城市解锁进度（每10个城市满环）";
+"activity_ring_next_level_hint" = "还差 %d 个旅程解锁下一级";
 "settings_icloud_sync_title" = "iCloud 同步";
 "settings_icloud_sync_desc" = "自动同步并恢复你的旅程、足迹和关键设置。";
 "settings_icloud_sync_unavailable_desc" = "iCloud 当前不可用，请先在系统设置登录 iCloud。";
@@ -1012,6 +1022,18 @@
 "error_forbidden" = "没有权限执行此操作";
 "error_not_configured" = "服务配置异常，请稍后重试";
 "error_unknown" = "出了点问题，请重试";
+"error_too_many_requests" = "请求太频繁，请稍等一下";
+"error_invalid_email" = "邮箱地址格式不正确";
+"error_weak_password" = "密码至少8位，需包含字母、数字和特殊字符";
+"error_email_exists" = "该邮箱已被注册";
+"error_wrong_credentials" = "邮箱或密码错误";
+"error_email_not_verified" = "邮箱未验证，请查收验证邮件";
+"error_account_not_found" = "账号不存在";
+"error_display_name_taken" = "该昵称已被占用";
+"error_invalid_display_name" = "昵称格式不正确";
+"error_already_friends" = "你们已经是好友了";
+"error_cannot_add_self" = "不能添加自己为好友";
+"error_exclusive_id_taken" = "该ID已被占用";
 
 // Contextual Hints (Onboarding)
 "hint_start_first_journey" = "点击 START 开始你的第一次旅程";
@@ -1060,5 +1082,8 @@
 "about_us_traveler_needs_content" = "Worldo里我最喜欢的板块是很简单的Journey Memory，也就是最后旅程被归档的图文所呈现的形态。我认为做APP会时常感到气馁的点是它并没有那么像创作，也并不像是一个人的游戏，决定成功的因素绝不仅仅是产品本身，同时一款产品的产生却会有成千上万的竞品随之而来，那为什么是我。想到最后我觉得可以回到我为什么依然喜欢一个最简单的记录功能。我觉得新其实更多时候只是既有东西的组合，组合好了就会达成某种和谐，这种和谐会产生一些能量。也就是说它实现了我个人最核心的需求，旅行者的需求，后来在火车上飞机上我都自然开始写点东西，拍点东西，就像是一种图文和时空和谐的归位，我觉得什么都对了。初版Worldo被测试的时候我在济州岛，爬汉拿山那天我用它记录了一路的旅程，后来我也经常和朋友炫耀导出的游记，这世界还存在游记吗？";
 "about_us_cyber_dog_title" = "赛博遛狗的故事";
 "about_us_cyber_dog_content" = "一个朋友打算在装备里画了一只小狗，因为她想到她的小狗安迪以后死了，她散步的时候可以看到地图里自己带着赛博小狗一起，然后还没画她就痛哭一场。很萌，我想要做的就是这种很萌的东西。又有一天我在为生活的一切，为这款app焦虑的时候，骑着车记录着轨迹，我突然觉得没关系，即使最后是自娱自乐也没关系。我为朋友们建造了一个赛博空间，这个空间只有30个人也是另一种伟大的故事。";
+"about_worldo_header" = "关于 WORLDO";
+"brand_tagline_journey_memory" = "旅程记忆";
+"brand_wordmark" = "worldo";
 "postcard_saved_front" = "已保存明信片正面";
 "postcard_saved_back" = "已保存明信片反面";

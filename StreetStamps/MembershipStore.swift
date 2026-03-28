@@ -129,7 +129,7 @@ final class MembershipStore: ObservableObject {
 
     private let tierKey = "streetstamps.membership.tier"
     private let expirationKey = "streetstamps.membership.expiration"
-    private let welcomeBonusGrantedKey = "streetstamps.membership.welcome_bonus_granted"
+    static let welcomeBonusGrantedKey = "streetstamps.membership.welcome_bonus_granted"
 
     private var transactionListener: Task<Void, Never>?
 
@@ -246,16 +246,16 @@ final class MembershipStore: ObservableObject {
         }
     }
 
-    /// Whether the welcome bonus has already been granted.
+    /// Whether the welcome bonus has already been granted for the active user.
     var welcomeBonusGranted: Bool {
-        UserDefaults.standard.bool(forKey: welcomeBonusGrantedKey)
+        UserScopedProfileStateStore.currentWelcomeBonusGranted()
     }
 
     /// Mark the welcome bonus as granted. Call this from the coin-awarding
     /// site (e.g. EquipmentView) after actually crediting the coins, so the
     /// bonus is only given once.
     func markWelcomeBonusGranted() {
-        UserDefaults.standard.set(true, forKey: welcomeBonusGrantedKey)
+        UserScopedProfileStateStore.saveCurrentWelcomeBonusGranted(true)
     }
 
     private func checkVerified<T>(_ result: VerificationResult<T>) throws -> T {

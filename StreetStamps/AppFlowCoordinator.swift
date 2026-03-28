@@ -37,6 +37,7 @@ final class AppFlowCoordinator: ObservableObject {
     @Published private(set) var pendingSidebarDestination: MainSidebarDestination?
     @Published private(set) var sidebarHiddenTokens: Set<String> = []
     @Published private(set) var requestedTab: NavigationTab?
+    @Published private(set) var requestedCollectionPage: Int?
     @Published private(set) var currentTab: NavigationTab = .start
 
     func requestResumeOngoing() {
@@ -79,6 +80,14 @@ final class AppFlowCoordinator: ObservableObject {
 
     func clearRequestedTab() {
         requestedTab = nil
+    }
+
+    func requestSelectCollectionPage(_ rawPage: Int) {
+        requestedCollectionPage = rawPage
+    }
+
+    func clearRequestedCollectionPage() {
+        requestedCollectionPage = nil
     }
 
     func updateCurrentTab(_ tab: NavigationTab) {

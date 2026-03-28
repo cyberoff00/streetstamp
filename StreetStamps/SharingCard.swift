@@ -179,6 +179,7 @@ struct PopSharingCard: View {
                 if showSavedToast {
                     HStack(spacing: 8) {
                         Image(systemName: "checkmark.circle.fill")
+                            .symbolEffect(.bounce, value: showSavedToast)
                         Text(L10n.t("share_saved_to_photos"))
                             .font(.system(size: 13, weight: .semibold))
                     }
@@ -228,8 +229,7 @@ struct PopSharingCard: View {
                     Image(systemName: "trash")
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(.black)
-                        .frame(width: 36, height: 36)
-                        .appFullSurfaceTapTarget(.circle)
+                        .appMinTapTarget()
                 }
                 .buttonStyle(.plain)
             }
@@ -251,7 +251,7 @@ struct PopSharingCard: View {
                 Spacer()
 
                 Button {
-                    withAnimation(.easeInOut(duration: 0.18)) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.78)) {
                         showShareActions.toggle()
                     }
                 } label: {
@@ -266,9 +266,9 @@ struct PopSharingCard: View {
                                     showShareSheet = true
                                 } label: {
                                     Image(systemName: "square.and.arrow.up")
-                                        .font(.system(size: 13, weight: .semibold))
+                                        .font(.system(size: 16, weight: .semibold))
                                         .foregroundColor(.black.opacity(0.78))
-                                        .frame(width: 24, height: 24)
+                                        .appMinTapTarget()
                                 }
                                 .buttonStyle(.plain)
 
@@ -278,9 +278,9 @@ struct PopSharingCard: View {
                                     showSavedToastNow()
                                 } label: {
                                     Image(systemName: "square.and.arrow.down")
-                                        .font(.system(size: 13, weight: .semibold))
+                                        .font(.system(size: 16, weight: .semibold))
                                         .foregroundColor(.black.opacity(0.78))
-                                        .frame(width: 24, height: 24)
+                                        .appMinTapTarget()
                                 }
                                 .buttonStyle(.plain)
                                 .disabled(finalCardImage == nil)
@@ -311,9 +311,10 @@ struct PopSharingCard: View {
                         Image(systemName: hideMapDetails ? "eye.slash" : "eye")
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundColor(.white)
-                            .frame(width: 40, height: 40)
+                            .frame(width: 36, height: 36)
                             .background(Color.black.opacity(0.28))
                             .clipShape(Circle())
+                            .appMinTapTarget()
                     }
                     .padding(10)
                 }
@@ -419,6 +420,7 @@ struct PopSharingCard: View {
                                 .frame(width: 40, height: 40)
                                 .background(Color.black.opacity(0.05))
                                 .clipShape(Circle())
+                                .appMinTapTarget()
                         }
                         .disabled(!canAddOverallMemoryPhoto)
                         .opacity(canAddOverallMemoryPhoto ? 1 : 0.35)
@@ -430,6 +432,7 @@ struct PopSharingCard: View {
                                 .frame(width: 40, height: 40)
                                 .background(Color.black.opacity(0.05))
                                 .clipShape(Circle())
+                                .appMinTapTarget()
                         }
                         .disabled(!canAddOverallMemoryPhoto)
                         .opacity(canAddOverallMemoryPhoto ? 1 : 0.35)
@@ -453,12 +456,12 @@ struct PopSharingCard: View {
                                             PhotoStore.delete(named: removed, userID: sessionStore.currentUserID)
                                         } label: {
                                             Image(systemName: "xmark.circle.fill")
-                                                .font(.system(size: 16))
+                                                .font(.system(size: 20))
                                                 .foregroundColor(FigmaTheme.text.opacity(0.6))
                                                 .background(Color.white.opacity(0.75).clipShape(Circle()))
+                                                .appMinTapTarget()
                                         }
                                         .buttonStyle(.plain)
-                                        .padding(4)
                                     }
                                 }
                             }
@@ -590,9 +593,10 @@ struct PopSharingCard: View {
     }
 
     private func showSavedToastNow() {
-        withAnimation(.easeInOut(duration: 0.2)) { showSavedToast = true }
+        Haptics.success()
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { showSavedToast = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-            withAnimation(.easeInOut(duration: 0.2)) { showSavedToast = false }
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { showSavedToast = false }
         }
     }
 

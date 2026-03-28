@@ -40,7 +40,7 @@ private enum FriendsRoute: Hashable, Identifiable {
     case profile(String)
     case cities(String)
     case publicMemories(String)
-    case collection(String)
+    case collection(String, Int = 0)
     case journey(friendID: String, snapshot: FriendProfileSnapshot?, journeyID: String)
 
     var id: String {
@@ -55,8 +55,8 @@ private enum FriendsRoute: Hashable, Identifiable {
             return "cities_\(friendID)"
         case .publicMemories(let friendID):
             return "public_memories_\(friendID)"
-        case .collection(let friendID):
-            return "collection_\(friendID)"
+        case .collection(let friendID, let rawPage):
+            return "collection_\(friendID)_\(rawPage)"
         case .journey(let friendID, _, let journeyID):
             return "journey_\(friendID)_\(journeyID)"
         }
@@ -171,6 +171,7 @@ struct FriendsHubView: View {
 
     @State private var tab: FriendsTopTab = .activity
     @State private var showAddFriendSheet = false
+    @State private var pendingFriendRequestSent = false
     @State private var loadingRemote = false
     @State private var activeRoute: FriendsRoute?
     @State private var toastText = ""
@@ -368,12 +369,18 @@ struct FriendsHubView: View {
         .navigationDestination(item: $activeRoute) { route in
             destination(for: route)
         }
-        .sheet(isPresented: $showAddFriendSheet) {
+        .sheet(isPresented: $showAddFriendSheet, onDismiss: {
+            if pendingFriendRequestSent {
+                pendingFriendRequestSent = false
+                showFeedToast(L10n.t("profile_friend_request_sent"))
+            }
+        }) {
             AddFriendSheet(
                 prefillInviteCode: addFriendPrefillInviteCode,
                 prefillHandle: addFriendPrefillHandle
             ) {
                 await refreshRemoteFriends()
+                pendingFriendRequestSent = true
             }
             .environmentObject(socialStore)
             .environmentObject(sessionStore)
@@ -472,7 +479,9 @@ struct FriendsHubView: View {
             guard phase == .active else { return }
             Task {
                 if didPerformInitialFeedRefresh {
-                    await detectUnseenFeedUpdates()
+                    async let a: Void = detectUnseenFeedUpdates()
+                    async let b: Void = refreshFriendRequests()
+                    _ = await (a, b)
                 } else {
                     await performInitialFeedRefreshIfNeeded()
                 }
@@ -613,6 +622,12 @@ struct FriendsHubView: View {
                                     }
                                 )
                                 .id(event.id)
+                                .scrollTransition(.animated(.spring(response: 0.4, dampingFraction: 0.85))) { content, phase in
+                                    content
+                                        .opacity(phase.isIdentity ? 1 : 0.3)
+                                        .scaleEffect(phase.isIdentity ? 1 : 0.95)
+                                        .offset(y: phase.isIdentity ? 0 : 20)
+                                }
                             }
                         }
                     }
@@ -655,6 +670,11 @@ struct FriendsHubView: View {
                         }
                         .buttonStyle(.plain)
                         .id(friend.id)
+                        .scrollTransition(.animated(.spring(response: 0.4, dampingFraction: 0.85))) { content, phase in
+                            content
+                                .opacity(phase.isIdentity ? 1 : 0.3)
+                                .scaleEffect(phase.isIdentity ? 1 : 0.96)
+                        }
                     }
                 }
             }
@@ -723,8 +743,8 @@ struct FriendsHubView: View {
                 FriendCitiesScreen(friendID: friendID)
             case .publicMemories(let friendID):
                 FriendPublicMemoriesScreen(friendID: friendID)
-            case .collection(let friendID):
-                FriendCollectionScreen(friendID: friendID)
+            case .collection(let friendID, let rawPage):
+                FriendCollectionScreen(friendID: friendID, initialPage: FriendCollectionPage(rawValue: rawPage) ?? .cities)
             case .journey(let friendID, let snapshot, let journeyID):
                 FriendJourneyDetailScreen(friendID: friendID, fallbackSnapshot: snapshot, journeyID: journeyID)
             }
@@ -740,6 +760,7 @@ struct FriendsHubView: View {
                             Image(systemName: "bell.badge.fill")
                                 .font(.system(size: 19, weight: .semibold))
                                 .foregroundColor(FigmaTheme.text)
+                                .symbolEffect(.bounce, value: notificationStore.unreadCount)
 
                             if notificationStore.unreadCount > 0 {
                                 Text("\(min(notificationStore.unreadCount, 99))")
@@ -752,7 +773,7 @@ struct FriendsHubView: View {
                                     .offset(x: 10, y: -8)
                             }
                         }
-                        .frame(width: 24, height: 24)
+                        .appMinTapTarget()
                     }
                     .buttonStyle(.plain)
                 } else {
@@ -761,12 +782,14 @@ struct FriendsHubView: View {
             } trailing: {
                 if sessionStore.isLoggedIn {
                     Button {
+                        Haptics.light()
                         showInviteFriendSheet = true
                         Task { await fetchMyProfile(token: sessionStore.currentAccessToken) }
                     } label: {
                         Image(systemName: "plus.circle.fill")
                             .font(.system(size: 20, weight: .semibold))
                             .foregroundColor(FigmaTheme.text)
+                            .appMinTapTarget()
                     }
                     .buttonStyle(.plain)
                 }
@@ -777,7 +800,7 @@ struct FriendsHubView: View {
             HStack {
                 ForEach(FriendsTopTab.allCases) { item in
                     Button {
-                        withAnimation(.easeInOut(duration: 0.22)) {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                             tab = item
                         }
                     } label: {
@@ -1306,7 +1329,7 @@ struct FriendsHubView: View {
                             Image(systemName: "checkmark.circle")
                                 .font(.system(size: 18, weight: .semibold))
                                 .foregroundColor(FigmaTheme.text)
-                                .frame(width: 42, height: 42)
+                                .appMinTapTarget()
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(L10n.t("friends_mark_all_read"))
@@ -1393,12 +1416,13 @@ struct FriendsHubView: View {
                 .replacingOccurrences(of: "\n", with: " ")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !compact.isEmpty else { return }
+            Haptics.light()
             toastText = compact
-            withAnimation(.easeInOut(duration: 0.2)) {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                 showToast = true
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
-                withAnimation(.easeInOut(duration: 0.2)) {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                     showToast = false
                 }
             }
@@ -1506,11 +1530,16 @@ private struct FriendActivityCard: View {
                 Spacer()
 
                 if let likeActionMode {
-                    Button(action: onLikeTap) {
+                    Button {
+                        Haptics.light()
+                        onLikeTap()
+                    } label: {
                         HStack(spacing: 5) {
                             Image(systemName: likeActionMode == .toggleLike && likedByMe ? "heart.fill" : "heart")
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundColor(likeActionMode == .toggleLike && likedByMe ? .red : FigmaTheme.subtext)
+                                .symbolEffect(.bounce, value: likedByMe)
+                                .contentTransition(.symbolEffect(.replace))
                             Text("\(max(0, likeCount))")
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundColor(FigmaTheme.subtext)
@@ -1614,6 +1643,11 @@ enum FriendListPresencePresentation {
     }
 }
 
+private struct ScannedFriendTarget {
+    let inviteCode: String?
+    let handle: String?
+}
+
 private struct AddFriendSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var socialStore: SocialGraphStore
@@ -1630,6 +1664,8 @@ private struct AddFriendSheet: View {
     @State private var message = ""
     @State private var showMessage = false
     @State private var showScannerSheet = false
+    @State private var pendingScanResult: ScannedFriendTarget?
+    @State private var scanResultInvalid = false
 
     init(
         prefillInviteCode: String? = nil,
@@ -1708,22 +1744,26 @@ private struct AddFriendSheet: View {
             } message: {
                 Text(message)
             }
-            .sheet(isPresented: $showScannerSheet) {
+            .sheet(isPresented: $showScannerSheet, onDismiss: {
+                if let result = pendingScanResult {
+                    pendingScanResult = nil
+                    Task { await submitScannedResult(result) }
+                } else if scanResultInvalid {
+                    scanResultInvalid = false
+                    message = L10n.t("friends_qr_invalid_content")
+                    showMessage = true
+                }
+            }) {
                 FriendInviteScannerSheet { text in
                     guard let parsed = AppDeepLinkStore.parseInvite(from: text), !parsed.isEmpty else {
-                        message = L10n.t("friends_qr_invalid_content")
-                        showMessage = true
+                        scanResultInvalid = true
                         return
                     }
                     if let code = parsed.inviteCode, !code.isEmpty {
-                        method = .inviteCode
-                        friendCode = code
+                        pendingScanResult = ScannedFriendTarget(inviteCode: code, handle: nil)
                     } else if let handle = parsed.handle, !handle.isEmpty {
-                        method = .exclusiveID
-                        friendCode = handle
+                        pendingScanResult = ScannedFriendTarget(inviteCode: nil, handle: handle)
                     }
-                    showMessage = true
-                    message = L10n.t("friends_qr_recognized")
                 }
             }
         }
@@ -1824,6 +1864,32 @@ private struct AddFriendSheet: View {
                 displayName: resolvedDisplayName(),
                 inviteCode: target.inviteCode,
                 handle: target.handle,
+                accessToken: sessionStore.currentAccessToken
+            )
+            await onAdded()
+            dismiss()
+        } catch {
+            message = String(format: L10n.t("friends_add_failed"), error.localizedDescription)
+            showMessage = true
+        }
+    }
+
+    @MainActor
+    private func submitScannedResult(_ result: ScannedFriendTarget) async {
+        submitting = true
+        defer { submitting = false }
+        if let code = result.inviteCode {
+            method = .inviteCode
+            friendCode = code
+        } else if let handle = result.handle {
+            method = .exclusiveID
+            friendCode = handle
+        }
+        do {
+            try await socialStore.addFriendSmart(
+                displayName: resolvedDisplayName(),
+                inviteCode: result.inviteCode,
+                handle: result.handle,
                 accessToken: sessionStore.currentAccessToken
             )
             await onAdded()
@@ -1979,7 +2045,7 @@ private struct FriendProfileScreen: View {
             Text(deleteFriendErrorText)
         }
         .navigationDestination(isPresented: $showPostcardComposer) {
-            PostcardComposerView(
+            PostcardInboxView(
                 friendID: friendID,
                 friendName: (friend ?? fallbackFriend).displayName
             )
@@ -1996,8 +2062,8 @@ private struct FriendProfileScreen: View {
                 FriendCitiesScreen(friendID: friendID)
             case .publicMemories(let friendID):
                 FriendPublicMemoriesScreen(friendID: friendID)
-            case .collection(let friendID):
-                FriendCollectionScreen(friendID: friendID)
+            case .collection(let friendID, let rawPage):
+                FriendCollectionScreen(friendID: friendID, initialPage: FriendCollectionPage(rawValue: rawPage) ?? .cities)
             case .journey(let friendID, let snapshot, let journeyID):
                 FriendJourneyDetailScreen(friendID: friendID, fallbackSnapshot: snapshot, journeyID: journeyID)
             }
@@ -2014,16 +2080,7 @@ private struct FriendProfileScreen: View {
     private var friendTopControls: some View {
         GeometryReader { proxy in
             HStack {
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(FigmaTheme.text)
-                        .frame(width: 42, height: 42)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
+                AppBackButton()
 
                 Spacer()
 
@@ -2040,7 +2097,8 @@ private struct FriendProfileScreen: View {
                                     .fill(FigmaTheme.primary)
                                     .shadow(color: FigmaTheme.primary.opacity(0.35), radius: 8, x: 0, y: 4)
                             )
-                            .contentShape(Circle())
+                            .clipShape(Circle())
+                            .appMinTapTarget()
                     }
                     .buttonStyle(.plain)
                     .transition(.scale.combined(with: .opacity))
@@ -2057,13 +2115,12 @@ private struct FriendProfileScreen: View {
                         Image(systemName: "ellipsis")
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundColor(FigmaTheme.text)
-                            .frame(width: 42, height: 42)
-                            .contentShape(Circle())
+                            .appMinTapTarget()
                     }
                     .disabled(isDeletingFriend)
                 } else {
                     Color.clear
-                        .frame(width: 42, height: 42)
+                        .frame(width: 44, height: 44)
                 }
             }
             .padding(.horizontal, 18)
@@ -2154,48 +2211,26 @@ private struct FriendProfileScreen: View {
 
                 VStack(alignment: .leading, spacing: 12) {
                     NavigationLink {
-                        ActivityRecordView(
-                            displayName: friend.displayName,
-                            stats: friend.stats,
-                            levelProgress: levelProgress,
-                            loadout: friend.loadout
+                        PostcardInboxView(
+                            friendID: friendID,
+                            friendName: (friend ?? fallbackFriend).displayName
                         )
                     } label: {
-                        friendActivityTile(
-                            icon: "chart.bar.doc.horizontal",
-                            iconColor: FigmaTheme.primary,
-                            iconBg: FigmaTheme.primary.opacity(0.1),
-                            title: L10n.t("friend_activity_record_entry"),
-                            subtitle: String(format: L10n.t("friend_stats_summary_format"), friend.stats.totalJourneys, friend.stats.totalMemories, friend.stats.totalUnlockedCities)
-                        )
+                        friendActivityTile(title: L10n.t("friend_postcards"), subtitle: nil)
                     }
                     .buttonStyle(.plain)
 
-                    Button {
-                        showPostcardComposer = true
-                    } label: {
-                        friendActivityTile(
-                            icon: "envelope.fill",
-                            iconColor: Color(red: 0.39, green: 0.29, blue: 0.74),
-                            iconBg: Color(red: 0.96, green: 0.94, blue: 1.0),
-                            title: L10n.t("friend_postcards"),
-                            subtitle: nil
-                        )
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        activeRoute.wrappedValue = .collection(friendID)
-                    } label: {
-                        friendActivityTile(
-                            icon: "rectangle.stack.fill",
-                            iconColor: Color(red: 0.24, green: 0.56, blue: 0.21),
-                            iconBg: Color(red: 0.95, green: 0.98, blue: 0.92),
-                            title: L10n.t("friend_collection"),
-                            subtitle: String(format: L10n.t("friend_collection_subtitle_format"), friend.stats.totalUnlockedCities, friend.stats.totalMemories)
-                        )
-                    }
-                    .buttonStyle(.plain)
+                    CompactActivityRingCard(
+                        stats: friend.stats,
+                        levelProgress: levelProgress,
+                        journeyDates: friend.journeys.compactMap { $0.endTime ?? $0.startTime },
+                        onCardsTap: {
+                            activeRoute.wrappedValue = .collection(friendID, 0)
+                        },
+                        onMemoriesTap: {
+                            activeRoute.wrappedValue = .collection(friendID, 1)
+                        }
+                    )
                 }
             }
             .padding(.horizontal, 24)
@@ -2242,41 +2277,8 @@ private struct FriendProfileScreen: View {
             .replacingOccurrences(of: " ", with: "")
     }
 
-    private func friendActivityTile(icon: String, iconColor: Color, iconBg: Color, title: String, subtitle: String?) -> some View {
-        HStack(spacing: 14) {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(iconBg)
-                .frame(width: 56, height: 56)
-                .overlay {
-                    Image(systemName: icon)
-                        .font(.system(size: 24, weight: .semibold))
-                        .foregroundColor(iconColor)
-                }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(FigmaTheme.text)
-                    .lineLimit(1)
-                if let subtitle = subtitle {
-                    Text(subtitle)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(FigmaTheme.subtext)
-                }
-            }
-
-            Spacer()
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(FigmaTheme.subtext)
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 16)
-        .frame(maxWidth: .infinity)
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-        .shadow(color: Color.black.opacity(0.04), radius: 20, x: 0, y: 8)
+    private func friendActivityTile(title: String, subtitle: String?) -> some View {
+        ProfilePostcardEntryCard(title: title, subtitle: subtitle)
     }
 
     private func friendProfileMenuTile(icon: String, iconColor: Color, iconBg: Color, title: String) -> some View {
@@ -2358,11 +2360,11 @@ private struct FriendProfileScreen: View {
     @MainActor
     private func showStompToastMessage(_ text: String) {
         stompToastText = text
-        withAnimation(.easeInOut(duration: 0.2)) {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
             showStompToast = true
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
-            withAnimation(.easeInOut(duration: 0.2)) {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                 showStompToast = false
             }
         }
@@ -2436,7 +2438,7 @@ private struct FriendInviteScannerSheet: View {
                         Image(systemName: isImportingFromAlbum ? "hourglass" : "photo")
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundColor(FigmaTheme.text)
-                            .frame(width: 42, height: 42)
+                            .appMinTapTarget()
                     }
                     .buttonStyle(.plain)
                     .disabled(isImportingFromAlbum || didResolveCode)
@@ -2491,8 +2493,8 @@ private struct FriendInviteScannerSheet: View {
     private func completeScan(with code: String) {
         guard !didResolveCode else { return }
         didResolveCode = true
-        dismiss()
         onScanned(code)
+        dismiss()
     }
 }
 
@@ -2870,7 +2872,7 @@ private final class FriendMirrorContext: ObservableObject {
 
 }
 
-private enum FriendCollectionPage: Int, CaseIterable, Identifiable {
+enum FriendCollectionPage: Int, CaseIterable, Identifiable {
     case cities
     case memories
 
@@ -2893,12 +2895,13 @@ private struct FriendCollectionScreen: View {
     let friendID: String
 
     @StateObject private var mirror: FriendMirrorContext
-    @State private var page: FriendCollectionPage = .cities
+    @State private var page: FriendCollectionPage
     @State private var sidebarHideToken = UUID().uuidString
 
-    init(friendID: String) {
+    init(friendID: String, initialPage: FriendCollectionPage = .cities) {
         self.friendID = friendID
         _mirror = StateObject(wrappedValue: FriendMirrorContext(friendID: friendID))
+        _page = State(initialValue: initialPage)
     }
 
     var body: some View {
@@ -2944,16 +2947,7 @@ private struct FriendCollectionScreen: View {
             topPadding: 14,
             bottomPadding: 12
         ) {
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.black)
-                    .frame(width: 42, height: 42)
-                    .appFullSurfaceTapTarget(.circle)
-            }
-            .buttonStyle(.plain)
+            AppBackButton(foreground: .black)
         } trailing: {
             Color.clear
         }
@@ -2963,7 +2957,7 @@ private struct FriendCollectionScreen: View {
         HStack {
             ForEach(FriendCollectionPage.allCases) { item in
                 Button {
-                    withAnimation(.easeInOut(duration: 0.22)) {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                         page = item
                     }
                 } label: {

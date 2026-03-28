@@ -419,6 +419,7 @@ struct StreetStampsApp: App {
                 Task { @MainActor in
                     await Task.yield()
                     VoiceBroadcastService.shared.start()
+                    onboardingGuide.markExistingUserIfNeeded(hasJourneys: !journeyStore.journeys.isEmpty)
                     onboardingGuide.startIfNeeded()
                     maybeShowFirstAuthPromptIfNeeded()
                     await sessionStore.syncHasEmailPasswordIfNeeded()
@@ -484,6 +485,7 @@ struct StreetStampsApp: App {
                     _ = await (journeyLoad, lifelogLoad)
                     guard !Task.isCancelled else { return }
 
+                    onboardingGuide.markExistingUserIfNeeded(hasJourneys: !journeyStore.journeys.isEmpty)
                     lifelogStore.bind(to: locationHub)
                     lifelogRenderCache.reset()
                     lifelogRenderCache.bind(
@@ -743,7 +745,7 @@ private func configureGlobalTabBarAppearance() {
 private extension StreetStampsApp {
     func hideSplash() {
         guard showSplash else { return }
-        withAnimation(.easeInOut(duration: 0.45)) {
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) {
             showSplash = false
         }
     }

@@ -138,6 +138,7 @@ struct MainTabView: View {
             maybePromptResumeIfNeeded()
         }
         .onChange(of: selectedTab) { tab in
+            Haptics.selection()
             loadedTabs.insert(tab)
             flow.updateCurrentTab(tab)
             if tab == .cities {
@@ -205,6 +206,13 @@ struct MainTabView: View {
         }
     }
 
+    private var visibleTabs: [NavigationTab] {
+        var tabs: [NavigationTab] = [.start, .cities, .lifelog]
+        if featureFlags.socialEnabled { tabs.append(.friends) }
+        tabs.append(.profile)
+        return tabs
+    }
+
     private var tabContent: some View {
         TabView(selection: $selectedTab) {
             MainView(selectedTab: Binding(
@@ -212,10 +220,6 @@ struct MainTabView: View {
                 set: { selectedTab = NavigationTab(rawValue: $0) ?? .start }
             ))
             .tag(NavigationTab.start)
-            .tabItem {
-                MainTabLayout.image(for: .start)
-                Text(L10n.t("tab_home"))
-            }
 
             NavigationStack {
                 if shouldRenderTab(.cities) {
@@ -225,10 +229,6 @@ struct MainTabView: View {
                 }
             }
             .tag(NavigationTab.cities)
-            .tabItem {
-                MainTabLayout.image(for: .cities)
-                Text(L10n.t("tab_memory"))
-            }
 
             Group {
                 if shouldRenderTab(.lifelog) {
@@ -237,11 +237,7 @@ struct MainTabView: View {
                     Color.clear
                 }
             }
-                .tag(NavigationTab.lifelog)
-                .tabItem {
-                    MainTabLayout.image(for: .lifelog)
-                    Text(L10n.upper("tab_worldo"))
-                }
+            .tag(NavigationTab.lifelog)
 
             if featureFlags.socialEnabled {
                 NavigationStack {
@@ -252,10 +248,6 @@ struct MainTabView: View {
                     }
                 }
                 .tag(NavigationTab.friends)
-                .tabItem {
-                    MainTabLayout.image(for: .friends)
-                    Text(L10n.t("tab_friends"))
-                }
             }
 
             NavigationStack {
@@ -266,15 +258,65 @@ struct MainTabView: View {
                 }
             }
             .tag(NavigationTab.profile)
-            .tabItem {
-                MainTabLayout.image(for: .profile)
-                Text(L10n.t("profile_title"))
-            }
         }
-        .tint(FigmaTheme.primary)
-        .toolbarColorScheme(.light, for: .tabBar)
-        .toolbarBackground(.white, for: .tabBar)
-        .toolbarBackground(.visible, for: .tabBar)
+        .toolbar(.hidden, for: .tabBar)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            customTabBar
+        }
+    }
+
+    private var customTabBar: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(Color.gray.opacity(0.1))
+                .frame(height: 1)
+
+            HStack(spacing: 0) {
+                ForEach(visibleTabs, id: \.self) { tab in
+                    customTabButton(tab)
+                }
+            }
+            .padding(.top, 8)
+            .padding(.bottom, 2)
+            .padding(.horizontal, 6)
+        }
+        .background(Color.white.opacity(0.95))
+        .background(.ultraThinMaterial)
+    }
+
+    private func customTabButton(_ tab: NavigationTab) -> some View {
+        let isSelected = selectedTab == tab
+
+        return Button {
+            selectedTab = tab
+        } label: {
+            VStack(spacing: 4) {
+                MainTabLayout.image(for: tab)
+                    .font(.system(size: 22, weight: isSelected ? .semibold : .regular))
+                    .foregroundColor(isSelected ? FigmaTheme.primary : Color.gray.opacity(0.45))
+                    .offset(y: isSelected ? -6 : 0)
+
+                Text(customTabLabel(tab))
+                    .font(.system(size: 10, weight: isSelected ? .bold : .medium))
+                    .foregroundColor(isSelected ? FigmaTheme.primary : Color.gray.opacity(0.45))
+                    .offset(y: isSelected ? -4 : 0)
+            }
+            .animation(.spring(response: 0.3, dampingFraction: 0.75), value: isSelected)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func customTabLabel(_ tab: NavigationTab) -> String {
+        switch tab {
+        case .start: return L10n.t("tab_home")
+        case .cities: return L10n.t("tab_memory")
+        case .lifelog: return L10n.upper("tab_worldo")
+        case .friends: return L10n.t("tab_friends")
+        case .profile: return L10n.t("profile_title")
+        default: return tab.title
+        }
     }
 
     private func shouldRenderTab(_ tab: NavigationTab) -> Bool {
@@ -345,9 +387,13 @@ private struct SidebarEquipmentEntryView: View {
 
     var body: some View {
         EquipmentView(loadout: $loadout)
+            .id(sessionStore.currentUserID)
             .onChange(of: loadout) { _, newValue in
                 UserScopedProfileStateStore.saveCurrentLoadout(newValue, for: sessionStore.currentUserID)
                 UserScopedProfileStateStore.markPendingLoadout(newValue, for: sessionStore.currentUserID)
+            }
+            .onChange(of: sessionStore.currentUserID) { _, _ in
+                loadout = AvatarLoadoutStore.load()
             }
     }
 }
@@ -388,7 +434,7 @@ private struct MainSidebarMenuView: View {
                 Color.black.opacity(0.30)
                     .ignoresSafeArea()
                     .onTapGesture {
-                        withAnimation(.easeOut(duration: 0.25)) {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
                             isPresented = false
                         }
                     }
@@ -433,7 +479,7 @@ private struct MainSidebarMenuView: View {
                 DragGesture(minimumDistance: 10)
                     .onEnded { v in
                         if v.translation.width < -80 {
-                            withAnimation(.easeOut(duration: 0.25)) {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
                                 isPresented = false
                             }
                         }
@@ -447,22 +493,16 @@ private struct MainSidebarMenuView: View {
         VStack(alignment: .leading, spacing: 24) {
             HStack(spacing: 8) {
                 Spacer(minLength: 0)
-                Button {
-                    withAnimation(.easeOut(duration: 0.25)) {
+                AppCloseButton(style: .plain) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
                         isPresented = false
                     }
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 22, weight: .regular))
-                        .foregroundColor(FigmaTheme.text)
-                        .frame(width: 40, height: 40)
                 }
-                .buttonStyle(.plain)
             }
 
             Button {
                 onSelectDestination(.profile)
-                withAnimation(.easeOut(duration: 0.25)) {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
                     isPresented = false
                 }
             } label: {
@@ -504,7 +544,7 @@ private struct MainSidebarMenuView: View {
     private func drawerItem(title: String, icon: String, action: @escaping () -> Void) -> some View {
         Button {
             action()
-            withAnimation(.easeOut(duration: 0.25)) {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
                 isPresented = false
             }
         } label: {

@@ -221,7 +221,7 @@ struct JourneyMemoryMainView: View {
                                 isExpanded: expandedCities.contains(city.cityKey),
                                 readOnly: readOnly,
                                 onToggle: {
-                                    withAnimation(.easeInOut(duration: 0.25)) {
+                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                                         if expandedCities.contains(city.cityKey) {
                                             expandedCities.remove(city.cityKey)
                                         } else {
@@ -358,18 +358,9 @@ struct JourneyMemoryMainView: View {
             if hideLeadingControl {
                 Color.clear
             } else if usesSidebarHeader {
-                SidebarHamburgerButton(showSidebar: $showSidebar, size: 42, iconSize: 20)
+                SidebarHamburgerButton(showSidebar: $showSidebar, size: 44, iconSize: 20)
             } else {
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(.black)
-                        .frame(width: 42, height: 42)
-                        .appFullSurfaceTapTarget(.circle)
-                }
-                .buttonStyle(.plain)
+                AppBackButton(foreground: .black)
             }
         } trailing: {
             MemoryFilterControls(
@@ -488,6 +479,28 @@ struct JourneyMemoryCalendarDay: Identifiable {
     let id = UUID()
     let date: Date?
     let number: Int
+
+    /// Generates calendar day items for the month containing `monthDate`.
+    /// Shared by JourneyMemoryCalendarRangePopover and MiniJourneyCalendar.
+    static func daysForMonth(_ monthDate: Date) -> [JourneyMemoryCalendarDay] {
+        let cal = Calendar.current
+        guard
+            let monthInterval = cal.dateInterval(of: .month, for: monthDate),
+            let monthFirstWeek = cal.dateInterval(of: .weekOfMonth, for: monthInterval.start),
+            let monthLastWeek = cal.dateInterval(of: .weekOfMonth, for: monthInterval.end.addingTimeInterval(-1))
+        else { return [] }
+
+        var cursor = monthFirstWeek.start
+        var out: [JourneyMemoryCalendarDay] = []
+        while cursor < monthLastWeek.end {
+            let isInMonth = cal.isDate(cursor, equalTo: monthDate, toGranularity: .month)
+            let n = cal.component(.day, from: cursor)
+            out.append(JourneyMemoryCalendarDay(date: isInMonth ? cursor : nil, number: n))
+            guard let next = cal.date(byAdding: .day, value: 1, to: cursor) else { break }
+            cursor = next
+        }
+        return out
+    }
 }
 
 struct JourneyMemoryCalendarRangePopover: View {
@@ -676,23 +689,7 @@ struct JourneyMemoryCalendarRangePopover: View {
     }
 
     private func calendarDays() -> [JourneyMemoryCalendarDay] {
-        let cal = Calendar.current
-        guard
-            let monthInterval = cal.dateInterval(of: .month, for: monthCursor),
-            let monthFirstWeek = cal.dateInterval(of: .weekOfMonth, for: monthInterval.start),
-            let monthLastWeek = cal.dateInterval(of: .weekOfMonth, for: monthInterval.end.addingTimeInterval(-1))
-        else { return [] }
-
-        var cursor = monthFirstWeek.start
-        var out: [JourneyMemoryCalendarDay] = []
-        while cursor < monthLastWeek.end {
-            let isInMonth = cal.isDate(cursor, equalTo: monthCursor, toGranularity: .month)
-            let n = cal.component(.day, from: cursor)
-            out.append(JourneyMemoryCalendarDay(date: isInMonth ? cursor : nil, number: n))
-            guard let next = cal.date(byAdding: .day, value: 1, to: cursor) else { break }
-            cursor = next
-        }
-        return out
+        JourneyMemoryCalendarDay.daysForMonth(monthCursor)
     }
 }
 
@@ -1371,19 +1368,13 @@ struct JourneyMemoryDetailView: View {
     private var headerCard: some View {
         VStack(alignment: .leading, spacing: 18) {
             // Back
-            Button {
+            AppBackButton(foreground: Color(red: 0.04, green: 0.04, blue: 0.04)) {
                 if isEditing {
                     cancelEditing()
                 }
                 dismiss()
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 16, weight: .medium))
-                .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
-                .frame(height: 20)
             }
-            .buttonStyle(.plain)
-            .padding(.top, 18)
+            .padding(.top, 4)
             
             // Title + actions
             HStack(alignment: .top) {
@@ -1445,7 +1436,7 @@ struct JourneyMemoryDetailView: View {
                                 Image(systemName: "xmark")
                                     .font(.system(size: 16, weight: .semibold))
                                     .foregroundColor(.black)
-                                    .frame(width: 36, height: 36)
+                                    .appMinTapTarget()
                             }
                             .buttonStyle(.plain)
 
@@ -1455,7 +1446,7 @@ struct JourneyMemoryDetailView: View {
                                 Image(systemName: "checkmark")
                                     .font(.system(size: 16, weight: .semibold))
                                     .foregroundColor(.black)
-                                    .frame(width: 36, height: 36)
+                                    .appMinTapTarget()
                             }
                             .buttonStyle(.plain)
                         } else {
@@ -1465,7 +1456,7 @@ struct JourneyMemoryDetailView: View {
                                 Image(systemName: "square.and.pencil")
                                     .font(.system(size: 16, weight: .semibold))
                                     .foregroundColor(.black)
-                                    .frame(width: 36, height: 36)
+                                    .appMinTapTarget()
                             }
                             .buttonStyle(.plain)
 
@@ -1498,13 +1489,13 @@ struct JourneyMemoryDetailView: View {
                                 Image(systemName: "ellipsis")
                                     .font(.system(size: 18, weight: .medium))
                                     .foregroundColor(.black)
-                                    .frame(width: 36, height: 36)
+                                    .appMinTapTarget()
                             }
                             .buttonStyle(.plain)
                         }
                     }
                 } else {
-                    Color.clear.frame(width: 72, height: 36)
+                    Color.clear.frame(width: 88, height: 44)
                 }
                 
                 
@@ -1637,6 +1628,7 @@ struct JourneyMemoryDetailView: View {
                             .frame(width: 40, height: 40)
                             .background(Color.black.opacity(0.05))
                             .clipShape(Circle())
+                            .appMinTapTarget()
                     }
                     .disabled(draftOverallMemoryImagePaths.count >= photoLimit)
                     .opacity(draftOverallMemoryImagePaths.count >= photoLimit ? 0.35 : 1.0)
@@ -1650,6 +1642,7 @@ struct JourneyMemoryDetailView: View {
                             .frame(width: 40, height: 40)
                             .background(Color.black.opacity(0.05))
                             .clipShape(Circle())
+                            .appMinTapTarget()
                     }
                     .disabled(draftOverallMemoryImagePaths.count >= photoLimit)
                     .opacity(draftOverallMemoryImagePaths.count >= photoLimit ? 0.35 : 1.0)
@@ -2478,7 +2471,7 @@ private struct EditableMemoryImagesView: View {
 
                     Button {
                         PhotoStore.delete(named: path, userID: userID)
-                        withAnimation(.easeInOut(duration: 0.15)) {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
                             imagePaths.removeAll(where: { $0 == path })
                         }
                     } label: {
@@ -2490,9 +2483,9 @@ private struct EditableMemoryImagesView: View {
                                     .fill(Color.white.opacity(0.92))
                                     .frame(width: 26, height: 26)
                             )
+                            .appMinTapTarget()
                     }
                     .buttonStyle(.plain)
-                    .padding(8)
                 }
             }
         }

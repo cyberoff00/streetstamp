@@ -18,6 +18,7 @@ struct CollectionTabView: View {
     @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var cityCache: CityCache
+    @EnvironmentObject private var flow: AppFlowCoordinator
     @State private var page: WorldoPage = .cities
     @StateObject private var memoryFilterState = MemoryFilterState()
 
@@ -42,7 +43,14 @@ struct CollectionTabView: View {
                 .padding(.bottom, 16)
             }
         }
-        .animation(.easeOut(duration: 0.3), value: page)
+        .onReceive(flow.$requestedCollectionPage) { rawPage in
+            guard let rawPage, let target = WorldoPage(rawValue: rawPage) else { return }
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                page = target
+            }
+            flow.clearRequestedCollectionPage()
+        }
+        .animation(.spring(response: 0.35, dampingFraction: 0.82), value: page)
         .onChange(of: page) { value in
             if value == .memories {
                 onboardingGuide.advance(.openMemory)
@@ -85,7 +93,7 @@ struct CollectionTabView: View {
         HStack {
             ForEach(WorldoPage.allCases) { item in
                 Button {
-                    withAnimation(.easeInOut(duration: 0.22)) {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                         page = item
                     }
                 } label: {

@@ -101,7 +101,7 @@ struct FriendMapCharacterOverlay: View {
             myCharacterPosition = layout.myPosition
         }
 
-        withAnimation(.easeInOut(duration: 0.25).delay(3.15)) {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.75).delay(3.15)) {
             showBubble = true
         }
     }

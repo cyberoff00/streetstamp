@@ -353,12 +353,44 @@ enum BackendAPIError: LocalizedError {
     private static func localizedServerMessage(_ msg: String) -> String {
         guard !msg.isEmpty else { return L10n.t("error_unknown") }
         let lower = msg.lowercased()
-        if lower.contains("not found") { return L10n.t("error_not_found") }
-        if lower.contains("forbidden") { return L10n.t("error_forbidden") }
-        if lower.contains("unauthorized") { return L10n.t("error_login_expired") }
+        // Infrastructure / auth-session errors → localized generic messages
         if lower.contains("internal error") || lower.contains("internal server") { return L10n.t("error_server_error") }
-        if lower.contains("too many requests") { return L10n.t("error_server_error") }
-        return L10n.t("error_server_error")
+        if lower.contains("too many requests") { return L10n.t("error_too_many_requests") }
+        if lower.contains("unauthorized") || lower.contains("refresh token") { return L10n.t("error_login_expired") }
+        // Known business errors → localized
+        let knownKey = knownServerMessageKey(lower)
+        if let key = knownKey { return L10n.t(key) }
+        // Unrecognized business errors → pass through the backend message directly
+        return msg
+    }
+
+    private static func knownServerMessageKey(_ lower: String) -> String? {
+        switch lower {
+        case "invalid email":
+            return "error_invalid_email"
+        case "password must be at least 8 characters and include a letter, number, and special character":
+            return "error_weak_password"
+        case "email already exists", "email already in use by another account":
+            return "error_email_exists"
+        case "wrong email or password":
+            return "error_wrong_credentials"
+        case "email not verified":
+            return "error_email_not_verified"
+        case "account not found":
+            return "error_account_not_found"
+        case "display name already taken":
+            return "error_display_name_taken"
+        case "invalid display name":
+            return "error_invalid_display_name"
+        case "already friends":
+            return "error_already_friends"
+        case "cannot add yourself":
+            return "error_cannot_add_self"
+        case "exclusive id already taken":
+            return "error_exclusive_id_taken"
+        default:
+            return nil
+        }
     }
 
     var serverMessage: String? {

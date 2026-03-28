@@ -257,15 +257,7 @@ struct JourneyRouteDetailView: View {
     private var routeHeader: some View {
         ZStack {
             HStack {
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(.black)
-                        .frame(width: 44, height: 44)
-                }
-                .buttonStyle(.plain)
+                AppBackButton(foreground: .black)
                 .frame(width: 88, alignment: .leading)
 
                 Spacer(minLength: 0)
@@ -278,7 +270,7 @@ struct JourneyRouteDetailView: View {
                             Image(systemName: "square.and.arrow.up")
                                 .font(.system(size: 18, weight: .regular))
                                 .foregroundColor(.black)
-                                .frame(width: 34, height: 34)
+                                .appMinTapTarget()
                         }
                         .buttonStyle(.plain)
 
@@ -288,12 +280,12 @@ struct JourneyRouteDetailView: View {
                             Image(systemName: "trash")
                                 .font(.system(size: 18, weight: .regular))
                                 .foregroundColor(.black)
-                                .frame(width: 34, height: 34)
+                                .appMinTapTarget()
                         }
                         .buttonStyle(.plain)
                     }
                 } else {
-                    Color.clear.frame(width: 68, height: 34)
+                    Color.clear.frame(width: 88, height: 44)
                 }
             }
 

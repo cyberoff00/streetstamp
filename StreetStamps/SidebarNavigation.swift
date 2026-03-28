@@ -83,7 +83,7 @@ struct SidebarMenuView: View {
                 Color.black.opacity(0.30)
                     .ignoresSafeArea()
                     .onTapGesture {
-                        withAnimation(.easeOut(duration: 0.25)) {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
                             isPresented = false
                         }
                     }
@@ -120,7 +120,7 @@ struct SidebarMenuView: View {
                 DragGesture(minimumDistance: 10)
                     .onEnded { v in
                         if v.translation.width < -80 {
-                            withAnimation(.easeOut(duration: 0.25)) {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
                                 isPresented = false
                             }
                         }
@@ -137,17 +137,11 @@ struct SidebarMenuView: View {
                     .appHeaderStyle()
                     .foregroundColor(FigmaTheme.text)
                 Spacer(minLength: 0)
-                Button {
-                    withAnimation(.easeOut(duration: 0.25)) {
+                AppCloseButton(style: .plain) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
                         isPresented = false
                     }
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 22, weight: .regular))
-                        .foregroundColor(FigmaTheme.text)
-                        .frame(width: 40, height: 40)
                 }
-                .buttonStyle(.plain)
             }
 
             HStack(spacing: 12) {
@@ -195,7 +189,7 @@ struct SidebarMenuView: View {
                     isSelected: selectedTab == tab,
                     onTap: {
                         selectedTab = tab
-                        withAnimation(.easeOut(duration: 0.25)) {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
                             isPresented = false
                         }
                     }

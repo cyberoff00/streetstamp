@@ -245,7 +245,7 @@ struct IntroSlidesView: View {
                 if page >= slides.count - 1 {
                     onFinish()
                 } else {
-                    withAnimation(.easeInOut(duration: 0.22)) {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                         page += 1
                     }
                 }

@@ -27,11 +27,15 @@ struct PostcardInboxView: View {
     @State private var isRefreshing = false
     @State private var showComposer = false
     private let focusMessageID: String?
+    private let friendID: String?
+    private let friendName: String?
 
-    init(initialBox: Box = .sent, focusMessageID: String? = nil) {
+    init(initialBox: Box = .sent, focusMessageID: String? = nil, friendID: String? = nil, friendName: String? = nil) {
         _selectedBox = State(initialValue: initialBox)
         _pendingFocusMessageID = State(initialValue: focusMessageID)
         self.focusMessageID = focusMessageID
+        self.friendID = friendID
+        self.friendName = friendName
     }
 
     static func viewIdentity(initialBox: Box, focusMessageID: String?) -> String {
@@ -53,6 +57,16 @@ struct PostcardInboxView: View {
                 (friend.id, friend.loadout.normalizedForCurrentAvatar())
             }
         )
+    }
+
+    private var filteredSentItems: [BackendPostcardMessageDTO] {
+        guard let friendID else { return postcardCenter.sentItems }
+        return postcardCenter.sentItems.filter { $0.toUserID == friendID }
+    }
+
+    private var filteredReceivedItems: [BackendPostcardMessageDTO] {
+        guard let friendID else { return postcardCenter.receivedItems }
+        return postcardCenter.receivedItems.filter { $0.fromUserID == friendID }
     }
 
     var body: some View {
@@ -102,7 +116,7 @@ struct PostcardInboxView: View {
                         Image(systemName: "envelope")
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundColor(FigmaTheme.text)
-                            .frame(width: 42, height: 42)
+                            .appMinTapTarget()
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("New postcard")
@@ -114,7 +128,11 @@ struct PostcardInboxView: View {
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
         .navigationDestination(isPresented: $showComposer) {
-            PostcardComposerView()
+            if let friendID, let friendName {
+                PostcardComposerView(friendID: friendID, friendName: friendName)
+            } else {
+                PostcardComposerView()
+            }
         }
         .task {
             await refreshInbox()
@@ -139,10 +157,10 @@ struct PostcardInboxView: View {
 
     @ViewBuilder
     private var sentSection: some View {
-        if postcardCenter.sentItems.isEmpty && pendingDrafts.isEmpty {
+        if filteredSentItems.isEmpty && filteredPendingDrafts.isEmpty {
             emptyState(text: L10n.t("postcard_sent_empty"))
         } else {
-            ForEach(postcardCenter.sentItems) { item in
+            ForEach(filteredSentItems) { item in
                 let recipientLabel = PostcardInboxPresentation.recipientLabel(
                     toDisplayName: item.toDisplayName,
                     toUserID: item.toUserID,
@@ -167,7 +185,7 @@ struct PostcardInboxView: View {
                 )
             }
 
-            ForEach(pendingDrafts) { draft in
+            ForEach(filteredPendingDrafts) { draft in
                 let recipientLabel = PostcardInboxPresentation.recipientLabel(
                     toDisplayName: draft.toDisplayName,
                     toUserID: draft.toUserID,
@@ -204,10 +222,10 @@ struct PostcardInboxView: View {
 
     @ViewBuilder
     private var receivedSection: some View {
-        if postcardCenter.receivedItems.isEmpty {
+        if filteredReceivedItems.isEmpty {
             emptyState(text: L10n.t("postcard_received_empty"))
         } else {
-            ForEach(postcardCenter.receivedItems) { item in
+            ForEach(filteredReceivedItems) { item in
                 let senderLabel = PostcardInboxPresentation.senderLabel(
                     fromDisplayName: item.fromDisplayName,
                     fromUserID: item.fromUserID,
@@ -254,6 +272,11 @@ struct PostcardInboxView: View {
             guard let messageID = draft.messageID, !messageID.isEmpty else { return true }
             return !sentIDs.contains(messageID)
         }
+    }
+
+    private var filteredPendingDrafts: [PostcardDraft] {
+        guard let friendID else { return pendingDrafts }
+        return pendingDrafts.filter { $0.toUserID == friendID }
     }
 
     private func photoSource(for item: BackendPostcardMessageDTO) -> PostcardPhotoSource {
@@ -413,11 +436,11 @@ private struct PostcardCardRow: View {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(.white)
-                            .padding(6)
+                            .frame(width: 28, height: 28)
                             .background(Color.black.opacity(0.4))
                             .clipShape(Circle())
+                            .appMinTapTarget()
                     }
-                    .padding(10)
                 }
             }
 
@@ -492,6 +515,7 @@ private struct PostcardCardRow: View {
                         Image(systemName: "ellipsis.circle")
                             .font(.system(size: 16))
                             .foregroundColor(FigmaTheme.text)
+                            .appMinTapTarget()
                     }
 
                     if showEmojiPicker {
@@ -745,15 +769,8 @@ private struct FullImageViewer: View {
             VStack {
                 HStack {
                     Spacer()
-                    Button {
+                    AppCloseButton(style: .circleDark) {
                         dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.white)
-                            .padding(12)
-                            .background(Color.black.opacity(0.5))
-                            .clipShape(Circle())
                     }
                     .padding()
                 }

@@ -78,7 +78,7 @@ struct AboutUsView: View {
 
     private var headerBlock: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("ABOUT WORLDO")
+            Text(L10n.t("about_worldo_header"))
                 .font(.system(size: 11, weight: .bold))
                 .tracking(1.8)
                 .foregroundColor(Color.black.opacity(0.48))
@@ -92,7 +92,7 @@ struct AboutUsView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(Color(red: 0.26, green: 0.30, blue: 0.35))
 
-                Text("Journey Memory")
+                Text(L10n.t("brand_tagline_journey_memory"))
                     .font(.system(size: 12, weight: .medium))
                     .tracking(1.2)
                     .foregroundColor(Color(red: 0.42, green: 0.45, blue: 0.51))
@@ -100,7 +100,7 @@ struct AboutUsView: View {
 
             HStack(spacing: 10) {
                 metaChip(icon: "location", text: AboutUsContent.location)
-                metaChip(icon: "text.book.closed", text: "Worldo")
+                metaChip(icon: "text.book.closed", text: L10n.t("brand_wordmark").capitalized)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

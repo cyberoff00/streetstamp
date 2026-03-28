@@ -43,7 +43,7 @@ struct AppSplashView: View {
                     }
                     .frame(width: 180, height: 180)
 
-                    Text("worldo")
+                    Text(L10n.t("brand_wordmark"))
                         .font(.system(size: 42, weight: .bold))
                         .foregroundColor(.white)
                         .tracking(-1.5)

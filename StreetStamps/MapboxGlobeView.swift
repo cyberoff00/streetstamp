@@ -113,13 +113,8 @@ struct MapboxGlobeView: View {
             VStack {
                 HStack {
                     if showsCloseButton {
-                        Button { isPresented = false } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.white)
-                                .padding(12)
-                                .background(.black.opacity(0.28))
-                                .clipShape(Circle())
+                        AppCloseButton(style: .circleDark) {
+                            isPresented = false
                         }
                     } else {
                         Color.clear.frame(width: 44, height: 44)

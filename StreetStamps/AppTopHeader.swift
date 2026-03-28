@@ -54,7 +54,7 @@ struct UnifiedTabPageHeader<Leading: View, Trailing: View>: View {
     var body: some View {
         HStack(spacing: 10) {
             leading
-                .frame(width: 42, height: 42)
+                .frame(width: 44, height: 44)
 
             Spacer(minLength: 0)
 
@@ -66,7 +66,7 @@ struct UnifiedTabPageHeader<Leading: View, Trailing: View>: View {
             Spacer(minLength: 0)
 
             trailing
-                .frame(width: 42, height: 42)
+                .frame(width: 44, height: 44)
         }
         .padding(.horizontal, horizontalPadding)
         .padding(.top, topPadding)
@@ -128,7 +128,7 @@ struct UnifiedNavigationHeader<Trailing: View>: View {
                 Image(systemName: "line.3.horizontal")
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundColor(FigmaTheme.text)
-                    .frame(width: 42, height: 42)
+                    .frame(width: 44, height: 44)
                     .appFullSurfaceTapTarget(.circle)
             }
             .buttonStyle(SidebarHamburgerPressStyle())
@@ -138,7 +138,7 @@ struct UnifiedNavigationHeader<Trailing: View>: View {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(FigmaTheme.text)
-                    .frame(width: 42, height: 42)
+                    .frame(width: 44, height: 44)
                     .appFullSurfaceTapTarget(.circle)
             }
             .buttonStyle(SidebarHamburgerPressStyle())
@@ -158,7 +158,7 @@ struct MainTabHeader: View {
     var body: some View {
         HStack(spacing: 10) {
             Color.clear
-                .frame(width: 42, height: 42)
+                .frame(width: 44, height: 44)
 
             Spacer()
 
@@ -171,10 +171,10 @@ struct MainTabHeader: View {
 
             if let rightAccessory {
                 rightAccessory()
-                    .frame(width: 42, height: 42)
+                    .frame(width: 44, height: 44)
             } else {
                 Color.clear
-                    .frame(width: 42, height: 42)
+                    .frame(width: 44, height: 44)
             }
         }
         .padding(.horizontal, horizontalPadding)
@@ -195,7 +195,7 @@ struct MainTabHeader: View {
 struct AppTopHeader: View {
     let title: String
     @Binding var showSidebar: Bool
-    private let buttonSize: CGFloat = 42
+    private let buttonSize: CGFloat = 44
 
     var body: some View {
         ZStack {
@@ -227,14 +227,15 @@ struct AppTopHeader: View {
 
 struct SidebarHamburgerButton: View {
     @Binding var showSidebar: Bool
-    var size: CGFloat = 42
+    var size: CGFloat = 44
     var iconSize: CGFloat = 20
     var iconWeight: Font.Weight = .semibold
     var foreground: Color = FigmaTheme.text
 
     var body: some View {
         Button {
-            withAnimation(.easeOut(duration: 0.25)) {
+            Haptics.light()
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
                 showSidebar = true
             }
         } label: {
@@ -255,8 +256,8 @@ private struct SidebarHamburgerPressStyle: ButtonStyle {
                 Circle()
                     .fill(Color.black.opacity(configuration.isPressed ? 0.10 : 0.0))
             )
-            .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
-            .animation(.easeOut(duration: 0.14), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed ? 0.92 : 1.0)
+            .animation(.spring(response: 0.2, dampingFraction: 0.7), value: configuration.isPressed)
     }
 }
 

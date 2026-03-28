@@ -892,6 +892,7 @@
 "membership_products_unavailable" = "產品暫不可用，請稍後再試。";
 "activity_record_title" = "活動記錄";
 "activity_ring_help" = "外圈：等級進度（完成1公里以上的旅程升級）\n中圈：記憶收集進度（每50個記憶滿環）\n內圈：城市解鎖進度（每10個城市滿環）";
+"activity_ring_next_level_hint" = "還差 %d 個旅程解鎖下一級";
 "activity_stat_cards" = "卡片";
 "activity_stat_distance_km" = "距離（公里）";
 "activity_stat_journeys" = "旅程";

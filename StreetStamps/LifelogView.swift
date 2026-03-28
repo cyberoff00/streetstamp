@@ -817,6 +817,7 @@ struct LifelogView: View {
                                 stepPopupToggleButton
                                 if isStepPopupVisible {
                                     stepCompactBadge
+                                        .transition(.move(edge: .top).combined(with: .opacity))
                                 }
                             }
                         }
@@ -847,12 +848,14 @@ struct LifelogView: View {
 
                 if isMoodPopupVisible {
                     moodPickerPopup
+                        .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .center)))
                 }
                 if isStepModalVisible {
                     stepMilestoneModal
                 }
             }
         }
+        .animation(.spring(response: 0.3, dampingFraction: 0.78), value: isMoodPopupVisible)
         .fullScreenCover(isPresented: $showGlobe) {
             LifelogGlobeCoverView()
         }
@@ -1122,8 +1125,7 @@ struct LifelogView: View {
                     Image(systemName: "globe.asia.australia.fill")
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(FigmaTheme.text)
-                        .frame(width: 42, height: 42)
-                        .contentShape(Circle())
+                        .appMinTapTarget()
                 }
                 .buttonStyle(.plain)
             }
@@ -1195,6 +1197,7 @@ struct LifelogView: View {
                 .background(Color.white.opacity(0.92))
                 .clipShape(Circle())
                 .shadow(color: Color.black.opacity(0.10), radius: 6, y: 2)
+                .appMinTapTarget()
         }
         .buttonStyle(.plain)
     }
@@ -1220,6 +1223,7 @@ struct LifelogView: View {
             .background(panelBackground)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .padding(.top, 10)
+            .transition(.move(edge: .top).combined(with: .opacity))
         }
     }
 
@@ -1400,7 +1404,7 @@ struct LifelogView: View {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 15, weight: .bold))
                             .foregroundColor(FigmaTheme.text)
-                            .frame(width: 28, height: 28)
+                            .appMinTapTarget()
                     }
                     .buttonStyle(.plain)
 
@@ -1414,7 +1418,7 @@ struct LifelogView: View {
                         Image(systemName: "chevron.right")
                             .font(.system(size: 15, weight: .bold))
                             .foregroundColor(FigmaTheme.text)
-                            .frame(width: 28, height: 28)
+                            .appMinTapTarget()
                     }
                     .buttonStyle(.plain)
                 }
@@ -1422,7 +1426,7 @@ struct LifelogView: View {
                 Spacer()
 
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                         calendarDisplayMode = calendarDisplayMode == .day ? .month : .day
                     }
                 } label: {
@@ -1491,6 +1495,7 @@ struct LifelogView: View {
                 )
                 .clipShape(Circle())
                 .shadow(color: Color.black.opacity(0.18), radius: 6, y: 2)
+                .appMinTapTarget()
         }
         .buttonStyle(.plain)
     }
@@ -2058,10 +2063,11 @@ struct LifelogView: View {
                             .frame(width: 28, height: 28)
                             .background(FigmaTheme.background.opacity(0.92))
                             .clipShape(Circle())
+                            .appMinTapTarget()
                     }
                     .buttonStyle(.plain)
-                    .padding(.top, 12)
-                    .padding(.trailing, 12)
+                    .padding(.top, 4)
+                    .padding(.trailing, 4)
                 }
             }
             .shadow(color: Color.black.opacity(0.16), radius: 20, x: 0, y: 8)

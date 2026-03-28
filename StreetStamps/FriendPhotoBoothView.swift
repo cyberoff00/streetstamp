@@ -120,12 +120,13 @@ struct FriendPhotoBoothView: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(Color(red: 0.4, green: 0.38, blue: 0.35))
-                    .frame(width: 40, height: 40)
+                    .frame(width: 36, height: 36)
                     .background(
                         Circle()
                             .fill(Color.white.opacity(0.7))
                     )
-                    .contentShape(Circle())
+                    .clipShape(Circle())
+                    .appMinTapTarget()
             }
             .buttonStyle(.plain)
 
@@ -144,9 +145,10 @@ struct FriendPhotoBoothView: View {
                     Image(systemName: "square.and.arrow.up")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(Color(red: 0.4, green: 0.38, blue: 0.35))
-                        .frame(width: 40, height: 40)
+                        .frame(width: 36, height: 36)
                         .background(Circle().fill(Color.white.opacity(0.7)))
-                        .contentShape(Circle())
+                        .clipShape(Circle())
+                        .appMinTapTarget()
                 }
                 .buttonStyle(.plain)
                 .transition(.scale.combined(with: .opacity))
@@ -296,7 +298,7 @@ struct FriendPhotoBoothView: View {
                     radius: phase == .shooting ? 10 : 0
                 )
                 .offset(x: 60, y: -40)
-                .animation(.easeInOut(duration: 0.15), value: phase)
+                .animation(.spring(response: 0.28, dampingFraction: 0.8), value: phase)
 
             // Shutter button on top
             Circle()
@@ -667,7 +669,7 @@ struct FriendPhotoBoothView: View {
                             Capsule().fill(savedFeedback ? Color(red: 0.30, green: 0.72, blue: 0.45) : FigmaTheme.primary)
                                 .shadow(color: FigmaTheme.primary.opacity(0.3), radius: 8, x: 0, y: 4)
                         )
-                        .animation(.easeInOut(duration: 0.2), value: savedFeedback)
+                        .animation(.spring(response: 0.35, dampingFraction: 0.75), value: savedFeedback)
                 }
                 .buttonStyle(.plain)
                 .disabled(savedFeedback)
@@ -750,8 +752,9 @@ struct FriendPhotoBoothView: View {
 
     private func saveToPhotos() {
         guard let img = renderedImage, !savedFeedback else { return }
+        Haptics.success()
         UIImageWriteToSavedPhotosAlbum(img, nil, nil, nil)
-        withAnimation {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
             savedFeedback = true
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {

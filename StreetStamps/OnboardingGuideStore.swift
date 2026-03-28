@@ -87,7 +87,7 @@ final class OnboardingGuideStore: ObservableObject {
     private let lightweightTipsKey = "streetstamps.onboarding.v2.lightweightTips"
     private let hintsKey = "streetstamps.onboarding.v3.hints"
     private let hintsSchemaKey = "streetstamps.onboarding.v3.schema"
-    private static let currentHintsSchema = 1
+    private static let currentHintsSchema = 2
     private var shownLightweightTips: Set<String> = []
     private var shownHints: Set<String> = []
 
@@ -176,19 +176,43 @@ final class OnboardingGuideStore: ObservableObject {
         migrateHintsSchemaIfNeeded()
     }
 
-    /// Auto-dismiss tour hints for existing users who never had them.
-    /// New hint keys added after a user's first install would otherwise
-    /// appear as "not yet shown" even though the user is not new.
+    /// Called once from StreetStampsApp after JourneyStore finishes loading.
+    /// Journey data is the ground truth for "has used the app before" —
+    /// it doesn't depend on any onboarding-related UserDefaults keys,
+    /// so it correctly identifies beta testers who installed before the
+    /// onboarding system was added.
+    func markExistingUserIfNeeded(hasJourneys: Bool) {
+        guard hasJourneys else { return }
+        autoSkipTourHints()
+        // Stamp schema so future migrations don't re-run
+        defaults.set(Self.currentHintsSchema, forKey: hintsSchemaKey)
+    }
+
+    /// Schema-based migration for users who already have onboarding state.
+    /// This catches users who went through prior schema versions.
     private func migrateHintsSchemaIfNeeded() {
         let saved = defaults.integer(forKey: hintsSchemaKey)
         guard saved < Self.currentHintsSchema else { return }
         defer { defaults.set(Self.currentHintsSchema, forKey: hintsSchemaKey) }
 
-        // If the hints key already existed in UserDefaults, this is an
-        // existing user — auto-dismiss tour-type hints they shouldn't see.
-        let isExistingUser = defaults.object(forKey: hintsKey) != nil
-        guard isExistingUser else { return }
+        // Anyone at schema ≥ 1 ran a prior migration — definitely not new.
+        if saved >= 1 {
+            autoSkipTourHints()
+            return
+        }
 
+        // Schema 0: could be genuinely new OR a beta user with no prior
+        // onboarding keys. Check for any onboarding state as a signal.
+        // The definitive check (hasJourneys) happens later via
+        // markExistingUserIfNeeded() after JourneyStore loads.
+        let hasOnboardingState = defaults.object(forKey: hintsKey) != nil
+            || defaults.object(forKey: lightweightTipsKey) != nil
+        if hasOnboardingState {
+            autoSkipTourHints()
+        }
+    }
+
+    private func autoSkipTourHints() {
         let toursToSkip: [Hint] = [.friendsTour, .lifelogTour, .memoryDetailTour]
         var changed = false
         for hint in toursToSkip {

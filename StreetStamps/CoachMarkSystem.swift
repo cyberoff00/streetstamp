@@ -145,7 +145,7 @@ struct CoachMarkTourModifier: ViewModifier {
                                 }
                             )
                             .position(x: placement.x, y: placement.y)
-                            .animation(.easeOut(duration: 0.25), value: currentIndex)
+                            .animation(.spring(response: 0.35, dampingFraction: 0.78), value: currentIndex)
                         }
                     }
                     .transition(.opacity)
@@ -156,7 +156,7 @@ struct CoachMarkTourModifier: ViewModifier {
                     let savedIndex = onboardingGuide.tourStepIndex(for: hint)
                     currentIndex = min(savedIndex, steps.count - 1)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                        withAnimation(.easeOut(duration: 0.3)) {
+                        withAnimation(.spring(response: 0.4, dampingFraction: 0.78)) {
                             showTour = true
                         }
                     }
@@ -166,7 +166,7 @@ struct CoachMarkTourModifier: ViewModifier {
 
     private func advance() {
         if currentIndex < steps.count - 1 {
-            withAnimation(.easeOut(duration: 0.25)) {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
                 currentIndex += 1
             }
             onboardingGuide.setTourStepIndex(currentIndex, for: hint)
@@ -176,7 +176,7 @@ struct CoachMarkTourModifier: ViewModifier {
     }
 
     private func dismissAll() {
-        withAnimation(.easeOut(duration: 0.2)) {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.78)) {
             showTour = false
         }
         onboardingGuide.dismissHint(hint)

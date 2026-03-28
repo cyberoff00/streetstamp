@@ -19,6 +19,7 @@ struct ProfileView: View {
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var socialStore: SocialGraphStore
     @EnvironmentObject private var notificationStore: SocialNotificationStore
+    @EnvironmentObject private var flow: AppFlowCoordinator
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
 
     @State private var loadout: RobotLoadout
@@ -28,13 +29,9 @@ struct ProfileView: View {
     @State private var isSavingName = false
     @State private var toastText = ""
     @State private var showToast = false
-    @State private var showLevelHelpBubble = false
     @State private var showNotificationsSheet = false
     @State private var showPostcardInboxFromNotification = false
     @State private var postcardInboxIntent = PostcardInboxIntent(box: "received", messageID: nil)
-    @State private var showInviteFriendSheet = false
-    @State private var myExclusiveID = ""
-    @State private var myInviteCode = ""
     @State private var lastSyncedLoadout: RobotLoadout?
     @State private var pendingLocalLoadout: RobotLoadout?
     @State private var loadoutSyncTask: Task<Void, Never>?
@@ -75,14 +72,14 @@ struct ProfileView: View {
                     headerView
                     
                     ScrollView(showsIndicators: false) {
-                        VStack(spacing: 24) {
+                        VStack(spacing: 20) {
                             avatarHeaderCard
                             topActionRow
                         }
                         .frame(maxWidth: 430)
                         .frame(maxWidth: .infinity)
-                        .padding(.horizontal, 24)
-                        .padding(.top, 12)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 4)
                         .padding(.bottom, 56)
                     }
                 }
@@ -123,16 +120,6 @@ struct ProfileView: View {
                 )
                 .id(PostcardInboxView.viewIdentity(initialBox: initialBox, focusMessageID: postcardInboxIntent.messageID))
             }
-        }
-        .sheet(isPresented: $showInviteFriendSheet) {
-            InviteFriendSheet(
-                displayName: displayName,
-                loadout: loadout,
-                exclusiveID: resolvedExclusiveIDForInvite(),
-                inviteCode: resolvedInviteCodeForInvite()
-            )
-            .environmentObject(socialStore)
-            .environmentObject(sessionStore)
         }
         .task {
             pendingLocalLoadout = UserScopedProfileStateStore.pendingLoadout(for: sessionStore.currentUserID)
@@ -199,19 +186,13 @@ struct ProfileView: View {
                 Image(systemName: "gearshape")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(FigmaTheme.text)
-                    .frame(width: 42, height: 42)
-                    .contentShape(Circle())
+                    .appMinTapTarget()
             }
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 18)
         .padding(.top, 8)
         .padding(.bottom, 12)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(FigmaTheme.border)
-                .frame(height: 1)
-        }
     }
 
     private var avatarHeaderCard: some View {
@@ -224,7 +205,7 @@ struct ProfileView: View {
 
         return VStack(spacing: 0) {
             ZStack(alignment: .topTrailing) {
-                ProfileHeroTopBackdrop(topCornerRadius: 36) {
+                ProfileHeroTopBackdrop(topCornerRadius: 28) {
                     VStack {
                         SofaProfileSceneView(
                             state: sceneState,
@@ -262,9 +243,10 @@ struct ProfileView: View {
                                     .offset(x: 10, y: -8)
                             }
                         }
+                        .appMinTapTarget()
                     }
                     .buttonStyle(.plain)
-                    .padding(14)
+                    .padding(6)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
 
@@ -278,9 +260,10 @@ struct ProfileView: View {
                         .background(Color.white.opacity(0.95))
                         .clipShape(Circle())
                         .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
+                        .appMinTapTarget()
                 }
                 .buttonStyle(.plain)
-                .padding(14)
+                .padding(6)
             }
 
             Button {
@@ -301,132 +284,46 @@ struct ProfileView: View {
             }
             .buttonStyle(.plain)
             .padding(.top, 20)
-
-            VStack(spacing: 10) {
-                HStack(spacing: 10) {
-                    ProfileHeroLevelPill(level: levelProgress.level)
-
-                    GeometryReader { proxy in
-                        ZStack(alignment: .leading) {
-                            Capsule()
-                                .fill(FigmaTheme.border)
-                                .frame(height: 7)
-                            Capsule()
-                                .fill(FigmaTheme.primary)
-                                .frame(
-                                    width: max(10, proxy.size.width * levelProgress.progress),
-                                    height: 7
-                                )
-                        }
-                    }
-                    .frame(maxWidth: 172)
-                    .frame(height: 7)
-
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            showLevelHelpBubble.toggle()
-                        }
-                    } label: {
-                        Image(systemName: "questionmark")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(FigmaTheme.subtext)
-                            .frame(width: 22, height: 22)
-                            .background(Color.black.opacity(0.05))
-                            .clipShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-                }
-                .frame(maxWidth: .infinity, alignment: .center)
-
-                if showLevelHelpBubble {
-                    Text(ProfileHeaderPresentation.levelHelpText(remainingJourneys: levelProgress.journeysRemainingToNextLevel))
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(FigmaTheme.text)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(Color.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .shadow(color: .black.opacity(0.10), radius: 10, x: 0, y: 4)
-                        .fixedSize()
-                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                        .zIndex(2)
-                }
-            }
-            .padding(.horizontal, 22)
-            .padding(.top, 10)
             .padding(.bottom, 14)
         }
         .frame(maxWidth: .infinity)
         .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
-        .shadow(color: Color.black.opacity(0.04), radius: 20, x: 0, y: 8)
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .stroke(Color.gray.opacity(0.08), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.03), radius: 10, x: 0, y: 4)
     }
 
     private var topActionRow: some View {
-        VStack(spacing: 14) {
-            NavigationLink {
-                ActivityRecordView(
-                    displayName: displayName,
-                    stats: ProfileStatsSnapshot(
-                        totalJourneys: totalJourneys,
-                        totalDistance: store.journeys.reduce(0) { $0 + $1.distance },
-                        totalMemories: totalMemories,
-                        totalUnlockedCities: citiesVisited
-                    ),
-                    levelProgress: levelProgress,
-                    loadout: loadout
-                )
-            } label: {
-                activityRecordTile
-            }
-            .buttonStyle(.plain)
-
-            Button {
-                showInviteFriendSheet = true
-            } label: {
-                inviteFriendTile
-            }
-            .buttonStyle(.plain)
-
+        VStack(spacing: 20) {
             NavigationLink {
                 PostcardInboxView()
             } label: {
                 postcardTile
             }
             .buttonStyle(.plain)
-        }
-    }
 
-    private var activityRecordTile: some View {
-        HStack(spacing: 14) {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(FigmaTheme.primary.opacity(0.1))
-                .frame(width: 56, height: 56)
-                .overlay {
-                    Image(systemName: "chart.bar.doc.horizontal")
-                        .font(.system(size: 24, weight: .semibold))
-                        .foregroundColor(FigmaTheme.primary)
+            CompactActivityRingCard(
+                stats: ProfileStatsSnapshot(
+                    totalJourneys: totalJourneys,
+                    totalDistance: store.journeys.reduce(0) { $0 + $1.distance },
+                    totalMemories: totalMemories,
+                    totalUnlockedCities: citiesVisited
+                ),
+                levelProgress: levelProgress,
+                journeyDates: store.journeys.compactMap { $0.endTime ?? $0.startTime },
+                onCardsTap: {
+                    flow.requestSelectCollectionPage(0)
+                    flow.requestSelectTab(.cities)
+                },
+                onMemoriesTap: {
+                    flow.requestSelectCollectionPage(1)
+                    flow.requestSelectTab(.cities)
                 }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(L10n.t("profile_activity_record"))
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(FigmaTheme.text)
-                Text(String(format: L10n.t("profile_stats_format"), totalJourneys, totalMemories, citiesVisited))
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(FigmaTheme.subtext)
-            }
-
-            Spacer()
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(FigmaTheme.subtext)
+            )
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 16)
-        .frame(maxWidth: .infinity)
-        .profileFeatureCardStyle()
     }
 
     private func profileMenuTile(icon: String, iconColor: Color, iconBg: Color, title: String) -> some View {
@@ -479,66 +376,11 @@ struct ProfileView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private var inviteFriendTile: some View {
-        return HStack(spacing: 14) {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color(red: 0.95, green: 0.98, blue: 0.92))
-                .frame(width: 56, height: 56)
-                .overlay {
-                    Image(systemName: "person.crop.circle.badge.plus")
-                        .font(.system(size: 24, weight: .semibold))
-                        .foregroundColor(Color(red: 0.24, green: 0.56, blue: 0.21))
-                }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(L10n.t("profile_invite_friends"))
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(FigmaTheme.text)
-                    .lineLimit(1)
-            }
-
-            Spacer()
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(FigmaTheme.subtext)
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 16)
-        .frame(maxWidth: .infinity)
-        .profileFeatureCardStyle()
-    }
-
     private var postcardTile: some View {
-        HStack(spacing: 14) {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color(red: 0.96, green: 0.94, blue: 1.0))
-                .frame(width: 56, height: 56)
-                .overlay {
-                    Image(systemName: "envelope.fill")
-                        .font(.system(size: 24, weight: .semibold))
-                        .foregroundColor(Color(red: 0.39, green: 0.29, blue: 0.74))
-                }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(L10n.t("postcard_profile_title"))
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(FigmaTheme.text)
-                Text(L10n.t("postcard_profile_subtitle"))
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(FigmaTheme.subtext)
-            }
-
-            Spacer()
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(FigmaTheme.subtext)
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 16)
-        .frame(maxWidth: .infinity)
-        .profileFeatureCardStyle()
+        ProfilePostcardEntryCard(
+            title: L10n.t("postcard_profile_title"),
+            subtitle: L10n.t("postcard_profile_subtitle")
+        )
     }
 
     @ViewBuilder
@@ -563,6 +405,11 @@ struct ProfileView: View {
                         VStack(spacing: 10) {
                             ForEach(notificationStore.notifications) { item in
                                 socialNotificationRow(item)
+                                    .scrollTransition(.animated(.spring(response: 0.4, dampingFraction: 0.85))) { content, phase in
+                                        content
+                                            .opacity(phase.isIdentity ? 1 : 0.3)
+                                            .scaleEffect(phase.isIdentity ? 1 : 0.96)
+                                    }
                             }
                         }
                         .padding(.horizontal, 16)
@@ -592,7 +439,7 @@ struct ProfileView: View {
                         Image(systemName: "checkmark.circle")
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundColor(FigmaTheme.text)
-                            .frame(width: 42, height: 42)
+                            .appMinTapTarget()
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(L10n.t("friends_mark_all_read"))
@@ -658,6 +505,9 @@ struct ProfileView: View {
                     postcardInboxIntent = PostcardInboxIntent(box: box, messageID: item.postcardMessageID)
                     showNotificationsSheet = false
                     showPostcardInboxFromNotification = true
+                } else if item.type == "friend_request" {
+                    showNotificationsSheet = false
+                    AppFlowCoordinator.shared.requestSelectTab(.friends)
                 }
             }
         }
@@ -717,17 +567,7 @@ struct ProfileView: View {
     }
 
     private func validateDisplayName(_ raw: String) -> String? {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return L10n.t("profile_name_empty") }
-        guard trimmed.count <= 24 else { return L10n.t("profile_name_too_long") }
-        guard !trimmed.unicodeScalars.contains(where: CharacterSet.whitespacesAndNewlines.contains) else {
-            return L10n.t("profile_name_no_spaces")
-        }
-        let allowed = CharacterSet.letters
-            .union(.decimalDigits)
-            .union(CharacterSet(charactersIn: "._-"))
-        let valid = trimmed.unicodeScalars.allSatisfy { allowed.contains($0) }
-        return valid ? nil : L10n.t("profile_name_charset")
+        DisplayNameValidator.validate(raw)
     }
 
     @MainActor
@@ -740,8 +580,7 @@ struct ProfileView: View {
         isSavingName = true
         defer { isSavingName = false }
 
-        let normalized = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        profileName = normalized
+        let normalized = DisplayNameValidator.normalize(nameDraft)
 
         if BackendConfig.isEnabled,
            let token = sessionStore.currentAccessToken,
@@ -752,13 +591,16 @@ struct ProfileView: View {
                     displayName: normalized
                 )
                 profileName = profile.displayName
+                showNameEditor = false
+                showToastMessage(L10n.t("profile_name_updated"))
             } catch {
-                showToastMessage(String(format: L10n.t("profile_name_local_updated_cloud_failed_format"), error.localizedDescription))
+                showToastMessage(error.localizedDescription)
             }
+        } else {
+            profileName = normalized
+            showNameEditor = false
+            showToastMessage(L10n.t("profile_name_updated"))
         }
-
-        showNameEditor = false
-        showToastMessage(L10n.t("profile_name_updated"))
     }
 
     @MainActor
@@ -766,7 +608,6 @@ struct ProfileView: View {
         guard BackendConfig.isEnabled,
               let token = sessionStore.currentAccessToken,
               !token.isEmpty else {
-            syncInviteIdentityFallback()
             return
         }
         do {
@@ -791,19 +632,8 @@ struct ProfileView: View {
             if !me.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 profileName = me.displayName
             }
-            if let id = me.resolvedExclusiveID?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !id.isEmpty {
-                myExclusiveID = id
-            }
-            if let code = me.inviteCode?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !code.isEmpty {
-                myInviteCode = code.uppercased()
-            } else {
-                myInviteCode = SocialGraphStore.generateInviteCode(source: me.id)
-            }
         } catch {
             // Keep profile editable even if backend request fails.
-            syncInviteIdentityFallback()
         }
     }
 
@@ -847,47 +677,18 @@ struct ProfileView: View {
 
     @MainActor
     private func showToastMessage(_ text: String) {
+        Haptics.success()
         toastText = text
-        withAnimation(.easeInOut(duration: 0.2)) {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
             showToast = true
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
-            withAnimation(.easeInOut(duration: 0.2)) {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                 showToast = false
             }
         }
     }
 
-    private func syncInviteIdentityFallback() {
-        if myExclusiveID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            myExclusiveID = fallbackExclusiveID()
-        }
-        if myInviteCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let source = sessionStore.accountUserID ?? myExclusiveID
-            myInviteCode = SocialGraphStore.generateInviteCode(source: source)
-        }
-    }
-
-    private func fallbackExclusiveID() -> String {
-        let base = displayName
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-            .replacingOccurrences(of: " ", with: "")
-        if !base.isEmpty { return base }
-        return "explorer"
-    }
-
-    private func resolvedExclusiveIDForInvite() -> String {
-        let id = myExclusiveID.trimmingCharacters(in: .whitespacesAndNewlines)
-        return id.isEmpty ? fallbackExclusiveID() : id
-    }
-
-    private func resolvedInviteCodeForInvite() -> String {
-        let code = myInviteCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if !code.isEmpty { return code }
-        let source = sessionStore.accountUserID ?? resolvedExclusiveIDForInvite()
-        return SocialGraphStore.generateInviteCode(source: source)
-    }
 }
 
 struct InviteFriendSheet: View {
@@ -1004,6 +805,7 @@ struct InviteFriendSheet: View {
                                     .frame(width: 36, height: 36)
                                     .background(Color.black.opacity(0.06))
                                     .clipShape(Circle())
+                                    .appMinTapTarget()
                             }
                             .buttonStyle(.plain)
                         }
@@ -1170,13 +972,14 @@ struct InviteFriendSheet: View {
     }
 
     private func copyText(_ text: String, success: String) {
+        Haptics.light()
         UIPasteboard.general.string = text
         copiedToast = success
-        withAnimation(.easeInOut(duration: 0.2)) {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
             showCopiedToast = true
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
-            withAnimation(.easeInOut(duration: 0.2)) {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                 showCopiedToast = false
             }
         }
@@ -1383,7 +1186,7 @@ private struct ProfileInviteScannerSheet: View {
                         Image(systemName: isImportingFromAlbum ? "hourglass" : "photo")
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundColor(FigmaTheme.text)
-                            .frame(width: 42, height: 42)
+                            .appMinTapTarget()
                     }
                     .buttonStyle(.plain)
                     .disabled(isImportingFromAlbum || didResolveCode)
@@ -1542,15 +1345,23 @@ private extension View {
     func figmaAvatarCardStyle() -> some View {
         self
             .background(Color.white)
-            .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
-            .shadow(color: Color.black.opacity(0.04), radius: 20, x: 0, y: 8)
+            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .stroke(Color.gray.opacity(0.08), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.03), radius: 10, x: 0, y: 4)
     }
 
     func profileFeatureCardStyle() -> some View {
         self
             .background(Color.white)
-            .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-            .shadow(color: Color.black.opacity(0.04), radius: 20, x: 0, y: 8)
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(Color.gray.opacity(0.08), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.03), radius: 10, x: 0, y: 4)
     }
 
 }
@@ -1593,7 +1404,7 @@ struct ExpandableSection<Content: View>: View {
         VStack(spacing: 0) {
             // Header
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                     isExpanded.toggle()
                 }
             } label: {
@@ -1762,6 +1573,11 @@ struct RecentJourneysView: View {
                         } else {
                             ForEach(recentJourneys, id: \.id) { j in
                                 RecentJourneyCard(journey: j, cityName: resolvedDisplayCityName(for: j))
+                                    .scrollTransition(.animated(.spring(response: 0.4, dampingFraction: 0.85))) { content, phase in
+                                        content
+                                            .opacity(phase.isIdentity ? 1 : 0.3)
+                                            .scaleEffect(phase.isIdentity ? 1 : 0.96)
+                                    }
                             }
                         }
                     }
@@ -1846,18 +1662,12 @@ struct RecentJourneysView: View {
     private var header: some View {
         VStack(spacing: 10) {
             HStack {
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(FigmaTheme.text.opacity(0.6))
-                }
+                AppBackButton(foreground: FigmaTheme.text.opacity(0.6))
 
                 Spacer()
             }
-            .padding(.horizontal, 32)
-            .padding(.top, 12)
+            .padding(.horizontal, 24)
+            .padding(.top, 4)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(L10n.t("recent_journeys_title"))
@@ -1984,6 +1794,7 @@ struct RecentJourneyCard: View {
                         .background(Color.white.opacity(0.92))
                         .clipShape(Capsule())
                         .padding(.top, 10)
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
 
@@ -2070,18 +1881,18 @@ struct RecentJourneyCard: View {
     }
 
     private func saveToPhotos(_ img: UIImage) {
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        Haptics.light()
 
         // Hold a strong reference until completion callback
         let saver = ImageSaver { err in
             DispatchQueue.main.async {
                 self.imageSaver = nil
                 self.saveToastText = (err == nil) ? L10n.t("share_saved_to_photos") : L10n.t("save_failed")
-                withAnimation(.easeInOut(duration: 0.15)) {
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
                     self.showSaveToast = true
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
-                    withAnimation(.easeInOut(duration: 0.2)) {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                         self.showSaveToast = false
                     }
                 }
@@ -2143,13 +1954,7 @@ struct EquipmentLibraryView: View {
                         .foregroundColor(FigmaTheme.text)
 
                     HStack {
-                        Button {
-                            dismiss()
-                        } label: {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(FigmaTheme.text.opacity(0.6))
-                        }
+                        AppBackButton(foreground: FigmaTheme.text.opacity(0.6))
 
                         Spacer()
                     }

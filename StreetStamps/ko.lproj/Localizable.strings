@@ -886,6 +886,7 @@
 "membership_products_unavailable" = "현재 상품을 이용할 수 없습니다. 잠시 후 다시 시도해 주세요.";
 "activity_record_title" = "활동 기록";
 "activity_ring_help" = "바깥: 레벨 진행도 (1km 이상 여정 카운트)\n중간: 기억 수집 (50개당 1바퀴)\n안쪽: 도시 해금 진행도 (10개당 1바퀴)";
+"activity_ring_next_level_hint" = "다음 레벨까지 여정 %d개 남음";
 "activity_stat_cards" = "카드";
 "activity_stat_distance_km" = "거리 (km)";
 "activity_stat_journeys" = "여정";

@@ -73,18 +73,6 @@ struct SettingsRowPresentation {
     let iconColor: Color
     let textStyle: SettingsRowTextStyle
 
-    static func profileVisibility(_ visibility: ProfileVisibility) -> SettingsRowPresentation {
-        SettingsRowPresentation(
-            title: visibility == .private
-                ? L10n.t("settings_profile_visibility_private")
-                : L10n.t("settings_profile_visibility_friends"),
-            subtitle: nil,
-            icon: "person.2",
-            iconColor: FigmaTheme.primary,
-            textStyle: .singleLine
-        )
-    }
-
     static let mapDarkMode = SettingsRowPresentation(
         title: L10n.t("settings_map_dark_mode"),
         subtitle: nil,
@@ -273,12 +261,13 @@ struct SettingsView: View {
     @State private var showDisplayNameEditor = false
     @State private var exclusiveIDDraft = ""
     @State private var accountEmail = ""
-    @State private var profileVisibility: ProfileVisibility = ProfileSharingSettings.visibility
     @State private var accountMessage = ""
     @State private var showAccountMessage = false
     @State private var didLoadAccountProfile = false
     @State private var showAuthSheet = false
     @State private var authSheetMode: AuthEntryMode = .signIn
+    @State private var showLogoutConfirmation = false
+    @State private var showLinkEmailSheet = false
     @State private var showBackgroundModeInfo = false
     @State private var iCloudAvailable = false
     @State private var isRestoringFromICloud = false
@@ -339,6 +328,12 @@ struct SettingsView: View {
                 utilitiesSection
                 generalSection
                 infoSection
+                if sessionStore.isLoggedIn && !sessionStore.hasEmailPassword {
+                    linkEmailSection
+                }
+                if sessionStore.isLoggedIn {
+                    logoutSection
+                }
             }
             .padding(.horizontal, 18)
             .padding(.top, 20)
@@ -365,6 +360,20 @@ struct SettingsView: View {
         } message: {
             Text(L10n.t("settings_lifelog_bg_mode_desc"))
         }
+        .alert(L10n.t("settings_logout_confirm_title"), isPresented: $showLogoutConfirmation) {
+            Button(L10n.t("cancel"), role: .cancel) {}
+            Button(L10n.t("settings_logout"), role: .destructive) {
+                sessionStore.logoutToGuest()
+                displayNameDraft = ""
+                displayNameInput = ""
+                exclusiveIDDraft = ""
+                accountEmail = ""
+                didLoadAccountProfile = false
+                toastAccount(L10n.t("switched_to_guest_mode"))
+            }
+        } message: {
+            Text(L10n.t("settings_logout_confirm_message"))
+        }
         .task {
             await refreshAccountIfPossible()
             await refreshICloudAvailability()
@@ -389,6 +398,12 @@ struct SettingsView: View {
             )
             .environmentObject(sessionStore)
         }
+        .sheet(isPresented: $showLinkEmailSheet) {
+            NavigationStack {
+                LinkEmailPasswordView()
+                    .environmentObject(sessionStore)
+            }
+        }
     }
 
     private var settingsHeader: some View {
@@ -400,16 +415,7 @@ struct SettingsView: View {
             bottomPadding: 12
         ) {
             if showsBackButton {
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(FigmaTheme.text)
-                        .frame(width: 42, height: 42)
-                        .appFullSurfaceTapTarget(.circle)
-                }
-                .buttonStyle(.plain)
+                AppBackButton()
             } else {
                 Color.clear
             }
@@ -662,32 +668,9 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
             } else {
-                NavigationLink {
-                    AccountCenterView()
-                        .environmentObject(sessionStore)
-                } label: {
-                    loggedInAccountCard(presentation: accountCardPresentation)
-                }
-                .buttonStyle(.plain)
+                loggedInAccountCard(presentation: accountCardPresentation)
             }
         }
-    }
-
-    private var profileVisibilityRow: some View {
-        toggleRowCard(
-            presentation: .profileVisibility(profileVisibility),
-            isOn: Binding(
-                get: { profileVisibility != .private },
-                set: { newValue in
-                    let previousVisibility = profileVisibility
-                    let newVisibility: ProfileVisibility = newValue ? .friendsOnly : .private
-                    guard profileVisibility != newVisibility else { return }
-                    profileVisibility = newVisibility
-                    Task { await updateVisibility(previous: previousVisibility) }
-                }
-            ),
-            isEnabled: sessionStore.isLoggedIn
-        )
     }
 
     private var subscriptionSection: some View {
@@ -763,6 +746,7 @@ struct SettingsView: View {
                             Image(systemName: "questionmark.circle")
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundColor(FigmaTheme.subtext)
+                                .appMinTapTarget()
                         }
                         .buttonStyle(.plain)
                     }
@@ -1055,40 +1039,46 @@ struct SettingsView: View {
     }
 
     private func loggedInAccountCard(presentation: SettingsAccountCardPresentation) -> some View {
-        HStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(presentation.title)
-                    .font(.system(size: 18, weight: .regular))
-                    .foregroundColor(FigmaTheme.text)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+        VStack(alignment: .leading, spacing: 12) {
+            Text(presentation.title)
+                .font(.system(size: 18, weight: .bold))
+                .foregroundColor(FigmaTheme.text)
+                .lineLimit(1)
+                .truncationMode(.tail)
 
-                Text(presentation.subtitle)
-                    .font(.system(size: 12, weight: .regular, design: .monospaced))
-                    .foregroundColor(Color(red: 139 / 255, green: 139 / 255, blue: 139 / 255))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+            accountInfoRow(label: L10n.t("account_exclusive_id_label"), value: exclusiveIDDraft.isEmpty ? "--" : exclusiveIDDraft)
+            accountInfoRow(label: L10n.t("account_email_label"), value: accountEmail.isEmpty ? L10n.t("not_linked") : accountEmail)
 
-                ForEach(presentation.detailLines, id: \.self) { line in
-                    Text(line)
-                        .font(.system(size: 12, weight: .regular))
-                        .foregroundColor(FigmaTheme.subtext)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
+            Divider().overlay(Color.black.opacity(0.08))
+
+            Button {
+                displayNameInput = displayNameDraft
+                showDisplayNameEditor = true
+            } label: {
+                Text(L10n.t("settings_edit_name_title"))
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(FigmaTheme.primary)
             }
-
-            Spacer(minLength: 12)
-
-            if presentation.showsChevron {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(FigmaTheme.subtext)
-            }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 24)
         .figmaSurfaceCard(radius: 36)
+    }
+
+    private func accountInfoRow(label: String, value: String) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(FigmaTheme.subtext)
+            Spacer(minLength: 8)
+            Text(value)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(FigmaTheme.text)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .padding(.vertical, 2)
     }
 
     private var levelRulesSection: some View {
@@ -1168,6 +1158,63 @@ struct SettingsView: View {
                     }
                 }
             }
+        }
+    }
+
+    private var linkEmailSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                showLinkEmailSheet = true
+            } label: {
+                HStack(spacing: 14) {
+                    Image(systemName: "envelope.badge.shield.half.filled")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(.orange)
+                        .frame(width: 20)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L10n.t("link_email_panel_title"))
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(FigmaTheme.text)
+                        Text(L10n.t("link_email_panel_subtitle"))
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(FigmaTheme.subtext)
+                    }
+
+                    Spacer(minLength: 8)
+                }
+                .padding(.horizontal, 20)
+                .frame(minHeight: 68)
+                .figmaSurfaceCard(radius: 34)
+                .appFullSurfaceTapTarget(.roundedRect(34))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var logoutSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                showLogoutConfirmation = true
+            } label: {
+                HStack(spacing: 14) {
+                    Image(systemName: "rectangle.portrait.and.arrow.right")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(.red.opacity(0.88))
+                        .frame(width: 20)
+
+                    Text(L10n.t("settings_logout"))
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.red.opacity(0.9))
+
+                    Spacer(minLength: 8)
+                }
+                .padding(.horizontal, 20)
+                .frame(minHeight: 68)
+                .figmaSurfaceCard(radius: 34)
+                .appFullSurfaceTapTarget(.roundedRect(34))
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -1336,7 +1383,7 @@ struct SettingsView: View {
 
     private func figmaToggle(isOn: Binding<Bool>) -> some View {
         Button {
-            withAnimation(.easeInOut(duration: 0.2)) {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                 isOn.wrappedValue.toggle()
             }
         } label: {
@@ -1534,7 +1581,6 @@ struct SettingsView: View {
             exclusiveIDDraft = UserDefaults.standard.string(forKey: "streetstamps.profile.exclusiveID") ?? ""
         }
         if accountEmail.isEmpty { accountEmail = sessionStore.currentEmail ?? "" }
-        profileVisibility = ProfileSharingSettings.visibility
     }
 
     private func refreshAccountIfPossible(force: Bool = false) async {
@@ -1560,10 +1606,7 @@ struct SettingsView: View {
             UserDefaults.standard.set(me.displayName, forKey: "streetstamps.profile.displayName")
             UserDefaults.standard.set(me.resolvedExclusiveID ?? "", forKey: "streetstamps.profile.exclusiveID")
             if let pv = me.profileVisibility {
-                profileVisibility = pv
                 ProfileSharingSettings.visibility = pv
-            } else {
-                profileVisibility = .friendsOnly
             }
         } catch is CancellationError {
             // View disappeared mid-request; silently ignore
@@ -1574,10 +1617,10 @@ struct SettingsView: View {
 
     private func updateDisplayName(to input: String) async {
         guard let token = sessionStore.currentAccessToken, !token.isEmpty else { return }
-        let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else {
-            return toastAccount(L10n.t("profile_name_empty"))
+        if let error = DisplayNameValidator.validate(input) {
+            return toastAccount(error)
         }
+        let value = DisplayNameValidator.normalize(input)
         do {
             _ = try await BackendAPIClient.shared.updateDisplayName(token: token, displayName: value)
             displayNameDraft = value
@@ -1585,17 +1628,6 @@ struct SettingsView: View {
             showDisplayNameEditor = false
             toastAccount(L10n.t("profile_name_updated"))
         } catch {
-            toastAccount(String(format: L10n.t("update_failed_format"), error.localizedDescription))
-        }
-    }
-
-    private func updateVisibility(previous: ProfileVisibility) async {
-        guard let token = sessionStore.currentAccessToken, !token.isEmpty else { return }
-        do {
-            _ = try await BackendAPIClient.shared.updateProfileVisibility(token: token, visibility: profileVisibility)
-            ProfileSharingSettings.visibility = profileVisibility
-        } catch {
-            profileVisibility = previous
             toastAccount(String(format: L10n.t("update_failed_format"), error.localizedDescription))
         }
     }
@@ -2439,7 +2471,14 @@ private final class PrivateDataTransferManager: ObservableObject {
         let packageURL = stagingDirectory.appendingPathComponent("streetstamps-private-backup.sspkg")
 
         let plan = try buildPrivateExportPlan(from: sourceRoot, fileManager: fm)
-        let files = try collectArchiveFiles(from: sourceRoot, allowedRelativePaths: plan.allowedRelativePaths, fileManager: fm)
+        var files = try collectArchiveFiles(from: sourceRoot, allowedRelativePaths: plan.allowedRelativePaths, fileManager: fm)
+        let defaults = UserDefaults.standard
+        if let economyData = defaults.data(forKey: UserScopedProfileStateStore.globalEconomyKey) {
+            files.append(PrivateTransferArchiveFile(relativePath: "__userdefaults/equipment.economy.v1", data: economyData, modifiedAt: Date()))
+        }
+        if let loadoutData = defaults.data(forKey: UserScopedProfileStateStore.globalAvatarLoadoutKey) {
+            files.append(PrivateTransferArchiveFile(relativePath: "__userdefaults/avatar.loadout.v2", data: loadoutData, modifiedAt: Date()))
+        }
         guard !files.isEmpty else {
             throw PrivateTransferError.noPrivateData
         }
@@ -2498,6 +2537,7 @@ private final class PrivateDataTransferManager: ObservableObject {
         defer { try? fm.removeItem(at: sourcePaths.userRoot) }
 
         let wroteFiles = try writeArchive(archive, to: sourcePaths.userRoot, fileManager: fm)
+        restoreUserDefaultsFromArchive(archive, currentUserID: currentUserID)
         guard wroteFiles > 0 else {
             throw PrivateTransferError.importSourceNotFound
         }
@@ -2657,7 +2697,8 @@ private final class PrivateDataTransferManager: ObservableObject {
     nonisolated private static func writeArchive(_ archive: PrivateTransferArchive, to root: URL, fileManager fm: FileManager) throws -> Int {
         var wrote = 0
         for file in archive.files {
-            guard isAllowedRelativePath(file.relativePath) else { continue }
+            guard isAllowedRelativePath(file.relativePath),
+                  !file.relativePath.hasPrefix("__userdefaults/") else { continue }
             let destination = root.appendingPathComponent(file.relativePath, isDirectory: false)
             try fm.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
             try file.data.write(to: destination, options: .atomic)
@@ -2667,6 +2708,31 @@ private final class PrivateDataTransferManager: ObservableObject {
             wrote += 1
         }
         return wrote
+    }
+
+    nonisolated private static func restoreUserDefaultsFromArchive(_ archive: PrivateTransferArchive, currentUserID: String) {
+        let defaults = UserDefaults.standard
+        for file in archive.files {
+            guard file.relativePath.hasPrefix("__userdefaults/") else { continue }
+            let key = String(file.relativePath.dropFirst("__userdefaults/".count))
+            if key == UserScopedProfileStateStore.globalEconomyKey {
+                // Merge economy: coins = sum, items = union
+                if let remote = try? JSONDecoder().decode(EquipmentEconomy.self, from: file.data) {
+                    var local = EquipmentEconomyStore.load()
+                    local.coins += remote.coins
+                    for (category, items) in remote.ownedItemsByCategory {
+                        let existing = Set(local.ownedItemsByCategory[category] ?? [])
+                        local.ownedItemsByCategory[category] = Array(existing.union(items))
+                    }
+                    UserScopedProfileStateStore.saveCurrentEconomy(local, for: currentUserID)
+                }
+            } else if key == UserScopedProfileStateStore.globalAvatarLoadoutKey {
+                // Loadout: only restore if local is empty/default
+                if defaults.data(forKey: key) == nil {
+                    defaults.set(file.data, forKey: key)
+                }
+            }
+        }
     }
 
     nonisolated private static func isAllowedRelativePath(_ path: String) -> Bool {

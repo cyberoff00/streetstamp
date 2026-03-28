@@ -125,7 +125,8 @@
         { "id": "upper_0015", "nameKey": "Upper 0015", "layer": "upper", "images": { "front": "front_upper014", "right": null, "back": null, "left": null } },
         { "id": "upper_0016", "nameKey": "Upper 0016", "layer": "upper", "images": { "front": "front_upper015", "right": null, "back": null, "left": null } },
         { "id": "upper_0017", "nameKey": "Upper 0017", "layer": "upper", "images": { "front": "front_upper016", "right": null, "back": null, "left": null } },
-        { "id": "upper_0018", "nameKey": "Upper 0018", "layer": "upper", "images": { "front": "front_pat009", "right": null, "back": null, "left": null } }
+        { "id": "upper_0018", "nameKey": "Upper 0018", "layer": "upper", "images": { "front": "front_pat009", "right": null, "back": null, "left": null } },
+        { "id": "upper_0019", "nameKey": "Upper 0019", "layer": "upper", "images": { "front": "front_upper017", "right": null, "back": null, "left": null } }
       ]
     },
     {

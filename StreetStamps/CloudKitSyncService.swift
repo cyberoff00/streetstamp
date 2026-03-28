@@ -267,12 +267,57 @@ actor CloudKitSyncService {
             try await settingsSync.ensureZone()
             guard let restored = try await settingsSync.downloadSettings() else { return 0 }
             for (key, value) in restored {
-                defaults.set(value, forKey: key)
+                if SettingsCloudKitSync.mergeOnRestoreKeys.contains(key) {
+                    Self.mergeEconomyFromCloud(remoteValue: value, defaults: defaults)
+                } else {
+                    defaults.set(value, forKey: key)
+                }
             }
+            Self.propagateRestoredSettingsToUserScope(defaults: defaults)
             return restored.count
         } catch {
             print("☁️ restore settings failed:", error)
             return -1
+        }
+    }
+
+    private static func propagateRestoredSettingsToUserScope(defaults: UserDefaults) {
+        guard let userID = UserScopedProfileStateStore.activeLocalProfileID(defaults: defaults) else { return }
+        if let loadoutData = defaults.data(forKey: UserScopedProfileStateStore.globalAvatarLoadoutKey) {
+            defaults.set(loadoutData, forKey: UserScopedProfileStateStore.avatarLoadoutKey(for: userID))
+        }
+        if let economyData = defaults.data(forKey: UserScopedProfileStateStore.globalEconomyKey) {
+            defaults.set(economyData, forKey: UserScopedProfileStateStore.economyKey(for: userID))
+        }
+    }
+
+    private static func mergeEconomyFromCloud(remoteValue: Any, defaults: UserDefaults) {
+        guard let remoteData = remoteValue as? Data,
+              let remote = try? JSONDecoder().decode(EquipmentEconomy.self, from: remoteData) else {
+            return
+        }
+        let key = UserScopedProfileStateStore.globalEconomyKey
+        let local: EquipmentEconomy
+        if let localData = defaults.data(forKey: key),
+           let decoded = try? JSONDecoder().decode(EquipmentEconomy.self, from: localData) {
+            local = decoded
+        } else {
+            local = .empty
+        }
+
+        var merged = local
+        merged.coins = max(local.coins, remote.coins)
+        for (category, items) in remote.ownedItemsByCategory {
+            let existing = Set(merged.ownedItemsByCategory[category] ?? [])
+            let union = existing.union(items)
+            merged.ownedItemsByCategory[category] = Array(union)
+        }
+
+        if let data = try? JSONEncoder().encode(merged) {
+            defaults.set(data, forKey: key)
+            if let userID = UserScopedProfileStateStore.activeLocalProfileID(defaults: defaults) {
+                defaults.set(data, forKey: UserScopedProfileStateStore.economyKey(for: userID))
+            }
         }
     }
 

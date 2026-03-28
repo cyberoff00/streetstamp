@@ -145,9 +145,10 @@ struct MainView: View {
                 )
                 .padding(.horizontal, 18)
                 .padding(.bottom, 24)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .animation(.easeInOut(duration: 0.18), value: showSharingCard)
+        .animation(.spring(response: 0.3, dampingFraction: 0.78), value: showSharingCard)
         .onChange(of: showSharingCard) { isShowing in
             if !isShowing { sharingJourney = nil }
         }
@@ -156,8 +157,8 @@ struct MainView: View {
             if !didPlayStartIntro {
                 showTitle = false
                 showStartButton = false
-                withAnimation(.easeOut(duration: 0.35)) { showTitle = true }
-                withAnimation(.easeOut(duration: 0.45).delay(0.08)) { showStartButton = true }
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) { showTitle = true }
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.75).delay(0.08)) { showStartButton = true }
                 didPlayStartIntro = true
             } else {
                 showTitle = true

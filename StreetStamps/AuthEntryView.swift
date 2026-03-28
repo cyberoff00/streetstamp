@@ -48,6 +48,7 @@ struct AuthEntryView: View {
     @State private var showGuestNotice = false
     @State private var showVerificationSheet = false
     @State private var pendingVerificationEmail: String?
+    @State private var pendingVerificationPassword: String?
     @State private var pendingPasswordResetToken: String?
     @FocusState private var focusedField: AuthField?
 
@@ -205,11 +206,17 @@ struct AuthEntryView: View {
                 focused: .password,
                 onToggleVisibility: { isPasswordVisible.toggle() }
             )
+            if mode == .register || mode == .resetPassword {
+                Text(L10n.t("auth_password_hint"))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.black.opacity(0.45))
+                    .padding(.top, -4)
+            }
 
             if mode == .register || mode == .resetPassword {
                 fieldContainer(
                     icon: "lock.rotation",
-                    placeholder: mode == .resetPassword ? "confirm new password" : "confirm password",
+                    placeholder: mode == .resetPassword ? L10n.t("auth_confirm_new_password") : L10n.t("auth_confirm_password"),
                     text: $confirmPassword,
                     secure: true,
                     visible: isConfirmPasswordVisible,
@@ -252,7 +259,7 @@ struct AuthEntryView: View {
                 Text(L10n.t("auth_no_account"))
                     .foregroundColor(.black.opacity(0.56))
                 Button(L10n.t("auth_sign_up")) {
-                    withAnimation(.easeInOut(duration: 0.16)) {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
                         mode = .register
                     }
                 }
@@ -262,7 +269,7 @@ struct AuthEntryView: View {
                 Text(L10n.t("auth_have_account"))
                     .foregroundColor(.black.opacity(0.56))
                 Button(L10n.t("auth_sign_in_lower")) {
-                    withAnimation(.easeInOut(duration: 0.16)) {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
                         mode = .signIn
                     }
                 }
@@ -272,7 +279,7 @@ struct AuthEntryView: View {
                 Text(L10n.t("auth_remembered_password"))
                     .foregroundColor(.black.opacity(0.56))
                 Button(L10n.t("auth_sign_in_lower")) {
-                    withAnimation(.easeInOut(duration: 0.16)) {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
                         clearPasswordResetDraft()
                         mode = .signIn
                     }
@@ -376,6 +383,7 @@ struct AuthEntryView: View {
                     Image(systemName: visible ? "eye.slash" : "eye")
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(.black.opacity(0.45))
+                        .appMinTapTarget()
                 }
             }
         }
@@ -449,6 +457,7 @@ struct AuthEntryView: View {
                     }
                     pendingVerificationEmail = registered.email
                     if registered.emailVerificationRequired {
+                        pendingVerificationPassword = trimmedPassword
                         showVerificationSheet = true
                     } else {
                         try await sessionStore.loginWithEmail(email: trimmedEmail, password: trimmedPassword)
@@ -462,6 +471,7 @@ struct AuthEntryView: View {
                     } catch {
                         if isEmailVerificationRequired(error) {
                             pendingVerificationEmail = trimmedEmail
+                            pendingVerificationPassword = trimmedPassword
                             showVerificationSheet = true
                         } else {
                             throw error
@@ -505,7 +515,7 @@ struct AuthEntryView: View {
         defer { submitting = false }
         do {
             try await sessionStore.sendPasswordReset(email: trimmedEmail)
-            messageText = "Password reset email sent."
+            messageText = L10n.t("auth_reset_email_sent")
         } catch {
             messageText = error.localizedDescription
         }
@@ -518,13 +528,13 @@ struct AuthEntryView: View {
         let token = pendingPasswordResetToken?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
         guard !token.isEmpty else {
-            messageText = "Reset link is missing or invalid."
+            messageText = L10n.t("auth_reset_link_invalid")
             showMessage = true
             return
         }
 
         guard !trimmedPassword.isEmpty, !trimmedConfirmPassword.isEmpty else {
-            messageText = "Please enter and confirm your new password."
+            messageText = L10n.t("auth_enter_confirm_new_password")
             showMessage = true
             return
         }
@@ -543,7 +553,7 @@ struct AuthEntryView: View {
                 deepLinkStore.consumePendingPasswordResetToken()
                 clearPasswordResetDraft()
                 mode = .signIn
-                messageText = "Password updated. Please sign in with your new password."
+                messageText = L10n.t("auth_password_updated")
             } catch {
                 messageText = error.localizedDescription
             }
@@ -553,9 +563,9 @@ struct AuthEntryView: View {
 
     private func refreshVerificationState() async throws -> Bool {
         let trimmedEmail = pendingVerificationEmail?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let trimmedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPassword = (pendingVerificationPassword ?? password).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedEmail.isEmpty, !trimmedPassword.isEmpty else {
-            throw BackendAPIError.server("请重新输入邮箱和密码后再继续。")
+            throw BackendAPIError.server(L10n.t("auth_reenter_credentials"))
         }
         do {
             try await sessionStore.loginWithEmail(email: trimmedEmail, password: trimmedPassword)
@@ -571,8 +581,7 @@ struct AuthEntryView: View {
     }
 
     private func normalizedDisplayName(_ raw: String) -> String {
-        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        return value.isEmpty ? "" : value.uppercased()
+        DisplayNameValidator.normalize(raw)
     }
 
     private var titleText: String {
@@ -593,7 +602,7 @@ struct AuthEntryView: View {
         case .register:
             return L10n.t("auth_create_account_subtitle")
         case .resetPassword:
-            return "Choose a new password for your account."
+            return L10n.t("auth_reset_subtitle")
         }
     }
 
@@ -603,7 +612,7 @@ struct AuthEntryView: View {
         pendingPasswordResetToken = token
         password = ""
         confirmPassword = ""
-        withAnimation(.easeInOut(duration: 0.16)) {
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
             mode = .resetPassword
         }
     }

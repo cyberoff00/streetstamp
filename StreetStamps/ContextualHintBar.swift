@@ -37,7 +37,7 @@ struct ContextualHintBar: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(.black.opacity(0.35))
-                    .frame(width: 28, height: 28)
+                    .appMinTapTarget()
             }
             .buttonStyle(.plain)
         }

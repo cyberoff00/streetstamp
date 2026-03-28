@@ -886,6 +886,7 @@
 "membership_products_unavailable" = "Produits actuellement indisponibles. Réessayez plus tard.";
 "activity_record_title" = "HISTORIQUE D'ACTIVITÉ";
 "activity_ring_help" = "Extérieur : Progression de niveau (voyages ≥1km comptent)\nMilieu : Collection de souvenirs (50 souvenirs par anneau)\nIntérieur : Progression des villes déverrouillées (10 villes par anneau)";
+"activity_ring_next_level_hint" = "Encore %d voyages pour le niveau suivant";
 "activity_stat_cards" = "CARTES";
 "activity_stat_distance_km" = "DISTANCE (KM)";
 "activity_stat_journeys" = "PARCOURS";

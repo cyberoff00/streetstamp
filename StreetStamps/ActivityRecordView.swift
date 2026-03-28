@@ -36,16 +36,7 @@ struct ActivityRecordView: View {
 
     private var headerView: some View {
         HStack {
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(FigmaTheme.text)
-                    .frame(width: 42, height: 42)
-                    .appFullSurfaceTapTarget(.circle)
-            }
-            .buttonStyle(.plain)
+            AppBackButton()
 
             Spacer()
 
@@ -61,8 +52,7 @@ struct ActivityRecordView: View {
                 Image(systemName: "questionmark.circle")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(FigmaTheme.text.opacity(0.5))
-                    .frame(width: 42, height: 42)
-                    .contentShape(Circle())
+                    .appMinTapTarget()
             }
             .buttonStyle(.plain)
         }

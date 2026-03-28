@@ -291,6 +291,7 @@ final class UserSessionStore: ObservableObject {
         persistSession()
         persistFirebaseAccountState()
         clearPendingGuestMigrationMarker()
+        switchActiveLocalProfileID(to: "account_\(auth.userId)")
     }
 
     func applyFirebaseAccountSession(
@@ -325,6 +326,7 @@ final class UserSessionStore: ObservableObject {
         if !preserveGuestBoundary {
             clearPendingGuestMigrationMarker()
         }
+        switchActiveLocalProfileID(to: "account_\(appUserID)")
     }
 
     func updateCachedFirebaseIDToken(_ token: String?) {
@@ -507,6 +509,12 @@ final class UserSessionStore: ObservableObject {
         let id = "local_\(guestID)"
         UserDefaults.standard.set(id, forKey: activeLocalProfileIDKey)
         return id
+    }
+
+    private func switchActiveLocalProfileID(to newID: String) {
+        guard activeLocalProfileID != newID else { return }
+        activeLocalProfileID = newID
+        UserDefaults.standard.set(newID, forKey: Self.activeLocalProfileIDKey)
     }
 
     private static func appProvider(firebaseProviderID: String) -> String {

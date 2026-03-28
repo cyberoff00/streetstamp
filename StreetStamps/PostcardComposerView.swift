@@ -406,7 +406,7 @@ struct PostcardComposerView: View {
                     if newValue.count > 80 {
                         messageText = String(newValue.prefix(80))
                         messageLimitHit = true
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        Haptics.light()
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
                             messageLimitHit = false
                         }
@@ -516,6 +516,8 @@ private struct RecipientPickerSheet: View {
                         if selectedRecipient?.userID == friend.id {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(FigmaTheme.primary)
+                                .transition(.scale.combined(with: .opacity))
+                                .symbolEffect(.bounce, value: selectedRecipient?.userID)
                         }
                     }
                 }

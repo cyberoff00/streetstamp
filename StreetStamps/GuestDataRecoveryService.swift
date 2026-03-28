@@ -19,6 +19,7 @@ struct GuestRecoveryResult {
     let copiedThumbnails: Int
     let replacedLifelog: Bool
     let mergedMood: Bool
+    let mergedEconomy: Bool
 }
 
 struct GuestRecoveryOptions {
@@ -132,13 +133,16 @@ enum GuestDataRecoveryService {
             JourneyRepairSourceStore.merge(entries, userID: targetUserID)
         }
 
+        let mergedEconomy = mergeEconomy(from: sourceUserID, to: targetUserID)
+
         return GuestRecoveryResult(
             mergedJourneyCount: mergedJourneyCount,
             copiedJourneyFiles: copiedJourneyFiles,
             copiedPhotos: copiedPhotos,
             copiedThumbnails: copiedThumbnails,
             replacedLifelog: replacedLifelog,
-            mergedMood: mergedMood
+            mergedMood: mergedMood,
+            mergedEconomy: mergedEconomy
         )
     }
 
@@ -464,6 +468,38 @@ enum GuestDataRecoveryService {
         try fm.createDirectory(at: targetURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         let data = try JSONEncoder().encode(merged)
         try data.write(to: targetURL, options: .atomic)
+        return true
+    }
+
+    private static func mergeEconomy(from sourceUserID: String, to targetUserID: String, defaults: UserDefaults = .standard) -> Bool {
+        let sourceKey = UserScopedProfileStateStore.economyKey(for: sourceUserID)
+        guard let sourceData = defaults.data(forKey: sourceKey),
+              let source = try? JSONDecoder().decode(EquipmentEconomy.self, from: sourceData),
+              (source.coins > 0 || !source.ownedItemsByCategory.isEmpty) else {
+            return false
+        }
+
+        let targetKey = UserScopedProfileStateStore.economyKey(for: targetUserID)
+        let target: EquipmentEconomy
+        if let targetData = defaults.data(forKey: targetKey),
+           let decoded = try? JSONDecoder().decode(EquipmentEconomy.self, from: targetData) {
+            target = decoded
+        } else {
+            target = .empty
+        }
+
+        var merged = target
+        merged.coins += source.coins
+        for (category, items) in source.ownedItemsByCategory {
+            let existing = Set(merged.ownedItemsByCategory[category] ?? [])
+            let union = existing.union(items)
+            merged.ownedItemsByCategory[category] = Array(union)
+        }
+
+        guard let data = try? JSONEncoder().encode(merged) else { return false }
+        defaults.set(data, forKey: targetKey)
+        defaults.set(data, forKey: UserScopedProfileStateStore.globalEconomyKey)
+        defaults.removeObject(forKey: sourceKey)
         return true
     }
 

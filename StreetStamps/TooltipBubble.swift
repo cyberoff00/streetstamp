@@ -73,7 +73,7 @@ struct TooltipBubble: View {
                     Image(systemName: "xmark")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundColor(.white.opacity(0.6))
-                        .frame(width: 22, height: 22)
+                        .appMinTapTarget()
                 }
                 .buttonStyle(.plain)
             }

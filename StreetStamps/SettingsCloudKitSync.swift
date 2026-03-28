@@ -17,6 +17,12 @@ actor SettingsCloudKitSync {
         "streetstamps.map.appearance",
         "streetstamps.profile.visibility",
         "app_language",
+        UserScopedProfileStateStore.globalEconomyKey,
+        UserScopedProfileStateStore.globalAvatarLoadoutKey,
+    ]
+
+    static let mergeOnRestoreKeys: Set<String> = [
+        UserScopedProfileStateStore.globalEconomyKey,
     ]
 
     init(database: CKDatabase) {

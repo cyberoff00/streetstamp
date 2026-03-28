@@ -105,6 +105,65 @@ final class UserScopedProfileStateStoreTests: XCTestCase {
         )
     }
 
+    func test_saveCurrentEconomyPersistsGlobalAndScopedState() throws {
+        let defaults = try makeDefaults()
+        let userID = "account_123"
+        let economy = EquipmentEconomy(
+            coins: 240,
+            ownedItemsByCategory: [
+                "hat": ["hat_001"],
+                "glass": ["glass_001"]
+            ]
+        )
+
+        UserScopedProfileStateStore.saveCurrentEconomy(economy, for: userID, defaults: defaults)
+
+        XCTAssertEqual(
+            try decodeEconomy(from: defaults, key: UserScopedProfileStateStore.globalEconomyKey),
+            economy
+        )
+        XCTAssertEqual(
+            try decodeEconomy(from: defaults, key: UserScopedProfileStateStore.economyKey(for: userID)),
+            economy
+        )
+    }
+
+    func test_equipmentEconomyStoreSavePersistsScopedStateForActiveUser() throws {
+        let defaults = try makeDefaults()
+        let userID = "account_123"
+        let economy = EquipmentEconomy(
+            coins: 99,
+            ownedItemsByCategory: ["upper": ["upper_0003"]]
+        )
+        defaults.set(userID, forKey: UserScopedProfileStateStore.activeLocalProfileIDKey)
+
+        EquipmentEconomyStore.save(economy, defaults: defaults)
+
+        XCTAssertEqual(
+            try decodeEconomy(from: defaults, key: UserScopedProfileStateStore.globalEconomyKey),
+            economy
+        )
+        XCTAssertEqual(
+            try decodeEconomy(from: defaults, key: UserScopedProfileStateStore.economyKey(for: userID)),
+            economy
+        )
+    }
+
+    func test_currentWelcomeBonusGrantedUsesActiveUserScopedValue() throws {
+        let defaults = try makeDefaults()
+        let userID = "account_123"
+        defaults.set(userID, forKey: UserScopedProfileStateStore.activeLocalProfileIDKey)
+        defaults.set(true, forKey: UserScopedProfileStateStore.globalWelcomeBonusKey)
+
+        XCTAssertFalse(UserScopedProfileStateStore.currentWelcomeBonusGranted(defaults: defaults))
+
+        UserScopedProfileStateStore.saveCurrentWelcomeBonusGranted(true, defaults: defaults)
+
+        XCTAssertTrue(UserScopedProfileStateStore.currentWelcomeBonusGranted(defaults: defaults))
+        XCTAssertTrue(defaults.bool(forKey: UserScopedProfileStateStore.globalWelcomeBonusKey))
+        XCTAssertTrue(defaults.bool(forKey: UserScopedProfileStateStore.welcomeBonusKey(for: userID)))
+    }
+
     func test_clearPendingLoadoutRemovesOnlyPendingMarker() throws {
         let defaults = try makeDefaults()
         let userID = "account_123"
@@ -148,20 +207,27 @@ final class UserScopedProfileStateStoreTests: XCTestCase {
         XCTAssertFalse(UserScopedProfileStateStore.isProfileSetupPending(for: firstUserID, defaults: defaults))
     }
 
-    func test_firstProfileSetupDecisionRejectsEmptyNicknameForConfirmAndSkip() {
+    func test_firstProfileSetupDecisionRejectsEmptyNicknameForConfirm() {
         XCTAssertEqual(
             FirstProfileSetupSubmission.decision(for: .confirm, nickname: "   "),
             .blocked(message: "Display name cannot be empty")
         )
+    }
+
+    func test_firstProfileSetupDecisionSkipAllowsEmptyNickname() {
         XCTAssertEqual(
             FirstProfileSetupSubmission.decision(for: .skip, nickname: "\n"),
-            .blocked(message: "Display name cannot be empty")
+            .submit(displayName: "")
         )
     }
 
     func test_firstProfileSetupDecisionTrimsNicknameBeforeSubmitting() {
         XCTAssertEqual(
             FirstProfileSetupSubmission.decision(for: .skip, nickname: "  CLAIRE  "),
+            .submit(displayName: "CLAIRE")
+        )
+        XCTAssertEqual(
+            FirstProfileSetupSubmission.decision(for: .confirm, nickname: "  CLAIRE  "),
             .submit(displayName: "CLAIRE")
         )
     }
@@ -280,6 +346,11 @@ final class UserScopedProfileStateStoreTests: XCTestCase {
             return .defaultBoy
         }
         return try JSONDecoder().decode(RobotLoadout.self, from: data)
+    }
+
+    private func decodeEconomy(from defaults: UserDefaults, key: String) throws -> EquipmentEconomy {
+        let data = try XCTUnwrap(defaults.data(forKey: key))
+        return try JSONDecoder().decode(EquipmentEconomy.self, from: data)
     }
 }
 

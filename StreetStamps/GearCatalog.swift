@@ -460,6 +460,12 @@ final class AvatarCatalogStore: ObservableObject {
                             nameKey: "Upper 0018",
                             layer: "upper",
                             images: .init(front: "front_pat009", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "upper_0019",
+                            nameKey: "Upper 0019",
+                            layer: "upper",
+                            images: .init(front: "front_upper017", right: nil, back: nil, left: nil)
                         )
                     ]
                 ),

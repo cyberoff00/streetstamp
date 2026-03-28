@@ -121,9 +121,8 @@ final class GuestDataRecoveryServiceTests: XCTestCase {
     }
 
     @MainActor
-    func test_logoutToGuest_restoresGuestScopedActiveLocalProfileID() {
+    func test_logoutToGuest_keepsAccountScopedLocalProfileID() {
         let store = UserSessionStore()
-        let initialLocalProfileID = store.activeLocalProfileID
         let accountUserID = "account-local-profile-\(UUID().uuidString)"
 
         store.applyAuth(
@@ -141,7 +140,7 @@ final class GuestDataRecoveryServiceTests: XCTestCase {
 
         store.logoutToGuest()
 
-        XCTAssertEqual(store.activeLocalProfileID, initialLocalProfileID)
+        XCTAssertEqual(store.activeLocalProfileID, "account_\(accountUserID)")
         XCTAssertNil(store.accountUserID)
         XCTAssertEqual(store.reauthenticationPromptVersion, 0)
     }

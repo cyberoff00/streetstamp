@@ -886,6 +886,7 @@
 "membership_products_unavailable" = "Los productos no están disponibles. Inténtalo de nuevo más tarde.";
 "activity_record_title" = "REGISTRO DE ACTIVIDAD";
 "activity_ring_help" = "Exterior: Progreso de nivel (viajes ≥1km cuentan)\nMedio: Colección de recuerdos (50 recuerdos por anillo)\nInterior: Progreso de ciudades desbloqueadas (10 ciudades por anillo)";
+"activity_ring_next_level_hint" = "Faltan %d viajes para el siguiente nivel";
 "activity_stat_cards" = "TARJETAS";
 "activity_stat_distance_km" = "DISTANCIA (KM)";
 "activity_stat_journeys" = "VIAJES";

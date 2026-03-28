@@ -109,9 +109,10 @@ struct GlobeViewScreen: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(.black)
-                    .frame(width: 44, height: 44)
+                    .frame(width: 36, height: 36)
                     .background(Color.white.opacity(0.92))
                     .clipShape(Circle())
+                    .appMinTapTarget()
             }
         }
     }

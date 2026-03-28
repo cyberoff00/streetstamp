@@ -40,6 +40,13 @@ enum EquipmentCategoryIconAssetResolver {
     }
 }
 
+enum EquipmentInteractionFeedbackPolicy {
+    static func feedbackLocalizationKey(isTryOnMode: Bool, tappedEquippedItem: Bool) -> String? {
+        guard isTryOnMode else { return nil }
+        return tappedEquippedItem ? nil : "equipment_trying_on"
+    }
+}
+
 struct EquipmentView: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -174,8 +181,10 @@ struct EquipmentView: View {
         .overlay {
             if showTryOnPurchaseDialog {
                 tryOnPurchaseDialog
+                    .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .center)))
             }
         }
+        .animation(.spring(response: 0.3, dampingFraction: 0.78), value: showTryOnPurchaseDialog)
     }
 
     private var effectiveLoadout: RobotLoadout {
@@ -210,15 +219,7 @@ struct EquipmentView: View {
                 .padding(.horizontal, 80)
 
             HStack(spacing: 12) {
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(FigmaTheme.text)
-                        .frame(width: 42, height: 42)
-                }
-                .buttonStyle(.plain)
+                AppBackButton()
 
                 Spacer()
 
@@ -367,7 +368,7 @@ struct EquipmentView: View {
                             return
                         }
 
-                        withAnimation(.easeInOut(duration: 0.2)) {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                             if isSameCategory {
                                 expandedColorCategoryId = (expandedColorCategoryId == cat.id) ? nil : cat.id
                             } else {
@@ -567,37 +568,23 @@ struct EquipmentView: View {
 
     private func handleTap(category: GearCategory, item: GearItem, ownership: GearOwnership) {
         if isTryOnMode {
-            applySelection(category: category, item: item)
-            showFeedback(L10n.t("equipment_trying_on"))
+            if ownership == .equipped {
+                deselectItem(category: category, item: item)
+            } else {
+                applySelection(category: category, item: item)
+            }
+            if let feedbackKey = EquipmentInteractionFeedbackPolicy.feedbackLocalizationKey(
+                isTryOnMode: true,
+                tappedEquippedItem: ownership == .equipped
+            ) {
+                showFeedback(L10n.t(feedbackKey))
+            }
             return
         }
 
         switch ownership {
         case .equipped:
-            updateLoadout { target in
-                switch category.selectionKey {
-                case "suitId":
-                    target.suitId = nil
-                    if target.upperId == "none" { target.upperId = target.savedUpperIdForSuit }
-                    if target.underId == "none" { target.underId = target.savedUnderIdForSuit }
-                case "upperId":
-                    target.upperId = "none"
-                case "underId":
-                    target.underId = "none"
-                case "hatId":
-                    target.hatId = nil
-                case "glassId":
-                    target.glassId = nil
-                case "shoesId":
-                    target.shoesId = nil
-                case "accessoryId":
-                    if let idx = target.accessoryIds.firstIndex(of: item.id) {
-                        target.accessoryIds.remove(at: idx)
-                    }
-                default:
-                    break
-                }
-            }
+            deselectItem(category: category, item: item)
         case .owned:
             applySelection(category: category, item: item)
             showFeedback(L10n.t("equipment_equipped_feedback"))
@@ -611,12 +598,40 @@ struct EquipmentView: View {
         }
     }
 
+    private func deselectItem(category: GearCategory, item: GearItem) {
+        updateLoadout { target in
+            switch category.selectionKey {
+            case "suitId":
+                target.suitId = nil
+                if target.upperId == "none" { target.upperId = target.savedUpperIdForSuit }
+                if target.underId == "none" { target.underId = target.savedUnderIdForSuit }
+            case "upperId":
+                target.upperId = "none"
+            case "underId":
+                target.underId = "none"
+            case "hatId":
+                target.hatId = nil
+            case "glassId":
+                target.glassId = nil
+            case "shoesId":
+                target.shoesId = nil
+            case "accessoryId":
+                if let idx = target.accessoryIds.firstIndex(of: item.id) {
+                    target.accessoryIds.remove(at: idx)
+                }
+            default:
+                break
+            }
+        }
+    }
+
     private func showFeedback(_ message: String) {
-        withAnimation(.easeOut(duration: 0.2)) {
+        Haptics.light()
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.78)) {
             feedbackMessage = message
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
-            withAnimation(.easeIn(duration: 0.2)) {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.78)) {
                 feedbackMessage = nil
             }
         }
@@ -654,6 +669,7 @@ struct EquipmentView: View {
         economy.coins -= price
         economy.markOwned(categoryId: category.id, itemId: item.id)
         applySelection(category: category, item: item)
+        Haptics.success()
         showFeedback(L10n.t("equipment_unlocked_and_equipped"))
         self.pendingPurchase = nil
     }

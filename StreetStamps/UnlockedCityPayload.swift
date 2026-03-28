@@ -80,12 +80,8 @@ struct UnlockCityModal: View {
 
                     Spacer()
 
-                    Button {
+                    AppCloseButton(style: .filled) {
                         isPresented = false
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 20))
-                            .foregroundColor(.gray)
                     }
                 }
                 .padding(.horizontal, 16)

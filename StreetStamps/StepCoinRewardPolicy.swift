@@ -12,7 +12,11 @@ enum StepCoinRewardPolicy {
 
     static let stepsPerMilestone = 10_000
 
-    private static let lastRewardedMilestoneKey = "streetstamps.steps.coin.last_rewarded_milestone"
+    private static let lastRewardedMilestoneKeyBase = "streetstamps.steps.coin.last_rewarded_milestone"
+
+    private static func lastRewardedMilestoneKey(for userID: String) -> String {
+        userID.isEmpty ? lastRewardedMilestoneKeyBase : "\(lastRewardedMilestoneKeyBase).user.\(userID)"
+    }
 
     struct Result {
         let coinsAwarded: Int
@@ -22,9 +26,10 @@ enum StepCoinRewardPolicy {
     /// Check if new milestones have been reached since the last reward, and grant coins.
     /// Returns the number of coins awarded (0 if no new milestones).
     @MainActor
-    static func checkAndReward(currentSteps: Int) -> Result {
+    static func checkAndReward(currentSteps: Int, userID: String) -> Result {
         let currentMilestone = currentSteps / stepsPerMilestone
-        let lastRewarded = UserDefaults.standard.integer(forKey: lastRewardedMilestoneKey)
+        let key = lastRewardedMilestoneKey(for: userID)
+        let lastRewarded = UserDefaults.standard.integer(forKey: key)
 
         guard currentMilestone > lastRewarded else {
             return Result(coinsAwarded: 0, milestonesReached: 0)
@@ -40,7 +45,7 @@ enum StepCoinRewardPolicy {
         EquipmentEconomyStore.save(economy)
 
         // Update last rewarded milestone
-        UserDefaults.standard.set(currentMilestone, forKey: lastRewardedMilestoneKey)
+        UserDefaults.standard.set(currentMilestone, forKey: key)
 
         return Result(coinsAwarded: totalCoins, milestonesReached: newMilestones)
     }

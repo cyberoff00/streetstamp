@@ -904,6 +904,7 @@ struct MapView: View {
 
         .navigationBarBackButtonHidden(true)
         .overlay(alignment: .top) { exitToast }
+        .animation(.easeInOut(duration: 0.25), value: showExitWarning)
         .overlay {
             if showModeSelector {
                 modeSelectorOverlay
@@ -971,12 +972,14 @@ struct MapView: View {
                         }
                     }
                 )
+                .transition(.opacity)
             }
         }
+        .animation(.spring(response: 0.3, dampingFraction: 0.78), value: showMemoryEditor)
         .onChange(of: showMemoryEditor) { visible in
             if !visible { editingMemory = nil }
         }
-        .animation(.easeInOut(duration: 0.18), value: showModeSelector)
+        .animation(.spring(response: 0.3, dampingFraction: 0.78), value: showModeSelector)
         .alert(L10n.t("finish_confirm_title"), isPresented: $showFinishConfirm) {
             Button(L10n.t("finish_confirm_finish"), role: .destructive) { finishJourney() }
             Button(L10n.t("finish_confirm_continue"), role: .cancel) {}
@@ -1162,7 +1165,7 @@ struct MapView: View {
                     Image(systemName: "arrow.left")
                         .font(.system(size: 16, weight: .medium))
                         .foregroundColor(FigmaTheme.text)
-                        .frame(width: 32, alignment: .leading)
+                        .appMinTapTarget()
                 }
                 .buttonStyle(.plain)
 
@@ -1170,7 +1173,7 @@ struct MapView: View {
 
                 Button {
                     dismissMapHint(.mapModeExplain)
-                    withAnimation(.easeInOut(duration: 0.18)) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.78)) {
                         showModeSelector = true
                     }
                 } label: {
@@ -1824,7 +1827,7 @@ struct MapView: View {
             Color.black.opacity(0.35)
                 .ignoresSafeArea()
                 .onTapGesture {
-                    withAnimation(.easeInOut(duration: 0.18)) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.78)) {
                         showModeSelector = false
                     }
                 }
@@ -1833,10 +1836,10 @@ struct MapView: View {
                 selectedMode: journeyRoute.trackingMode,
                 onSelect: { mode in
                     applyTrackingMode(mode)
-                    withAnimation(.easeInOut(duration: 0.18)) { showModeSelector = false }
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.78)) { showModeSelector = false }
                 },
                 onClose: {
-                    withAnimation(.easeInOut(duration: 0.18)) { showModeSelector = false }
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.78)) { showModeSelector = false }
                 }
             )
             .frame(maxWidth: 360)
@@ -2013,10 +2016,8 @@ struct MemoryClusterView: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.gray)
                     Spacer()
-                    Button { isPresented = false } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 18))
-                            .foregroundColor(.gray)
+                    AppCloseButton(style: .filled) {
+                        isPresented = false
                     }
                 }
                 .padding(.horizontal, 16)
@@ -2115,13 +2116,12 @@ struct MemoryDetailPage: View {
                                 Image(systemName: "square.and.pencil")
                                     .font(.system(size: 16, weight: .semibold))
                                     .foregroundColor(.gray)
+                                    .appMinTapTarget()
                             }
                         }
 
-                        Button { isPresented = false } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 18))
-                                .foregroundColor(.gray)
+                        AppCloseButton(style: .filled) {
+                            isPresented = false
                         }
                     }
                 }
@@ -2240,8 +2240,10 @@ struct MemoryDetailPage: View {
                         if updated == nil { isPresented = false }
                     }
                 )
+                .transition(.opacity)
             }
         }
+        .animation(.spring(response: 0.3, dampingFraction: 0.78), value: showEditor)
         .onAppear {
             // ✅ If user left mid-edit (Back gesture), automatically resume editing.
             let uid = sessionStore.currentUserID
@@ -2276,8 +2278,7 @@ private struct MapTrackingModeSelector: View {
                     Image(systemName: "xmark")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.white.opacity(0.9))
-                        .frame(width: 32, height: 32)
-                        .contentShape(Rectangle())
+                        .appMinTapTarget()
                 }
                 .buttonStyle(.plain)
             }
@@ -2623,18 +2624,13 @@ private var hasUnsavedChanges: Bool {
                     .frame(width: 32, height: 32)
                     .background(Color.black.opacity(0.04))
                     .clipShape(Circle())
+                    .appMinTapTarget()
             }
             .buttonStyle(.plain)
 
-            Button { dismissSmart() } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(FigmaTheme.text.opacity(0.85))
-                    .frame(width: 32, height: 32)
-                    .background(Color.black.opacity(0.04))
-                    .clipShape(Circle())
+            AppCloseButton(style: .circleSubtle) {
+                dismissSmart()
             }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 24)
         .frame(height: 58)
@@ -2667,12 +2663,12 @@ private var hasUnsavedChanges: Bool {
                                         PhotoStore.delete(named: removed, userID: userID)
                                     } label: {
                                         Image(systemName: "xmark.circle.fill")
-                                            .font(.system(size: 16))
+                                            .font(.system(size: 20))
                                             .foregroundColor(FigmaTheme.text.opacity(0.6))
                                             .background(Color.white.opacity(0.75).clipShape(Circle()))
+                                            .appMinTapTarget()
                                     }
                                     .buttonStyle(.plain)
-                                    .padding(4)
                                 }
                             }
                         }
@@ -2704,7 +2700,7 @@ private var hasUnsavedChanges: Bool {
                     Image(systemName: "camera")
                         .font(.system(size: 20, weight: .medium))
                         .foregroundColor(FigmaTheme.text.opacity(0.82))
-                        .frame(width: 32, height: 32)
+                        .appMinTapTarget()
                 }
                 .buttonStyle(.plain)
                 .disabled(!canAddPhoto)
@@ -2714,7 +2710,7 @@ private var hasUnsavedChanges: Bool {
                     Image(systemName: "photo")
                         .font(.system(size: 20, weight: .medium))
                         .foregroundColor(FigmaTheme.text.opacity(0.82))
-                        .frame(width: 32, height: 32)
+                        .appMinTapTarget()
                 }
                 .buttonStyle(.plain)
                 .disabled(!canAddPhoto)
@@ -2959,12 +2955,12 @@ struct MemoryEditorPage: View {
                                         PhotoStore.delete(named: removed, userID: userID)
                                     } label: {
                                         Image(systemName: "xmark.circle.fill")
-                                            .font(.system(size: 16))
+                                            .font(.system(size: 20))
                                             .foregroundColor(FigmaTheme.text.opacity(0.6))
                                             .background(Color.white.opacity(0.75).clipShape(Circle()))
+                                            .appMinTapTarget()
                                     }
                                     .buttonStyle(.plain)
-                                    .padding(4)
                                 }
                             }
                         }
@@ -2990,7 +2986,7 @@ struct MemoryEditorPage: View {
                     Image(systemName: "camera")
                         .font(.system(size: 20, weight: .medium))
                         .foregroundColor(FigmaTheme.text.opacity(0.82))
-                        .frame(width: 32, height: 32)
+                        .appMinTapTarget()
                 }
                 .buttonStyle(.plain)
                 .disabled(!canAddPhoto)
@@ -3000,7 +2996,7 @@ struct MemoryEditorPage: View {
                     Image(systemName: "photo")
                         .font(.system(size: 20, weight: .medium))
                         .foregroundColor(FigmaTheme.text.opacity(0.82))
-                        .frame(width: 32, height: 32)
+                        .appMinTapTarget()
                 }
                 .buttonStyle(.plain)
                 .disabled(!canAddPhoto)
@@ -3049,15 +3045,7 @@ struct MemoryEditorPage: View {
 
             Spacer()
 
-            Button(action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(FigmaTheme.text.opacity(0.85))
-                    .frame(width: 32, height: 32)
-                    .background(Color.black.opacity(0.04))
-                    .clipShape(Circle())
-            }
-            .buttonStyle(.plain)
+            AppCloseButton(style: .circleSubtle, action: onClose)
         }
         .padding(.horizontal, 24)
         .frame(height: 58)
@@ -3134,14 +3122,7 @@ struct PhotoViewer: View {
 
             VStack {
                 HStack {
-                    Button(action: onClose) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.white)
-                            .frame(width: 44, height: 44)
-                            .background(Color.black.opacity(0.35))
-                            .clipShape(Circle())
-                    }
+                    AppCloseButton(style: .circleDark, action: onClose)
                     Spacer()
                     Text("\(index + 1)/\(max(1, totalCount))")
                         .font(.system(size: 12, weight: .semibold))
@@ -3268,10 +3249,8 @@ struct MemoryGroupDetailPage: View {
 
                     Spacer()
 
-                    Button { isPresented = false } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 18))
-                            .foregroundColor(.gray)
+                    AppCloseButton(style: .filled) {
+                        isPresented = false
                     }
                 }
                 .padding(.horizontal, 16)

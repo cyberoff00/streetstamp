@@ -669,7 +669,16 @@
 "profile_setup_edit_look" = "EDIT MY LOOK";
 "profile_setup_nickname_label" = "NICKNAME";
 "profile_setup_nickname_placeholder" = "SKYWALKER";
-"profile_setup_nickname_hint" = "Nicknames are unique now, so pick one that feels like you.";
+"profile_setup_nickname_hint" = "Max 24 characters. Letters, numbers, _ . - only. Must be unique.";
+"auth_password_hint" = "At least 8 characters, with a letter, a number, and a special character.";
+"auth_confirm_password" = "confirm password";
+"auth_confirm_new_password" = "confirm new password";
+"auth_reset_email_sent" = "Password reset email sent.";
+"auth_reset_link_invalid" = "Reset link is missing or invalid.";
+"auth_enter_confirm_new_password" = "Please enter and confirm your new password.";
+"auth_password_updated" = "Password updated. Please sign in with your new password.";
+"auth_reset_subtitle" = "Choose a new password for your account.";
+"auth_reenter_credentials" = "Please re-enter your email and password to continue.";
 "profile_setup_ready_title" = "One last step";
 "profile_setup_ready_body" = "We'll save this nickname and outfit to your account so your friends see the same traveler everywhere.";
 "profile_setup_skip" = "SKIP";
@@ -900,6 +909,7 @@
 "profile_activity_record" = "ACTIVITY RECORD";
 "profile_stats_format" = "%d journeys · %d memories · %d cards";
 "activity_ring_help" = "Outer: Level Progress (journeys ≥1km count)\nMiddle: Memory Collection (50 memories per ring)\nInner: City Unlock Progress (10 cities per ring)";
+"activity_ring_next_level_hint" = "%d more journeys to unlock the next level";
 "settings_icloud_sync_title" = "iCloud Sync";
 "settings_icloud_sync_desc" = "Automatically sync and restore your journeys, lifelog, and key settings via iCloud.";
 "settings_icloud_sync_unavailable_desc" = "iCloud is unavailable. Sign in to iCloud in system settings to enable cloud sync.";
@@ -1018,6 +1028,18 @@
 "error_forbidden" = "You do not have permission for this action.";
 "error_not_configured" = "Service configuration error. Please try again later.";
 "error_unknown" = "Something went wrong. Please try again.";
+"error_too_many_requests" = "Too many requests. Please wait a moment.";
+"error_invalid_email" = "Invalid email address.";
+"error_weak_password" = "Password must be at least 8 characters and include a letter, a number, and a special character.";
+"error_email_exists" = "This email is already registered.";
+"error_wrong_credentials" = "Wrong email or password.";
+"error_email_not_verified" = "Email not verified. Please check your inbox.";
+"error_account_not_found" = "Account not found.";
+"error_display_name_taken" = "This nickname is already taken.";
+"error_invalid_display_name" = "Invalid nickname format.";
+"error_already_friends" = "You are already friends.";
+"error_cannot_add_self" = "You cannot add yourself as a friend.";
+"error_exclusive_id_taken" = "This ID is already taken.";
 
 // Contextual Hints (Onboarding)
 "hint_start_first_journey" = "Tap START to begin your first journey";
@@ -1066,5 +1088,8 @@
 "about_us_traveler_needs_content" = "about_us_traveler_needs_content";
 "about_us_cyber_dog_title" = "The Cyber Dog Story";
 "about_us_cyber_dog_content" = "about_us_cyber_dog_content";
+"about_worldo_header" = "ABOUT WORLDO";
+"brand_tagline_journey_memory" = "Journey Memory";
+"brand_wordmark" = "worldo";
 "postcard_saved_front" = "Postcard front saved";
 "postcard_saved_back" = "Postcard back saved";

@@ -194,6 +194,7 @@ struct LinkEmailPasswordView: View {
                     Image(systemName: visible ? "eye.slash" : "eye")
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(.black.opacity(0.45))
+                        .appMinTapTarget()
                 }
             }
         }

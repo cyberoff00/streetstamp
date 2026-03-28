@@ -42,7 +42,7 @@ struct MembershipSubscriptionView: View {
         .background(FigmaTheme.mutedBackground.ignoresSafeArea())
         .onTapGesture {
             if activeInfoKey != nil {
-                withAnimation(.easeInOut(duration: 0.15)) { activeInfoKey = nil }
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) { activeInfoKey = nil }
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) { topBar }
@@ -68,12 +68,7 @@ struct MembershipSubscriptionView: View {
 
     private var topBar: some View {
         HStack {
-            Button { dismiss() } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(FigmaTheme.text)
-                    .frame(width: 36, height: 36)
-            }
+            AppBackButton()
             Spacer()
             Text(L10n.t("membership_page_title"))
                 .font(.system(size: 17, weight: .bold))
@@ -278,13 +273,14 @@ struct MembershipSubscriptionView: View {
                     .foregroundColor(FigmaTheme.text)
                 if let infoKey {
                     Button {
-                        withAnimation(.easeInOut(duration: 0.15)) {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
                             activeInfoKey = activeInfoKey == infoKey ? nil : infoKey
                         }
                     } label: {
                         Image(systemName: "questionmark.circle")
-                            .font(.system(size: 11))
+                            .font(.system(size: 13))
                             .foregroundColor(FigmaTheme.subtext.opacity(0.5))
+                            .appMinTapTarget()
                     }
                     .buttonStyle(.plain)
                 }

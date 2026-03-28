@@ -33,7 +33,7 @@ struct FirstProfileSetupPresentationModel: Equatable {
         heroTitleKey: "profile_setup_avatar_title",
         heroHelperKey: "profile_setup_avatar_hint",
         showsSubtitle: false,
-        showsNicknameHint: false,
+        showsNicknameHint: true,
         showsSummaryCard: false,
         showsHeroCardTitle: false,
         usesScrollLayout: true,
@@ -50,12 +50,16 @@ enum FirstProfileSetupSubmission: Equatable {
     case submit(displayName: String)
 
     static func decision(for action: FirstProfileSetupAction, nickname: String) -> FirstProfileSetupSubmission {
-        let trimmedName = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else {
-            return .blocked(message: L10n.t("profile_name_empty"))
+        switch action {
+        case .skip:
+            let trimmed = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
+            return .submit(displayName: trimmed.isEmpty ? "" : DisplayNameValidator.normalize(nickname))
+        case .confirm:
+            if let error = DisplayNameValidator.validate(nickname) {
+                return .blocked(message: error)
+            }
+            return .submit(displayName: DisplayNameValidator.normalize(nickname))
         }
-        _ = action
-        return .submit(displayName: trimmedName)
     }
 }
 
@@ -406,6 +410,16 @@ struct FirstProfileSetupView: View {
             onDismissDebugPreview?()
             return
         }
+
+        if action == .skip {
+            let resolvedLoadout = loadout.normalizedForCurrentAvatar()
+            AvatarLoadoutStore.save(resolvedLoadout)
+            UserScopedProfileStateStore.saveCurrentLoadout(resolvedLoadout, for: sessionStore.currentUserID)
+            sessionStore.markProfileSetupCompleted()
+            if debugPreviewEnabled { onDismissDebugPreview?() }
+            return
+        }
+
         guard !token.isEmpty else {
             errorMessage = BackendAPIError.unauthorized.localizedDescription
             return

@@ -198,16 +198,7 @@ struct CityStampLibraryView: View {
                 AppTopHeader(title: titleText, showSidebar: $showSidebar)
             } else {
                 HStack(spacing: 10) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundColor(.black)
-                            .frame(width: 42, height: 42)
-                            .appFullSurfaceTapTarget(.circle)
-                    }
-                    .buttonStyle(.plain)
+                    AppBackButton(foreground: .black)
 
                     Spacer()
 
@@ -253,6 +244,11 @@ struct CityStampLibraryView: View {
                                 Label(L10n.t("delete"), systemImage: "trash")
                             }
                         }
+                        .scrollTransition(.animated(.spring(response: 0.4, dampingFraction: 0.85))) { content, phase in
+                            content
+                                .opacity(phase.isIdentity ? 1 : 0.2)
+                                .scaleEffect(phase.isIdentity ? 1 : 0.92)
+                        }
                     } else {
                         Button {
                             showPublicDetailUnavailableAlert = true
@@ -260,6 +256,11 @@ struct CityStampLibraryView: View {
                             CityStampCard(city: city, cardWidth: cardW)
                         }
                         .buttonStyle(.plain)
+                        .scrollTransition(.animated(.spring(response: 0.4, dampingFraction: 0.85))) { content, phase in
+                            content
+                                .opacity(phase.isIdentity ? 1 : 0.2)
+                                .scaleEffect(phase.isIdentity ? 1 : 0.92)
+                        }
                     }
                 }
             }

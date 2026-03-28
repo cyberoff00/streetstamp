@@ -99,11 +99,11 @@ struct EquipmentEconomy: Codable, Equatable {
 }
 
 enum EquipmentEconomyStore {
-    private static let key = "equipment.economy.v1"
+    private static let key = UserScopedProfileStateStore.globalEconomyKey
 
-    static func load() -> EquipmentEconomy {
+    static func load(defaults: UserDefaults = .standard) -> EquipmentEconomy {
         guard
-            let data = UserDefaults.standard.data(forKey: key),
+            let data = defaults.data(forKey: key),
             let decoded = try? JSONDecoder().decode(EquipmentEconomy.self, from: data)
         else {
             return .empty
@@ -111,8 +111,13 @@ enum EquipmentEconomyStore {
         return decoded
     }
 
-    static func save(_ economy: EquipmentEconomy) {
-        guard let data = try? JSONEncoder().encode(economy) else { return }
-        UserDefaults.standard.set(data, forKey: key)
+    static func save(_ economy: EquipmentEconomy, defaults: UserDefaults = .standard) {
+        guard let activeUserID = UserScopedProfileStateStore.activeLocalProfileID(defaults: defaults) else {
+            guard let data = try? JSONEncoder().encode(economy) else { return }
+            defaults.set(data, forKey: key)
+            return
+        }
+
+        UserScopedProfileStateStore.saveCurrentEconomy(economy, for: activeUserID, defaults: defaults)
     }
 }

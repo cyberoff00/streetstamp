@@ -244,7 +244,7 @@ struct AccountCenterView: View {
                         .foregroundColor(FigmaTheme.subtext)
                 }
             }
-            .disabled(!sessionStore.isLoggedIn)
+            .disabled(!sessionStore.isLoggedIn || isLoading)
         }
         .cardStyle()
     }
@@ -318,22 +318,30 @@ struct AccountCenterView: View {
 
     private func capsuleAction(_ title: String, filled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(title)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(filled ? .white : .black)
-                .frame(maxWidth: .infinity)
-                .frame(height: 48)
-                .background(
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .fill(filled ? FigmaTheme.primary : Color.clear)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .stroke(Color.black.opacity(filled ? 0 : 0.12), lineWidth: filled ? 0 : 2)
-                )
-                .appFullSurfaceTapTarget(.roundedRect(24))
+            ZStack {
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(filled ? .white : .black)
+                    .opacity(isLoading ? 0.5 : 1)
+                if isLoading {
+                    ProgressView()
+                        .tint(filled ? .white : FigmaTheme.primary)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 48)
+            .background(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(filled ? FigmaTheme.primary : Color.clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(Color.black.opacity(filled ? 0 : 0.12), lineWidth: filled ? 0 : 2)
+            )
+            .appFullSurfaceTapTarget(.roundedRect(24))
         }
         .buttonStyle(.plain)
+        .disabled(isLoading)
     }
 
     private var backendCard: some View {
@@ -388,10 +396,10 @@ struct AccountCenterView: View {
 
     private func updateDisplayName(to input: String) async {
         guard let token = sessionStore.currentAccessToken, !token.isEmpty else { return }
-        let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else {
-            return toast(L10n.t("profile_name_empty"))
+        if let error = DisplayNameValidator.validate(input) {
+            return toast(error)
         }
+        let value = DisplayNameValidator.normalize(input)
         isLoading = true
         defer { isLoading = false }
 
