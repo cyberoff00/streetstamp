@@ -12,7 +12,7 @@ final class FilmCameraDropManager: ObservableObject {
 
     /// Drop probability per MapView session.
     /// Tune this down later once the novelty factor is calibrated.
-    private let dropChance: Double = 1.0
+    private let dropChance: Double = 0.5
 
     /// Cooldown: minimum seconds between drops to avoid spam.
     /// Set to 0 during development; raise to 120–300 for production.
