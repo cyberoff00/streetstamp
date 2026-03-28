@@ -2553,7 +2553,7 @@ function profileDTOForViewer(target, isSelf, isFriend) {
   if (!isSelf && cards.length > 0 && journeys.length > 0) {
     const visibleCityIDs = new Set();
     for (const j of journeys) {
-      const ck = (j.startCityKey || j.cityKey || "").trim();
+      const ck = (j.cityID || j.startCityKey || j.cityKey || "").trim();
       if (ck) visibleCityIDs.add(ck);
     }
     cards = cards.filter((c) => visibleCityIDs.has((c.id || "").trim()));
@@ -2852,7 +2852,10 @@ async function main() {
           existingEmailIdentity.updatedAt = now;
           existingUser.passwordHash = passwordHash;
           if (displayName) {
-            existingUser.displayName = displayName;
+            const normalized = normalizeDisplayName(displayName);
+            if (normalized && canUseDisplayName(normalized, existingEmailIdentity.userID)) {
+              existingUser.displayName = normalized;
+            }
           }
           const verificationToken = issueEmailVerificationToken(existingEmailIdentity.userID, email);
           await persistPG(async () => {
@@ -4460,39 +4463,36 @@ async function main() {
       const ext = safeExt(req.file.originalname);
       const objectKey = `${uid}/${randHex(16)}${ext}`;
 
-      if (r2Client) {
-        try {
-          const r2UploadStartedAt = timingNowNs();
-          await uploadToR2OrThrow(objectKey, req.file.buffer, req.file.mimetype);
-          const url = r2PublicURL(objectKey);
-          if (url) {
-            logTiming("media_upload", {
-              userID: uid,
-              backend: "r2",
-              bytes: req.file.buffer.length,
-              uploadDurationMs: elapsedMs(r2UploadStartedAt),
-              totalDurationMs: elapsedMs(requestStartedAt)
-            });
-            return res.status(200).json({ objectKey, url });
-          }
-        } catch (e) {
-          console.error("r2 upload failed, fallback to local disk:", e && e.message ? e.message : e);
-        }
-      }
-
+      // Always write to local disk first (fast, reliable)
       const fullPath = path.join(MEDIA_DIR, objectKey);
       const diskWriteStartedAt = timingNowNs();
       await fsp.mkdir(path.dirname(fullPath), { recursive: true });
       await fsp.writeFile(fullPath, req.file.buffer);
       const base = derivePublicBase(req);
       const url = base ? `${base}/media/${objectKey}` : `/media/${objectKey}`;
+      const fileBytes = req.file.buffer.length;
+      const fileMime = req.file.mimetype;
       logTiming("media_upload", {
         userID: uid,
         backend: "disk",
-        bytes: req.file.buffer.length,
+        bytes: fileBytes,
         writeDurationMs: elapsedMs(diskWriteStartedAt),
         totalDurationMs: elapsedMs(requestStartedAt)
       });
+
+      // Async sync to R2 in background (non-blocking)
+      if (r2Client) {
+        setImmediate(async () => {
+          try {
+            const buf = await fsp.readFile(fullPath);
+            await uploadToR2OrThrow(objectKey, buf, fileMime);
+            logTiming("media_r2_sync", { userID: uid, objectKey, bytes: fileBytes, status: "ok" });
+          } catch (e) {
+            logTiming("media_r2_sync", { userID: uid, objectKey, bytes: fileBytes, status: "failed", message: e && e.message ? e.message : String(e) });
+          }
+        });
+      }
+
       return res.status(200).json({ objectKey, url });
     } catch (error) {
       logTiming("media_upload_error", {

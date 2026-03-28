@@ -7,4 +7,6 @@ RUN chown -R node:node /app
 USER node
 ENV PORT=18080
 EXPOSE 18080
+COPY --chown=node:node entrypoint.sh /app/entrypoint.sh
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["npm", "start"]

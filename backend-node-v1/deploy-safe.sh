@@ -60,6 +60,7 @@ ssh -o StrictHostKeyChecking=no "$SERVER_HOST" "\
   if [ -f postcard-rules.js ]; then cp postcard-rules.js '${REMOTE_RELEASE_DIR}/'; fi; \
   if [ -f apns.js ]; then cp apns.js '${REMOTE_RELEASE_DIR}/'; fi; \
   if [ -f .deployed-git-commit ]; then cp .deployed-git-commit '${REMOTE_RELEASE_DIR}/'; fi; \
+  if [ -f entrypoint.sh ]; then cp entrypoint.sh '${REMOTE_RELEASE_DIR}/'; fi; \
   if [ -f DEPLOY.md ]; then cp DEPLOY.md '${REMOTE_RELEASE_DIR}/'; fi; \
   if [ -f check_auth_mode.sh ]; then cp check_auth_mode.sh '${REMOTE_RELEASE_DIR}/'; fi; \
   if [ -f readonly_prod_check.sh ]; then cp readonly_prod_check.sh '${REMOTE_RELEASE_DIR}/'; fi; \
@@ -79,6 +80,7 @@ scp -o StrictHostKeyChecking=no \
   backend-node-v1/package.json \
   backend-node-v1/package-lock.json \
   backend-node-v1/Dockerfile \
+  backend-node-v1/entrypoint.sh \
   backend-node-v1/DEPLOY.md \
   scripts/check_auth_mode.sh \
   scripts/readonly_prod_check.sh \
@@ -105,6 +107,7 @@ ssh -o StrictHostKeyChecking=no "$SERVER_HOST" "\
   cd '${REMOTE_DIR}'; \
   chmod +x check_auth_mode.sh readonly_prod_check.sh; \
   grep -q '^WRITE_FREEZE_ENABLED=' .env || echo 'WRITE_FREEZE_ENABLED=false' >> .env; \
+  chown -R 1000:1000 media data 2>/dev/null || true; \
   docker compose up -d --build api; \
   sleep 8; \
   curl -fsS http://127.0.0.1:18080/v1/health >/dev/null; \
