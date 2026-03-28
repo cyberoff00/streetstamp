@@ -201,7 +201,7 @@
 ### City Membership And Deduplication (Verified)
 - `CityMembershipContribution` reads `journey.stableCityKey` to determine which city a journey belongs to. This is the grouping key.
 - `CityMembershipIndex` groups journeys by city key. `CityCache.rebuildFromJourneyStore()` rebuilds from this index.
-- `CityCollectionResolver` provides static mapping (`CityCollectionMapping.json`) to merge city keys into collections for display grouping.
+- City display grouping uses the raw city key directly — there is no secondary collection merge layer.
 - On-load deduplication: exact `city.id` dedup via `Set<String>`. This is sufficient because the write path produces consistent keys.
 
 ### Social City Data (Verified, By Design)

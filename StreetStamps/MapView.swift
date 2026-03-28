@@ -393,7 +393,7 @@ struct JourneyRoute: Codable {
         let unknownLocalized = L10n.t("unknown")
         let unknownEN = "Unknown"
         let rawCityKey = (startCityKey ?? cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedCityKey = CityCollectionResolver.resolveCollectionKey(cityKey: rawCityKey)
+        let resolvedCityKey = rawCityKey
         let label = (cityName ?? canonicalCity).trimmingCharacters(in: .whitespacesAndNewlines)
         if !label.isEmpty,
            label.caseInsensitiveCompare(unknownEN) != .orderedSame,

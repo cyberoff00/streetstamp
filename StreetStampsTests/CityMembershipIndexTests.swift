@@ -4,7 +4,6 @@ import XCTest
 final class CityMembershipIndexTests: XCTestCase {
     override func tearDown() {
         super.tearDown()
-        CityCollectionResolver.resetForTesting()
     }
 
     func test_encodingAndDecodingPreservesEntries() throws {
@@ -95,11 +94,6 @@ final class CityMembershipIndexTests: XCTestCase {
     }
 
     func test_applyJourneyMutationKeepsMembershipAtIdentityCityKey() {
-        CityCollectionResolver.setTestingMappings(
-            cityToCollection: ["Nanshan District|CN": "Shenzhen|CN"],
-            collectionTitles: ["Shenzhen|CN": "Shenzhen"]
-        )
-
         var index = CityMembershipIndex()
         let journey = makeJourney(
             id: "journey-1",

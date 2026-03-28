@@ -15,10 +15,10 @@ enum PostcardCityOptionsPresentation {
             ordered.append((trimmedID, trimmedName))
         }
 
-        let cityByCollectionKey: [String: CachedCity] = {
+        let cityByKey: [String: CachedCity] = {
             var map: [String: CachedCity] = [:]
             for city in cachedCities where !(city.isTemporary ?? false) {
-                let id = CityCollectionResolver.resolveCollectionKey(cityKey: city.id.trimmingCharacters(in: .whitespacesAndNewlines))
+                let id = city.id.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !id.isEmpty { map[id] = city }
             }
             return map
@@ -26,17 +26,16 @@ enum PostcardCityOptionsPresentation {
 
         // 1) City library entries first — use the single source of truth.
         for city in cachedCities where !(city.isTemporary ?? false) {
-            let id = CityCollectionResolver.resolveCollectionKey(cityKey: city.id.trimmingCharacters(in: .whitespacesAndNewlines))
+            let id = city.id.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !id.isEmpty else { continue }
             appendOption(id: id, name: city.displayTitle)
         }
 
         // 2) Journey candidates — only adds cities not already in the library.
         for journey in journeyCandidates {
-            let rawID = journey.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
-            let id = CityCollectionResolver.resolveCollectionKey(cityKey: rawID)
+            let id = journey.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !id.isEmpty else { continue }
-            if let city = cityByCollectionKey[id] {
+            if let city = cityByKey[id] {
                 appendOption(id: id, name: city.displayTitle)
             } else {
                 let keyName = id.split(separator: "|", omittingEmptySubsequences: false).first.map(String.init) ?? ""

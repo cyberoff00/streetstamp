@@ -112,8 +112,14 @@ enum AppJourneySyncCoordinator {
             countryISO2: lifelogStore.countryISO2 ?? locationHub.countryISO2
         )
 
-        // Track tile rebuild is deferred — triggered lazily by onChange(trackTileRevision)
-        // and onChange(currentTab) when user navigates to the lifelog tab.
+        // Eagerly kick off track tile rebuild so lifelog data is ready before
+        // the user switches to the lifelog tab.  Runs on .utility and does not
+        // block the startup path — the city warmup above already returned.
+        eagerTrackTileRebuild(
+            journeyStore: journeyStore,
+            lifelogStore: lifelogStore,
+            trackTileStore: trackTileStore
+        )
 
         // Phase 3: Deferred non-critical services
         Task { @MainActor in
@@ -204,7 +210,11 @@ enum AppJourneySyncCoordinator {
             countryISO2: lifelogStore.countryISO2 ?? locationHub.countryISO2
         )
 
-        // Track tile rebuild deferred — triggered by onChange handlers when needed.
+        eagerTrackTileRebuild(
+            journeyStore: journeyStore,
+            lifelogStore: lifelogStore,
+            trackTileStore: trackTileStore
+        )
 
         applyIdleLocationPolicy(true)
         syncMotionActivityPolicy()
@@ -219,6 +229,40 @@ enum AppJourneySyncCoordinator {
                 cityCache: cityCache,
                 cityRenderCache: cityRenderCache,
                 limit: 16
+            )
+        }
+    }
+
+    /// Fire-and-forget track tile rebuild so tiles are ready before the user
+    /// opens the lifelog tab.  Runs on `.utility` to avoid competing with
+    /// UI-critical startup work.  If manifest already matches, this is a
+    /// near-instant no-op (just ensures tile data is in memory).
+    @MainActor
+    private static func eagerTrackTileRebuild(
+        journeyStore: JourneyStore,
+        lifelogStore: LifelogStore,
+        trackTileStore: TrackTileStore,
+        zoom: Int = TrackRenderAdapter.unifiedRenderZoom
+    ) {
+        let journeyRevision = journeyStore.trackTileRevision
+        let passiveRevision = lifelogStore.trackTileRevision
+        if let manifest = trackTileStore.currentManifest,
+           manifest.zoom == zoom,
+           manifest.journeyRevision == journeyRevision,
+           manifest.passiveRevision == passiveRevision {
+            trackTileStore.ensureTilesLoaded(zoom: zoom)
+            return
+        }
+        Task.detached(priority: .utility) {
+            async let journeyEvents = journeyStore.trackRenderEventsAsync()
+            async let passiveEvents = lifelogStore.trackRenderEventsAsync()
+            let (je, pe) = await (journeyEvents, passiveEvents)
+            try? trackTileStore.refresh(
+                journeyEvents: je,
+                passiveEvents: pe,
+                journeyRevision: journeyRevision,
+                passiveRevision: passiveRevision,
+                zoom: zoom
             )
         }
     }

@@ -3,124 +3,24 @@ import MapKit
 import SwiftUI
 import Combine   // ✅ 必须：ObservableObject / @Published
 
-enum CityCollectionResolver {
-    fileprivate struct Mapping: Decodable {
-        var cityToCollection: [String: String] = [:]
-        var collectionTitles: [String: String] = [:]
-    }
-
-    private static var testingMapping = Mapping()
-    private static let bundleMapping: Mapping = loadBundleMapping()
-
-    static func resolveCollectionKey(cityKey: String) -> String {
-        let trimmed = cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return trimmed }
-        return activeMapping.cityToCollection[trimmed] ?? trimmed
-    }
-
-    static func resolveCollectionKey(for journey: JourneyRoute) -> String {
-        resolveCollectionKey(cityKey: journey.startCityKey ?? journey.cityKey)
-    }
-
-    static func resolveCollectionKey(
-        for journey: JourneyRoute,
-        cachedCitiesByKey: [String: CachedCity]
-    ) -> String {
-        let rawKey = (journey.startCityKey ?? journey.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !rawKey.isEmpty else { return rawKey }
-        if let cached = cachedCitiesByKey[rawKey] {
-            return resolveCollectionKey(for: cached)
-        }
-        return resolveCollectionKey(cityKey: rawKey)
-    }
-
-    static func resolveCollectionKey(
-        cityKey: String,
-        selectedDisplayLevelRaw: String?,
-        availableLevelNamesRaw: [String: String]?,
-        iso2: String?
-    ) -> String {
-        let trimmed = cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return trimmed }
-
-        // Use raw identity (cityKey) to query mapping, not dynamic key based on user selection
-        return activeMapping.cityToCollection[trimmed] ?? trimmed
-    }
-
-    static func resolveCollectionKey(for cachedCity: CachedCity) -> String {
-        resolveCollectionKey(
-            cityKey: cachedCity.cityKey,
-            selectedDisplayLevelRaw: cachedCity.selectedDisplayLevelRaw,
-            availableLevelNamesRaw: cachedCity.availableLevelNames,
-            iso2: cachedCity.countryISO2
-        )
-    }
-
-    static func configuredTitle(for collectionKey: String) -> String? {
-        let trimmed = collectionKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        return activeMapping.collectionTitles[trimmed]
-    }
-
-    static func setTestingMappings(
-        cityToCollection: [String: String],
-        collectionTitles: [String: String]
-    ) {
-        testingMapping = Mapping(cityToCollection: cityToCollection, collectionTitles: collectionTitles)
-    }
-
-    static func resetForTesting() {
-        testingMapping = Mapping()
-    }
-
-    private static var activeMapping: Mapping {
-        var merged = bundleMapping
-        if !testingMapping.cityToCollection.isEmpty {
-            merged.cityToCollection.merge(testingMapping.cityToCollection) { _, new in new }
-        }
-        if !testingMapping.collectionTitles.isEmpty {
-            merged.collectionTitles.merge(testingMapping.collectionTitles) { _, new in new }
-        }
-        return merged
-    }
-
-    private static func loadBundleMapping() -> Mapping {
-        guard let url = Bundle.main.url(forResource: "CityCollectionMapping", withExtension: "json"),
-              let data = try? Data(contentsOf: url),
-              let decoded = try? JSONDecoder().decode(Mapping.self, from: data) else {
-            return Mapping()
-        }
-        return decoded
-    }
-
-    private static func iso2FromKey(_ key: String) -> String? {
-        key
-            .split(separator: "|", omittingEmptySubsequences: false)
-            .dropFirst()
-            .first
-            .map(String.init)
-    }
-}
-
 enum CityDisplayResolver {
     static func title(
-        for collectionKey: String,
+        for cityKey: String,
         fallbackTitle: String,
         locale: Locale = LanguagePreference.shared.displayLocale
     ) -> String {
-        let trimmedKey = collectionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedKey = cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedKey.isEmpty else { return fallbackTitle }
-        let configured = CityCollectionResolver.configuredTitle(for: trimmedKey) ?? fallbackTitle
         return CityDisplayTitlePresentation.title(
             cityKey: trimmedKey,
             iso2: iso2(from: trimmedKey),
-            fallbackTitle: configured,
+            fallbackTitle: fallbackTitle,
             locale: locale
         )
     }
 
-    static func iso2(from collectionKey: String) -> String? {
-        collectionKey
+    static func iso2(from cityKey: String) -> String? {
+        cityKey
             .split(separator: "|", omittingEmptySubsequences: false)
             .dropFirst()
             .first
@@ -221,27 +121,24 @@ final class CityLibraryVM: ObservableObject {
 
     func upsertCity(cityKey: String, journeyStore: JourneyStore, cityCache: CityCache) {
         self.cityCache = cityCache
-        let collectionKey = cityCache.cachedCities
-            .first(where: { $0.id == cityKey && !($0.isTemporary ?? false) })
-            .map(CityCollectionResolver.resolveCollectionKey(for:))
-            ?? CityCollectionResolver.resolveCollectionKey(cityKey: cityKey)
+        let trimmedKey = cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let nextCities = Self.buildCities(
             journeys: journeyStore.journeys,
             cachedCities: cityCache.cachedCities
         )
 
-        if let next = nextCities.first(where: { $0.id == collectionKey }) {
-            if let idx = cities.firstIndex(where: { $0.id == collectionKey }) {
+        if let next = nextCities.first(where: { $0.id == trimmedKey }) {
+            if let idx = cities.firstIndex(where: { $0.id == trimmedKey }) {
                 cities[idx] = next
             } else {
                 cities.append(next)
             }
         } else {
-            removeCity(cityKey: collectionKey)
+            removeCity(cityKey: trimmedKey)
         }
         sortCities()
         Task {
-            await prefetchDisplayNameDetached(cityID: collectionKey)
+            await prefetchDisplayNameDetached(cityID: trimmedKey)
         }
     }
 
@@ -294,7 +191,7 @@ final class CityLibraryVM: ObservableObject {
         let cached = cachedCities.filter { !($0.isTemporary ?? false) }
 
         struct Aggregate {
-            let collectionKey: String
+            let cityKey: String
             var fallbackName: String
             var countryISO2: String?
             var sourceCityKeys: [String]
@@ -317,11 +214,10 @@ final class CityLibraryVM: ObservableObject {
 
         var grouped: [String: Aggregate] = [:]
         for c in cached {
-            let collectionKey = CityCollectionResolver.resolveCollectionKey(for: c)
+            let key = c.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
             let resolvedJourneys = c.journeyIds.compactMap { byId[$0] }.filter { $0.isCompleted }
-            let fallbackName = CityCollectionResolver.configuredTitle(for: collectionKey) ?? c.name
 
-            if var existing = grouped[collectionKey] {
+            if var existing = grouped[key] {
                 let existingIDs = Set(existing.journeys.map(\.id))
                 let appended = resolvedJourneys.filter { !existingIDs.contains($0.id) }
                 existing.journeys.append(contentsOf: appended)
@@ -343,11 +239,11 @@ final class CityLibraryVM: ObservableObject {
                 existing.localizedDisplayNameByLocale = existing.localizedDisplayNameByLocale ?? c.localizedDisplayNameByLocale
                 existing.resolvedDisplayName = existing.resolvedDisplayName ?? c.resolvedDisplayName
                 existing.resolvedDisplayNameLocaleID = existing.resolvedDisplayNameLocaleID ?? c.resolvedDisplayNameLocaleID
-                grouped[collectionKey] = existing
+                grouped[key] = existing
             } else {
-                grouped[collectionKey] = Aggregate(
-                    collectionKey: collectionKey,
-                    fallbackName: fallbackName,
+                grouped[key] = Aggregate(
+                    cityKey: key,
+                    fallbackName: c.name,
                     countryISO2: c.countryISO2,
                     sourceCityKeys: [c.cityKey],
                     journeys: resolvedJourneys,
@@ -381,9 +277,9 @@ final class CityLibraryVM: ObservableObject {
             }()
             return City(
                 displayName: resolvedName,
-                id: aggregate.collectionKey,
+                id: aggregate.cityKey,
                 name: aggregate.fallbackName,
-                countryISO2: aggregate.countryISO2 ?? CityDisplayResolver.iso2(from: aggregate.collectionKey),
+                countryISO2: aggregate.countryISO2 ?? CityDisplayResolver.iso2(from: aggregate.cityKey),
                 journeys: aggregate.journeys,
                 boundaryPolygon: aggregate.boundaryPolygon,
                 anchor: aggregate.anchor,

@@ -1116,3 +1116,30 @@
 "auth_terms_and" = "和";
 "auth_terms_privacy_policy" = "隐私政策";
 "auth_terms_required" = "请先同意用户协议和隐私政策。";
+
+// MARK: - FAQ
+"faq_title" = "常见问题";
+"faq_subtitle" = "关于 Worldo 的常见问题解答";
+"settings_faq_title" = "常见问题";
+"faq_q_track_accuracy" = "为什么轨迹不准？";
+"faq_a_track_accuracy" = "GPS 精度取决于你的环境。高楼、隧道和室内会削弱 GPS 信号，导致定位漂移。建议将定位权限设为「始终允许」或「使用期间」，尽量在开阔区域使用。运动模式使用更高精度的 GPS 采样，轨迹会更准确。";
+"faq_q_straight_lines" = "为什么轨迹会拉直线？";
+"faq_a_straight_lines" = "直线出现在 GPS 信号丢失时（如地铁、隧道、建筑物内）。App 会将最后已知位置与信号恢复处连接。这是正常的 GPS 行为。运动模式通过更频繁的采样可以减少这种情况，但在信号盲区无法完全避免。";
+"faq_q_battery" = "Worldo 耗电吗？";
+"faq_a_battery" = "追踪 Journey 时会使用 GPS，确实会消耗电量。运动模式比日常模式更耗电，因为 GPS 采样频率更高。不追踪时，后台 Lifelog 记录通过低精度定位更新，耗电量很小。你可以在 设置 → 后台记录模式 调整精度。";
+"faq_q_data_storage" = "我的数据存在哪里？";
+"faq_a_data_storage" = "所有 Journey 数据、照片和 Lifelog 首先存储在本地设备上。如果你有账号，数据会同步到 iCloud 备份。你的数据不会与任何第三方共享。你可以在 设置 → 数据管理 中手动备份或恢复 iCloud 数据。";
+"faq_q_city_wrong" = "为什么 Journey 的城市归属不对？";
+"faq_a_city_wrong" = "城市归属基于你开始 Journey 的 GPS 位置，通过 Apple 的地理编码服务解析。有时地理编码数据库中的城市边界可能与你的预期不同。这种情况会随着 Apple 更新数据而改善。";
+"faq_q_sport_vs_daily" = "运动模式和日常模式有什么区别？";
+"faq_a_sport_vs_daily" = "运动模式以高精度录制（3米采样间隔），带路线平滑处理 — 适合跑步、骑行或徒步等需要精确轨迹的场景。日常模式为省电优化（12米采样），会根据出行方式自动调整 — 适合通勤或全天记录等更看重续航的场景。";
+"faq_q_icloud_sync" = "iCloud 同步怎么运作？";
+"faq_a_icloud_sync" = "Worldo 会将你的 Journey、记忆、Lifelog 和设置同步到你的个人 iCloud 存储。有账号时会自动同步。你也可以在 设置 → 数据管理 → iCloud 备份 中手动触发完整备份或恢复。同步使用你自己的 iCloud 配额，不是 Worldo 的服务器。";
+"faq_q_location_permission" = "Worldo 需要什么定位权限？";
+"faq_a_location_permission" = "为获得最佳体验，建议授予「始终允许」定位权限。这样可以启用后台 Lifelog 记录和追踪时的实时活动。「使用期间」可以用于主动追踪，但会禁用后台功能。你可以随时在 iOS 设置 → Worldo → 定位 中更改。";
+
+// MARK: - Feedback & Rating
+"settings_feedback_title" = "发送反馈";
+"settings_rate_app_title" = "去 APP STORE 评分";
+"feedback_email_subject" = "Worldo 反馈 (v%@)";
+"feedback_email_body" = "\n\n---\n设备: %@\niOS: %@\nApp: v%@";

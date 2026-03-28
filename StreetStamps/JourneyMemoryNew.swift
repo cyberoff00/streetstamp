@@ -413,10 +413,7 @@ struct JourneyMemoryMainView: View {
         var countryForKey: [String: String] = [:]
 
         for j in journeys {
-            let rawKey = (j.startCityKey ?? j.cityKey)
-            let cached = citiesByKey[rawKey]
-            let key = cached.map(CityCollectionResolver.resolveCollectionKey(for:))
-                ?? CityCollectionResolver.resolveCollectionKey(cityKey: rawKey)
+            let key = (j.startCityKey ?? j.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
 
             buckets[key, default: [:]][j.id] = j.memories
 

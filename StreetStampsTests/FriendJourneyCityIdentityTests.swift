@@ -4,7 +4,6 @@ import XCTest
 final class FriendJourneyCityIdentityTests: XCTestCase {
     override func tearDown() {
         super.tearDown()
-        CityCollectionResolver.resetForTesting()
     }
 
     func test_resolveCityID_prefersStableCityIDWhenTitleLanguageDiffers() {
@@ -184,32 +183,4 @@ final class FriendJourneyCityIdentityTests: XCTestCase {
         XCTAssertEqual(merged.startCityKey, "Shenzhen|CN")
     }
 
-    func test_resolveCollectionKey_mapsFriendJourneyCityIDIntoMergedCollectionKey() {
-        CityCollectionResolver.setTestingMappings(
-            cityToCollection: ["Nanshan District|CN": "Shenzhen|CN"],
-            collectionTitles: ["Shenzhen|CN": "Shenzhen"]
-        )
-
-        let journey = FriendSharedJourney(
-            id: "journey-nanshan",
-            title: "Nanshan Walk",
-            cityID: "Nanshan District|CN",
-            activityTag: nil,
-            overallMemory: nil,
-            distance: 3_000,
-            startTime: Date(timeIntervalSince1970: 1_700_000_000),
-            endTime: Date(timeIntervalSince1970: 1_700_000_600),
-            visibility: .friendsOnly,
-            routeCoordinates: [],
-            memories: []
-        )
-        let cards = [
-            FriendCityCard(id: "Nanshan District|CN", name: "Nanshan District", countryISO2: "CN")
-        ]
-
-        XCTAssertEqual(
-            FriendJourneyCityIdentity.resolveCollectionKey(for: journey, cards: cards),
-            "Shenzhen|CN"
-        )
-    }
 }

@@ -119,9 +119,7 @@ struct PostcardComposerView: View {
     }
 
     private func localizedCityName(for journey: JourneyRoute) -> String {
-        let key = CityCollectionResolver.resolveCollectionKey(
-            cityKey: journey.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        )
+        let key = journey.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
         if let cachedCity = cityCache.cachedCities.first(where: { $0.id == key && !($0.isTemporary ?? false) }) {
             return cachedCity.displayTitle
         }
@@ -133,9 +131,7 @@ struct PostcardComposerView: View {
     }
 
     private func resolvedLocalizedCityName(for journey: JourneyRoute) -> String {
-        let key = CityCollectionResolver.resolveCollectionKey(
-            cityKey: journey.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        )
+        let key = journey.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
         return localizedCityNamesByID[key] ?? localizedCityName(for: journey)
     }
 
@@ -493,31 +489,54 @@ private struct RecipientPickerSheet: View {
 
     var body: some View {
         NavigationStack {
-            List(friends) { friend in
-                Button {
-                    onSelect(
-                        PostcardRecipient(
-                            userID: friend.id,
-                            displayName: friend.displayName
-                        )
-                    )
-                    dismiss()
-                } label: {
-                    HStack(spacing: 12) {
-                        Text(friend.displayName)
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(FigmaTheme.text)
-                        Spacer()
-                        if selectedRecipient?.userID == friend.id {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(FigmaTheme.primary)
-                                .transition(.scale.combined(with: .opacity))
-                                .symbolEffect(.bounce, value: selectedRecipient?.userID)
+            ScrollView(showsIndicators: false) {
+                LazyVStack(spacing: 12) {
+                    ForEach(friends) { friend in
+                        let isSelected = selectedRecipient?.userID == friend.id
+                        Button {
+                            onSelect(
+                                PostcardRecipient(
+                                    userID: friend.id,
+                                    displayName: friend.displayName
+                                )
+                            )
+                            dismiss()
+                        } label: {
+                            HStack(spacing: 14) {
+                                RobotRendererView(size: 36, face: .front, loadout: friend.loadout)
+                                    .frame(width: 52, height: 52)
+                                    .background(Color(red: 227.0 / 255.0, green: 239.0 / 255.0, blue: 235.0 / 255.0))
+                                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+                                Text(friend.displayName)
+                                    .font(.system(size: 15, weight: .bold))
+                                    .foregroundColor(FigmaTheme.text)
+
+                                Spacer(minLength: 8)
+
+                                if isSelected {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.system(size: 22))
+                                        .foregroundColor(FigmaTheme.primary)
+                                        .transition(.scale.combined(with: .opacity))
+                                        .symbolEffect(.bounce, value: selectedRecipient?.userID)
+                                }
+                            }
+                            .padding(14)
+                            .figmaSurfaceCard(radius: 24)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                                    .stroke(isSelected ? FigmaTheme.primary : Color.clear, lineWidth: 2)
+                            )
                         }
+                        .buttonStyle(.plain)
                     }
                 }
-                .buttonStyle(.plain)
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+                .padding(.bottom, 32)
             }
+            .background(FigmaTheme.background)
             .navigationTitle(L10n.t("postcard_select_recipient_title"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

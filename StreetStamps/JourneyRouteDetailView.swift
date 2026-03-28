@@ -59,12 +59,9 @@ struct JourneyRouteDetailView: View {
             localizedCityNameByKey: [:],
             cachedCitiesByKey: cachedCitiesByKey
         )
-        let collectionKey = CityCollectionResolver.resolveCollectionKey(
-            for: journey,
-            cachedCitiesByKey: cachedCitiesByKey
-        )
+        let cityKey = (journey.startCityKey ?? journey.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
         return CityDisplayResolver.title(
-            for: collectionKey,
+            for: cityKey,
             fallbackTitle: fallbackTitle
         )
     }

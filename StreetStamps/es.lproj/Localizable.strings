@@ -130,7 +130,7 @@
 "delete_all_notes_title" = "Delete all notes?";
 "delete_city_alert_message" = "\"%@\" will be removed from your City Library. This can't be undone.";
 "delete_city_alert_title" = "Delete this city card?";
-"delete_journey_confirm_title" = "Delete this journey?";
+"delete_journey_confirm_title" = "Delete This Journey";
 "details_unavailable_message" = "Only public thumbnails are available for this friend's city cards right now.";
 "details_unavailable_title" = "Details unavailable";
 "discard" = "Discard";

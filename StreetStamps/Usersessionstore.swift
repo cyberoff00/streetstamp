@@ -61,7 +61,9 @@ final class UserSessionStore: ObservableObject {
 
     init() {
         let guestID = Self.loadOrCreateGuestID()
-        self.activeLocalProfileID = Self.loadOrCreateActiveLocalProfileID(guestID: guestID)
+        let resolvedProfileID = Self.loadOrCreateActiveLocalProfileID(guestID: guestID)
+        self.activeLocalProfileID = resolvedProfileID
+        print("[DEBUG] activeLocalProfileID = \(resolvedProfileID), guestID = \(guestID)")
         let savedPending = UserDefaults.standard.string(forKey: Self.pendingGuestMigrationKey)
         self.pendingMigrationFromGuestUserID = savedPending
         self.firebaseAccountState = Self.loadFirebaseAccountState()
@@ -291,7 +293,6 @@ final class UserSessionStore: ObservableObject {
         persistSession()
         persistFirebaseAccountState()
         clearPendingGuestMigrationMarker()
-        switchActiveLocalProfileID(to: "account_\(auth.userId)")
     }
 
     func applyFirebaseAccountSession(
@@ -326,7 +327,6 @@ final class UserSessionStore: ObservableObject {
         if !preserveGuestBoundary {
             clearPendingGuestMigrationMarker()
         }
-        switchActiveLocalProfileID(to: "account_\(appUserID)")
     }
 
     func updateCachedFirebaseIDToken(_ token: String?) {
@@ -503,6 +503,14 @@ final class UserSessionStore: ObservableObject {
     private static func loadOrCreateActiveLocalProfileID(guestID: String) -> String {
         if let existing = UserDefaults.standard.string(forKey: activeLocalProfileIDKey),
            !existing.isEmpty {
+            // Fix: account_ prefix was incorrectly written by a prior bug.
+            // Local storage must always use local_ scope, not account scope.
+            if existing.hasPrefix("account_") {
+                let corrected = "local_\(guestID)"
+                UserDefaults.standard.set(corrected, forKey: activeLocalProfileIDKey)
+                print("[DEBUG] corrected activeLocalProfileID from \(existing) → \(corrected)")
+                return corrected
+            }
             return existing
         }
 
@@ -513,6 +521,7 @@ final class UserSessionStore: ObservableObject {
 
     private func switchActiveLocalProfileID(to newID: String) {
         guard activeLocalProfileID != newID else { return }
+        print("[DEBUG] switchActiveLocalProfileID: \(activeLocalProfileID) → \(newID)")
         activeLocalProfileID = newID
         UserDefaults.standard.set(newID, forKey: Self.activeLocalProfileIDKey)
     }

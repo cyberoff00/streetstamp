@@ -952,13 +952,12 @@ enum JourneyCityNamePresentation {
         cachedCitiesByKey: [String: CachedCity],
         locale: Locale = LanguagePreference.shared.displayLocale
     ) -> String {
-        let rawKey = journey.stableCityKey ?? ""
-        let key = CityCollectionResolver.resolveCollectionKey(cityKey: rawKey)
+        let key = (journey.stableCityKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if let localized = localizedCityNameByKey[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
            !localized.isEmpty {
             return localized
         }
-        if let cachedCity = cachedCitiesByKey[rawKey] ?? cachedCitiesByKey[key] {
+        if let cachedCity = cachedCitiesByKey[key] {
             let title = cachedCity.displayTitle.trimmingCharacters(in: .whitespacesAndNewlines)
             if !title.isEmpty {
                 return title

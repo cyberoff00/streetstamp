@@ -69,8 +69,7 @@ enum FriendJourneyCityIdentity {
     }
 
     static func resolveCollectionKey(for journey: FriendSharedJourney, cards: [FriendCityCard]) -> String {
-        let rawCityID = resolveCityID(for: journey, cards: cards)
-        return CityCollectionResolver.resolveCollectionKey(cityKey: rawCityID)
+        resolveCityID(for: journey, cards: cards)
     }
 
     static func stableCityID(from route: JourneyRoute) -> String? {

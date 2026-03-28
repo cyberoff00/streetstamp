@@ -1408,9 +1408,8 @@ final class CityCache: ObservableObject {
                 // Final fallback - if no reliable key exists, skip card creation.
                 let fallbackKey = self.normalizedCardKey(journey.canonicalCityKeyFallback)
                 guard let fallbackKey else { return }
-                let collectionKey = CityCollectionResolver.resolveCollectionKey(cityKey: fallbackKey)
                 let fallbackName = CityDisplayResolver.title(
-                    for: collectionKey,
+                    for: fallbackKey,
                     fallbackTitle: journey.displayCityName
                 )
                 let fallbackIso = (journey.countryISO2 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
@@ -1435,9 +1434,8 @@ final class CityCache: ObservableObject {
         guard let fallbackKey = normalizedCardKey(journey.canonicalCityKeyFallback) else {
             return nil
         }
-        let collectionKey = CityCollectionResolver.resolveCollectionKey(cityKey: fallbackKey)
         let fallbackName = CityDisplayResolver.title(
-            for: collectionKey,
+            for: fallbackKey,
             fallbackTitle: journey.displayCityName
         )
         let fallbackIso = (journey.countryISO2 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()

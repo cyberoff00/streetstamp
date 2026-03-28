@@ -56,7 +56,8 @@
         { "id": "pat_006", "nameKey": "Pat 006", "layer": "accessory", "images": { "front": "front_pat006", "right": null, "back": null, "left": null } },
         { "id": "pat_007", "nameKey": "Pat 007", "layer": "accessory", "images": { "front": "front_pat007", "right": null, "back": null, "left": null } },
         { "id": "pat_008", "nameKey": "Pat 008", "layer": "accessory", "images": { "front": "front_pat008", "right": null, "back": null, "left": null } },
-        { "id": "pat_010", "nameKey": "Pat 010", "layer": "accessory", "images": { "front": "front_pat010", "right": null, "back": null, "left": null } }
+        { "id": "pat_010", "nameKey": "Pat 010", "layer": "accessory", "images": { "front": "front_pat010", "right": null, "back": null, "left": null } },
+        { "id": "pat_011", "nameKey": "Pat 011", "layer": "accessory", "images": { "front": "front_pat011", "right": null, "back": null, "left": null } }
       ]
     },
     {
@@ -99,7 +100,9 @@
         { "id": "suit_0007", "nameKey": "Suit 0007", "layer": "suit", "images": { "front": "front_suit007", "right": null, "back": null, "left": null } },
         { "id": "suit_0008", "nameKey": "Suit 0008", "layer": "suit", "images": { "front": "front_suit008", "right": null, "back": null, "left": null } },
         { "id": "suit_0009", "nameKey": "Suit 0009", "layer": "suit", "images": { "front": "front_suit009", "right": null, "back": null, "left": null } },
-        { "id": "suit_0010", "nameKey": "Suit 0010", "layer": "suit", "images": { "front": "front_suit010", "right": null, "back": null, "left": null } }
+        { "id": "suit_0010", "nameKey": "Suit 0010", "layer": "suit", "images": { "front": "front_suit010", "right": null, "back": null, "left": null } },
+        { "id": "suit_0011", "nameKey": "Suit 0011", "layer": "suit", "images": { "front": "front_suit011", "right": null, "back": null, "left": null } },
+        { "id": "suit_0012", "nameKey": "Suit 0012", "layer": "suit", "images": { "front": "front_suit012", "right": null, "back": null, "left": null } }
       ]
     },
     {
@@ -152,7 +155,9 @@
       "items": [
         { "id": "none", "nameKey": "equipment_item_none", "layer": "shoes", "images": { "front": null, "right": null, "back": null, "left": null } },
         { "id": "shoes_0001", "nameKey": "Shoes 0001", "layer": "shoes", "images": { "front": "front_shoes001", "right": null, "back": null, "left": null } },
-        { "id": "shoes_0002", "nameKey": "Shoes 0002", "layer": "shoes", "images": { "front": "front_shoes002", "right": null, "back": null, "left": null } }
+        { "id": "shoes_0002", "nameKey": "Shoes 0002", "layer": "shoes", "images": { "front": "front_shoes002", "right": null, "back": null, "left": null } },
+        { "id": "shoes_0003", "nameKey": "Shoes 0003", "layer": "shoes", "images": { "front": "front_shoes003", "right": null, "back": null, "left": null } },
+        { "id": "shoes_0004", "nameKey": "Shoes 0004", "layer": "shoes", "images": { "front": "front_shoes004", "right": null, "back": null, "left": null } }
       ]
     },
     {
@@ -214,7 +219,10 @@
         { "id": "acc_011", "nameKey": "Accessory 011", "layer": "accessory", "images": { "front": "front_ac012", "right": null, "back": null, "left": null } },
         { "id": "acc_012", "nameKey": "Accessory 012", "layer": "accessory", "images": { "front": "front_ac013", "right": null, "back": null, "left": null } },
         { "id": "acc_013", "nameKey": "Accessory 013", "layer": "accessory", "images": { "front": "front_ac014", "right": null, "back": null, "left": null } },
-        { "id": "acc_015", "nameKey": "Accessory 015", "layer": "accessory", "images": { "front": "front_ac016", "right": null, "back": null, "left": null } }
+        { "id": "acc_015", "nameKey": "Accessory 015", "layer": "accessory", "images": { "front": "front_ac016", "right": null, "back": null, "left": null } },
+        { "id": "acc_016", "nameKey": "Accessory 016", "layer": "accessory", "images": { "front": "front_ac017", "right": null, "back": null, "left": null } },
+        { "id": "acc_017", "nameKey": "Accessory 017", "layer": "accessory", "images": { "front": "front_ac018", "right": null, "back": null, "left": null } },
+        { "id": "acc_018", "nameKey": "Accessory 018", "layer": "accessory", "images": { "front": "front_ac019", "right": null, "back": null, "left": null } }
       ]
     }
   ]

@@ -126,6 +126,9 @@ struct SettingsInformationRowPresentation: Equatable {
         case checkUpdates
         case aboutUs
         case privacyPolicy
+        case faq
+        case feedback
+        case rateApp
     }
 }
 
@@ -220,6 +223,30 @@ enum SettingsInformationPresentation {
                 badgeText: nil,
                 rowHeight: 64,
                 destination: .privacyPolicy
+            ),
+            SettingsInformationRowPresentation(
+                title: L10n.t("settings_faq_title"),
+                icon: "questionmark.circle",
+                iconColor: FigmaTheme.primary,
+                badgeText: nil,
+                rowHeight: 64,
+                destination: .faq
+            ),
+            SettingsInformationRowPresentation(
+                title: L10n.t("settings_feedback_title"),
+                icon: "envelope",
+                iconColor: FigmaTheme.secondary,
+                badgeText: nil,
+                rowHeight: 64,
+                destination: .feedback
+            ),
+            SettingsInformationRowPresentation(
+                title: L10n.t("settings_rate_app_title"),
+                icon: "star",
+                iconColor: .orange,
+                badgeText: nil,
+                rowHeight: 64,
+                destination: .rateApp
             )
         ]
     }
@@ -329,9 +356,6 @@ struct SettingsView: View {
                 subscriptionSection
                 utilitiesSection
                 generalSection
-                if sessionStore.isLoggedIn && FeatureFlagStore.shared.socialEnabled {
-                    blockedUsersSection
-                }
                 infoSection
                 if sessionStore.isLoggedIn && !sessionStore.hasEmailPassword {
                     linkEmailSection
@@ -1158,7 +1182,20 @@ struct SettingsView: View {
                             )
                         }
                         .buttonStyle(.plain)
-                    case .checkUpdates, .privacyPolicy:
+                    case .faq:
+                        NavigationLink {
+                            FAQView()
+                        } label: {
+                            settingsRowLabel(
+                                title: row.title,
+                                icon: row.icon,
+                                iconColor: row.iconColor,
+                                badgeText: row.badgeText,
+                                rowHeight: row.rowHeight
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    case .checkUpdates, .privacyPolicy, .feedback, .rateApp:
                         settingsRow(
                             title: row.title,
                             icon: row.icon,
@@ -1173,11 +1210,30 @@ struct SettingsView: View {
                                 if let url = URL(string: "https://cyberoff00.github.io/streetstamp/privacy-policy.html") {
                                     UIApplication.shared.open(url)
                                 }
-                            case .aboutUs:
+                            case .feedback:
+                                openFeedbackEmail()
+                            case .rateApp:
+                                openAppStoreRating()
+                            case .aboutUs, .faq:
                                 break
                             }
                         }
                     }
+                }
+
+                if sessionStore.isLoggedIn && FeatureFlagStore.shared.socialEnabled {
+                    NavigationLink {
+                        BlockedUsersListView()
+                    } label: {
+                        settingsRowLabel(
+                            title: L10n.t("settings_blocked_users_row"),
+                            icon: "hand.raised",
+                            iconColor: .red.opacity(0.75),
+                            badgeText: blockStore.blockedUsers.isEmpty ? nil : "\(blockStore.blockedUsers.count)",
+                            rowHeight: 64
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -1498,6 +1554,30 @@ struct SettingsView: View {
     private func showPlaceholder(_ title: String) {
         comingSoonTitle = title
         showComingSoon = true
+    }
+
+    private func openFeedbackEmail() {
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let systemVersion = UIDevice.current.systemVersion
+        let deviceModel = UIDevice.current.model
+        let subject = String(format: L10n.t("feedback_email_subject"), appVersion)
+        let body = String(format: L10n.t("feedback_email_body"), deviceModel, systemVersion, appVersion)
+        let mailto = "feedback@worldo.app"  // TODO: replace with actual email
+        var components = URLComponents(string: "mailto:\(mailto)")!
+        components.queryItems = [
+            URLQueryItem(name: "subject", value: subject),
+            URLQueryItem(name: "body", value: body)
+        ]
+        if let url = components.url {
+            UIApplication.shared.open(url)
+        }
+    }
+
+    private func openAppStoreRating() {
+        // TODO: replace APP_ID with actual App Store ID
+        if let url = URL(string: "itms-apps://itunes.apple.com/app/idAPP_ID?action=write-review") {
+            UIApplication.shared.open(url)
+        }
     }
 
     private func refreshICloudAvailability() async {
