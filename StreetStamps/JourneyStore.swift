@@ -182,6 +182,15 @@ final class JourneyStore: ObservableObject {
 
         // Best-effort: restore "ongoing" journey pointer after a cold start.
         self.latestOngoing = loaded.first(where: { $0.endTime == nil })
+
+        // Pre-seed delta persistence offset so that coordinates already recovered
+        // from the delta file are not re-written on the first flush after cold start.
+        if let ongoing = self.latestOngoing {
+            self.currentPersistJourneyId = ongoing.id
+            self.lastDeltaPersistCoordCount = ongoing.coordinates.count
+            self.lastSeenCoordCount = ongoing.coordinates.count
+        }
+
         self.hasLoaded = true
         self.bumpTrackTileRevision()
     }
@@ -363,31 +372,62 @@ final class JourneyStore: ObservableObject {
         let budgetPerFlush = max(2, Int((Double(perHour) * interval / 3600.0).rounded(.up)))
         guard coords.count > budgetPerFlush else { return coords }
 
-        return evenlySample(coords, maxPoints: budgetPerFlush)
+        return douglasPeuckerReduce(coords, maxPoints: budgetPerFlush)
     }
 
-    private func evenlySample(_ coords: [CoordinateCodable], maxPoints: Int) -> [CoordinateCodable] {
+    /// Douglas-Peucker simplification: keeps turns, removes points on straight segments.
+    /// Always retains first and last points; selects the `maxPoints` most significant points
+    /// by perpendicular distance from the simplifying line.
+    private func douglasPeuckerReduce(_ coords: [CoordinateCodable], maxPoints: Int) -> [CoordinateCodable] {
         guard maxPoints >= 2 else { return Array(coords.prefix(1)) }
         guard coords.count > maxPoints else { return coords }
 
         let n = coords.count
-        let m = maxPoints
-        var out: [CoordinateCodable] = []
-        out.reserveCapacity(m)
+        // Assign importance to each point. First/last get max importance so they are always kept.
+        var importance = [Double](repeating: 0, count: n)
+        importance[0] = .greatestFiniteMagnitude
+        importance[n - 1] = .greatestFiniteMagnitude
 
-        for i in 0..<m {
-            let t = Double(i) / Double(m - 1)
-            let idx = Int((t * Double(n - 1)).rounded(.toNearestOrAwayFromZero))
-            out.append(coords[min(max(idx, 0), n - 1)])
+        func assignImportance(_ start: Int, _ end: Int) {
+            guard end - start > 1 else { return }
+
+            let ax = coords[start].lon, ay = coords[start].lat
+            let bx = coords[end].lon, by = coords[end].lat
+            let midLat = (ay + by) / 2.0
+            let lonScale = cos(midLat * .pi / 180.0)
+            let dx = (bx - ax) * lonScale
+            let dy = by - ay
+            let lenSq = dx * dx + dy * dy
+
+            var maxDist = 0.0
+            var maxIdx = start + 1
+            for i in (start + 1)..<end {
+                let px = (coords[i].lon - ax) * lonScale
+                let py = coords[i].lat - ay
+                let dist: Double
+                if lenSq < 1e-20 {
+                    dist = sqrt(px * px + py * py)
+                } else {
+                    dist = abs(px * dy - py * dx) / sqrt(lenSq)
+                }
+                if dist > maxDist {
+                    maxDist = dist
+                    maxIdx = i
+                }
+            }
+
+            importance[maxIdx] = maxDist
+            assignImportance(start, maxIdx)
+            assignImportance(maxIdx, end)
         }
 
-        var compact: [CoordinateCodable] = []
-        compact.reserveCapacity(out.count)
-        for c in out {
-            if let last = compact.last, last.lat == c.lat, last.lon == c.lon { continue }
-            compact.append(c)
-        }
-        return compact
+        assignImportance(0, n - 1)
+
+        // Keep the `maxPoints` most important points, preserving original order.
+        var indexed = (0..<n).map { ($0, importance[$0]) }
+        indexed.sort { $0.1 > $1.1 }
+        let kept = Set(indexed.prefix(maxPoints).map { $0.0 })
+        return (0..<n).filter { kept.contains($0) }.map { coords[$0] }
     }
 
     /// Persist a completed journey immediately and ensure list order is updated.

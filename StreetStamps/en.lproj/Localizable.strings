@@ -360,6 +360,8 @@
 "friends_badge_memory" = "MEMORY";
 "friends_delete_friend" = "Delete Friend";
 "friends_empty_activity" = "No friend activity yet";
+"friends_feed_end" = "You're all caught up";
+"friends_feed_end_hint" = "Visit a friend's profile to see more";
 "edit_save_republish_title" = "This journey has been shared";
 "edit_save_republish_action" = "Save & Republish";
 "edit_save_local_only_action" = "Save Locally";

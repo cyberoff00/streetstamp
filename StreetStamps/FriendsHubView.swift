@@ -632,6 +632,8 @@ struct FriendsHubView: View {
                                 }
                             }
                         }
+
+                        feedEndFooter
                     }
                 }
                 .padding(.horizontal, 14)
@@ -901,6 +903,20 @@ struct FriendsHubView: View {
                 .foregroundColor(.secondary)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.top, 28)
+        }
+
+        private var feedEndFooter: some View {
+            VStack(spacing: 6) {
+                Text(L10n.t("friends_feed_end"))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.secondary)
+                Text(L10n.t("friends_feed_end_hint"))
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary.opacity(0.7))
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.top, 20)
+            .padding(.bottom, 8)
         }
 
         private func resolvedDisplayNameForInvite() -> String {

@@ -267,6 +267,8 @@
 "friends_delete_friend" = "Delete Friend";
 "friends_distance_compact_format" = "%.1fkm";
 "friends_empty_activity" = "No friend activity yet";
+"friends_feed_end" = "최근 30일간의 활동만 표시됩니다";
+"friends_feed_end_hint" = "더 보려면 친구 프로필을 방문하세요";
 "edit_save_republish_title" = "이 여행은 이미 공유되었습니다";
 "edit_save_republish_action" = "저장 후 다시 게시";
 "edit_save_local_only_action" = "로컬에만 저장";

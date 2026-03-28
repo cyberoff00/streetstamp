@@ -267,6 +267,8 @@
 "friends_delete_friend" = "刪除好友";
 "friends_distance_compact_format" = "%.1f公里";
 "friends_empty_activity" = "还没有好友動態";
+"friends_feed_end" = "只顯示最近 30 天的動態";
+"friends_feed_end_hint" = "更多動態去好友主頁看看";
 "edit_save_republish_title" = "這段旅程已分享給好友";
 "edit_save_republish_action" = "儲存並重新發佈";
 "edit_save_local_only_action" = "僅儲存到本機";
@@ -639,7 +641,7 @@
 "settings_live_activity_desc" = "在锁屏和灵动岛顯示当前追蹤进度。";
 "settings_live_activity_system_disabled_desc" = "请前往 設置 -> Worldo -> 实时活動 開啟。";
 "settings_live_activity_title" = "实时活動";
-"settings_logout" = "LOG OUT";
+"settings_logout" = "退出登入";
 "settings_logout_confirm_message" = "退出后将切回游客模式，本地数据会保留在当前设备。";
 "settings_logout_confirm_title" = "確認退出登入？";
 "settings_logout_subtitle" = "退出当前账号并切回游客模式";

@@ -267,6 +267,8 @@
 "friends_delete_friend" = "Delete Friend";
 "friends_distance_compact_format" = "%.1fkm";
 "friends_empty_activity" = "No friend activity yet";
+"friends_feed_end" = "最近30日間のアクティビティのみ表示";
+"friends_feed_end_hint" = "もっと見るにはフレンドのプロフィールへ";
 "edit_save_republish_title" = "この旅は共有済みです";
 "edit_save_republish_action" = "保存して再公開";
 "edit_save_local_only_action" = "ローカルに保存";

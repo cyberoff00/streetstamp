@@ -151,15 +151,56 @@ final class JourneysFileStore {
 
                 if !lines.isEmpty {
                     let decoder = JSONDecoder()
+                    // Collect all delta coords, then deduplicate.
+                    var allDelta: [CoordinateCodable] = []
                     for line in lines {
                         guard !line.isEmpty else { continue }
                         if let data = line.data(using: .utf8),
                            let chunk = try? decoder.decode([CoordinateCodable].self, from: data) {
-                            for c in chunk {
-                                if let last = out.coordinates.last, last.lat == c.lat, last.lon == c.lon {
-                                    continue
-                                }
-                                out.coordinates.append(c)
+                            allDelta.append(contentsOf: chunk)
+                        }
+                    }
+
+                    // Global dedup: if timestamps are available, use them to detect
+                    // re-appended segments (caused by cold-start re-flushing the
+                    // same coords). A point is a duplicate if its timestamp is ≤ the
+                    // latest timestamp already seen.
+                    let hasTimestamps = allDelta.contains(where: { $0.t != nil })
+                    if hasTimestamps {
+                        var latestT: Date = out.coordinates.last?.t ?? .distantPast
+                        for c in allDelta {
+                            if let ct = c.t, ct <= latestT {
+                                // Skip: this point's timestamp is not newer than
+                                // what we already have — likely a re-appended segment.
+                                continue
+                            }
+                            if let last = out.coordinates.last, last.lat == c.lat, last.lon == c.lon {
+                                continue
+                            }
+                            out.coordinates.append(c)
+                            if let ct = c.t { latestT = ct }
+                        }
+                    } else {
+                        // Legacy path (no timestamps): consecutive dedup only,
+                        // plus skip segments that repeat the start of existing coords
+                        // (heuristic for detecting cold-start re-flush).
+                        let existingCount = out.coordinates.count
+                        for c in allDelta {
+                            if let last = out.coordinates.last, last.lat == c.lat, last.lon == c.lon {
+                                continue
+                            }
+                            out.coordinates.append(c)
+                        }
+                        // Heuristic: if delta doubled the coords and the second half
+                        // starts with the same first point, trim the duplicate half.
+                        if existingCount == 0 && out.coordinates.count > 4 {
+                            let half = out.coordinates.count / 2
+                            let firstHalf = out.coordinates[0..<half]
+                            let secondStart = out.coordinates[half..<min(half + half, out.coordinates.count)]
+                            if firstHalf.count == secondStart.count &&
+                               zip(firstHalf, secondStart).allSatisfy({ $0.0.lat == $0.1.lat && $0.0.lon == $0.1.lon }) {
+                                // Second half is a superset starting with first half — keep only second half onward.
+                                out.coordinates = Array(out.coordinates[half...])
                             }
                         }
                     }

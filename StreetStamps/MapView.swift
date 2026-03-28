@@ -36,10 +36,24 @@ enum LiveTrackingRefreshPolicy {
 struct CoordinateCodable: Codable, Hashable, Sendable {
     var lat: Double
     var lon: Double
+    /// GPS timestamp from CLLocation. Nil for legacy data recorded before this field existed.
+    var t: Date?
 }
 
 extension CoordinateCodable {
     var cl: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
+
+    init(lat: Double, lon: Double) {
+        self.lat = lat
+        self.lon = lon
+        self.t = nil
+    }
+
+    init(lat: Double, lon: Double, timestamp: Date?) {
+        self.lat = lat
+        self.lon = lon
+        self.t = timestamp
+    }
 }
 
 extension Array where Element == CoordinateCodable {
@@ -696,16 +710,14 @@ struct SystemCameraPicker: UIViewControllerRepresentable {
             picker.cameraFlashMode = .off
         }
 
-        // Front camera: hide default controls and use custom overlay
-        // so we skip the iOS review screen (which shows un-mirrored image).
-        if picker.cameraDevice == .front {
-            picker.showsCameraControls = false
-            let overlay = FrontCameraOverlay(picker: picker)
-            let host = UIHostingController(rootView: overlay)
-            host.view.backgroundColor = .clear
-            host.view.frame = UIScreen.main.bounds
-            picker.cameraOverlayView = host.view
-        }
+        // Use custom overlay so we can:
+        // 1. Show mirrored review for front camera selfies (iOS default review is un-mirrored)
+        // 2. Provide a camera flip button so user can switch front/rear freely
+        picker.showsCameraControls = false
+        let overlay = CameraOverlayController(picker: picker, coordinator: context.coordinator)
+        overlay.view.frame = UIScreen.main.bounds
+        picker.cameraOverlayView = overlay.view
+        context.coordinator.overlayController = overlay
 
         return picker
     }
@@ -714,6 +726,7 @@ struct SystemCameraPicker: UIViewControllerRepresentable {
 
     final class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
         let parent: SystemCameraPicker
+        var overlayController: CameraOverlayController?
         init(parent: SystemCameraPicker) { self.parent = parent }
 
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
@@ -732,53 +745,211 @@ struct SystemCameraPicker: UIViewControllerRepresentable {
 
             let isFrontCamera = picker.cameraDevice == .front
             let shouldMirror = isFrontCamera || self.parent.mirrorOnCapture
-            let out = shouldMirror ? image.horizontallyFlipped() : image
+            let finalImage = shouldMirror ? image.horizontallyFlipped() : image
+
+            // Show custom review screen (mirrored for front camera)
+            if let overlay = overlayController {
+                overlay.showReview(image: finalImage)
+                return
+            }
 
             picker.dismiss(animated: true) {
-                self.parent.onImage(out)
+                self.parent.onImage(finalImage)
             }
         }
     }
 }
 
-// MARK: - Custom overlay for front camera (skips iOS review screen)
+// MARK: - Custom camera overlay (shutter, flip, close, mirrored review)
 
-private struct FrontCameraOverlay: View {
-    let picker: UIImagePickerController
+final class CameraOverlayController: UIViewController {
+    private weak var picker: UIImagePickerController?
+    private weak var coordinator: SystemCameraPicker.Coordinator?
 
-    var body: some View {
-        VStack {
-            HStack {
-                Button {
-                    // Trigger the delegate's cancel handler so onCancel fires
-                    picker.delegate?.imagePickerControllerDidCancel?(picker)
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundColor(.white)
-                        .frame(width: 44, height: 44)
-                }
-                .padding(.leading, 16)
-                Spacer()
-            }
-            .padding(.top, 8)
+    // Shooting UI
+    private var shutterButton: UIButton?
+    private var closeButton: UIButton?
+    private var flipButton: UIButton?
 
-            Spacer()
+    // Review UI
+    private var reviewImage: UIImage?
+    private var reviewImageView: UIImageView?
+    private var retakeButton: UIButton?
+    private var usePhotoButton: UIButton?
 
-            // Shutter button
-            Button {
-                picker.takePicture()
-            } label: {
-                ZStack {
-                    Circle()
-                        .fill(.white)
-                        .frame(width: 72, height: 72)
-                    Circle()
-                        .stroke(.white, lineWidth: 4)
-                        .frame(width: 80, height: 80)
-                }
-            }
-            .padding(.bottom, 40)
+    init(picker: UIImagePickerController, coordinator: SystemCameraPicker.Coordinator) {
+        self.picker = picker
+        self.coordinator = coordinator
+        super.init(nibName: nil, bundle: nil)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .clear
+        setupShootingUI()
+    }
+
+    // MARK: - Shooting mode UI
+
+    private func setupShootingUI() {
+        // Close button (top-left)
+        let close = UIButton(type: .system)
+        close.setImage(UIImage(systemName: "xmark")?.withConfiguration(
+            UIImage.SymbolConfiguration(pointSize: 20, weight: .semibold)
+        ), for: .normal)
+        close.tintColor = .white
+        close.addTarget(self, action: #selector(cancelTapped), for: .touchUpInside)
+        close.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(close)
+        self.closeButton = close
+
+        // Flip camera button (top-right)
+        let flip = UIButton(type: .system)
+        flip.setImage(UIImage(systemName: "camera.rotate")?.withConfiguration(
+            UIImage.SymbolConfiguration(pointSize: 20, weight: .semibold)
+        ), for: .normal)
+        flip.tintColor = .white
+        flip.addTarget(self, action: #selector(flipTapped), for: .touchUpInside)
+        flip.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(flip)
+        self.flipButton = flip
+
+        // Shutter button (bottom-center)
+        let shutter = UIButton(type: .custom)
+        shutter.translatesAutoresizingMaskIntoConstraints = false
+        let shutterSize: CGFloat = 72
+        let ringSize: CGFloat = 80
+        shutter.layer.cornerRadius = ringSize / 2
+        shutter.layer.borderWidth = 4
+        shutter.layer.borderColor = UIColor.white.cgColor
+        let innerCircle = UIView()
+        innerCircle.backgroundColor = .white
+        innerCircle.layer.cornerRadius = shutterSize / 2
+        innerCircle.isUserInteractionEnabled = false
+        innerCircle.translatesAutoresizingMaskIntoConstraints = false
+        shutter.addSubview(innerCircle)
+        shutter.addTarget(self, action: #selector(shutterTapped), for: .touchUpInside)
+        view.addSubview(shutter)
+        self.shutterButton = shutter
+
+        NSLayoutConstraint.activate([
+            close.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            close.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            close.widthAnchor.constraint(equalToConstant: 44),
+            close.heightAnchor.constraint(equalToConstant: 44),
+
+            flip.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            flip.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            flip.widthAnchor.constraint(equalToConstant: 44),
+            flip.heightAnchor.constraint(equalToConstant: 44),
+
+            shutter.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            shutter.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -30),
+            shutter.widthAnchor.constraint(equalToConstant: ringSize),
+            shutter.heightAnchor.constraint(equalToConstant: ringSize),
+
+            innerCircle.centerXAnchor.constraint(equalTo: shutter.centerXAnchor),
+            innerCircle.centerYAnchor.constraint(equalTo: shutter.centerYAnchor),
+            innerCircle.widthAnchor.constraint(equalToConstant: shutterSize),
+            innerCircle.heightAnchor.constraint(equalToConstant: shutterSize),
+        ])
+    }
+
+    // MARK: - Review mode UI
+
+    func showReview(image: UIImage) {
+        self.reviewImage = image
+
+        // Hide shooting controls
+        shutterButton?.isHidden = true
+        closeButton?.isHidden = true
+        flipButton?.isHidden = true
+
+        // Show photo full screen
+        let imgView = UIImageView(image: image)
+        imgView.contentMode = .scaleAspectFit
+        imgView.backgroundColor = .black
+        imgView.translatesAutoresizingMaskIntoConstraints = false
+        view.insertSubview(imgView, at: 0)
+        self.reviewImageView = imgView
+
+        // Retake button (bottom-left)
+        let retake = UIButton(type: .system)
+        retake.setTitle(NSLocalizedString("Retake", comment: ""), for: .normal)
+        retake.titleLabel?.font = .systemFont(ofSize: 18)
+        retake.tintColor = .white
+        retake.addTarget(self, action: #selector(retakeTapped), for: .touchUpInside)
+        retake.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(retake)
+        self.retakeButton = retake
+
+        // Use Photo button (bottom-right)
+        let usePhoto = UIButton(type: .system)
+        usePhoto.setTitle(NSLocalizedString("Use Photo", comment: ""), for: .normal)
+        usePhoto.titleLabel?.font = .systemFont(ofSize: 18, weight: .semibold)
+        usePhoto.tintColor = .white
+        usePhoto.addTarget(self, action: #selector(usePhotoTapped), for: .touchUpInside)
+        usePhoto.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(usePhoto)
+        self.usePhotoButton = usePhoto
+
+        NSLayoutConstraint.activate([
+            imgView.topAnchor.constraint(equalTo: view.topAnchor),
+            imgView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            imgView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            imgView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+
+            retake.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            retake.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -30),
+
+            usePhoto.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
+            usePhoto.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -30),
+        ])
+    }
+
+    private func dismissReview() {
+        reviewImageView?.removeFromSuperview()
+        reviewImageView = nil
+        retakeButton?.removeFromSuperview()
+        retakeButton = nil
+        usePhotoButton?.removeFromSuperview()
+        usePhotoButton = nil
+        reviewImage = nil
+
+        shutterButton?.isHidden = false
+        closeButton?.isHidden = false
+        flipButton?.isHidden = false
+    }
+
+    // MARK: - Actions
+
+    @objc private func cancelTapped() {
+        guard let picker else { return }
+        picker.delegate?.imagePickerControllerDidCancel?(picker)
+    }
+
+    @objc private func shutterTapped() {
+        picker?.takePicture()
+    }
+
+    @objc private func flipTapped() {
+        guard let picker else { return }
+        if picker.cameraDevice == .front {
+            picker.cameraDevice = .rear
+        } else {
+            picker.cameraDevice = .front
+        }
+    }
+
+    @objc private func retakeTapped() {
+        dismissReview()
+    }
+
+    @objc private func usePhotoTapped() {
+        guard let image = reviewImage, let picker else { return }
+        picker.dismiss(animated: true) { [weak self] in
+            self?.coordinator?.parent.onImage(image)
         }
     }
 }
@@ -919,6 +1090,11 @@ struct MapView: View {
     @State private var activeMapHint: OnboardingGuideStore.Hint?
     @State private var mapHintTask: Task<Void, Never>?
 
+    // Film camera
+    @StateObject private var filmCameraDrop = FilmCameraDropManager()
+    @State private var showFilmCamera = false
+    @State private var filmCameraPreloadedPaths: [String] = []
+
     private func mapCoord(_ c: CLLocationCoordinate2D) -> CLLocationCoordinate2D {
         tracking.mapReady(c)
     }
@@ -971,6 +1147,7 @@ struct MapView: View {
                     isPresented: $showMemoryEditor,
                     userID: sessionStore.currentUserID,
                     existing: editingMemory,
+                    preloadedImagePaths: filmCameraPreloadedPaths,
                     onSave: { draft in
                         if draft == nil {
                             if let existingID = editingMemory?.id,
@@ -1032,7 +1209,10 @@ struct MapView: View {
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.78), value: showMemoryEditor)
         .onChange(of: showMemoryEditor) { visible in
-            if !visible { editingMemory = nil }
+            if !visible {
+                editingMemory = nil
+                filmCameraPreloadedPaths = []
+            }
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.78), value: showModeSelector)
         .alert(L10n.t("finish_confirm_title"), isPresented: $showFinishConfirm) {
@@ -1053,8 +1233,21 @@ struct MapView: View {
         } message: {
             Text(L10n.t("finish_pending_memory_message"))
         }
+        .fullScreenCover(isPresented: $showFilmCamera) {
+            FilmCameraView(
+                onCapture: { image in
+                    showFilmCamera = false
+                    handleFilmCameraCapture(image)
+                },
+                onDismiss: {
+                    showFilmCamera = false
+                }
+            )
+            .ignoresSafeArea()
+        }
         .onAppear {
             onAppearSetup()
+            filmCameraDrop.rollForDrop()
             groupedMemoriesCache = computeGroupedMemories()
             if flow.pendingWidgetCaptureSignal > 0 {
                 if WidgetCaptureLaunchPolicy.shouldOpenEditorOnMapAppear(
@@ -1080,6 +1273,7 @@ struct MapView: View {
         .onDisappear {
             mapHintTask?.cancel()
             tracking.deactivateMapRenderingSurface()
+            filmCameraDrop.reset()
             if journeyRoute.endTime == nil { flushSnapshot(.exitToHome) }
         }
         .onReceive(tracking.$coords) { onCoordsUpdated($0) }
@@ -1122,7 +1316,16 @@ struct MapView: View {
     // MARK: - Map Layer
     // =======================
     private var rightMiddleButtons: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 12) {
+            // Film camera — shown when dropped
+            if filmCameraDrop.hasFilmCamera {
+                filmCameraButton
+                    .transition(.asymmetric(
+                        insertion: .scale(scale: 0.3).combined(with: .opacity).combined(with: .offset(y: -12)),
+                        removal: .opacity
+                    ))
+            }
+
             floatingActionButton(icon: "scope", label: "LOCATE", dark: false) {
                 followUser = false
                 if let loc = tracking.userLocation { updateCamera(for: loc) }
@@ -1134,8 +1337,101 @@ struct MapView: View {
                 dismissMapHint(.mapMemoryIcon)
             }
         }
+        .animation(.spring(response: 0.5, dampingFraction: 0.7), value: filmCameraDrop.hasFilmCamera)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
         .padding(.trailing, 24)
+    }
+
+    private var filmCameraButton: some View {
+        Button {
+            showFilmCamera = true
+            UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+        } label: {
+            VStack(spacing: 6) {
+                // Mini film camera icon
+                ZStack {
+                    // Camera body
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.18, green: 0.18, blue: 0.20),
+                                    Color(red: 0.10, green: 0.10, blue: 0.12)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .frame(width: 48, height: 36)
+
+                    // Viewfinder bump (top center)
+                    RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                        .fill(Color(red: 0.14, green: 0.14, blue: 0.16))
+                        .frame(width: 16, height: 7)
+                        .offset(y: -21)
+
+                    // Chrome top edge
+                    Rectangle()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color(white: 0.35), Color(white: 0.22)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: 48, height: 1.5)
+                        .offset(y: -17.5)
+
+                    // Lens
+                    Circle()
+                        .fill(Color(red: 0.06, green: 0.06, blue: 0.08))
+                        .frame(width: 20, height: 20)
+                    Circle()
+                        .stroke(Color(white: 0.30), lineWidth: 1)
+                        .frame(width: 20, height: 20)
+                    Circle()
+                        .fill(
+                            RadialGradient(
+                                colors: [
+                                    Color(red: 0.2, green: 0.25, blue: 0.4),
+                                    Color(red: 0.06, green: 0.08, blue: 0.14)
+                                ],
+                                center: .center,
+                                startRadius: 1,
+                                endRadius: 8
+                            )
+                        )
+                        .frame(width: 14, height: 14)
+
+                    // Lens glint
+                    Circle()
+                        .fill(Color.white.opacity(0.25))
+                        .frame(width: 4, height: 4)
+                        .offset(x: -3, y: -3)
+
+                    // Flash window (top-right)
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(Color(red: 0.95, green: 0.80, blue: 0.4).opacity(0.6))
+                        .frame(width: 5, height: 5)
+                        .offset(x: 15, y: -10)
+
+                    // Shutter button (top-right of body)
+                    Circle()
+                        .fill(Color(white: 0.35))
+                        .frame(width: 6, height: 6)
+                        .offset(x: 16, y: -21)
+                }
+                .frame(width: 48, height: 48)
+                .shadow(color: Color.black.opacity(0.25), radius: 10, x: 0, y: 3)
+
+                Text("FILM")
+                    .font(.system(size: 8, weight: .semibold))
+                    .tracking(0.5)
+                    .foregroundColor(Color(red: 1.0, green: 0.85, blue: 0.6).opacity(0.8))
+            }
+            .appFullSurfaceTapTarget(.rectangle)
+        }
+        .buttonStyle(.plain)
     }
 
     private var mapLayer: some View {
@@ -1270,6 +1566,26 @@ struct MapView: View {
         flow.consumeWidgetCapture()
     }
 
+    /// Film camera capture → save photo → auto-open MemoryEditor with image pre-loaded
+    private func handleFilmCameraCapture(_ image: UIImage) {
+        guard let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) else { return }
+        filmCameraPreloadedPaths = [filename]
+        editingMemory = nil
+
+        // Also save to photo library
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else { return }
+            PHPhotoLibrary.shared().performChanges({
+                PHAssetChangeRequest.creationRequestForAsset(from: image)
+            }, completionHandler: nil)
+        }
+
+        // Small delay so fullScreenCover dismiss completes before sheet opens
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            self.showMemoryEditor = true
+        }
+    }
+
     private var gpsStatusChip: some View {
         HStack(spacing: 8) {
             Image(systemName: "bolt.fill")
@@ -1347,25 +1663,25 @@ struct MapView: View {
 
     private func floatingActionButton(icon: String, label: String, dark: Bool, highlighted: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 Image(systemName: icon)
-                    .font(.system(size: 24, weight: .medium))
+                    .font(.system(size: 18, weight: .medium))
                     .foregroundColor(dark ? .white : .black)
-                    .frame(width: 64, height: 64)
+                    .frame(width: 48, height: 48)
                     .background(dark ? Color.black : Color.white.opacity(0.95))
                     .clipShape(Circle())
-                    .shadow(color: Color.black.opacity(0.20), radius: 12, x: 0, y: 4)
+                    .shadow(color: Color.black.opacity(0.20), radius: 10, x: 0, y: 3)
                     .overlay {
                         if highlighted {
                             Circle()
-                                .stroke(Color.white, lineWidth: 3)
+                                .stroke(Color.white, lineWidth: 2.5)
                         }
                     }
                     .scaleEffect(highlighted ? 1.06 : 1.0)
 
                 Text(label)
-                    .font(.system(size: 9, weight: .semibold))
-                    .tracking(0.62)
+                    .font(.system(size: 8, weight: .semibold))
+                    .tracking(0.5)
                     .foregroundColor(Color.white.opacity(0.6))
             }
             .appFullSurfaceTapTarget(.rectangle)
@@ -1663,6 +1979,8 @@ struct MapView: View {
     }
 
     private func syncJourneyCoordinatesIncremental(from coords: [CLLocationCoordinate2D]) {
+        let timestamps = tracking.coordTimestamps
+
         if coords.isEmpty {
             journeyRoute.coordinates = []
             lastSyncedCoordCount = 0
@@ -1674,7 +1992,15 @@ struct MapView: View {
         }
 
         if coords.count < lastSyncedCoordCount || journeyRoute.coordinates.count > coords.count {
-            journeyRoute.coordinates = coords.map { .init(lat: $0.latitude, lon: $0.longitude) }
+            journeyRoute.coordinates = zip(coords, timestamps).map {
+                CoordinateCodable(lat: $0.0.latitude, lon: $0.0.longitude, timestamp: $0.1)
+            }
+            // If timestamps array is shorter (legacy recovery), fill remaining without timestamp.
+            if coords.count > timestamps.count {
+                journeyRoute.coordinates += coords[timestamps.count...].map {
+                    CoordinateCodable(lat: $0.latitude, lon: $0.longitude)
+                }
+            }
             lastSyncedCoordCount = coords.count
             return
         }
@@ -1684,7 +2010,11 @@ struct MapView: View {
         }
 
         guard coords.count > lastSyncedCoordCount else { return }
-        let appended = coords[lastSyncedCoordCount...].map { CoordinateCodable(lat: $0.latitude, lon: $0.longitude) }
+        let appended = coords[lastSyncedCoordCount...].enumerated().map { offset, c in
+            let tsIdx = lastSyncedCoordCount + offset
+            let ts: Date? = tsIdx < timestamps.count ? timestamps[tsIdx] : nil
+            return CoordinateCodable(lat: c.latitude, lon: c.longitude, timestamp: ts)
+        }
         journeyRoute.coordinates.append(contentsOf: appended)
         lastSyncedCoordCount = coords.count
     }
@@ -2453,6 +2783,7 @@ struct MemoryEditorSheet: View {
     @Binding var isPresented: Bool
     let userID: String
     let existing: JourneyMemory?
+    let preloadedImagePaths: [String]
     let onSave: (JourneyMemory?) -> Void
 
     @State private var title: String
@@ -2488,11 +2819,13 @@ struct MemoryEditorSheet: View {
         isPresented: Binding<Bool>,
         userID: String,
         existing: JourneyMemory?,
+        preloadedImagePaths: [String] = [],
         onSave: @escaping (JourneyMemory?) -> Void
     ) {
         self._isPresented = isPresented
         self.userID = userID
         self.existing = existing
+        self.preloadedImagePaths = preloadedImagePaths
         self.onSave = onSave
 
         let memoryID = existing?.id ?? "new"
@@ -2501,6 +2834,12 @@ struct MemoryEditorSheet: View {
             _notes = State(initialValue: draft.notes)
             _imagePaths = State(initialValue: draft.imagePaths)
             _mirrorSelfie = State(initialValue: draft.mirrorSelfie)
+        } else if !preloadedImagePaths.isEmpty && existing == nil {
+            // Film camera pre-loaded images
+            _title = State(initialValue: "")
+            _notes = State(initialValue: "")
+            _imagePaths = State(initialValue: preloadedImagePaths)
+            _mirrorSelfie = State(initialValue: false)
         } else {
             _title = State(initialValue: existing?.title ?? "")
             _notes = State(initialValue: existing?.notes ?? "")

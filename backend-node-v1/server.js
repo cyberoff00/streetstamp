@@ -925,7 +925,13 @@ function normalizeRouteCoordinates(raw) {
     const lon = Number(item && item.lon);
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
     if (lat < -90 || lat > 90 || lon < -180 || lon > 180) continue;
-    out.push({ lat, lon });
+    const entry = { lat, lon };
+    // Preserve GPS timestamp if present (ISO 8601 string or epoch seconds).
+    if (item.t != null) {
+      const parsed = typeof item.t === "string" ? new Date(item.t) : typeof item.t === "number" ? new Date(item.t * 1000) : null;
+      if (parsed && !isNaN(parsed.getTime())) entry.t = parsed.toISOString();
+    }
+    out.push(entry);
     if (out.length >= 50000) break;
   }
   return out;

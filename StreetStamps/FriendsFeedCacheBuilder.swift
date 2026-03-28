@@ -8,17 +8,16 @@ struct FriendsFeedCacheSnapshot {
 }
 
 enum FriendsFeedCacheBuilder {
-    /// Max events per friend in the feed.
-    private static let maxJourneysPerFriend = 12
-    /// Max total events in the feed (caps build cost, like-stats requests, etc.).
-    private static let maxTotalEvents = 50
+    /// Feed time window: only show events from the last 30 days.
+    static let feedWindowSeconds: TimeInterval = 30 * 24 * 3600
 
     static func build(
         friends: [FriendProfileSnapshot],
         selfProfile: FriendProfileSnapshot?,
         lastActiveDate: (FriendProfileSnapshot) -> Date,
         formatDistance: (Double) -> String,
-        formatDuration: (Date?, Date?) -> String
+        formatDuration: (Date?, Date?) -> String,
+        now: Date = Date()
     ) -> FriendsFeedCacheSnapshot {
         let sortedFriends = friends.sorted { lhs, rhs in
             lastActiveDate(lhs) > lastActiveDate(rhs)
@@ -31,8 +30,10 @@ enum FriendsFeedCacheBuilder {
             feedProfiles = sortedFriends
         }
 
+        let cutoff = now.addingTimeInterval(-feedWindowSeconds)
         let feedEvents = buildFeedEvents(
             from: feedProfiles,
+            cutoff: cutoff,
             formatDistance: formatDistance,
             formatDuration: formatDuration
         )
@@ -59,8 +60,10 @@ enum FriendsFeedCacheBuilder {
     /// Skips all title formatting and meta text.
     static func buildEventIDs(
         friends: [FriendProfileSnapshot],
-        selfProfile: FriendProfileSnapshot?
+        selfProfile: FriendProfileSnapshot?,
+        now: Date = Date()
     ) -> [String] {
+        let cutoff = now.addingTimeInterval(-feedWindowSeconds)
         let feedProfiles: [FriendProfileSnapshot]
         if let selfProfile {
             feedProfiles = [selfProfile] + friends.filter { $0.id != selfProfile.id }
@@ -69,24 +72,24 @@ enum FriendsFeedCacheBuilder {
         }
 
         var stubs: [(id: String, timestamp: Date)] = []
-        stubs.reserveCapacity(feedProfiles.count * maxJourneysPerFriend)
 
         for friend in feedProfiles {
             let eligible = friend.journeys.filter { FriendFeedLogic.isJourneyEligible($0) }
             guard !eligible.isEmpty else { continue }
 
             let sorted = FriendsFeedOrdering.sortJourneys(eligible)
-            for journey in sorted.prefix(maxJourneysPerFriend) {
+            for journey in sorted {
+                let ts = FriendFeedLogic.feedTimestamp(for: journey)
+                guard ts >= cutoff else { break }
                 stubs.append((
                     id: "feed_\(friend.id)_\(journey.id)",
-                    timestamp: FriendFeedLogic.feedTimestamp(for: journey)
+                    timestamp: ts
                 ))
             }
         }
 
         return stubs
             .sorted { $0.timestamp != $1.timestamp ? $0.timestamp > $1.timestamp : $0.id < $1.id }
-            .prefix(maxTotalEvents)
             .map(\.id)
     }
 
@@ -116,6 +119,7 @@ enum FriendsFeedCacheBuilder {
 
     private static func buildFeedEvents(
         from friends: [FriendProfileSnapshot],
+        cutoff: Date,
         formatDistance: (Double) -> String,
         formatDuration: (Date?, Date?) -> String
     ) -> [FriendFeedEvent] {
@@ -136,8 +140,10 @@ enum FriendsFeedCacheBuilder {
                 }
             }
 
-            for journey in visibleJourneys.prefix(maxJourneysPerFriend) {
+            for journey in visibleJourneys {
                 let eventDate = FriendFeedLogic.feedTimestamp(for: journey)
+                guard eventDate >= cutoff else { break }
+
                 let cityKey = friendCityKey(for: journey)
                 let cityName = friendCityDisplayName(for: journey, cards: friend.unlockedCityCards)
                 let memoryCount = journey.memories.count
@@ -188,9 +194,6 @@ enum FriendsFeedCacheBuilder {
             }
         }
 
-        return Array(
-            events.sorted { $0.timestamp != $1.timestamp ? $0.timestamp > $1.timestamp : $0.id < $1.id }
-                .prefix(maxTotalEvents)
-        )
+        return events.sorted { $0.timestamp != $1.timestamp ? $0.timestamp > $1.timestamp : $0.id < $1.id }
     }
 }

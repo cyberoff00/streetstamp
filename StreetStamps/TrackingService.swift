@@ -17,6 +17,8 @@ final class TrackingService: ObservableObject {
 
     /// Raw recorded points (WGS84) used for storage & internal segment building.
     @Published private(set) var coords: [CLLocationCoordinate2D] = []
+    /// GPS timestamps parallel to `coords`. Same count, same order.
+    @Published private(set) var coordTimestamps: [Date] = []
 
     @Published var totalDistance: Double = 0
     /// Total horizontal (2D) distance in meters.
@@ -101,6 +103,8 @@ final class TrackingService: ObservableObject {
 
     private var lastLocation: CLLocation?
     private var rawCoords: [CLLocationCoordinate2D] = []
+    /// Parallel array: GPS timestamp for each entry in rawCoords.
+    private var rawTimestamps: [Date] = []
     private var acceptedLocations: [CLLocation] = []
 
     var latestReliableLocationForMemories: CLLocation? {
@@ -455,6 +459,7 @@ final class TrackingService: ObservableObject {
         applyModeConfig(config)
         
         rawCoords.removeAll()
+        rawTimestamps.removeAll()
         coords.removeAll()
         totalDistance = 0
         totalAscent = 0
@@ -755,10 +760,13 @@ final class TrackingService: ObservableObject {
         }
 
         // For historical/ended journeys we want deterministic playback from snapshot.
+        let timestamps = journey.displayRouteCoordinates.map { $0.t }
         if !isTracking || journey.endTime != nil {
             rawCoords = ext
+            rawTimestamps = timestamps.map { $0 ?? .distantPast }
         } else if rawCoords.isEmpty {
             rawCoords = ext
+            rawTimestamps = timestamps.map { $0 ?? .distantPast }
         }
         if totalDistance <= 0, journey.distance > 0 { totalDistance = journey.distance }
         if totalAscent <= 0, journey.elevationGain > 0 { totalAscent = journey.elevationGain }
@@ -960,6 +968,7 @@ final class TrackingService: ObservableObject {
             resetOneEuro() // start filter fresh at lock
 
             rawCoords.append(loc.coordinate)
+            rawTimestamps.append(loc.timestamp)
             appendPointToInternalSegments(coord: loc.coordinate, at: loc.timestamp, preferredStyle: .solid)
             lastRecordedLocationForStationary = loc
             stationarySince = nil
@@ -976,6 +985,7 @@ final class TrackingService: ObservableObject {
             lastLocation = loc
             resetOneEuro()
             rawCoords.append(loc.coordinate)
+            rawTimestamps.append(loc.timestamp)
             appendPointToInternalSegments(coord: loc.coordinate, at: loc.timestamp, preferredStyle: .solid)
             lastRecordedLocationForStationary = loc
             stationarySince = nil
@@ -1247,6 +1257,7 @@ final class TrackingService: ObservableObject {
         // 8) Append point / segment
         // =========================================================
         rawCoords.append(outCoord)
+        rawTimestamps.append(loc.timestamp)
 
         if isMissingSegment, let from = missingFromCoord {
             appendMissingConnectionSegment(from: from, to: outCoord, at: loc.timestamp)
@@ -1493,6 +1504,7 @@ final class TrackingService: ObservableObject {
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.coords = self.rawCoords
+            self.coordTimestamps = self.rawTimestamps
             if self.isRealtimeRenderingEnabled {
                 self.segments = self.internalSegments
             }

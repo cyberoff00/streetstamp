@@ -300,7 +300,7 @@
 "settings_map_dark_mode" = "地图深色模式";
 "settings_profile_visibility_friends" = "Profile 好友可见";
 "settings_profile_visibility_private" = "Profile 仅自己可见";
-"settings_logout" = "LOG OUT";
+"settings_logout" = "退出登录";
 "settings_logout_subtitle" = "退出当前账号并切回游客模式";
 "settings_logout_confirm_title" = "确认退出登录？";
 "settings_logout_confirm_message" = "退出后将切回游客模式，本地数据会保留在当前设备。";
@@ -353,6 +353,8 @@
 "friends_badge_journey" = "旅程";
 "friends_badge_memory" = "记忆";
 "friends_empty_activity" = "还没有好友动态";
+"friends_feed_end" = "只显示最近 30 天的动态";
+"friends_feed_end_hint" = "更多动态去好友主页看看";
 "edit_save_republish_title" = "这段旅程已分享给好友";
 "edit_save_republish_action" = "保存并重新发布";
 "edit_save_local_only_action" = "仅保存到本地";

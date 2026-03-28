@@ -267,6 +267,8 @@
 "friends_delete_friend" = "Delete Friend";
 "friends_distance_compact_format" = "%.1fkm";
 "friends_empty_activity" = "No friend activity yet";
+"friends_feed_end" = "Showing activity from the last 30 days";
+"friends_feed_end_hint" = "Visit a friend's profile to see more";
 "edit_save_republish_title" = "Ce voyage a été partagé";
 "edit_save_republish_action" = "Enregistrer et republier";
 "edit_save_local_only_action" = "Enregistrer localement";

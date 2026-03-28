@@ -2,27 +2,49 @@ import XCTest
 @testable import StreetStamps
 
 final class FriendsFeedCacheBuilderTests: XCTestCase {
-    func test_build_initialFeedPage_shouldCapAt25Items() {
+    func test_build_excludesEventsOlderThan30Days() {
+        let now = Date()
+        let withinWindow = now.addingTimeInterval(-10 * 86400)  // 10 days ago
+        let outsideWindow = now.addingTimeInterval(-35 * 86400) // 35 days ago
+
+        let friend = makeFriend(
+            id: "f1",
+            createdAt: outsideWindow,
+            journeys: [
+                makeJourney(id: "recent", cityID: "A|XX", endTime: withinWindow),
+                makeJourney(id: "old", cityID: "B|XX", endTime: outsideWindow),
+            ]
+        )
+
+        let cache = buildCache(friends: [friend], now: now)
+
+        XCTAssertEqual(cache.feedEvents.count, 1, "Events older than 30 days should be excluded")
+        XCTAssertEqual(cache.feedEvents.first?.journeyID, "recent")
+    }
+
+    func test_build_noPerFriendOrTotalCap() {
+        let now = Date()
+        // 10 friends × 10 journeys = 100 events, all within window
         let friends = (0..<10).map { friendIndex in
             makeFriend(
                 id: "friend-\(friendIndex)",
-                createdAt: Date(timeIntervalSince1970: 1_000),
+                createdAt: now.addingTimeInterval(-86400),
                 journeys: (0..<10).map { journeyIndex in
                     makeJourney(
                         id: "journey-\(friendIndex)-\(journeyIndex)",
                         cityID: "city-\(journeyIndex)|XX",
-                        endTime: Date(timeIntervalSince1970: 10_000 - TimeInterval(friendIndex * 100 + journeyIndex))
+                        endTime: now.addingTimeInterval(-TimeInterval(friendIndex * 100 + journeyIndex))
                     )
                 }
             )
         }
 
-        let cache = buildCache(friends: friends)
+        let cache = buildCache(friends: friends, now: now)
 
         XCTAssertEqual(
             cache.feedEvents.count,
-            25,
-            "Friends feed should only build the first 25 visible items for the initial page."
+            100,
+            "All events within the 30-day window should be included without per-friend or total cap"
         )
     }
 
@@ -57,7 +79,8 @@ final class FriendsFeedCacheBuilderTests: XCTestCase {
             selfProfile: selfProfile,
             lastActiveDate: { FriendListPresencePresentation.recentJourneyDate(for: $0) ?? $0.createdAt },
             formatDistance: { _ in "1.2km" },
-            formatDuration: { _, _ in "0h 0m" }
+            formatDuration: { _, _ in "0h 0m" },
+            now: Date(timeIntervalSince1970: 4_000)
         )
 
         XCTAssertEqual(cache.sortedFriends.map(\.id), ["friend-newer", "friend-older"])
@@ -83,7 +106,8 @@ final class FriendsFeedCacheBuilderTests: XCTestCase {
             selfProfile: selfProfile,
             lastActiveDate: { FriendListPresencePresentation.recentJourneyDate(for: $0) ?? $0.createdAt },
             formatDistance: { _ in "1.2km" },
-            formatDuration: { _, _ in "0h 0m" }
+            formatDuration: { _, _ in "0h 0m" },
+            now: Date(timeIntervalSince1970: 3_000)
         )
 
         XCTAssertEqual(cache.feedEvents.map(\.id), ["feed_me_journey-self"])
@@ -146,8 +170,9 @@ final class FriendsFeedCacheBuilderTests: XCTestCase {
             )
         }
 
-        let fullBuild = buildCache(friends: friends)
-        let lightIDs = FriendsFeedCacheBuilder.buildEventIDs(friends: friends, selfProfile: nil)
+        let testNow = Date(timeIntervalSince1970: 11_000)
+        let fullBuild = buildCache(friends: friends, now: testNow)
+        let lightIDs = FriendsFeedCacheBuilder.buildEventIDs(friends: friends, selfProfile: nil, now: testNow)
 
         XCTAssertEqual(fullBuild.feedEvents.map(\.id), lightIDs,
                        "Lightweight buildEventIDs must produce the same IDs in the same order as full build")
@@ -157,6 +182,7 @@ final class FriendsFeedCacheBuilderTests: XCTestCase {
 
     func test_performance_build_50friends_100journeysEach() {
         let friends = makeLargeFriendList()
+        let testNow = Date(timeIntervalSince1970: 101_000)
 
         measure {
             _ = FriendsFeedCacheBuilder.build(
@@ -164,16 +190,18 @@ final class FriendsFeedCacheBuilderTests: XCTestCase {
                 selfProfile: nil,
                 lastActiveDate: { FriendListPresencePresentation.recentJourneyDate(for: $0) ?? $0.createdAt },
                 formatDistance: { _ in "1km" },
-                formatDuration: { _, _ in "0h" }
+                formatDuration: { _, _ in "0h" },
+                now: testNow
             )
         }
     }
 
     func test_performance_buildEventIDs_50friends_100journeysEach() {
         let friends = makeLargeFriendList()
+        let testNow = Date(timeIntervalSince1970: 101_000)
 
         measure {
-            _ = FriendsFeedCacheBuilder.buildEventIDs(friends: friends, selfProfile: nil)
+            _ = FriendsFeedCacheBuilder.buildEventIDs(friends: friends, selfProfile: nil, now: testNow)
         }
     }
 
@@ -181,13 +209,14 @@ final class FriendsFeedCacheBuilderTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func buildCache(friends: [FriendProfileSnapshot]) -> FriendsFeedCacheSnapshot {
+    private func buildCache(friends: [FriendProfileSnapshot], now: Date? = nil) -> FriendsFeedCacheSnapshot {
         FriendsFeedCacheBuilder.build(
             friends: friends,
             selfProfile: nil,
             lastActiveDate: { FriendListPresencePresentation.recentJourneyDate(for: $0) ?? $0.createdAt },
             formatDistance: { _ in "" },
-            formatDuration: { _, _ in "" }
+            formatDuration: { _, _ in "" },
+            now: now ?? Date(timeIntervalSince1970: 11_000)
         )
     }
 
