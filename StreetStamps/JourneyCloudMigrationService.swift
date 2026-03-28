@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import CryptoKit
 
 struct JourneyMigrationReport {
     var uploadedJourneys: Int
@@ -12,6 +13,7 @@ struct JourneyIncrementalSyncPlan {
     var payload: BackendMigrationRequest
     var uploadedMemories: Int
     var uploadedMediaFiles: Int
+    var remoteURLCache: [String: JourneyCloudMigrationService.JourneyRemoteURLCache] = [:]
 }
 
 enum JourneyCloudMigrationService {
@@ -72,7 +74,7 @@ enum JourneyCloudMigrationService {
 
         let cards = snapshot.cards
             .filter { !($0.isTemporary ?? false) }
-            .map { FriendCityCard(id: $0.id, name: $0.resolvedDisplayName ?? $0.name, countryISO2: $0.countryISO2) }
+            .map { FriendCityCard(id: $0.id, name: CityPlacemarkResolver.displayTitle(for: $0), countryISO2: $0.countryISO2) }
 
         let removedJourneyIDs = try await removedRemoteJourneyIDsIfNeeded(
             token: token,
@@ -115,7 +117,7 @@ enum JourneyCloudMigrationService {
         )
         let cards = cachedCities
             .filter { !($0.isTemporary ?? false) }
-            .map { FriendCityCard(id: $0.id, name: $0.resolvedDisplayName ?? $0.name, countryISO2: $0.countryISO2) }
+            .map { FriendCityCard(id: $0.id, name: CityPlacemarkResolver.displayTitle(for: $0), countryISO2: $0.countryISO2) }
 
         return JourneyIncrementalSyncPlan(
             payload: BackendMigrationRequest(
@@ -125,7 +127,8 @@ enum JourneyCloudMigrationService {
                 snapshotComplete: false
             ),
             uploadedMemories: payloadResult.memoriesCount,
-            uploadedMediaFiles: payloadResult.uploadedMediaCount
+            uploadedMediaFiles: payloadResult.uploadedMediaCount,
+            remoteURLCache: payloadResult.remoteURLCache
         )
     }
 
@@ -141,6 +144,7 @@ enum JourneyCloudMigrationService {
         )
     }
 
+    @discardableResult
     @MainActor
     static func syncJourneyVisibilityChange(
         journey: JourneyRoute,
@@ -149,8 +153,8 @@ enum JourneyCloudMigrationService {
         migrationSender: @escaping MigrationSender = liveMigrationSender,
         mediaUploader: @escaping MediaUploader = liveMediaUploader,
         payloadBuildObserver: PayloadBuildObserver? = nil
-    ) async throws {
-        guard BackendConfig.isEnabled else { return }
+    ) async throws -> [String: JourneyRemoteURLCache] {
+        guard BackendConfig.isEnabled else { return [:] }
 
         let snapshot = await MainActor.run {
             (
@@ -166,9 +170,10 @@ enum JourneyCloudMigrationService {
 
         let cards = snapshot.cards
             .filter { !($0.isTemporary ?? false) }
-            .map { FriendCityCard(id: $0.id, name: $0.resolvedDisplayName ?? $0.name, countryISO2: $0.countryISO2) }
+            .map { FriendCityCard(id: $0.id, name: CityPlacemarkResolver.displayTitle(for: $0), countryISO2: $0.countryISO2) }
 
         let payload: BackendMigrationRequest
+        var urlCache: [String: JourneyRemoteURLCache] = [:]
         if journey.visibility == .public || journey.visibility == .friendsOnly {
             let plan = try await Task.detached(priority: .userInitiated) {
                 payloadBuildObserver?()
@@ -181,6 +186,7 @@ enum JourneyCloudMigrationService {
                 )
             }.value
             payload = plan.payload
+            urlCache = plan.remoteURLCache
         } else {
             payload = makeJourneyRemovalPayload(
                 journeyID: journey.id,
@@ -189,6 +195,7 @@ enum JourneyCloudMigrationService {
         }
 
         try await migrationSender(token, payload)
+        return urlCache
     }
 
     @MainActor
@@ -213,7 +220,7 @@ enum JourneyCloudMigrationService {
 
         let cards = snapshot.cards
             .filter { !($0.isTemporary ?? false) }
-            .map { FriendCityCard(id: $0.id, name: $0.resolvedDisplayName ?? $0.name, countryISO2: $0.countryISO2) }
+            .map { FriendCityCard(id: $0.id, name: CityPlacemarkResolver.displayTitle(for: $0), countryISO2: $0.countryISO2) }
 
         let payload = makeJourneyRemovalPayload(
             journeyID: journeyID,
@@ -249,10 +256,11 @@ enum JourneyCloudMigrationService {
         userID: String,
         token: String,
         mediaUploader: MediaUploader = liveMediaUploader
-    ) async throws -> (journeys: [BackendJourneyUploadDTO], memoriesCount: Int, uploadedMediaCount: Int) {
+    ) async throws -> (journeys: [BackendJourneyUploadDTO], memoriesCount: Int, uploadedMediaCount: Int, remoteURLCache: [String: JourneyRemoteURLCache]) {
         var out: [BackendJourneyUploadDTO] = []
         var memoriesCount = 0
         var uploadedMediaCount = 0
+        var remoteURLCache: [String: JourneyRemoteURLCache] = [:]
 
         for route in journeys {
             let title = route.customTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -260,13 +268,16 @@ enum JourneyCloudMigrationService {
             let routeCoordinates = route.coordinates.isEmpty ? route.thumbnailCoordinates : route.coordinates
 
             var memories: [BackendMemoryUploadDTO] = []
+            var memoryURLs: [String: [String]] = [:]
             for memory in route.memories {
                 let uploadedURLs = try await uploadMemoryImagesIfNeeded(
                     imagePaths: memory.imagePaths,
+                    fallbackRemoteURLs: memory.remoteImageURLs,
                     userID: userID,
                     token: token,
                     mediaUploader: mediaUploader
                 )
+                memoryURLs[memory.id] = uploadedURLs
                 memories.append(
                     BackendMemoryUploadDTO(
                         id: memory.id,
@@ -285,11 +296,17 @@ enum JourneyCloudMigrationService {
 
             let overallImageURLs = try await uploadMemoryImagesIfNeeded(
                 imagePaths: route.overallMemoryImagePaths,
+                fallbackRemoteURLs: route.overallMemoryRemoteImageURLs,
                 userID: userID,
                 token: token,
                 mediaUploader: mediaUploader
             )
             uploadedMediaCount += overallImageURLs.count
+
+            remoteURLCache[route.id] = JourneyRemoteURLCache(
+                memoryURLs: memoryURLs,
+                overallImageURLs: overallImageURLs
+            )
 
             out.append(
                 BackendJourneyUploadDTO(
@@ -310,31 +327,78 @@ enum JourneyCloudMigrationService {
             )
         }
 
-        return (out, memoriesCount, uploadedMediaCount)
+        return (out, memoriesCount, uploadedMediaCount, remoteURLCache)
     }
+
+    struct JourneyRemoteURLCache {
+        let memoryURLs: [String: [String]]
+        let overallImageURLs: [String]
+    }
+
+    private static let maxRetryPerImage = 2
 
     private static func uploadMemoryImagesIfNeeded(
         imagePaths: [String],
+        fallbackRemoteURLs: [String] = [],
         userID: String,
         token: String,
         mediaUploader: MediaUploader = liveMediaUploader
     ) async throws -> [String] {
-        guard !imagePaths.isEmpty else { return [] }
+        guard !imagePaths.isEmpty else { return fallbackRemoteURLs.isEmpty ? [] : fallbackRemoteURLs }
 
         let paths = StoragePath(userID: userID)
         var uploaded: [String] = []
 
-        for name in imagePaths {
+        for (idx, name) in imagePaths.enumerated() {
             let fileURL = paths.photosDir.appendingPathComponent(name)
-            guard FileManager.default.fileExists(atPath: fileURL.path) else { continue }
+            guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                // Local file missing — fall back to previously uploaded remote URL if available.
+                if idx < fallbackRemoteURLs.count, !fallbackRemoteURLs[idx].isEmpty {
+                    uploaded.append(fallbackRemoteURLs[idx])
+                    continue
+                }
+                throw PublishError.localFileMissing(name)
+            }
 
             let data = try Data(contentsOf: fileURL)
             let mime = mimeType(for: fileURL.pathExtension)
-            let result = try await mediaUploader(token, data, fileURL.lastPathComponent, mime)
-            uploaded.append(result.url)
+            // Use content hash as filename so server can dedup on retry.
+            let hash = data.md5HexString
+            let ext = (fileURL.pathExtension.isEmpty) ? ".jpg" : ".\(fileURL.pathExtension)"
+            let hashFileName = "\(hash)\(ext)"
+
+            var lastError: Error?
+            for attempt in 0...maxRetryPerImage {
+                do {
+                    let result = try await mediaUploader(token, data, hashFileName, mime)
+                    uploaded.append(result.url)
+                    lastError = nil
+                    break
+                } catch {
+                    lastError = error
+                    if attempt < maxRetryPerImage {
+                        try await Task.sleep(nanoseconds: UInt64((attempt + 1)) * 1_000_000_000)
+                    }
+                }
+            }
+            if let error = lastError {
+                throw error
+            }
         }
 
         return uploaded
+    }
+
+    enum PublishError: LocalizedError {
+        case localFileMissing(String)
+        case journeyNotCompleted
+
+        var errorDescription: String? {
+            switch self {
+            case .localFileMissing(let name): return "Photo file missing: \(name)"
+            case .journeyNotCompleted: return "Journey has no end time"
+            }
+        }
     }
 
     // MARK: - Download & Merge (Cloud → Local)
@@ -468,5 +532,12 @@ enum JourneyCloudMigrationService {
         case "mov": return "video/quicktime"
         default: return "application/octet-stream"
         }
+    }
+}
+
+extension Data {
+    var md5HexString: String {
+        let digest = Insecure.MD5.hash(data: self)
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 }

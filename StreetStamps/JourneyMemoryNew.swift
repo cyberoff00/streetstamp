@@ -1038,8 +1038,7 @@ struct JourneyMemoryDetailView: View {
     @State private var showMembershipGate: MembershipGatedFeature? = nil
     @ObservedObject private var membership = MembershipStore.shared
     @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
-    @State private var activeMemoryHint: MemoryHintItem? = nil
-    @State private var memoryHintTask: Task<Void, Never>? = nil
+    @State private var showMemoryHint = false
 
     init(
         journey: JourneyRoute,
@@ -1183,19 +1182,18 @@ struct JourneyMemoryDetailView: View {
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
         .overlay(alignment: .bottom) {
-            if let hint = activeMemoryHint {
+            if showMemoryHint {
                 ContextualHintBar(
-                    icon: hint.icon,
-                    message: hint.message,
-                    onDismiss: { dismissMemoryHintSequence() }
+                    icon: "info.circle",
+                    message: L10n.t("tour_memory_combined"),
+                    onDismiss: { dismissMemoryHint() }
                 )
                 .padding(.horizontal, 18)
                 .padding(.bottom, 16)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
-                .id(hint.id)
             }
         }
-        .animation(.easeInOut(duration: 0.3), value: activeMemoryHint?.id)
+        .animation(.easeInOut(duration: 0.3), value: showMemoryHint)
         .task {
             if let cached = RouteThumbnailCache.shared.get(journey.id) {
                 routeThumbnail = cached
@@ -1246,9 +1244,8 @@ struct JourneyMemoryDetailView: View {
                 snapshotOverallMemoryImagePathsBeforeEdit = journey.overallMemoryImagePaths
             }
         }
-        .onAppear { startMemoryHintSequence() }
+        .onAppear { showMemoryHintIfNeeded() }
         .onDisappear {
-            memoryHintTask?.cancel()
             flow.popSidebarButtonHidden(token: sidebarHideToken)
             // ✅ If user leaves while editing (e.g. switches to another tab), keep editing state.
             if !readOnly {
@@ -1419,7 +1416,7 @@ struct JourneyMemoryDetailView: View {
                         }
                     }
 
-                    if !readOnly {
+                    if !readOnly && FeatureFlagStore.shared.socialEnabled {
                         visibilityStatusButton
                     }
                 }
@@ -1543,7 +1540,7 @@ struct JourneyMemoryDetailView: View {
                     EditableMemoryTimelineItem(
                         memory: $draftMemories[index],
                         userID: sessionStore.currentUserID,
-                        maxPhotos: membership.maxJourneyPhotos,
+                        maxPhotos: membership.maxPhotosPerMemory,
                         focusedMemoryID: $focusedMemoryID,
                         onOpenCamera: { openCamera(for: index) },
                         onOpenPhotoLibrary: { openPhotoLibrary(for: index) }
@@ -1735,7 +1732,8 @@ struct JourneyMemoryDetailView: View {
             return
         }
         saveEditing()
-        guard let updated = store.journeys.first(where: { $0.id == journey.id }) else { return }
+        guard let updated = store.journeys.first(where: { $0.id == journey.id }),
+              updated.endTime != nil else { return }
         publishStore.publish(
             journey: updated,
             sessionStore: sessionStore,
@@ -1796,7 +1794,7 @@ struct JourneyMemoryDetailView: View {
     }
 
     // MARK: - Photo add helpers (edit mode)
-    private var photoLimit: Int { membership.maxJourneyPhotos }
+    private var photoLimit: Int { membership.maxPhotosPerMemory }
 
     private func remainingPhotoSlotsForActiveTarget() -> Int {
         switch activePhotoTarget {
@@ -1926,37 +1924,15 @@ struct JourneyMemoryDetailView: View {
     @MainActor
     // MARK: - Memory Detail Hint Sequence
 
-    private struct MemoryHintItem: Equatable {
-        let id: String
-        let icon: String
-        let message: String
-    }
-
-    private static let memoryHintSequence: [MemoryHintItem] = [
-        MemoryHintItem(id: "edit", icon: "square.and.pencil", message: L10n.t("tour_memory_edit")),
-        MemoryHintItem(id: "export", icon: "square.and.arrow.up", message: L10n.t("tour_memory_export")),
-        MemoryHintItem(id: "visibility", icon: "lock.fill", message: L10n.t("tour_memory_visibility")),
-    ]
-
-    private func startMemoryHintSequence() {
+    private func showMemoryHintIfNeeded() {
         guard !readOnly, onboardingGuide.shouldShowHint(.memoryDetailTour) else { return }
-        memoryHintTask?.cancel()
-        memoryHintTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            for hint in Self.memoryHintSequence {
-                guard !Task.isCancelled else { return }
-                activeMemoryHint = hint
-                try? await Task.sleep(nanoseconds: 6_000_000_000)
-            }
-            guard !Task.isCancelled else { return }
-            activeMemoryHint = nil
-            onboardingGuide.dismissHint(.memoryDetailTour)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            withAnimation { showMemoryHint = true }
         }
     }
 
-    private func dismissMemoryHintSequence() {
-        memoryHintTask?.cancel()
-        activeMemoryHint = nil
+    private func dismissMemoryHint() {
+        withAnimation { showMemoryHint = false }
         onboardingGuide.dismissHint(.memoryDetailTour)
     }
 
@@ -2088,6 +2064,7 @@ struct JourneyMemoryDetailView: View {
 
     private func applyVisibilityChange() {
         guard !publishStore.status.isSending else { return }
+        guard currentJourney.endTime != nil else { return }
         let target = pendingVisibility
         let journey = currentJourney
         guard target != journey.visibility else {
@@ -2282,7 +2259,7 @@ private struct SyncMemoryImagesView: View {
     var body: some View {
         VStack(spacing: 12) {
             ForEach(imagePaths, id: \.self) { path in
-                if let img = PhotoStore.loadImage(named: path, userID: userID) {
+                if let img = PhotoStore.loadImage(named: path, userID: userID)?.downscaled(maxPixel: 720) {
                     Image(uiImage: img)
                         .resizable()
                         .scaledToFit()
@@ -2421,38 +2398,30 @@ private struct MemoryImagesView: View {
             }
             ForEach(remoteImageURLs, id: \.self) { rawURL in
                 if let url = URL(string: rawURL) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .scaledToFit()
-                                .frame(maxWidth: .infinity)
-                                .overlay(
-                                    Rectangle()
-                                        .inset(by: 0.5)
-                                        .stroke(
-                                            Color(red: 0.90, green: 0.91, blue: 0.92),
-                                            lineWidth: 0.5
-                                        )
-                                )
-                        case .failure:
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(Color(red: 0.95, green: 0.95, blue: 0.95))
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 140)
-                                .overlay {
-                                    Image(systemName: "exclamationmark.triangle")
-                                        .foregroundColor(.secondary)
-                                }
-                        case .empty:
-                            ProgressView()
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 140)
-                        @unknown default:
-                            EmptyView()
-                        }
+                    CachedRemoteImage(url: url) { $0.resizable() } placeholder: {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 140)
+                    } failure: {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color(red: 0.95, green: 0.95, blue: 0.95))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 140)
+                            .overlay {
+                                Image(systemName: "exclamationmark.triangle")
+                                    .foregroundColor(.secondary)
+                            }
                     }
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity)
+                    .overlay(
+                        Rectangle()
+                            .inset(by: 0.5)
+                            .stroke(
+                                Color(red: 0.90, green: 0.91, blue: 0.92),
+                                lineWidth: 0.5
+                            )
+                    )
                 }
             }
         }

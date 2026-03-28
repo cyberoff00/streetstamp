@@ -695,6 +695,18 @@ struct SystemCameraPicker: UIViewControllerRepresentable {
         if UIImagePickerController.isFlashAvailable(for: picker.cameraDevice) {
             picker.cameraFlashMode = .off
         }
+
+        // Front camera: hide default controls and use custom overlay
+        // so we skip the iOS review screen (which shows un-mirrored image).
+        if picker.cameraDevice == .front {
+            picker.showsCameraControls = false
+            let overlay = FrontCameraOverlay(picker: picker)
+            let host = UIHostingController(rootView: overlay)
+            host.view.backgroundColor = .clear
+            host.view.frame = UIScreen.main.bounds
+            picker.cameraOverlayView = host.view
+        }
+
         return picker
     }
 
@@ -718,12 +730,55 @@ struct SystemCameraPicker: UIViewControllerRepresentable {
                 return
             }
 
-            let out = self.parent.mirrorOnCapture ? image.horizontallyFlipped() : image
+            let isFrontCamera = picker.cameraDevice == .front
+            let shouldMirror = isFrontCamera || self.parent.mirrorOnCapture
+            let out = shouldMirror ? image.horizontallyFlipped() : image
 
-            // ✅ 关键：dismiss 完成后再回调 SwiftUI（避免卡在 Use Photo 页）
             picker.dismiss(animated: true) {
                 self.parent.onImage(out)
             }
+        }
+    }
+}
+
+// MARK: - Custom overlay for front camera (skips iOS review screen)
+
+private struct FrontCameraOverlay: View {
+    let picker: UIImagePickerController
+
+    var body: some View {
+        VStack {
+            HStack {
+                Button {
+                    // Trigger the delegate's cancel handler so onCancel fires
+                    picker.delegate?.imagePickerControllerDidCancel?(picker)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(width: 44, height: 44)
+                }
+                .padding(.leading, 16)
+                Spacer()
+            }
+            .padding(.top, 8)
+
+            Spacer()
+
+            // Shutter button
+            Button {
+                picker.takePicture()
+            } label: {
+                ZStack {
+                    Circle()
+                        .fill(.white)
+                        .frame(width: 72, height: 72)
+                    Circle()
+                        .stroke(.white, lineWidth: 4)
+                        .frame(width: 80, height: 80)
+                }
+            }
+            .padding(.bottom, 40)
         }
     }
 }
@@ -1422,7 +1477,8 @@ struct MapView: View {
         guard journeyRoute.endTime == nil else { return }
         mapHintTask?.cancel()
         mapHintTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            // Longer initial delay so system permission dialogs clear first
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
             guard !Task.isCancelled else { return }
             if onboardingGuide.shouldShowHint(.mapModeExplain) {
                 activeMapHint = .mapModeExplain
@@ -2169,31 +2225,22 @@ struct MemoryDetailPage: View {
                                     }
                                     ForEach(Array(memory.remoteImageURLs.enumerated()), id: \.offset) { idx, rawURL in
                                         if let url = URL(string: rawURL) {
-                                            AsyncImage(url: url) { phase in
-                                                switch phase {
-                                                case .success(let image):
-                                                    image
-                                                        .resizable()
-                                                        .scaledToFill()
-                                                        .frame(width: 88, height: 88)
-                                                        .clipped()
-                                                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                                case .failure:
-                                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                        .fill(Color(UIColor(white: 0.92, alpha: 1)))
-                                                        .frame(width: 88, height: 88)
-                                                        .overlay {
-                                                            Image(systemName: "exclamationmark.triangle")
-                                                                .foregroundColor(.secondary)
-                                                        }
-                                                case .empty:
-                                                    ProgressView()
-                                                        .frame(width: 88, height: 88)
-                                                @unknown default:
-                                                    EmptyView()
-                                                        .frame(width: 88, height: 88)
-                                                }
+                                            CachedRemoteImage(url: url) { $0.resizable() } placeholder: {
+                                                ProgressView()
+                                                    .frame(width: 88, height: 88)
+                                            } failure: {
+                                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                    .fill(Color(UIColor(white: 0.92, alpha: 1)))
+                                                    .frame(width: 88, height: 88)
+                                                    .overlay {
+                                                        Image(systemName: "exclamationmark.triangle")
+                                                            .foregroundColor(.secondary)
+                                                    }
                                             }
+                                            .scaledToFill()
+                                            .frame(width: 88, height: 88)
+                                            .clipped()
+                                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                             .onTapGesture {
                                                 viewerIndex = memory.imagePaths.count + idx
                                                 showViewer = true
@@ -2431,7 +2478,7 @@ struct MemoryEditorSheet: View {
     @State private var initialNotes: String
     @State private var initialImagePaths: [String]
     @State private var initialMirrorSelfie: Bool
-    private var maxPhotos: Int { MembershipStore.shared.maxJourneyPhotos }
+    private var maxPhotos: Int { MembershipStore.shared.maxPhotosPerMemory }
 
     private func hideKeyboard() {
         endEditingGlobal()
@@ -3186,36 +3233,28 @@ private struct ZoomableRemoteImage: View {
     var body: some View {
         Group {
             if let imageURL = URL(string: url) {
-                AsyncImage(url: imageURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFit()
-                            .scaleEffect(scale)
-                            .gesture(
-                                MagnificationGesture()
-                                    .onChanged { v in
-                                        scale = max(1, min(4, lastScale * v))
-                                    }
-                                    .onEnded { _ in
-                                        lastScale = scale
-                                    }
-                            )
-                            .onTapGesture(count: 2) {
-                                if scale > 1 { scale = 1; lastScale = 1 }
-                                else { scale = 2; lastScale = 2 }
-                            }
-                    case .failure:
-                        Image(systemName: "exclamationmark.triangle")
-                            .font(.system(size: 40, weight: .semibold))
-                            .foregroundColor(.white.opacity(0.7))
-                    case .empty:
-                        ProgressView()
-                            .tint(.white)
-                    @unknown default:
-                        EmptyView()
-                    }
+                CachedRemoteImage(url: imageURL) { $0.resizable() } placeholder: {
+                    ProgressView()
+                        .tint(.white)
+                } failure: {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 40, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.7))
+                }
+                .scaledToFit()
+                .scaleEffect(scale)
+                .gesture(
+                    MagnificationGesture()
+                        .onChanged { v in
+                            scale = max(1, min(4, lastScale * v))
+                        }
+                        .onEnded { _ in
+                            lastScale = scale
+                        }
+                )
+                .onTapGesture(count: 2) {
+                    if scale > 1 { scale = 1; lastScale = 1 }
+                    else { scale = 2; lastScale = 2 }
                 }
             } else {
                 Image(systemName: "photo")

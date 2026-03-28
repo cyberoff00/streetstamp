@@ -656,7 +656,7 @@ final class TrackingService: ObservableObject {
             )
             switch action {
             case .startPassive:
-                hub.startPassiveLifelog(mode: AppSettings.lifelogBackgroundMode)
+                hub.startPassiveLifelog()
             case .stayIdle, .requestSingleRefresh:
                 hub.stop()
             }
@@ -704,13 +704,18 @@ final class TrackingService: ObservableObject {
 
     func enterLowPowerBackgroundMode() {
         guard isTracking else { return }
-        
-        // ✅ 根据追踪模式选择后台策略
-        if trackingMode == .sport {
-            hub.enterBackgroundHighFidelity()  // 运动模式保持高精度
-        } else {
-            hub.enterBackgroundPowerSaving()  // 日常模式优先省电
-        }
+
+        // Sport and daily high-precision foreground configs already have
+        // allowsBackgroundLocationUpdates = true + pausesLocationUpdatesAutomatically = false,
+        // so they work correctly in background without any mode switch.
+        // Calling stop() under WhenInUse authorization would kill the background session.
+        if trackingMode == .sport { return }
+
+        if AppSettings.dailyTrackingPrecision == .highPrecision { return }
+
+        // Daily low-precision: transition parameters in-place (no stop) to save battery
+        // while preserving the background location session.
+        hub.transitionToBackgroundPowerSaving()
     }
 
     /// MapView 进来自动对齐一次（你选的策略）

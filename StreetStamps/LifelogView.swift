@@ -866,6 +866,8 @@ struct LifelogView: View {
             AlwaysLocationGuideView(isPresented: $showAlwaysLocationGuide, onEnable: {
                 alwaysLocationGuideShown = true
                 locationHub.requestAlwaysPermissionIfNeeded()
+            }, onSkip: {
+                alwaysLocationGuideShown = true
             })
         }
         .alert(L10n.t("lifelog_disable_title"), isPresented: $showDisableConfirm) {
@@ -1271,12 +1273,12 @@ struct LifelogView: View {
         switch locationHub.authorizationStatus {
         case .authorizedAlways:
             showEnableHint = false
-        case .denied, .restricted:
+        case .notDetermined:
+            locationHub.requestAlwaysPermissionIfNeeded()
+        case .authorizedWhenInUse, .denied, .restricted:
             openAppSettings()
-        case .notDetermined, .authorizedWhenInUse:
-            locationHub.requestAlwaysPermissionIfNeeded()
         @unknown default:
-            locationHub.requestAlwaysPermissionIfNeeded()
+            openAppSettings()
         }
     }
 
@@ -1292,13 +1294,24 @@ struct LifelogView: View {
         LifelogHintItem(id: "calendar", icon: "calendar", message: L10n.t("tooltip_lifelog_calendar")),
     ]
 
+    private var hasActivePopup: Bool {
+        showAlwaysLocationGuide || isMoodPopupVisible || isStepPopupVisible || isStepModalVisible || showPermissionSettingsPrompt || showDisableConfirm
+    }
+
     private func startLifelogHintSequence() {
         guard onboardingGuide.shouldShowHint(.lifelogTour) else { return }
         lifelogHintTask?.cancel()
         lifelogHintTask = Task { @MainActor in
+            // Wait until all competing popups are dismissed
+            while hasActivePopup {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                guard !Task.isCancelled else { return }
+            }
             try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled, !hasActivePopup else { return }
             for hint in Self.lifelogHintSequence {
                 guard !Task.isCancelled else { return }
+                if hasActivePopup { return }
                 activeLifelogHint = hint
                 try? await Task.sleep(nanoseconds: 6_000_000_000)
             }
@@ -2381,6 +2394,7 @@ private struct FootstepGlyph: View {
 private struct AlwaysLocationGuideView: View {
     @Binding var isPresented: Bool
     let onEnable: () -> Void
+    var onSkip: (() -> Void)?
 
     var body: some View {
         ZStack {
@@ -2423,6 +2437,7 @@ private struct AlwaysLocationGuideView: View {
 
                     Button {
                         isPresented = false
+                        onSkip?()
                     } label: {
                         Text(L10n.t("lifelog_always_guide_skip"))
                             .font(.system(size: 15))

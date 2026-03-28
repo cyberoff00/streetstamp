@@ -7,8 +7,8 @@ enum JourneyVisibility: String, Codable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    static var frontendCases: [JourneyVisibility] {
-        [.private, .friendsOnly]
+    @MainActor static var frontendCases: [JourneyVisibility] {
+        FeatureFlagStore.shared.socialEnabled ? [.private, .friendsOnly] : [.private]
     }
 
     var localizedTitle: String {

@@ -29,6 +29,7 @@ struct ProfileView: View {
     @State private var isSavingName = false
     @State private var toastText = ""
     @State private var showToast = false
+    @ObservedObject private var featureFlags = FeatureFlagStore.shared
     @State private var showNotificationsSheet = false
     @State private var showPostcardInboxFromNotification = false
     @State private var postcardInboxIntent = PostcardInboxIntent(box: "received", messageID: nil)
@@ -109,16 +110,20 @@ struct ProfileView: View {
             profileNameEditorSheet
         }
         .sheet(isPresented: $showNotificationsSheet) {
-            socialNotificationsSheet
+            if featureFlags.socialEnabled {
+                socialNotificationsSheet
+            }
         }
         .sheet(isPresented: $showPostcardInboxFromNotification) {
-            let initialBox: PostcardInboxView.Box = postcardInboxIntent.box == "sent" ? .sent : .received
-            NavigationStack {
-                PostcardInboxView(
-                    initialBox: initialBox,
-                    focusMessageID: postcardInboxIntent.messageID
-                )
-                .id(PostcardInboxView.viewIdentity(initialBox: initialBox, focusMessageID: postcardInboxIntent.messageID))
+            if featureFlags.socialEnabled {
+                let initialBox: PostcardInboxView.Box = postcardInboxIntent.box == "sent" ? .sent : .received
+                NavigationStack {
+                    PostcardInboxView(
+                        initialBox: initialBox,
+                        focusMessageID: postcardInboxIntent.messageID
+                    )
+                    .id(PostcardInboxView.viewIdentity(initialBox: initialBox, focusMessageID: postcardInboxIntent.messageID))
+                }
             }
         }
         .task {
@@ -128,12 +133,16 @@ struct ProfileView: View {
                 scheduleLoadoutSync(pendingLocalLoadout)
             }
             await refreshDisplayNameIfNeeded()
-            await notificationStore.refresh(token: sessionStore.currentAccessToken, showToastCallback: { msg in showToastMessage(msg) })
+            if featureFlags.socialEnabled {
+                await notificationStore.refresh(token: sessionStore.currentAccessToken, showToastCallback: { msg in showToastMessage(msg) })
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             Task {
-                await notificationStore.refresh(token: sessionStore.currentAccessToken, showToastCallback: { msg in showToastMessage(msg) })
+                if featureFlags.socialEnabled {
+                    await notificationStore.refresh(token: sessionStore.currentAccessToken, showToastCallback: { msg in showToastMessage(msg) })
+                }
             }
         }
         .onChange(of: sessionStore.currentAccessToken) { _, _ in
@@ -144,7 +153,9 @@ struct ProfileView: View {
                     scheduleLoadoutSync(pendingLocalLoadout)
                 }
                 await refreshDisplayNameIfNeeded()
-                await notificationStore.refresh(token: sessionStore.currentAccessToken)
+                if featureFlags.socialEnabled {
+                    await notificationStore.refresh(token: sessionStore.currentAccessToken)
+                }
             }
         }
         .onChange(of: sessionStore.currentUserID) { _, _ in
@@ -219,7 +230,8 @@ struct ProfileView: View {
                 }
                 .frame(height: 252)
 
-                if ProfileHeaderPresentation.showsNotificationCloud(notificationCount: notificationStore.notifications.count) {
+                if featureFlags.socialEnabled,
+                   ProfileHeaderPresentation.showsNotificationCloud(notificationCount: notificationStore.notifications.count) {
                     Button {
                         showNotificationsSheet = true
                     } label: {
@@ -298,12 +310,14 @@ struct ProfileView: View {
 
     private var topActionRow: some View {
         VStack(spacing: 20) {
-            NavigationLink {
-                PostcardInboxView()
-            } label: {
-                postcardTile
+            if featureFlags.socialEnabled {
+                NavigationLink {
+                    PostcardInboxView()
+                } label: {
+                    postcardTile
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
 
             CompactActivityRingCard(
                 stats: ProfileStatsSnapshot(
@@ -498,6 +512,7 @@ struct ProfileView: View {
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .shadow(color: Color.black.opacity(0.04), radius: 14, x: 0, y: 5)
         .onTapGesture {
+            guard featureFlags.socialEnabled else { return }
             Task {
                 await notificationStore.markSingleRead(id: item.id, token: sessionStore.currentAccessToken)
                 if item.type == "postcard_received" || item.type == "postcard_reaction" {

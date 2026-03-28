@@ -201,25 +201,17 @@ struct PostcardFrontFaceView: View {
                 }
             case .remoteURL(let raw):
                 if let url = URL(string: raw) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: geo.size.width, height: geo.size.height)
-                                .clipped()
-                        case .failure:
-                            placeholder
-                        case .empty:
-                            ZStack {
-                                Color(red: 0.95, green: 0.94, blue: 0.92)
-                                ProgressView()
-                            }
-                        @unknown default:
-                            placeholder
+                    CachedRemoteImage(url: url) { $0.resizable() } placeholder: {
+                        ZStack {
+                            Color(red: 0.95, green: 0.94, blue: 0.92)
+                            ProgressView()
                         }
+                    } failure: {
+                        placeholder
                     }
+                    .scaledToFill()
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .clipped()
                 } else {
                     placeholder
                 }

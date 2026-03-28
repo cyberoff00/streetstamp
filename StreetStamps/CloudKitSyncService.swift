@@ -36,6 +36,11 @@ struct CloudKitRestoreResult {
     }
 }
 
+struct CloudKitStatusSnapshot: Equatable {
+    let status: String?
+    let at: Date?
+}
+
 // MARK: - Sync Coordinator
 
 actor CloudKitSyncService {
@@ -602,6 +607,26 @@ actor CloudKitSyncService {
 
     nonisolated static func statusAtKey(for userID: String) -> String {
         "\(statusAtKeyPrefix)\(userID)"
+    }
+
+    nonisolated static func statusSnapshot(
+        defaults: UserDefaults = .standard,
+        localUserID: String,
+        accountUserID: String?
+    ) -> CloudKitStatusSnapshot {
+        let preferredIDs = [accountUserID, localUserID]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        for userID in preferredIDs {
+            let status = defaults.string(forKey: statusKey(for: userID))
+            let at = defaults.object(forKey: statusAtKey(for: userID)) as? Date
+            if status != nil || at != nil {
+                return CloudKitStatusSnapshot(status: status, at: at)
+            }
+        }
+
+        return CloudKitStatusSnapshot(status: nil, at: nil)
     }
 
     nonisolated private static func lastJourneySyncAtKey(for userID: String) -> String {

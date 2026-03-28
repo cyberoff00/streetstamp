@@ -6,6 +6,29 @@ enum PassiveLocationState: Equatable {
     case stationary
 }
 
+struct PassiveLocationProfile: Equatable {
+    let desiredAccuracy: CLLocationAccuracy
+    let distanceFilter: CLLocationDistance
+    let activityType: CLActivityType
+
+    static func profile(for state: PassiveLocationState) -> PassiveLocationProfile {
+        switch state {
+        case .moving:
+            return PassiveLocationProfile(
+                desiredAccuracy: kCLLocationAccuracyNearestTenMeters,
+                distanceFilter: 40,
+                activityType: .fitness
+            )
+        case .stationary:
+            return PassiveLocationProfile(
+                desiredAccuracy: kCLLocationAccuracyHundredMeters,
+                distanceFilter: 80,
+                activityType: .otherNavigation
+            )
+        }
+    }
+}
+
 enum LocationLifecycleAction: Equatable {
     case requestSingleRefresh
     case startPassive
@@ -53,49 +76,5 @@ enum MotionActivityPolicy {
             isTrackingJourney: isTrackingJourney,
             isPassiveLifelogActive: isPassiveLifelogEnabled && authorizationStatus == .authorizedAlways
         )
-    }
-}
-
-struct PassiveLocationProfile: Equatable {
-    let desiredAccuracy: CLLocationAccuracy
-    let distanceFilter: CLLocationDistance
-    let activityType: CLActivityType
-
-    static func profile(
-        for mode: LifelogBackgroundMode,
-        state: PassiveLocationState
-    ) -> PassiveLocationProfile {
-        switch mode {
-        case .highPrecision:
-            switch state {
-            case .moving:
-                return PassiveLocationProfile(
-                    desiredAccuracy: kCLLocationAccuracyNearestTenMeters,
-                    distanceFilter: 35,
-                    activityType: .fitness
-                )
-            case .stationary:
-                return PassiveLocationProfile(
-                    desiredAccuracy: kCLLocationAccuracyHundredMeters,
-                    distanceFilter: 90,
-                    activityType: .otherNavigation
-                )
-            }
-        case .lowPrecision:
-            switch state {
-            case .moving:
-                return PassiveLocationProfile(
-                    desiredAccuracy: kCLLocationAccuracyHundredMeters,
-                    distanceFilter: 70,
-                    activityType: .otherNavigation
-                )
-            case .stationary:
-                return PassiveLocationProfile(
-                    desiredAccuracy: kCLLocationAccuracyKilometer,
-                    distanceFilter: 180,
-                    activityType: .other
-                )
-            }
-        }
     }
 }

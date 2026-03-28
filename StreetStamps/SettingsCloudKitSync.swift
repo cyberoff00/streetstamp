@@ -12,7 +12,7 @@ actor SettingsCloudKitSync {
         AppSettings.voiceBroadcastIntervalKMKey,
         AppSettings.longStationaryReminderEnabledKey,
         AppSettings.liveActivityEnabledKey,
-        AppSettings.lifelogBackgroundModeKey,
+        AppSettings.dailyTrackingPrecisionKey,
         AppSettings.lifelogPassiveEnabledKey,
         "streetstamps.map.appearance",
         "streetstamps.profile.visibility",

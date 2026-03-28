@@ -45,6 +45,7 @@
 "auth_forgot_password" = "Forgot password?";
 "auth_forgot_password_hint" = "Please use the change-password action in Settings.";
 "auth_full_name" = "FULL NAME";
+"auth_nickname_placeholder" = "영문, 숫자, 밑줄";
 "auth_have_account" = "Already have an account?";
 "auth_no_account" = "Don't have an account?";
 "auth_password" = "PASSWORD";
@@ -62,6 +63,8 @@
 "backend_url_saved" = "Backend URL saved";
 "buy_coins" = "Buy Coins";
 "buy_n_coins" = "Buy %d coins";
+"coin_sheet_premium_title" = "프리미엄 가입 시 1,500 코인 지급!";
+"coin_sheet_premium_subtitle" = "걸을 때마다 5배 코인 보상";
 "cancel" = "Cancel";
 "choose_city_manually" = "도시 수동 선택";
 "cities_title" = "Cities";
@@ -624,6 +627,10 @@
 "settings_lifelog_bg_mode_high" = "High Precision";
 "settings_lifelog_bg_mode_low" = "Low Precision";
 "settings_lifelog_bg_mode_title" = "Background Recording Mode";
+"settings_daily_precision_desc" = "데일리 모드 Journey의 백그라운드 GPS 품질을 제어합니다. 고정밀은 경로가 더 정확하지만 배터리를 더 사용하고, 저정밀은 배터리를 우선합니다.";
+"settings_daily_precision_high" = "고정밀";
+"settings_daily_precision_low" = "저정밀";
+"settings_daily_precision_title" = "데일리 모드 정밀도";
 "settings_live_activity_desc" = "Show current tracking progress on the Lock Screen and Dynamic Island.";
 "settings_live_activity_system_disabled_desc" = "설정 -> Worldo -> Live Activities에서 켜 주세요.";
 "settings_live_activity_title" = "Live Activity";
@@ -825,7 +832,7 @@
 "membership_gate_subtitle" = "모든 기능을 잠금 해제하고 여정을 최대한 즐기세요.";
 "membership_gate_friends_limit" = "무료 플랜 친구 수 한도에 도달했습니다. Premium으로 업그레이드하면 무제한입니다.";
 "membership_gate_photos_title" = "더 많은 사진";
-"membership_gate_photos_desc" = "무료 플랜은 메모리당 최대 6장. Premium은 12장.";
+"membership_gate_photos_desc" = "무료 플랜은 여정당 최대 6장. Premium은 12장.";
 "membership_gate_friends_title" = "더 많은 친구";
 "membership_gate_friends_desc" = "무료 플랜은 최대 5명. Premium은 무제한.";
 "membership_gate_globe_title" = "글로벌 뷰";
@@ -842,7 +849,7 @@
 "membership_gate_gpx_desc" = "Premium으로 여정을 GPX 파일로 내보내기.";
 "membership_gate_map_title" = "지도 테마";
 "membership_gate_map_desc" = "Premium으로 추가 지도 스타일 잠금 해제.";
-"membership_benefit_photos" = "메모리당 최대 12장";
+"membership_benefit_photos" = "여정당 최대 12장";
 "membership_benefit_friends" = "무제한 친구";
 "membership_benefit_globe" = "풀 글로벌 뷰 경험";
 "membership_benefit_icloud" = "iCloud 동기화 & 복원";
@@ -860,8 +867,8 @@
 "membership_compare_feature" = "기능";
 "membership_compare_free" = "무료";
 "membership_compare_premium" = "Premium";
-"membership_compare_photos" = "사진 / 메모리";
-"membership_info_photos" = "여정당 추가 가능한 최대 사진 수. 무료: 6장, Premium: 12장.";
+"membership_compare_photos" = "사진 / 여정";
+"membership_info_photos" = "여정당 추가 가능한 최대 사진 수. 메모리당 최대 2장. 무료: 6장, Premium: 12장.";
 "membership_info_postcard" = "도시당: 친구 1명에게 1장(무료)/2장(Premium) 발송 가능, 최대 3명(무료)/10명(Premium). 해당 도시의 여정이 추가될 때마다 친구당 +1장, 수신자 수도 증가.";
 "membership_compare_friends" = "친구";
 "membership_compare_unlimited" = "무제한";
@@ -962,10 +969,8 @@
 "tooltip_next" = "다음";
 "tooltip_done" = "확인";
 
-// Memory Detail Tour
-"tour_memory_edit" = "여기를 탭하여 여행 이름, 메모, 활동 태그를 편집하세요";
-"tour_memory_export" = "이 여행의 멋진 롱 이미지를 내보내어 공유하세요";
-"tour_memory_visibility" = "이 여행의 공개 범위를 변경하세요 — 비공개, 친구, 전체 공개";
+// Memory Detail Hint
+"tour_memory_combined" = "여행 기록이 여기에 저장됩니다. 편집, 공개 범위 변경, 롱 이미지 내보내기가 가능합니다.";
 
 // Lifelog Tour
 "tour_lifelog_weather" = "현재 위치의 날씨와 기온";
@@ -997,3 +1002,27 @@
 "about_us_cyber_dog_content" = "about_us_cyber_dog_content";
 "postcard_saved_front" = "엽서 앞면이 저장되었습니다";
 "postcard_saved_back" = "엽서 뒷면이 저장되었습니다";
+
+"report_user" = "신고";
+"block_user" = "차단";
+"unblock" = "차단 해제";
+"block_user_confirm_title" = "사용자 차단";
+"block_user_confirm_message" = "이 사용자는 더 이상 프로필, 여정을 보거나 메시지를 보낼 수 없습니다. 친구 목록에서도 제거됩니다.";
+"report_title" = "신고";
+"report_submit" = "제출";
+"report_description" = "%@을(를) 신고하는 이유가 무엇인가요?";
+"report_reason_spam" = "스팸";
+"report_reason_harassment" = "괴롭힘 또는 따돌림";
+"report_reason_inappropriate" = "부적절한 콘텐츠";
+"report_reason_other" = "기타";
+"report_detail_placeholder" = "추가 설명 (선택 사항)";
+"report_submitted_title" = "신고가 접수되었습니다";
+"report_submitted_message" = "신고해 주셔서 감사합니다. 최대한 빨리 검토하겠습니다.";
+"settings_blocked_users_title" = "개인정보 및 안전";
+"settings_blocked_users_row" = "차단된 사용자";
+"blocked_users_empty" = "차단된 사용자가 없습니다";
+"auth_terms_prefix" = "";
+"auth_terms_of_service" = "이용약관";
+"auth_terms_and" = " 및 ";
+"auth_terms_privacy_policy" = "개인정보 처리방침";
+"auth_terms_required" = "이용약관 및 개인정보 처리방침에 동의해 주세요.";

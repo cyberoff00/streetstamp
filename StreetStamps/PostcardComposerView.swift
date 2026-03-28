@@ -504,14 +504,9 @@ private struct RecipientPickerSheet: View {
                     dismiss()
                 } label: {
                     HStack(spacing: 12) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(friend.displayName)
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(FigmaTheme.text)
-                            Text(friend.handle)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(FigmaTheme.subtext)
-                        }
+                        Text(friend.displayName)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(FigmaTheme.text)
                         Spacer()
                         if selectedRecipient?.userID == friend.id {
                             Image(systemName: "checkmark.circle.fill")

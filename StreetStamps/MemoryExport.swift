@@ -98,7 +98,7 @@ struct MemoryDetailExportView: View {
                     if !mem.imagePaths.isEmpty {
                         VStack(spacing: 12) {
                             ForEach(mem.imagePaths, id: \.self) { filename in
-                                if let ui = PhotoStore.loadImage(named: filename, userID: userID) {
+                                if let ui = Self.loadExportImage(named: filename, userID: userID) {
                                     Image(uiImage: ui)
                                         .resizable()
                                         .scaledToFill()
@@ -125,6 +125,13 @@ struct MemoryDetailExportView: View {
         }
         .padding(16)
         .background(Color.white)
+    }
+
+    /// Load image downscaled for export to reduce memory pressure.
+    /// Export width is 360pt × @3x = 1080px; images fill width, so 540px is sufficient.
+    private static func loadExportImage(named filename: String, userID: String) -> UIImage? {
+        guard let full = PhotoStore.loadImage(named: filename, userID: userID) else { return nil }
+        return full.downscaled(maxPixel: 540)
     }
 }
 import SwiftUI
@@ -161,7 +168,7 @@ enum MemoryExportRenderer {
         let renderer = ImageRenderer(content: view)
         renderer.scale = 3
         renderer.proposedSize = .init(width: exportWidth, height: nil)
-        renderer.isOpaque = true
+        renderer.isOpaque = false
         return renderer.uiImage
     }
 }

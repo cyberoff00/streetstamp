@@ -15,6 +15,7 @@ final class CoinStoreService: ObservableObject {
 
     @Published private(set) var products: [Product] = []
     @Published private(set) var isLoading = false
+    @Published private(set) var hasFinishedInitialLoad = false
     @Published private(set) var errorMessage: String?
 
     private var updateListenerTask: Task<Void, Never>?
@@ -30,7 +31,10 @@ final class CoinStoreService: ObservableObject {
     // MARK: - Load products from App Store
 
     func loadProducts() async {
-        guard products.isEmpty else { return }
+        guard products.isEmpty else {
+            hasFinishedInitialLoad = true
+            return
+        }
         isLoading = true
         errorMessage = nil
 
@@ -46,6 +50,7 @@ final class CoinStoreService: ObservableObject {
             #endif
         }
         isLoading = false
+        hasFinishedInitialLoad = true
     }
 
     // MARK: - Purchase

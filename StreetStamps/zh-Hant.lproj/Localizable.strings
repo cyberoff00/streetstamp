@@ -45,6 +45,7 @@
 "auth_forgot_password" = "忘记密碼？";
 "auth_forgot_password_hint" = "请在設置中使用修改密碼功能。";
 "auth_full_name" = "暱稱";
+"auth_nickname_placeholder" = "輸入暱稱，支持字母、數字、底線";
 "auth_have_account" = "已有账号？";
 "auth_no_account" = "还没有账号？";
 "auth_password" = "密碼";
@@ -62,6 +63,8 @@
 "backend_url_saved" = "已保存后端地址";
 "buy_coins" = "購買金幣";
 "buy_n_coins" = "購買 %d 金幣";
+"coin_sheet_premium_title" = "加入會員，立享 1,500 金幣！";
+"coin_sheet_premium_subtitle" = "每日步行還能賺 5 倍金幣";
 "cancel" = "取消";
 "choose_city_manually" = "手動選擇城市";
 "cities_title" = "城市";
@@ -629,6 +632,10 @@
 "settings_lifelog_bg_mode_high" = "高精度";
 "settings_lifelog_bg_mode_low" = "低精度";
 "settings_lifelog_bg_mode_title" = "後台記錄模式";
+"settings_daily_precision_desc" = "控制日常模式 Journey 的後台 GPS 品質。高精度路線更準確但更耗電，低精度優先節省電量。";
+"settings_daily_precision_high" = "高精度";
+"settings_daily_precision_low" = "低精度";
+"settings_daily_precision_title" = "日常模式精度";
 "settings_live_activity_desc" = "在锁屏和灵动岛顯示当前追蹤进度。";
 "settings_live_activity_system_disabled_desc" = "请前往 設置 -> Worldo -> 实时活動 開啟。";
 "settings_live_activity_title" = "实时活動";
@@ -831,7 +838,7 @@
 "membership_gate_subtitle" = "解鎖全部功能，讓每段旅程都更精彩。";
 "membership_gate_friends_limit" = "已達到免費版好友上限。升級 Premium 可新增無限好友。";
 "membership_gate_photos_title" = "更多照片";
-"membership_gate_photos_desc" = "免費版每條記憶最多 6 張照片，升級 Premium 可拍 12 張。";
+"membership_gate_photos_desc" = "免費版每段旅程最多 6 張照片，升級 Premium 可拍 12 張。";
 "membership_gate_friends_title" = "更多好友";
 "membership_gate_friends_desc" = "免費版最多 5 位好友，升級 Premium 無上限。";
 "membership_gate_globe_title" = "全球視圖";
@@ -848,7 +855,7 @@
 "membership_gate_gpx_desc" = "升級 Premium，將旅程匯出為 GPX 檔案。";
 "membership_gate_map_title" = "地圖主題";
 "membership_gate_map_desc" = "升級 Premium 解鎖更多地圖外觀樣式。";
-"membership_benefit_photos" = "每條記憶最多 12 張照片";
+"membership_benefit_photos" = "每段旅程最多 12 張照片";
 "membership_benefit_friends" = "無限好友";
 "membership_benefit_globe" = "完整全球視圖體驗";
 "membership_benefit_icloud" = "iCloud 同步與還原";
@@ -866,8 +873,8 @@
 "membership_compare_feature" = "功能";
 "membership_compare_free" = "免費";
 "membership_compare_premium" = "Premium";
-"membership_compare_photos" = "照片 / 記憶";
-"membership_info_photos" = "每段旅程最多可添加的照片數。免費 6 張，Premium 12 張。";
+"membership_compare_photos" = "照片 / 旅程";
+"membership_info_photos" = "每段旅程最多可添加的照片數，每條記憶最多 2 張。免費 6 張，Premium 12 張。";
 "membership_info_postcard" = "每個城市：可向每位好友發 1 張(免費)/2 張(Premium)明信片，最多 3 位(免費)/10 位(Premium)好友。該城市每多一段旅程，每位好友 +1 張，可發好友數也增加。";
 "membership_compare_friends" = "好友";
 "membership_compare_unlimited" = "無限";
@@ -962,10 +969,8 @@
 "tooltip_next" = "下一步";
 "tooltip_done" = "知道了";
 
-// Memory Detail Tour
-"tour_memory_edit" = "點擊這裡編輯旅程名稱、筆記和活動標籤";
-"tour_memory_export" = "匯出精美長圖，分享這次旅程";
-"tour_memory_visibility" = "設定誰可以看到這次旅程 — 私密、好友或公開";
+// Memory Detail Hint
+"tour_memory_combined" = "旅程圖文記憶保存在這裡，可以編輯、更改可見性或匯出長圖。";
 
 // Lifelog Tour
 "tour_lifelog_weather" = "目前位置的天氣和溫度";
@@ -997,3 +1002,27 @@
 "about_us_cyber_dog_content" = "一個朋友打算在裝備裡畫了一隻小狗，因為她想到她的小狗安迪以後死了，她散步的時候可以看到地圖裡自己帶著賽博小狗一起，然後還沒畫她就痛哭一場。很萌，我想要做的就是這種很萌的東西。又有一天我在為生活的一切，為這款app焦慮的時候，騎著車記錄著軌跡，我突然覺得沒關係，即使最後是自娛自樂也沒關係。我為朋友們建造了一個賽博空間，這個空間只有30個人也是另一種偉大的故事。";
 "postcard_saved_front" = "已保存明信片正面";
 "postcard_saved_back" = "已保存明信片反面";
+
+"report_user" = "檢舉";
+"block_user" = "封鎖";
+"unblock" = "取消封鎖";
+"block_user_confirm_title" = "封鎖用戶";
+"block_user_confirm_message" = "該用戶將無法查看你的資料、旅程或向你發送訊息，同時會從好友列表中移除。";
+"report_title" = "檢舉";
+"report_submit" = "提交";
+"report_description" = "你為什麼要檢舉 %@？";
+"report_reason_spam" = "垃圾訊息";
+"report_reason_harassment" = "騷擾或霸凌";
+"report_reason_inappropriate" = "不當內容";
+"report_reason_other" = "其他";
+"report_detail_placeholder" = "補充說明（可選）";
+"report_submitted_title" = "檢舉已提交";
+"report_submitted_message" = "感謝你的檢舉，我們會盡快審核處理。";
+"settings_blocked_users_title" = "隱私與安全";
+"settings_blocked_users_row" = "已封鎖用戶";
+"blocked_users_empty" = "暫無封鎖用戶";
+"auth_terms_prefix" = "我已閱讀並同意";
+"auth_terms_of_service" = "用戶協議";
+"auth_terms_and" = "和";
+"auth_terms_privacy_policy" = "隱私政策";
+"auth_terms_required" = "請先同意用戶協議和隱私政策。";

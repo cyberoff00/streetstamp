@@ -119,7 +119,10 @@ struct MainView: View {
                         store.upsertSnapshotThrottled(resumed, coordCount: resumed.coordinates.count)
                         store.flushPersist()
                         tracking.syncFromJourneyIfNeeded(resumed)
-                        tracking.resumeJourney()
+                        tracking.resumeJourney(
+                            startTime: resumed.startTime,
+                            restoredPausedDuration: resumed.pausedDurationSeconds
+                        )
                         showMapView = true
                     },
                     onCompleteAndExit: { finalized in
@@ -341,9 +344,12 @@ struct MainView: View {
                     
                     tracking.startNewJourney(mode: trackingMode)
                 } else {
-                    tracking.resumeJourney()
+                    tracking.resumeJourney(
+                        startTime: ongoingJourney.startTime,
+                        restoredPausedDuration: ongoingJourney.pausedDurationSeconds
+                    )
                 }
-                
+
                 showMapView = true
             }
             
@@ -385,10 +391,14 @@ struct MainView: View {
             
             private func endUnfinishedJourneyAndShare() {
                 var ended = ongoingJourney
-                ended.endTime = Date()
+                // Priority: last memory time → last file persist time → now.
+                ended.endTime = ended.memories.map(\.timestamp).max()
+                    ?? store.lastPersistedAt(journeyID: ended.id)
+                    ?? Date()
                 hasOngoingJourney = false
-                
+
                 tracking.stopJourney()
+                LiveActivityManager.shared.endAllStaleActivities()
                 
                 JourneyFinalizer.finalize(
                     route: ended,

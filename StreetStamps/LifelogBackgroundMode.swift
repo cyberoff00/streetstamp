@@ -1,15 +1,17 @@
 import Foundation
 
-enum LifelogBackgroundMode: String, CaseIterable {
+/// Controls the precision/battery tradeoff for daily journey tracking.
+/// High precision uses better background GPS; low precision prioritizes battery.
+enum DailyTrackingPrecision: String, CaseIterable {
     case highPrecision
     case lowPrecision
 
-    static let defaultMode: LifelogBackgroundMode = .highPrecision
+    static let defaultPrecision: DailyTrackingPrecision = .lowPrecision
 
     var titleKey: String {
         switch self {
-        case .highPrecision: return "settings_lifelog_bg_mode_high"
-        case .lowPrecision: return "settings_lifelog_bg_mode_low"
+        case .highPrecision: return "settings_daily_precision_high"
+        case .lowPrecision: return "settings_daily_precision_low"
         }
     }
 }

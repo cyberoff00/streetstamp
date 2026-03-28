@@ -1133,6 +1133,44 @@ final class BackendAPIClient {
         let body = try encoder.encode(["token": pushToken, "platform": platform])
         _ = try await request(path: "/v1/push-token", method: "PUT", token: token, jsonBody: body)
     }
+
+    // MARK: - Block / Report
+
+    func blockUser(token: String, userID: String) async throws {
+        _ = try await request(path: "/v1/users/\(userID)/block", method: "POST", token: token)
+    }
+
+    func unblockUser(token: String, userID: String) async throws {
+        _ = try await request(path: "/v1/users/\(userID)/block", method: "DELETE", token: token)
+    }
+
+    func fetchBlockedUsers(token: String) async throws -> [BlockedUserDTO] {
+        let (data, _) = try await request(path: "/v1/blocks", method: "GET", token: token)
+        let wrapper = try decoder.decode(BlockedUsersResponse.self, from: data)
+        return wrapper.blocks
+    }
+
+    func submitReport(token: String, reportedUserID: String, contentType: String, contentID: String?, reason: String, detail: String) async throws {
+        var dict: [String: String] = [
+            "reportedUserID": reportedUserID,
+            "contentType": contentType,
+            "reason": reason,
+            "detail": detail
+        ]
+        if let contentID { dict["contentID"] = contentID }
+        let body = try encoder.encode(dict)
+        _ = try await request(path: "/v1/reports", method: "POST", token: token, jsonBody: body)
+    }
+}
+
+struct BlockedUserDTO: Codable, Identifiable {
+    let id: String
+    let displayName: String
+    let handle: String?
+}
+
+private struct BlockedUsersResponse: Codable {
+    let blocks: [BlockedUserDTO]
 }
 
 private extension ISO8601DateFormatter {

@@ -187,6 +187,18 @@ final class JourneysFileStore {
         }
     }
 
+    /// Return the most recent modification date among a journey's persisted files (meta, delta, full).
+    func lastPersistedAt(journeyID: String) -> Date? {
+        let candidates = [urlMeta(for: journeyID), urlDelta(for: journeyID), urlFull(for: journeyID)]
+        var latest: Date?
+        for url in candidates {
+            guard let attrs = try? fm.attributesOfItem(atPath: url.path),
+                  let mod = attrs[.modificationDate] as? Date else { continue }
+            if latest == nil || mod > latest! { latest = mod }
+        }
+        return latest
+    }
+
     /// Find journey files on disk that are not in the index (orphans from crash between file write and index update).
     func scanOrphanedIDs(knownIDs: Set<String>) -> [String] {
         guard let files = try? fm.contentsOfDirectory(at: baseURL, includingPropertiesForKeys: nil) else { return [] }

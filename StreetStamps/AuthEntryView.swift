@@ -50,6 +50,7 @@ struct AuthEntryView: View {
     @State private var pendingVerificationEmail: String?
     @State private var pendingVerificationPassword: String?
     @State private var pendingPasswordResetToken: String?
+    @State private var agreedToTerms = false
     @FocusState private var focusedField: AuthField?
 
     private let accent = FigmaTheme.primary
@@ -176,7 +177,7 @@ struct AuthEntryView: View {
                 fieldLabel(L10n.t("auth_full_name"))
                 fieldContainer(
                     icon: "person",
-                    placeholder: "Cyber Kaka",
+                    placeholder: L10n.t("auth_nickname_placeholder"),
                     text: $fullName,
                     secure: false,
                     visible: true,
@@ -233,7 +234,45 @@ struct AuthEntryView: View {
                     .foregroundColor(.black.opacity(0.58))
                 }
             }
+
+            if mode == .register {
+                termsAgreementRow
+            }
         }
+    }
+
+    private var termsAgreementRow: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Button {
+                agreedToTerms.toggle()
+            } label: {
+                Image(systemName: agreedToTerms ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 20))
+                    .foregroundColor(agreedToTerms ? accent : .black.opacity(0.35))
+            }
+            .buttonStyle(.plain)
+
+            Text(termsAttributedText)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.black.opacity(0.55))
+                .tint(accent)
+        }
+        .padding(.top, 4)
+    }
+
+    private var termsAttributedText: AttributedString {
+        var text = AttributedString(L10n.t("auth_terms_prefix"))
+        var terms = AttributedString(L10n.t("auth_terms_of_service"))
+        terms.link = URL(string: "https://cyberoff00.github.io/streetstamp/terms.html")
+        terms.foregroundColor = accent
+        var and = AttributedString(L10n.t("auth_terms_and"))
+        var privacy = AttributedString(L10n.t("auth_terms_privacy_policy"))
+        privacy.link = URL(string: "https://cyberoff00.github.io/streetstamp/privacy-policy.html")
+        privacy.foregroundColor = accent
+        text.append(terms)
+        text.append(and)
+        text.append(privacy)
+        return text
     }
 
     private var authPrimaryButton: some View {
@@ -437,6 +476,12 @@ struct AuthEntryView: View {
         if mode == .register,
            trimmedPassword != confirmPassword.trimmingCharacters(in: .whitespacesAndNewlines) {
             messageText = L10n.t("auth_password_mismatch")
+            showMessage = true
+            return
+        }
+
+        if mode == .register && !agreedToTerms {
+            messageText = L10n.t("auth_terms_required")
             showMessage = true
             return
         }

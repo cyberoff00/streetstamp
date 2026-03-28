@@ -57,6 +57,12 @@ final class PostcardCenter: ObservableObject {
     @Published private(set) var receivedItems: [BackendPostcardMessageDTO] = []
     @Published private(set) var lastSyncError: String? = nil
 
+    /// Monotonic counter incremented each time sentItems is written locally
+    /// (optimistic insert). `refreshFromBackend` captures the value before
+    /// starting the network call and only writes if still current, preventing
+    /// a slow/stale fetch from overwriting a newer optimistic insert.
+    private var sentItemsGeneration: UInt64 = 0
+
     private let logger = Logger(subsystem: "StreetStamps", category: "PostcardSend")
 
     private var activeUserID: String
@@ -181,11 +187,24 @@ final class PostcardCenter: ObservableObject {
 
     func refreshFromBackend(token: String?) async {
         guard let token, !token.isEmpty else { return }
+        let generationAtStart = sentItemsGeneration
         do {
             async let sentTask = BackendAPIClient.shared.fetchPostcards(token: token, box: "sent")
             async let receivedTask = BackendAPIClient.shared.fetchPostcards(token: token, box: "received")
             let (sent, received) = try await (sentTask, receivedTask)
-            sentItems = sent.items.sorted(by: { $0.sentAt > $1.sentAt })
+            let freshSent = sent.items.sorted(by: { $0.sentAt > $1.sentAt })
+
+            // If an optimistic insert happened while we were fetching,
+            // merge rather than overwrite, so the new item stays visible.
+            if sentItemsGeneration != generationAtStart {
+                let freshIDs = Set(freshSent.map(\.messageID))
+                let optimisticOnly = sentItems.filter { !freshIDs.contains($0.messageID) }
+                sentItems = optimisticOnly + freshSent
+                sentItems.sort(by: { $0.sentAt > $1.sentAt })
+            } else {
+                sentItems = freshSent
+            }
+
             receivedItems = received.items.sorted(by: { $0.sentAt > $1.sentAt })
             lastSyncError = nil
         } catch {
@@ -268,7 +287,32 @@ final class PostcardCenter: ObservableObject {
             drafts[currentIndex] = current
             persist()
             logSendDiagnostics(status: "sent", draftID: draftID, diagnostics: diagnostics)
-            // Keep "send" completion snappy; refresh inbox in background.
+
+            // Optimistically insert a synthetic sent item so the postcard is
+            // visible in the outbox immediately, without waiting for the
+            // backend list refresh (which can race or lag).
+            let syntheticItem = BackendPostcardMessageDTO(
+                messageID: response.messageID,
+                type: "postcard",
+                fromUserID: activeUserID,
+                fromDisplayName: nil,
+                toUserID: current.toUserID,
+                toDisplayName: current.toDisplayName,
+                cityID: current.cityID,
+                cityName: current.cityName,
+                photoURL: photoResolution.url,
+                messageText: current.message,
+                sentAt: response.sentAt,
+                clientDraftID: current.clientDraftID,
+                status: "sent",
+                reaction: nil
+            )
+            if !sentItems.contains(where: { $0.messageID == response.messageID }) {
+                sentItems.insert(syntheticItem, at: 0)
+                sentItemsGeneration &+= 1
+            }
+
+            // Refresh from backend in background to get authoritative data.
             Task { [weak self] in
                 await self?.refreshFromBackend(token: token)
             }

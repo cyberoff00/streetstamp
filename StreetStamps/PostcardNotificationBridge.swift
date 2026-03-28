@@ -186,6 +186,7 @@ final class AppNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNoti
             return
         }
         await MainActor.run {
+            guard FeatureFlagStore.shared.socialEnabled else { return }
             if let intent = AppDeepLinkStore.parsePostcardInbox(from: url) {
                 AppFlowCoordinator.shared.requestOpenPostcardSidebar(intent)
             } else {

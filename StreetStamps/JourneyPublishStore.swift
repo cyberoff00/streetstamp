@@ -49,6 +49,17 @@ final class JourneyPublishStore: ObservableObject {
         guard BackendConfig.isEnabled,
               sessionStore.currentAccessToken?.isEmpty == false else { return }
 
+        // Auto-complete ongoing journeys before publishing.
+        // Priority: last memory time → last file persist time → now.
+        var journey = journey
+        if journey.endTime == nil {
+            let fallbackEnd = journey.memories.map(\.timestamp).max()
+                ?? journeyStore.lastPersistedAt(journeyID: journey.id)
+                ?? Date()
+            journey.endTime = fallbackEnd
+            journeyStore.applyBulkCompletedUpdates([journey])
+        }
+
         dismissTask?.cancel()
         status = .sending(journeyID: journey.id, title: title)
         lastFailedJourney = journey
@@ -58,11 +69,15 @@ final class JourneyPublishStore: ObservableObject {
 
         Task {
             do {
-                try await JourneyCloudMigrationService.syncJourneyVisibilityChange(
+                let urlCache = try await JourneyCloudMigrationService.syncJourneyVisibilityChange(
                     journey: journey,
                     sessionStore: sessionStore,
                     cityCache: cityCache
                 )
+                // Cache remote URLs locally so future republish can skip missing local files.
+                if let cache = urlCache[journey.id] {
+                    Self.applyRemoteURLCache(cache, journeyID: journey.id, journeyStore: journeyStore)
+                }
                 status = .success(journeyID: journey.id, title: title)
                 lastFailedJourney = nil
                 scheduleDismiss()
@@ -78,10 +93,12 @@ final class JourneyPublishStore: ObservableObject {
     }
 
     func retry() {
-        guard let journey = lastFailedJourney,
+        guard let failed = lastFailedJourney,
               let sessionStore = lastFailedSessionStore,
               let cityCache = lastFailedCityCache,
               let journeyStore = lastFailedJourneyStore else { return }
+        // Use the latest version from store instead of the stale snapshot.
+        let journey = journeyStore.journeys.first(where: { $0.id == failed.id }) ?? failed
         publish(
             journey: journey,
             sessionStore: sessionStore,
@@ -120,6 +137,29 @@ final class JourneyPublishStore: ObservableObject {
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             guard !Task.isCancelled else { return }
             status = .idle
+        }
+    }
+
+    private static func applyRemoteURLCache(
+        _ cache: JourneyCloudMigrationService.JourneyRemoteURLCache,
+        journeyID: String,
+        journeyStore: JourneyStore
+    ) {
+        guard let idx = journeyStore.journeys.firstIndex(where: { $0.id == journeyID }) else { return }
+        var j = journeyStore.journeys[idx]
+        var changed = false
+        for memIdx in j.memories.indices {
+            if let urls = cache.memoryURLs[j.memories[memIdx].id], urls != j.memories[memIdx].remoteImageURLs {
+                j.memories[memIdx].remoteImageURLs = urls
+                changed = true
+            }
+        }
+        if cache.overallImageURLs != j.overallMemoryRemoteImageURLs {
+            j.overallMemoryRemoteImageURLs = cache.overallImageURLs
+            changed = true
+        }
+        if changed {
+            journeyStore.applyBulkCompletedUpdates([j])
         }
     }
 }

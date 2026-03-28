@@ -45,6 +45,7 @@
 "auth_forgot_password" = "Forgot password?";
 "auth_forgot_password_hint" = "Please use the change-password action in Settings.";
 "auth_full_name" = "FULL NAME";
+"auth_nickname_placeholder" = "Lettres, chiffres, underscores";
 "auth_have_account" = "Already have an account?";
 "auth_no_account" = "Don't have an account?";
 "auth_password" = "PASSWORD";
@@ -62,6 +63,8 @@
 "backend_url_saved" = "Backend URL saved";
 "buy_coins" = "Buy Coins";
 "buy_n_coins" = "Buy %d coins";
+"coin_sheet_premium_title" = "Passez Premium : 1 500 pièces offertes !";
+"coin_sheet_premium_subtitle" = "Et 5× plus de pièces à chaque marche";
 "cancel" = "Cancel";
 "choose_city_manually" = "Choisir une ville manuellement";
 "cities_title" = "Cities";
@@ -624,6 +627,10 @@
 "settings_lifelog_bg_mode_high" = "High Precision";
 "settings_lifelog_bg_mode_low" = "Low Precision";
 "settings_lifelog_bg_mode_title" = "Background Recording Mode";
+"settings_daily_precision_desc" = "Contrôle la qualité GPS en arrière-plan pour le mode Quotidien. Haute précision offre un meilleur tracé mais consomme plus de batterie ; basse précision privilégie la batterie.";
+"settings_daily_precision_high" = "Haute Précision";
+"settings_daily_precision_low" = "Basse Précision";
+"settings_daily_precision_title" = "Précision Mode Quotidien";
 "settings_live_activity_desc" = "Show current tracking progress on the Lock Screen and Dynamic Island.";
 "settings_live_activity_system_disabled_desc" = "Activez Live Activities dans Reglages -> Worldo -> Live Activities.";
 "settings_live_activity_title" = "Live Activity";
@@ -825,7 +832,7 @@
 "membership_gate_subtitle" = "Profitez au maximum de chaque trajet avec toutes les fonctionnalités débloquées.";
 "membership_gate_friends_limit" = "Limite d'amis du plan gratuit atteinte. Passez à Premium pour des amis illimités.";
 "membership_gate_photos_title" = "Plus de photos";
-"membership_gate_photos_desc" = "Le plan gratuit autorise 6 photos par souvenir. Premium en autorise 12.";
+"membership_gate_photos_desc" = "Le plan gratuit autorise 6 photos par trajet. Premium en autorise 12.";
 "membership_gate_friends_title" = "Plus d'amis";
 "membership_gate_friends_desc" = "Le plan gratuit autorise 5 amis. Premium est illimité.";
 "membership_gate_globe_title" = "Vue Globale";
@@ -842,7 +849,7 @@
 "membership_gate_gpx_desc" = "Exportez vos trajets en fichiers GPX avec Premium.";
 "membership_gate_map_title" = "Thèmes de carte";
 "membership_gate_map_desc" = "Débloquez des styles de carte supplémentaires avec Premium.";
-"membership_benefit_photos" = "Jusqu'à 12 photos par souvenir";
+"membership_benefit_photos" = "Jusqu'à 12 photos par trajet";
 "membership_benefit_friends" = "Amis illimités";
 "membership_benefit_globe" = "Expérience de vue globale complète";
 "membership_benefit_icloud" = "Synchronisation et restauration iCloud";
@@ -860,8 +867,8 @@
 "membership_compare_feature" = "Fonctionnalité";
 "membership_compare_free" = "Gratuit";
 "membership_compare_premium" = "Premium";
-"membership_compare_photos" = "Photos / souvenir";
-"membership_info_photos" = "Photos max par trajet. Gratuit : 6, Premium : 12.";
+"membership_compare_photos" = "Photos / trajet";
+"membership_info_photos" = "Photos max par trajet. 2 par souvenir max. Gratuit : 6, Premium : 12.";
 "membership_info_postcard" = "Par ville : envoyez 1 (Gratuit) / 2 (Premium) cartes par ami, à 3 (Gratuit) / 10 (Premium) amis max. Chaque trajet supplémentaire donne +1 par ami et plus de destinataires.";
 "membership_compare_friends" = "Amis";
 "membership_compare_unlimited" = "Illimité";
@@ -962,10 +969,8 @@
 "tooltip_next" = "Suivant";
 "tooltip_done" = "Compris";
 
-// Memory Detail Tour
-"tour_memory_edit" = "Touchez ici pour modifier le nom, les notes et le tag d'activité";
-"tour_memory_export" = "Exportez une belle image longue de ce voyage pour partager";
-"tour_memory_visibility" = "Changez qui peut voir ce voyage — Privé, Amis ou Public";
+// Memory Detail Hint
+"tour_memory_combined" = "Vos souvenirs de voyage sont sauvegardés ici. Vous pouvez modifier, changer la visibilité ou exporter en image longue.";
 
 // Lifelog Tour
 "tour_lifelog_weather" = "Météo et température actuelles de votre position";
@@ -997,3 +1002,27 @@
 "about_us_cyber_dog_content" = "about_us_cyber_dog_content";
 "postcard_saved_front" = "Recto de la carte postale enregistré";
 "postcard_saved_back" = "Verso de la carte postale enregistré";
+
+"report_user" = "Signaler";
+"block_user" = "Bloquer";
+"unblock" = "Débloquer";
+"block_user_confirm_title" = "Bloquer l'utilisateur";
+"block_user_confirm_message" = "Cet utilisateur ne pourra plus voir votre profil, vos parcours ni vous envoyer de messages. Il sera également retiré de votre liste d'amis.";
+"report_title" = "Signaler";
+"report_submit" = "Envoyer";
+"report_description" = "Pourquoi signalez-vous %@ ?";
+"report_reason_spam" = "Spam";
+"report_reason_harassment" = "Harcèlement";
+"report_reason_inappropriate" = "Contenu inapproprié";
+"report_reason_other" = "Autre";
+"report_detail_placeholder" = "Détails supplémentaires (facultatif)";
+"report_submitted_title" = "Signalement envoyé";
+"report_submitted_message" = "Merci pour votre signalement. Nous l'examinerons dès que possible.";
+"settings_blocked_users_title" = "CONFIDENTIALITÉ ET SÉCURITÉ";
+"settings_blocked_users_row" = "Utilisateurs bloqués";
+"blocked_users_empty" = "Aucun utilisateur bloqué";
+"auth_terms_prefix" = "J'accepte les ";
+"auth_terms_of_service" = "Conditions d'utilisation";
+"auth_terms_and" = " et la ";
+"auth_terms_privacy_policy" = "Politique de confidentialité";
+"auth_terms_required" = "Veuillez accepter les Conditions d'utilisation et la Politique de confidentialité.";

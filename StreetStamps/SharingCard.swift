@@ -65,7 +65,7 @@ struct PopSharingCard: View {
     @State private var visibilityRestrictionMessage = ""
     private var canRenderCard: Bool { journey.coordinates.count >= 1 && !journey.isTooShort }
     private let activityPresets: [String] = ["通勤", "跑步", "旅游", "散步", "骑行", "驾车", "地铁", "登山"]
-    private let maxOverallMemoryPhotos = 3
+    private var maxOverallMemoryPhotos: Int { MembershipStore.shared.maxPhotosPerMemory }
 
     private var cachedCitiesByKey: [String: CachedCity] {
         cityCache.cachedCitiesByKey
@@ -471,21 +471,23 @@ struct PopSharingCard: View {
                 }
             }
 
-            if onboardingGuide.shouldShowHint(.visibilityToggle) {
-                ContextualHintBar(
-                    icon: "lock.shield",
-                    message: L10n.t("hint_visibility_toggle"),
-                    onDismiss: { onboardingGuide.dismissHint(.visibilityToggle) }
-                )
-            }
-
-            HStack(spacing: 10) {
-                Picker(L10n.t("visibility"), selection: visibilitySelection) {
-                    ForEach(JourneyVisibility.frontendCases) { v in
-                        Text(v.localizedTitle).tag(v)
-                    }
+            if FeatureFlagStore.shared.socialEnabled {
+                if onboardingGuide.shouldShowHint(.visibilityToggle) {
+                    ContextualHintBar(
+                        icon: "lock.shield",
+                        message: L10n.t("hint_visibility_toggle"),
+                        onDismiss: { onboardingGuide.dismissHint(.visibilityToggle) }
+                    )
                 }
-                .pickerStyle(.segmented)
+
+                HStack(spacing: 10) {
+                    Picker(L10n.t("visibility"), selection: visibilitySelection) {
+                        ForEach(JourneyVisibility.frontendCases) { v in
+                            Text(v.localizedTitle).tag(v)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
             }
 
             Button(action: completeJourneyAndMaybeUnlock) {

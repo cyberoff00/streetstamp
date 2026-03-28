@@ -233,6 +233,7 @@ struct SettingsView: View {
     @EnvironmentObject var journeyStore: JourneyStore
     @EnvironmentObject var cityCache: CityCache
     @EnvironmentObject private var lifelogStore: LifelogStore
+    @EnvironmentObject private var blockStore: UserBlockStore
     @ObservedObject private var languagePreference = LanguagePreference.shared
 
     @AppStorage(MapAppearanceSettings.storageKey) private var mapAppearanceRaw = MapAppearanceSettings.current.rawValue
@@ -240,7 +241,7 @@ struct SettingsView: View {
     @AppStorage(AppSettings.voiceBroadcastIntervalKMKey) private var voiceBroadcastIntervalKM = 1
     @AppStorage(AppSettings.longStationaryReminderEnabledKey) private var longStationaryReminderEnabled = true
     @AppStorage(AppSettings.liveActivityEnabledKey) private var liveActivityEnabled = true
-    @AppStorage(AppSettings.lifelogBackgroundModeKey) private var lifelogBackgroundModeRaw = LifelogBackgroundMode.defaultMode.rawValue
+    @AppStorage(AppSettings.dailyTrackingPrecisionKey) private var dailyTrackingPrecisionRaw = DailyTrackingPrecision.defaultPrecision.rawValue
     @AppStorage(AppSettings.iCloudSyncEnabledKey) private var iCloudSyncEnabled = true
 
     @State private var systemNotificationEnabled = true
@@ -293,18 +294,19 @@ struct SettingsView: View {
 
     private var iCloudSyncSubtitle: String {
         guard iCloudAvailable else { return L10n.t("settings_icloud_sync_unavailable_desc") }
-        let userID = sessionStore.activeLocalProfileID
-        let statusKey = CloudKitSyncService.statusKey(for: userID)
-        let statusAtKey = CloudKitSyncService.statusAtKey(for: userID)
-        let status = UserDefaults.standard.string(forKey: statusKey)
-        let statusAt = UserDefaults.standard.object(forKey: statusAtKey) as? Date
+        let snapshot = CloudKitSyncService.statusSnapshot(
+            localUserID: sessionStore.activeLocalProfileID,
+            accountUserID: sessionStore.accountUserID
+        )
+        let status = snapshot.status
+        let statusAt = snapshot.at
         let statusLine = iCloudStatusLine(status: status, at: statusAt)
         return "\(L10n.t("settings_icloud_sync_desc"))\n\(statusLine)"
     }
 
-    private var lifelogBackgroundMode: LifelogBackgroundMode {
-        get { LifelogBackgroundMode(rawValue: lifelogBackgroundModeRaw) ?? .defaultMode }
-        nonmutating set { lifelogBackgroundModeRaw = newValue.rawValue }
+    private var dailyTrackingPrecision: DailyTrackingPrecision {
+        get { DailyTrackingPrecision(rawValue: dailyTrackingPrecisionRaw) ?? .defaultPrecision }
+        nonmutating set { dailyTrackingPrecisionRaw = newValue.rawValue }
     }
 
     private var accountCardPresentation: SettingsAccountCardPresentation {
@@ -327,6 +329,9 @@ struct SettingsView: View {
                 subscriptionSection
                 utilitiesSection
                 generalSection
+                if sessionStore.isLoggedIn && FeatureFlagStore.shared.socialEnabled {
+                    blockedUsersSection
+                }
                 infoSection
                 if sessionStore.isLoggedIn && !sessionStore.hasEmailPassword {
                     linkEmailSection
@@ -355,10 +360,10 @@ struct SettingsView: View {
         } message: {
             Text(accountMessage)
         }
-        .alert(L10n.t("settings_lifelog_bg_mode_title"), isPresented: $showBackgroundModeInfo) {
+        .alert(L10n.t("settings_daily_precision_title"), isPresented: $showBackgroundModeInfo) {
             Button(L10n.t("got_it"), role: .cancel) {}
         } message: {
-            Text(L10n.t("settings_lifelog_bg_mode_desc"))
+            Text(L10n.t("settings_daily_precision_desc"))
         }
         .alert(L10n.t("settings_logout_confirm_title"), isPresented: $showLogoutConfirmation) {
             Button(L10n.t("cancel"), role: .cancel) {}
@@ -448,6 +453,25 @@ struct SettingsView: View {
         }
     }
 
+    private var blockedUsersSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionTitle(L10n.t("settings_blocked_users_title"))
+
+            NavigationLink {
+                BlockedUsersListView()
+            } label: {
+                settingsRowLabel(
+                    title: L10n.t("settings_blocked_users_row"),
+                    icon: "hand.raised",
+                    iconColor: .red.opacity(0.75),
+                    badgeText: blockStore.blockedUsers.isEmpty ? nil : "\(blockStore.blockedUsers.count)",
+                    rowHeight: 64
+                )
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
     @ViewBuilder
     private func settingsDestinationView(for destination: SettingsGeneralRowPresentation.Destination) -> some View {
         switch destination {
@@ -480,14 +504,6 @@ struct SettingsView: View {
                         languageOption(code: "zh-Hant", name: "繁體中文")
                         Divider().padding(.leading, 16)
                         languageOption(code: "en", name: "English")
-                        Divider().padding(.leading, 16)
-                        languageOption(code: "ja", name: "日本語")
-                        Divider().padding(.leading, 16)
-                        languageOption(code: "ko", name: "한국어")
-                        Divider().padding(.leading, 16)
-                        languageOption(code: "fr", name: "Français")
-                        Divider().padding(.leading, 16)
-                        languageOption(code: "es", name: "Español")
                     }
                     .figmaSurfaceCard(radius: 30)
                 }
@@ -515,6 +531,7 @@ struct SettingsView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 16)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -634,6 +651,7 @@ struct SettingsView: View {
             .padding(.horizontal, 18)
             .padding(.vertical, 18)
             .figmaSurfaceCard(radius: 30)
+            .contentShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -733,7 +751,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(alignment: .center, spacing: 10) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(L10n.t("settings_lifelog_bg_mode_title"))
+                            Text(L10n.t("settings_daily_precision_title"))
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundColor(FigmaTheme.text)
                         }
@@ -753,16 +771,16 @@ struct SettingsView: View {
 
                     segmentedContainer {
                         segmentButton(
-                            title: L10n.t(LifelogBackgroundMode.highPrecision.titleKey),
-                            isSelected: lifelogBackgroundMode == .highPrecision
+                            title: L10n.t(DailyTrackingPrecision.highPrecision.titleKey),
+                            isSelected: dailyTrackingPrecision == .highPrecision
                         ) {
-                            lifelogBackgroundMode = .highPrecision
+                            dailyTrackingPrecision = .highPrecision
                         }
                         segmentButton(
-                            title: L10n.t(LifelogBackgroundMode.lowPrecision.titleKey),
-                            isSelected: lifelogBackgroundMode == .lowPrecision
+                            title: L10n.t(DailyTrackingPrecision.lowPrecision.titleKey),
+                            isSelected: dailyTrackingPrecision == .lowPrecision
                         ) {
-                            lifelogBackgroundMode = .lowPrecision
+                            dailyTrackingPrecision = .lowPrecision
                         }
                     }
                 }
@@ -912,10 +930,13 @@ struct SettingsView: View {
                         settingsRow(
                             title: L10n.t("settings_restore_from_icloud"),
                             icon: "icloud.and.arrow.down",
-                            iconColor: FigmaTheme.secondary
+                            iconColor: FigmaTheme.secondary,
+                            isLoading: isRestoringFromICloud
                         ) {
                             showRestoreConfirmation = true
                         }
+                        .disabled(isRestoringFromICloud)
+                        .opacity(isRestoringFromICloud ? 0.6 : 1)
                     }
                     .padding(16)
                     .figmaSurfaceCard(radius: 22)
@@ -1036,6 +1057,7 @@ struct SettingsView: View {
         .padding(.horizontal, 24)
         .padding(.vertical, 24)
         .figmaSurfaceCard(radius: 36)
+        .contentShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
     }
 
     private func loggedInAccountCard(presentation: SettingsAccountCardPresentation) -> some View {
@@ -1221,17 +1243,6 @@ struct SettingsView: View {
     private var gpxImportEntryView: some View {
         SettingsDetailPage(title: L10n.t("import_gpx_title")) {
             VStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(L10n.t("gpx_import_entry_title"))
-                        .font(.system(size: 20, weight: .bold))
-                        .foregroundColor(FigmaTheme.text)
-
-                    Text(L10n.t("gpx_import_entry_desc"))
-                        .font(.system(size: 14, weight: .regular))
-                        .foregroundColor(FigmaTheme.subtext)
-                }
-                .padding(.bottom, 4)
-
                 VStack(alignment: .leading, spacing: 12) {
                     Text(L10n.t("gpx_import_upload_block_title"))
                         .font(.system(size: 14, weight: .semibold))
@@ -1416,6 +1427,7 @@ struct SettingsView: View {
         icon: String,
         iconColor: Color,
         badgeText: String? = nil,
+        isLoading: Bool = false,
         rowHeight: CGFloat = 68,
         action: @escaping () -> Void
     ) -> some View {
@@ -1425,6 +1437,7 @@ struct SettingsView: View {
                 icon: icon,
                 iconColor: iconColor,
                 badgeText: badgeText,
+                isLoading: isLoading,
                 rowHeight: rowHeight
             )
         }
@@ -1436,6 +1449,7 @@ struct SettingsView: View {
         icon: String,
         iconColor: Color,
         badgeText: String? = nil,
+        isLoading: Bool = false,
         rowHeight: CGFloat = 68
     ) -> some View {
         HStack(spacing: 14) {
@@ -1465,9 +1479,15 @@ struct SettingsView: View {
                     )
             }
 
-            Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(FigmaTheme.text.opacity(0.46))
+            if isLoading {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(FigmaTheme.text.opacity(0.72))
+            } else {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(FigmaTheme.text.opacity(0.46))
+            }
         }
         .padding(.horizontal, 20)
         .frame(minHeight: rowHeight)

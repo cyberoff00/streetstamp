@@ -37,6 +37,14 @@ struct JourneyPublishBanner: View {
                     .foregroundColor(FigmaTheme.text)
                     .lineLimit(2)
                 Spacer(minLength: 4)
+                Button {
+                    publishStore.dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(FigmaTheme.subtext)
+                }
+                .buttonStyle(.plain)
             }
             HStack(spacing: 12) {
                 Button {

@@ -311,18 +311,29 @@ final class JourneyStore: ObservableObject {
             lastDeltaPersistAt = now
         }
 
+        // Finalized journeys: write synchronously so the caller can be sure the
+        // data is durable before the process exits. This prevents the scenario
+        // where the UI reports success but the app is killed before the async
+        // write reaches disk, causing the journey to revert to "ongoing" on
+        // next cold start.
+        // ioQueue is a serial utility queue; the caller is on @MainActor, so
+        // ioQueue.sync will not deadlock.
+        if snapshot.endTime != nil {
+            ioQueue.sync { [self] in
+                do {
+                    try self.indexStore.upsertIDFirst(snapshot.id)
+                    try self.fileStore.finalizeJourney(snapshot)
+                } catch {
+                    print("❌ finalize save failed:", error)
+                }
+            }
+            return
+        }
+
         ioQueue.async { [weak self] in
             guard let self else { return }
             do {
-                // Index first: an indexed ID whose file doesn't exist yet is safely skipped on load.
-                // A file without an index entry is an orphan that the user never sees.
                 try self.indexStore.upsertIDFirst(snapshot.id)
-
-                if snapshot.endTime != nil {
-                    try self.fileStore.finalizeJourney(snapshot)
-                    return
-                }
-
                 try self.fileStore.saveMetaSnapshot(snapshot)
 
                 if shouldWriteDelta {
@@ -405,6 +416,10 @@ final class JourneyStore: ObservableObject {
             }
         }
 
+        if let oid = latestOngoing?.id, let updated = updateByID[oid], updated.endTime != nil {
+            latestOngoing = nil
+        }
+
         let snapshots = journeys
         bumpTrackTileRevision()
         updates
@@ -422,6 +437,11 @@ final class JourneyStore: ObservableObject {
                 print("❌ bulk completed update failed:", error)
             }
         }
+    }
+
+    /// File modification date of the most recently written journey file on disk.
+    func lastPersistedAt(journeyID: String) -> Date? {
+        fileStore.lastPersistedAt(journeyID: journeyID)
     }
 
     /// Compatibility alias.

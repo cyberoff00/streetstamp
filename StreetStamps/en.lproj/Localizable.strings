@@ -301,7 +301,7 @@
 "auth_fill_email_password" = "Please enter email and password";
 "auth_forgot_password" = "Forgot password?";
 "auth_forgot_password_hint" = "Please use the change-password action in Settings.";
-"settings_map_dark_mode" = "Map dark mode";
+"settings_map_dark_mode" = "Map Dark Mode";
 "settings_profile_visibility_friends" = "Profile visible to friends";
 "settings_profile_visibility_private" = "Profile visible only to me";
 "settings_logout" = "Log out";
@@ -309,6 +309,7 @@
 "settings_logout_confirm_title" = "Log out?";
 "settings_logout_confirm_message" = "You will switch back to guest mode on this device.";
 "auth_full_name" = "FULL NAME";
+"auth_nickname_placeholder" = "Max 24 characters";
 "auth_have_account" = "Already have an account?";
 "auth_remembered_password" = "Remembered your password?";
 "auth_no_account" = "Don't have an account?";
@@ -459,6 +460,10 @@
 "settings_lifelog_bg_mode_high" = "High Precision";
 "settings_lifelog_bg_mode_low" = "Low Precision";
 "settings_lifelog_bg_mode_title" = "Background Recording Mode";
+"settings_daily_precision_desc" = "Controls background GPS quality during Daily journey tracking. High precision keeps better route quality but uses more battery; low precision prioritizes battery life.";
+"settings_daily_precision_high" = "High Precision";
+"settings_daily_precision_low" = "Low Precision";
+"settings_daily_precision_title" = "Daily Journey Precision";
 "settings_map_appearance_desc" = "Apply to all maps and route rendering";
 "settings_stationary_reminder_desc" = "Alert when movement stays within 100 m for 90 minutes.";
 "settings_stationary_reminder_title" = "Stillness Reminder";
@@ -494,6 +499,8 @@
 "add_5000_coins" = "+5000 Coins";
 "buy_coins" = "Buy Coins";
 "buy_n_coins" = "Buy %d coins";
+"coin_sheet_premium_title" = "Join Premium — Get 1,500 coins!";
+"coin_sheet_premium_subtitle" = "Plus 5× coin rewards on every walk";
 "confirm_purchase" = "Confirm purchase";
 "need_coins_to_unlock" = "You need %d coins to unlock this item.";
 "not_enough_coins" = "Not enough coins";
@@ -945,7 +952,7 @@
 "membership_gate_subtitle" = "Get the most out of every journey with all features unlocked.";
 "membership_gate_friends_limit" = "You've reached the free plan friend limit. Upgrade to Premium for unlimited friends.";
 "membership_gate_photos_title" = "More Photos";
-"membership_gate_photos_desc" = "Free plan allows up to 6 photos per memory. Upgrade to Premium for 12.";
+"membership_gate_photos_desc" = "Free plan allows up to 6 photos per journey. Upgrade to Premium for 12.";
 "membership_gate_friends_title" = "More Friends";
 "membership_gate_friends_desc" = "Free plan allows up to 5 friends. Upgrade to Premium for unlimited.";
 "membership_gate_globe_title" = "Global View";
@@ -962,7 +969,7 @@
 "membership_gate_gpx_desc" = "Export your journeys as GPX files with Premium.";
 "membership_gate_map_title" = "Map Themes";
 "membership_gate_map_desc" = "Unlock additional map appearance styles with Premium.";
-"membership_benefit_photos" = "Up to 12 photos per memory";
+"membership_benefit_photos" = "Up to 12 photos per journey";
 "membership_benefit_friends" = "Unlimited friends";
 "membership_benefit_globe" = "Full global view experience";
 "membership_benefit_icloud" = "iCloud sync & restore";
@@ -980,8 +987,8 @@
 "membership_compare_feature" = "Feature";
 "membership_compare_free" = "Free";
 "membership_compare_premium" = "Premium";
-"membership_compare_photos" = "Photos / memory";
-"membership_info_photos" = "Max photos per journey memory. Free: 6, Premium: 12.";
+"membership_compare_photos" = "Photos / journey";
+"membership_info_photos" = "Max photos per journey. Each memory can hold up to 2 photos. Free: 6 total, Premium: 12 total.";
 "membership_info_postcard" = "Per city: send up to 1 (Free) or 2 (Premium) postcards to each friend, to max 3 (Free) or 10 (Premium) friends. Each extra journey in that city gives +1 per friend and more recipients.";
 "membership_compare_friends" = "Friends";
 "membership_compare_unlimited" = "Unlimited";
@@ -1055,10 +1062,8 @@
 "tooltip_next" = "Next";
 "tooltip_done" = "Got it";
 
-// Memory Detail Tour
-"tour_memory_edit" = "Tap here to edit your journey name, notes, and activity tag";
-"tour_memory_export" = "Export a beautiful long image of this journey to share";
-"tour_memory_visibility" = "Change who can see this journey — Private, Friends, or Public";
+// Memory Detail Hint
+"tour_memory_combined" = "Your journey memories are saved here. You can edit, change visibility, or export as a long image.";
 
 // Lifelog Tour
 "tour_lifelog_weather" = "Today's weather and temperature at your location";
@@ -1093,3 +1098,27 @@
 "brand_wordmark" = "worldo";
 "postcard_saved_front" = "Postcard front saved";
 "postcard_saved_back" = "Postcard back saved";
+
+"report_user" = "Report";
+"block_user" = "Block";
+"unblock" = "Unblock";
+"block_user_confirm_title" = "Block User";
+"block_user_confirm_message" = "This user will no longer be able to see your profile, journeys, or send you messages. They will also be removed from your friends list.";
+"report_title" = "Report";
+"report_submit" = "Submit";
+"report_description" = "Why are you reporting %@?";
+"report_reason_spam" = "Spam";
+"report_reason_harassment" = "Harassment or Bullying";
+"report_reason_inappropriate" = "Inappropriate Content";
+"report_reason_other" = "Other";
+"report_detail_placeholder" = "Additional details (optional)";
+"report_submitted_title" = "Report Submitted";
+"report_submitted_message" = "Thank you for your report. We will review it as soon as possible.";
+"settings_blocked_users_title" = "PRIVACY & SAFETY";
+"settings_blocked_users_row" = "Blocked Users";
+"blocked_users_empty" = "No blocked users";
+"auth_terms_prefix" = "I agree to the ";
+"auth_terms_of_service" = "Terms of Service";
+"auth_terms_and" = " and ";
+"auth_terms_privacy_policy" = "Privacy Policy";
+"auth_terms_required" = "Please agree to the Terms of Service and Privacy Policy to continue.";

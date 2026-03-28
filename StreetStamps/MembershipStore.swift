@@ -31,6 +31,14 @@ enum MembershipTierConfig {
         }
     }
 
+    /// Per-memory / per-overall-memory photo cap (same for all tiers).
+    static func maxPhotosPerMemory(for tier: MembershipTier) -> Int {
+        switch tier {
+        case .free:    return 2
+        case .premium: return 2
+        }
+    }
+
     // MARK: Friends
 
     static func maxFriends(for tier: MembershipTier) -> Int {
@@ -155,6 +163,7 @@ final class MembershipStore: ObservableObject {
     // MARK: - Convenience Accessors
 
     var maxJourneyPhotos: Int { MembershipTierConfig.maxJourneyPhotos(for: tier) }
+    var maxPhotosPerMemory: Int { MembershipTierConfig.maxPhotosPerMemory(for: tier) }
     var maxFriends: Int { MembershipTierConfig.maxFriends(for: tier) }
     var globeViewEnabled: Bool { MembershipTierConfig.globeViewEnabled(for: tier) }
     var canRepublishEditedJourney: Bool { MembershipTierConfig.canRepublishEditedJourney(for: tier) }

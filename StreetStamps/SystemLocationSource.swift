@@ -16,19 +16,11 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
     private let subject = PassthroughSubject<CLLocation, Never>()
     private let authSubject = CurrentValueSubject<CLAuthorizationStatus, Never>(.notDetermined)
 
-    private enum PassiveState {
-        case none
-        case highPrecisionActive
-        case highPrecisionCalmed
-        case lowPrecisionActive
-        case lowPrecisionCalmed
-    }
-    private var passiveState: PassiveState = .none
+    private var pendingSingleLocationRequest = false
+    private var passiveActive = false
     private var passiveAnchorLocation: CLLocation?
     private var passiveAnchorTimestamp: Date = .distantPast
-    private var pendingSingleLocationRequest = false
-    private var passiveMode: LifelogBackgroundMode?
-    
+
     var locationPublisher: AnyPublisher<CLLocation, Never> { subject.eraseToAnyPublisher() }
     var authorizationStatus: CLAuthorizationStatus { manager.authorizationStatus }
     var authorizationPublisher: AnyPublisher<CLAuthorizationStatus, Never> { authSubject.eraseToAnyPublisher() }
@@ -93,10 +85,8 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         manager.stopUpdatingLocation()
         manager.stopMonitoringSignificantLocationChanges()
         manager.stopMonitoringVisits()
-        // ✅ 停止时关闭后台更新
         manager.allowsBackgroundLocationUpdates = false
-        passiveState = .none
-        passiveMode = nil
+        passiveActive = false
         passiveAnchorLocation = nil
         passiveAnchorTimestamp = .distantPast
     }
@@ -162,17 +152,18 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         stop()
     }
 
-    /// Passive high precision mode for Lifelog when app has no active journey.
-    /// Keeps continuity close to foreground while capping battery by calming down when stationary.
-    func startPassiveHighPrecision() {
+    /// Passive lifelog mode with dynamic moving/stationary adaptation.
+    /// Starts in stationary profile; upgrades precision when movement is detected,
+    /// then calms back down when the user stops. `pausesLocationUpdatesAutomatically`
+    /// stays true so iOS can fully pause GPS during extended stillness.
+    func startPassiveLifelog() {
         stop()
 
         manager.allowsBackgroundLocationUpdates = true
-        manager.pausesLocationUpdatesAutomatically = false
+        manager.pausesLocationUpdatesAutomatically = true
         manager.showsBackgroundLocationIndicator = false
-        passiveMode = .highPrecision
 
-        passiveState = .highPrecisionCalmed
+        passiveActive = true
         passiveAnchorLocation = nil
         passiveAnchorTimestamp = .distantPast
 
@@ -181,22 +172,52 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         requestImmediateLocationRefresh()
     }
 
-    /// Passive low precision mode for Lifelog with battery priority.
-    func startPassiveLowPrecision() {
-        stop()
+    private func applyPassiveProfile(for state: PassiveLocationState) {
+        let profile = PassiveLocationProfile.profile(for: state)
+        manager.activityType = profile.activityType
+        manager.desiredAccuracy = profile.desiredAccuracy
+        manager.distanceFilter = profile.distanceFilter
+    }
 
-        manager.allowsBackgroundLocationUpdates = true
-        manager.pausesLocationUpdatesAutomatically = false
-        manager.showsBackgroundLocationIndicator = false
-        passiveMode = .lowPrecision
+    /// Evaluate each incoming location and switch between moving/stationary profiles.
+    private func adaptPassiveIfNeeded(for loc: CLLocation) {
+        guard passiveActive else { return }
+        guard loc.horizontalAccuracy >= 0, loc.horizontalAccuracy <= 150 else { return }
 
-        passiveState = .lowPrecisionCalmed
-        passiveAnchorLocation = nil
-        passiveAnchorTimestamp = .distantPast
+        if passiveAnchorLocation == nil {
+            passiveAnchorLocation = loc
+            passiveAnchorTimestamp = loc.timestamp
+            return
+        }
 
-        applyPassiveProfile(for: .stationary)
-        manager.startUpdatingLocation()
-        requestImmediateLocationRefresh()
+        guard let anchor = passiveAnchorLocation else { return }
+        let dt = loc.timestamp.timeIntervalSince(passiveAnchorTimestamp)
+        let moved = loc.distance(from: anchor)
+        let speed = max(loc.speed, 0)
+
+        let isCurrentlyMoving = manager.desiredAccuracy < kCLLocationAccuracyHundredMeters
+
+        if isCurrentlyMoving {
+            // Active → calm down when stationary for 2.5 min
+            if dt >= 150, moved < 30, speed < 0.8 {
+                applyPassiveProfile(for: .stationary)
+                passiveAnchorLocation = loc
+                passiveAnchorTimestamp = loc.timestamp
+            } else if dt >= 6 * 60 {
+                passiveAnchorLocation = loc
+                passiveAnchorTimestamp = loc.timestamp
+            }
+        } else {
+            // Calmed → activate when significant movement detected
+            if moved >= 50 || speed >= 1.2 {
+                applyPassiveProfile(for: .moving)
+                passiveAnchorLocation = loc
+                passiveAnchorTimestamp = loc.timestamp
+            } else if dt >= 10 * 60 {
+                passiveAnchorLocation = loc
+                passiveAnchorTimestamp = loc.timestamp
+            }
+        }
     }
     
     /// ✅ 后台平衡模式（运动模式进入后台）
@@ -231,96 +252,55 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         requestImmediateLocationRefresh()
     }
     
-    /// ✅ 后台省电模式（日常模式进入后台）
-    func startBackgroundPowerSaving() {
+    /// Daily high-precision background: better route quality, GPS stays active.
+    func startBackgroundDailyHighPrecision() {
         stop()
-        
+
         manager.allowsBackgroundLocationUpdates = true
-        manager.pausesLocationUpdatesAutomatically = true  // 允许系统暂停
+        manager.pausesLocationUpdatesAutomatically = false
         manager.showsBackgroundLocationIndicator = true
-        manager.activityType = .otherNavigation
-        
+        manager.activityType = .fitness
+
         manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
-        manager.distanceFilter = 50  // 50米才更新
-        
+        manager.distanceFilter = 15
+
         manager.startUpdatingLocation()
         requestImmediateLocationRefresh()
     }
 
-    private func applyPassiveProfile(for state: PassiveLocationState) {
-        guard let passiveMode else { return }
-        let profile = PassiveLocationProfile.profile(for: passiveMode, state: state)
-        manager.activityType = profile.activityType
-        manager.desiredAccuracy = profile.desiredAccuracy
-        manager.distanceFilter = profile.distanceFilter
+    /// ✅ 后台省电模式（日常低精度进入后台）
+    func startBackgroundPowerSaving() {
+        stop()
+
+        manager.allowsBackgroundLocationUpdates = true
+        manager.pausesLocationUpdatesAutomatically = true
+        manager.showsBackgroundLocationIndicator = true
+        manager.activityType = .otherNavigation
+
+        manager.desiredAccuracy = 30
+        manager.distanceFilter = 50
+
+        manager.startUpdatingLocation()
+        requestImmediateLocationRefresh()
     }
 
-    private func adaptPassiveHighPrecisionIfNeeded(for loc: CLLocation) {
-        guard passiveState != .none else { return }
-        guard loc.horizontalAccuracy >= 0, loc.horizontalAccuracy <= 150 else { return }
-
-        if passiveAnchorLocation == nil {
-            passiveAnchorLocation = loc
-            passiveAnchorTimestamp = loc.timestamp
-            return
-        }
-
-        guard let anchor = passiveAnchorLocation else { return }
-        let dt = loc.timestamp.timeIntervalSince(passiveAnchorTimestamp)
-        let moved = loc.distance(from: anchor)
-        let speed = max(loc.speed, 0)
-
-        switch passiveState {
-        case .highPrecisionCalmed:
-            if moved >= 30 || speed >= 1.2 {
-                passiveState = .highPrecisionActive
-                applyPassiveProfile(for: .moving)
-                passiveAnchorLocation = loc
-                passiveAnchorTimestamp = loc.timestamp
-            } else if dt >= 10 * 60 {
-                passiveAnchorLocation = loc
-                passiveAnchorTimestamp = loc.timestamp
-            }
-        case .highPrecisionActive:
-            if dt >= 2 * 60, moved < 25, speed < 0.8 {
-                passiveState = .highPrecisionCalmed
-                applyPassiveProfile(for: .stationary)
-                passiveAnchorLocation = loc
-                passiveAnchorTimestamp = loc.timestamp
-            } else if dt >= 6 * 60 {
-                passiveAnchorLocation = loc
-                passiveAnchorTimestamp = loc.timestamp
-            }
-        case .lowPrecisionCalmed:
-            if moved >= 60 || speed >= 1.6 {
-                passiveState = .lowPrecisionActive
-                applyPassiveProfile(for: .moving)
-                passiveAnchorLocation = loc
-                passiveAnchorTimestamp = loc.timestamp
-            } else if dt >= 12 * 60 {
-                passiveAnchorLocation = loc
-                passiveAnchorTimestamp = loc.timestamp
-            }
-        case .lowPrecisionActive:
-            if dt >= 3 * 60, moved < 35, speed < 0.8 {
-                passiveState = .lowPrecisionCalmed
-                applyPassiveProfile(for: .stationary)
-                passiveAnchorLocation = loc
-                passiveAnchorTimestamp = loc.timestamp
-            } else if dt >= 8 * 60 {
-                passiveAnchorLocation = loc
-                passiveAnchorTimestamp = loc.timestamp
-            }
-        case .none:
-            break
-        }
+    /// In-place transition to power-saving parameters WITHOUT calling stop().
+    /// This preserves the existing background location session under WhenInUse
+    /// authorization, avoiding the iOS session revocation that stop() causes.
+    func transitionToBackgroundPowerSaving() {
+        manager.pausesLocationUpdatesAutomatically = true
+        manager.showsBackgroundLocationIndicator = true
+        manager.activityType = .otherNavigation
+        manager.desiredAccuracy = 30
+        manager.distanceFilter = 50
     }
+
     
     // MARK: - CLLocationManagerDelegate
     
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         for loc in locations {
-            adaptPassiveHighPrecisionIfNeeded(for: loc)
+            adaptPassiveIfNeeded(for: loc)
             subject.send(loc)
         }
     }

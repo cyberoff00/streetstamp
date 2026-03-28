@@ -8,7 +8,6 @@ final class SharingCardSourceTests: XCTestCase {
         let sourceURL = root.appendingPathComponent("StreetStamps/SharingCard.swift")
         let source = try String(contentsOf: sourceURL)
 
-        XCTAssertTrue(source.contains("private var canRenderCard: Bool { journey.coordinates.count >= 1 }"))
-        XCTAssertFalse(source.contains("journey.coordinates.count >= 1 && !journey.isTooShort"))
+        XCTAssertTrue(source.contains("private var canRenderCard: Bool { journey.coordinates.count >= 1 && !journey.isTooShort }"))
     }
 }

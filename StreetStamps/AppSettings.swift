@@ -5,7 +5,7 @@ enum AppSettings {
     static let voiceBroadcastIntervalKMKey = "streetstamps.voice.broadcast.interval_km"
     static let longStationaryReminderEnabledKey = "streetstamps.long_stationary_reminder.enabled"
     static let liveActivityEnabledKey = "streetstamps.live_activity.enabled"
-    static let lifelogBackgroundModeKey = "streetstamps.lifelog.background.mode"
+    static let dailyTrackingPrecisionKey = "streetstamps.daily.tracking.precision"
     static let lifelogPassiveEnabledKey = "streetstamps.lifelog.passive.enabled"
     static let iCloudSyncEnabledKey = "streetstamps.icloud.sync.enabled"
     static let iCloudAutomaticRestoreEnabledKey = "streetstamps.icloud.sync.auto_restore.enabled"
@@ -39,13 +39,13 @@ enum AppSettings {
         return defaults.bool(forKey: liveActivityEnabledKey)
     }
 
-    static var lifelogBackgroundMode: LifelogBackgroundMode {
+    static var dailyTrackingPrecision: DailyTrackingPrecision {
         let defaults = UserDefaults.standard
-        guard let raw = defaults.string(forKey: lifelogBackgroundModeKey),
-              let mode = LifelogBackgroundMode(rawValue: raw) else {
-            return .highPrecision
+        guard let raw = defaults.string(forKey: dailyTrackingPrecisionKey),
+              let precision = DailyTrackingPrecision(rawValue: raw) else {
+            return .defaultPrecision
         }
-        return mode
+        return precision
     }
 
     static var hasPassiveLifelogPreference: Bool {

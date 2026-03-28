@@ -305,6 +305,7 @@
 "settings_logout_confirm_title" = "确认退出登录？";
 "settings_logout_confirm_message" = "退出后将切回游客模式，本地数据会保留在当前设备。";
 "auth_full_name" = "昵称";
+"auth_nickname_placeholder" = "输入昵称，支持字母、数字、下划线";
 "auth_have_account" = "已有账号？";
 "auth_remembered_password" = "想起密码了？";
 "auth_no_account" = "还没有账号？";
@@ -449,6 +450,10 @@
 "settings_lifelog_bg_mode_high" = "高精度";
 "settings_lifelog_bg_mode_low" = "低精度";
 "settings_lifelog_bg_mode_title" = "后台记录模式";
+"settings_daily_precision_desc" = "控制日常模式 Journey 的后台 GPS 质量。高精度路线更准确但更耗电，低精度优先节省电量。";
+"settings_daily_precision_high" = "高精度";
+"settings_daily_precision_low" = "低精度";
+"settings_daily_precision_title" = "日常模式精度";
 "settings_stationary_reminder_desc" = "当 90 分钟内移动范围小于 100 米时提醒。";
 "settings_stationary_reminder_title" = "静止提醒";
 "settings_title" = "设置";
@@ -483,6 +488,8 @@
 "add_5000_coins" = "+5000 金币";
 "buy_coins" = "购买金币";
 "buy_n_coins" = "购买 %d 金币";
+"coin_sheet_premium_title" = "开通会员，立享 1,500 金币！";
+"coin_sheet_premium_subtitle" = "每日步行还能赚 5 倍金币";
 "confirm_purchase" = "确认购买";
 "need_coins_to_unlock" = "解锁该物品需要 %d 金币。";
 "not_enough_coins" = "金币不足";
@@ -955,7 +962,7 @@
 "membership_gate_subtitle" = "解锁全部功能，让每段旅程都更精彩。";
 "membership_gate_friends_limit" = "已达到免费版好友上限。升级 Premium 可添加无限好友。";
 "membership_gate_photos_title" = "更多照片";
-"membership_gate_photos_desc" = "免费版每条记忆最多 6 张照片，升级 Premium 可拍 12 张。";
+"membership_gate_photos_desc" = "免费版每段旅程最多 6 张照片，升级 Premium 可拍 12 张。";
 "membership_gate_friends_title" = "更多好友";
 "membership_gate_friends_desc" = "免费版最多 5 位好友，升级 Premium 无上限。";
 "membership_gate_globe_title" = "全球视图";
@@ -972,7 +979,7 @@
 "membership_gate_gpx_desc" = "升级 Premium，将旅程导出为 GPX 文件。";
 "membership_gate_map_title" = "地图主题";
 "membership_gate_map_desc" = "升级 Premium 解锁更多地图外观样式。";
-"membership_benefit_photos" = "每条记忆最多 12 张照片";
+"membership_benefit_photos" = "每段旅程最多 12 张照片";
 "membership_benefit_friends" = "无限好友";
 "membership_benefit_globe" = "完整全球视图体验";
 "membership_benefit_icloud" = "iCloud 同步与恢复";
@@ -990,8 +997,8 @@
 "membership_compare_feature" = "功能";
 "membership_compare_free" = "免费";
 "membership_compare_premium" = "Premium";
-"membership_compare_photos" = "照片 / 记忆";
-"membership_info_photos" = "每段旅程最多可添加的照片数。免费 6 张，Premium 12 张。";
+"membership_compare_photos" = "照片 / 旅程";
+"membership_info_photos" = "每段旅程最多可添加的照片数，每条记忆最多 2 张。免费 6 张，Premium 12 张。";
 "membership_info_postcard" = "每个城市：可向每位好友发 1 张(免费)/2 张(Premium)明信片，最多 3 位(免费)/10 位(Premium)好友。该城市每多一段旅程，每位好友 +1 张，可发好友数也增加。";
 "membership_compare_friends" = "好友";
 "membership_compare_unlimited" = "无限";
@@ -1049,10 +1056,8 @@
 "tooltip_next" = "下一步";
 "tooltip_done" = "知道了";
 
-// Memory Detail Tour
-"tour_memory_edit" = "点击这里编辑旅程名称、笔记和活动标签";
-"tour_memory_export" = "导出精美长图，分享这次旅程";
-"tour_memory_visibility" = "设置谁可以看到这次旅程 — 私密、好友或公开";
+// Memory Detail Hint
+"tour_memory_combined" = "旅程图文记忆保存在这里，可以编辑、更改可见性或导出长图。";
 
 // Lifelog Tour
 "tour_lifelog_weather" = "当前位置的天气和温度";
@@ -1087,3 +1092,27 @@
 "brand_wordmark" = "worldo";
 "postcard_saved_front" = "已保存明信片正面";
 "postcard_saved_back" = "已保存明信片反面";
+
+"report_user" = "举报";
+"block_user" = "屏蔽";
+"unblock" = "取消屏蔽";
+"block_user_confirm_title" = "屏蔽用户";
+"block_user_confirm_message" = "该用户将无法查看你的资料、旅程或向你发送消息，同时会从好友列表中移除。";
+"report_title" = "举报";
+"report_submit" = "提交";
+"report_description" = "你为什么要举报 %@？";
+"report_reason_spam" = "垃圾信息";
+"report_reason_harassment" = "骚扰或霸凌";
+"report_reason_inappropriate" = "不当内容";
+"report_reason_other" = "其他";
+"report_detail_placeholder" = "补充说明（可选）";
+"report_submitted_title" = "举报已提交";
+"report_submitted_message" = "感谢你的举报，我们会尽快审核处理。";
+"settings_blocked_users_title" = "隐私与安全";
+"settings_blocked_users_row" = "已屏蔽用户";
+"blocked_users_empty" = "暂无屏蔽用户";
+"auth_terms_prefix" = "我已阅读并同意";
+"auth_terms_of_service" = "用户协议";
+"auth_terms_and" = "和";
+"auth_terms_privacy_policy" = "隐私政策";
+"auth_terms_required" = "请先同意用户协议和隐私政策。";

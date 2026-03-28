@@ -64,7 +64,7 @@ struct StreetStampsApp: App {
     @UIApplicationDelegateAdaptor(AppNotificationDelegate.self) private var appDelegate
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("streetstamps.intro_slides_shown.v1") private var hasSeenIntroSlides = false
-    @AppStorage(AppSettings.lifelogBackgroundModeKey) private var lifelogBackgroundModeRaw = LifelogBackgroundMode.defaultMode.rawValue
+    @AppStorage(AppSettings.dailyTrackingPrecisionKey) private var dailyTrackingPrecisionRaw = DailyTrackingPrecision.defaultPrecision.rawValue
     @StateObject private var locationHub = LocationHub.shared
     @StateObject private var sessionStore: UserSessionStore
     @StateObject private var journeyStore: JourneyStore
@@ -80,6 +80,7 @@ struct StreetStampsApp: App {
     @StateObject private var onboardingGuide = OnboardingGuideStore()
     @StateObject private var publishStore = JourneyPublishStore()
     @StateObject private var notificationStore = SocialNotificationStore()
+    @StateObject private var blockStore = UserBlockStore()
     @State private var journeyDeletionSyncFailureStore = JourneyDeletionSyncFailureStore()
     @State private var showAuthEntry = false
     @State private var showSplash = true
@@ -113,8 +114,8 @@ struct StreetStampsApp: App {
 #endif
     }
 
-    private var lifelogBackgroundMode: LifelogBackgroundMode {
-        LifelogBackgroundMode(rawValue: lifelogBackgroundModeRaw) ?? .defaultMode
+    private var dailyTrackingPrecision: DailyTrackingPrecision {
+        DailyTrackingPrecision(rawValue: dailyTrackingPrecisionRaw) ?? .defaultPrecision
     }
 
     private func applyIdleLocationPolicy(requestSingleRefreshWhenIdle: Bool) {
@@ -128,7 +129,7 @@ struct StreetStampsApp: App {
 
         switch action {
         case .startPassive:
-            locationHub.startPassiveLifelog(mode: lifelogBackgroundMode)
+            locationHub.startPassiveLifelog()
         case .requestSingleRefresh:
             locationHub.stop()
             if requestSingleRefreshWhenIdle {
@@ -298,6 +299,7 @@ struct StreetStampsApp: App {
             .environmentObject(onboardingGuide)
             .environmentObject(publishStore)
             .environmentObject(notificationStore)
+            .environmentObject(blockStore)
     }
 
     private var appContentWithPresentation: some View {
@@ -423,6 +425,7 @@ struct StreetStampsApp: App {
                     onboardingGuide.startIfNeeded()
                     maybeShowFirstAuthPromptIfNeeded()
                     await sessionStore.syncHasEmailPasswordIfNeeded()
+                    await blockStore.refresh(accessToken: sessionStore.currentAccessToken)
                 }
 
                 Task { @MainActor in
@@ -591,9 +594,12 @@ struct StreetStampsApp: App {
                     scheduleTrackTileRebuild(delay: 0, force: true)
                 }
             }
-            .onChange(of: lifelogBackgroundModeRaw) { _, _ in
-                applyIdleLocationPolicy(requestSingleRefreshWhenIdle: false)
-                syncMotionActivityPolicy()
+            .onChange(of: dailyTrackingPrecisionRaw) { _, _ in
+                // If a daily journey is active, update background mode immediately
+                let ts = TrackingService.shared
+                if ts.isTracking && ts.trackingMode == .daily {
+                    ts.enterLowPowerBackgroundMode()
+                }
             }
             .onChange(of: lifelogStore.isEnabled) { _, _ in
                 applyIdleLocationPolicy(requestSingleRefreshWhenIdle: false)
@@ -639,6 +645,7 @@ struct StreetStampsApp: App {
 
     private func handleIncomingAppURL(_ url: URL) {
         if let postcardIntent = AppDeepLinkStore.parsePostcardInbox(from: url) {
+            guard FeatureFlagStore.shared.socialEnabled else { return }
             flow.requestOpenPostcardSidebar(postcardIntent)
             return
         }
@@ -647,6 +654,7 @@ struct StreetStampsApp: App {
         if deepLinkStore.pendingPasswordResetToken != nil {
             showAuthEntry = true
         } else {
+            guard FeatureFlagStore.shared.socialEnabled else { return }
             flow.requestSelectTab(.friends)
         }
     }

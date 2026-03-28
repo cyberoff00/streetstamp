@@ -316,19 +316,27 @@ final class LocationHub: ObservableObject {
         }
     }
 
-    /// Passive Lifelog recording mode (only used when no active journey is running).
-    func startPassiveLifelog(mode passiveMode: LifelogBackgroundMode) {
+    /// Battery-friendly passive Lifelog recording (only used when no active journey is running).
+    func startPassiveLifelog() {
         #if DEBUG
         if mode == .mock { return }
         #endif
 
         if current === systemSource {
-            switch passiveMode {
-            case .highPrecision:
-                systemSource.startPassiveHighPrecision()
-            case .lowPrecision:
-                systemSource.startPassiveLowPrecision()
-            }
+            systemSource.startPassiveLifelog()
+        } else {
+            current.start()
+        }
+    }
+
+    /// Daily high-precision background: better route than PowerSaving, still lets iOS pause.
+    func enterBackgroundDailyHighPrecision() {
+        #if DEBUG
+        if mode == .mock { return }
+        #endif
+
+        if current === systemSource {
+            systemSource.startBackgroundDailyHighPrecision()
         } else {
             current.start()
         }
@@ -370,6 +378,18 @@ final class LocationHub: ObservableObject {
             systemSource.startBackgroundPowerSaving()
         } else {
             current.start()
+        }
+    }
+
+    /// In-place transition to power-saving parameters without stopping location updates.
+    /// Preserves the background session under WhenInUse authorization.
+    func transitionToBackgroundPowerSaving() {
+        #if DEBUG
+        if mode == .mock { return }
+        #endif
+
+        if current === systemSource {
+            systemSource.transitionToBackgroundPowerSaving()
         }
     }
 

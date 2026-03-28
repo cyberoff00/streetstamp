@@ -45,6 +45,18 @@ struct CompactActivityRingCard: View {
                 .stroke(Color.gray.opacity(0.08), lineWidth: 1)
         )
         .shadow(color: Color.black.opacity(0.03), radius: 10, x: 0, y: 4)
+        .overlay(alignment: .bottomLeading) {
+            Button { showRingHelp = true } label: {
+                Image(systemName: "questionmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundColor(Color(white: 0.5))
+                    .frame(width: 18, height: 18)
+                    .background(Color(red: 0.97, green: 0.97, blue: 0.98))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(10)
+        }
     }
 
     private var statsPanel: some View {
@@ -85,26 +97,14 @@ struct CompactActivityRingCard: View {
                 .frame(width: ringSize, height: ringSize)
                 .rotationEffect(.degrees(-90))
 
-            VStack(spacing: 0) {
+            VStack(spacing: 2) {
                 Text("LV.\(levelProgress.level)")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(FigmaTheme.subtext)
-                Text(progressPercentText)
-                    .font(.system(size: 23, weight: .bold))
+                    .font(.system(size: 24, weight: .bold))
                     .foregroundColor(FigmaTheme.text)
+                Text(progressPercentText)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(FigmaTheme.subtext)
             }
-        }
-        .overlay(alignment: .bottomLeading) {
-            Button { showRingHelp = true } label: {
-                Image(systemName: "questionmark")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundColor(Color(white: 0.5))
-                    .frame(width: 18, height: 18)
-                    .background(Color(red: 0.97, green: 0.97, blue: 0.98))
-                    .clipShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .offset(x: -4, y: 4)
         }
         .frame(width: ringSize + 8, height: ringSize + 8)
     }

@@ -45,6 +45,7 @@
 "auth_forgot_password" = "Forgot password?";
 "auth_forgot_password_hint" = "Please use the change-password action in Settings.";
 "auth_full_name" = "FULL NAME";
+"auth_nickname_placeholder" = "英数字とアンダースコア";
 "auth_have_account" = "Already have an account?";
 "auth_no_account" = "Don't have an account?";
 "auth_password" = "PASSWORD";
@@ -62,6 +63,8 @@
 "backend_url_saved" = "Backend URL saved";
 "buy_coins" = "Buy Coins";
 "buy_n_coins" = "Buy %d coins";
+"coin_sheet_premium_title" = "プレミアム加入で1,500コインGET！";
+"coin_sheet_premium_subtitle" = "さらに歩くだけで5倍のコイン報酬";
 "cancel" = "Cancel";
 "choose_city_manually" = "都市を手動で選択";
 "cities_title" = "Cities";
@@ -624,6 +627,10 @@
 "settings_lifelog_bg_mode_high" = "High Precision";
 "settings_lifelog_bg_mode_low" = "Low Precision";
 "settings_lifelog_bg_mode_title" = "Background Recording Mode";
+"settings_daily_precision_desc" = "デイリーモードのバックグラウンドGPS精度を制御します。高精度はルートが正確ですがバッテリー消費が増えます。低精度はバッテリーを優先します。";
+"settings_daily_precision_high" = "高精度";
+"settings_daily_precision_low" = "低精度";
+"settings_daily_precision_title" = "デイリーモード精度";
 "settings_live_activity_desc" = "Show current tracking progress on the Lock Screen and Dynamic Island.";
 "settings_live_activity_system_disabled_desc" = "設定 -> Worldo -> Live Activities でオンにしてください。";
 "settings_live_activity_title" = "Live Activity";
@@ -825,7 +832,7 @@
 "membership_gate_subtitle" = "すべての機能を解放して旅を最大限に楽しもう。";
 "membership_gate_friends_limit" = "無料プランのフレンド上限に達しました。Premiumにアップグレードすると無制限になります。";
 "membership_gate_photos_title" = "もっと写真を";
-"membership_gate_photos_desc" = "無料プランは1メモリーにつき6枚まで。Premiumなら12枚。";
+"membership_gate_photos_desc" = "無料プランは1旅程につき6枚まで。Premiumなら12枚。";
 "membership_gate_friends_title" = "もっとフレンドを";
 "membership_gate_friends_desc" = "無料プランは5人まで。Premiumなら無制限。";
 "membership_gate_globe_title" = "グローバルビュー";
@@ -842,7 +849,7 @@
 "membership_gate_gpx_desc" = "PremiumでGPXファイルとして旅程をエクスポート。";
 "membership_gate_map_title" = "マップテーマ";
 "membership_gate_map_desc" = "Premiumでマップスタイルを解放。";
-"membership_benefit_photos" = "1メモリーにつき最大12枚";
+"membership_benefit_photos" = "1旅程につき最大12枚";
 "membership_benefit_friends" = "フレンド無制限";
 "membership_benefit_globe" = "フルグローバルビュー体験";
 "membership_benefit_icloud" = "iCloud同期＆復元";
@@ -860,8 +867,8 @@
 "membership_compare_feature" = "機能";
 "membership_compare_free" = "無料";
 "membership_compare_premium" = "Premium";
-"membership_compare_photos" = "写真 / メモリー";
-"membership_info_photos" = "旅ごとに追加できる写真の上限。無料: 6枚、Premium: 12枚。";
+"membership_compare_photos" = "写真 / 旅程";
+"membership_info_photos" = "旅ごとに追加できる写真の上限。各メモリー最大2枚。無料: 6枚、Premium: 12枚。";
 "membership_info_postcard" = "都市ごと：友達1人に1枚(無料)/2枚(Premium)送付可、最大3人(無料)/10人(Premium)。その都市の旅が増えるたびに友達1人あたり+1枚、送付先も増加。";
 "membership_compare_friends" = "フレンド";
 "membership_compare_unlimited" = "無制限";
@@ -962,10 +969,8 @@
 "tooltip_next" = "次へ";
 "tooltip_done" = "了解";
 
-// Memory Detail Tour
-"tour_memory_edit" = "ここをタップして旅の名前やメモ、アクティビティタグを編集";
-"tour_memory_export" = "この旅のロング画像をエクスポートしてシェア";
-"tour_memory_visibility" = "この旅の公開範囲を変更 — 非公開・友達のみ・公開";
+// Memory Detail Hint
+"tour_memory_combined" = "旅の記録はここに保存されます。編集・公開範囲の変更・ロング画像のエクスポートができます。";
 
 // Lifelog Tour
 "tour_lifelog_weather" = "現在地の天気と気温";
@@ -997,3 +1002,27 @@
 "about_us_cyber_dog_content" = "about_us_cyber_dog_content";
 "postcard_saved_front" = "ポストカードの表面を保存しました";
 "postcard_saved_back" = "ポストカードの裏面を保存しました";
+
+"report_user" = "報告";
+"block_user" = "ブロック";
+"unblock" = "ブロック解除";
+"block_user_confirm_title" = "ユーザーをブロック";
+"block_user_confirm_message" = "このユーザーはあなたのプロフィール、旅程を閲覧したり、メッセージを送信できなくなります。フレンドリストからも削除されます。";
+"report_title" = "報告";
+"report_submit" = "送信";
+"report_description" = "%@ を報告する理由は？";
+"report_reason_spam" = "スパム";
+"report_reason_harassment" = "嫌がらせ・いじめ";
+"report_reason_inappropriate" = "不適切なコンテンツ";
+"report_reason_other" = "その他";
+"report_detail_placeholder" = "詳細を追加（任意）";
+"report_submitted_title" = "報告を送信しました";
+"report_submitted_message" = "報告ありがとうございます。できるだけ早く確認いたします。";
+"settings_blocked_users_title" = "プライバシーと安全";
+"settings_blocked_users_row" = "ブロックしたユーザー";
+"blocked_users_empty" = "ブロックしたユーザーはいません";
+"auth_terms_prefix" = "";
+"auth_terms_of_service" = "利用規約";
+"auth_terms_and" = "と";
+"auth_terms_privacy_policy" = "プライバシーポリシー";
+"auth_terms_required" = "利用規約とプライバシーポリシーに同意してください。";

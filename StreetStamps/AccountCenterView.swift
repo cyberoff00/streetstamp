@@ -29,8 +29,10 @@ struct AccountCenterView: View {
                     sectionTitle(L10n.t("account_section_account"))
                     accountPanel
 
-                    sectionTitle(L10n.t("account_section_visibility"))
-                    visibilityPanel
+                    if FeatureFlagStore.shared.socialEnabled {
+                        sectionTitle(L10n.t("account_section_visibility"))
+                        visibilityPanel
+                    }
 
                     if sessionStore.isLoggedIn && !sessionStore.hasEmailPassword {
                         sectionTitle(L10n.t("account_section_security"))

@@ -163,6 +163,7 @@ struct FriendsHubView: View {
     @EnvironmentObject private var publishStore: JourneyPublishStore
     @EnvironmentObject private var notificationStore: SocialNotificationStore
     @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
+    @EnvironmentObject private var blockStore: UserBlockStore
     // NOTE: journeyStore, cityCache, flow removed from here to prevent
     // spurious body recomputation. Those stores update frequently but are
     // only used by child screens which obtain them via @EnvironmentObject
@@ -278,7 +279,8 @@ struct FriendsHubView: View {
         let version = feedSourceVersion
         guard version != lastFeedSourceVersion else { return }
         lastFeedSourceVersion = version
-        let friends = socialStore.friends
+        let blockedIDs = blockStore.blockedUserIDs
+        let friends = socialStore.friends.filter { !blockedIDs.contains($0.id) }
         let selfProfile = selfSnapshotForFeed
         let buildStart = CFAbsoluteTimeGetCurrent()
 
@@ -1395,6 +1397,9 @@ struct FriendsHubView: View {
                         let box = item.type == "postcard_received" ? "received" : "sent"
                         postcardInboxIntent = PostcardInboxIntent(box: box, messageID: item.postcardMessageID)
                         showPostcardInboxSheet = true
+                    } else if item.type == "friend_request" {
+                        showSocialNotificationsSheet = false
+                        tab = .allFriends
                     } else if let fromUserID = item.fromUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
                               !fromUserID.isEmpty {
                         showSocialNotificationsSheet = false
@@ -1910,6 +1915,7 @@ private struct FriendProfileScreen: View {
     @EnvironmentObject private var socialStore: SocialGraphStore
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var flow: AppFlowCoordinator
+    @EnvironmentObject private var blockStore: UserBlockStore
 
     let friendID: String
 
@@ -1926,6 +1932,12 @@ private struct FriendProfileScreen: View {
     @State private var showPostcardComposer = false
     @State private var showPhotoBooth = false
     @State private var activeRoute: FriendsRoute?
+    @State private var showBlockConfirm = false
+    @State private var showReportSheet = false
+    @State private var reportReason: String = ""
+    @State private var reportDetail: String = ""
+    @State private var isSubmittingReport = false
+    @State private var showReportSubmitted = false
 
     private var viewerUserID: String {
         let current = sessionStore.accountUserID ?? sessionStore.currentUserID
@@ -2075,6 +2087,68 @@ private struct FriendProfileScreen: View {
                 visitorLoadout: visitorLoadout
             )
         }
+        .confirmationDialog(
+            L10n.t("block_user_confirm_title"),
+            isPresented: $showBlockConfirm,
+            titleVisibility: .visible
+        ) {
+            Button(L10n.t("block_user"), role: .destructive) {
+                Task { await blockAndDismiss() }
+            }
+            Button(L10n.t("cancel"), role: .cancel) {}
+        } message: {
+            Text(L10n.t("block_user_confirm_message"))
+        }
+        .sheet(isPresented: $showReportSheet) {
+            ReportUserSheet(
+                friendName: (friend ?? fallbackFriend).displayName,
+                reason: $reportReason,
+                detail: $reportDetail,
+                isSubmitting: isSubmittingReport,
+                onSubmit: { submitReport() },
+                onCancel: { showReportSheet = false }
+            )
+            .presentationDetents([.medium])
+        }
+        .alert(L10n.t("report_submitted_title"), isPresented: $showReportSubmitted) {
+            Button(L10n.t("got_it"), role: .cancel) {}
+        } message: {
+            Text(L10n.t("report_submitted_message"))
+        }
+    }
+
+    private func blockAndDismiss() async {
+        do {
+            try await blockStore.blockUser(friendID, accessToken: sessionStore.currentAccessToken)
+            // Backend removes friendship on block; dismiss and feed cache
+            // will filter blocked IDs on next rebuild.
+            dismiss()
+        } catch {
+            deleteFriendErrorText = error.localizedDescription
+            showDeleteFriendError = true
+        }
+    }
+
+    private func submitReport() {
+        guard !reportReason.isEmpty else { return }
+        isSubmittingReport = true
+        Task {
+            do {
+                try await blockStore.submitReport(
+                    accessToken: sessionStore.currentAccessToken,
+                    reportedUserID: friendID,
+                    reason: reportReason,
+                    detail: reportDetail
+                )
+                isSubmittingReport = false
+                showReportSheet = false
+                reportReason = ""
+                reportDetail = ""
+                showReportSubmitted = true
+            } catch {
+                isSubmittingReport = false
+            }
+        }
     }
 
     private var friendTopControls: some View {
@@ -2106,6 +2180,17 @@ private struct FriendProfileScreen: View {
 
                 if sessionStore.isLoggedIn && (sessionStore.accountUserID ?? "") != friendID {
                     Menu {
+                        Button {
+                            showReportSheet = true
+                        } label: {
+                            Label(L10n.t("report_user"), systemImage: "exclamationmark.bubble")
+                        }
+                        Button(role: .destructive) {
+                            showBlockConfirm = true
+                        } label: {
+                            Label(L10n.t("block_user"), systemImage: "hand.raised")
+                        }
+                        Divider()
                         Button(role: .destructive) {
                             showDeleteFriendConfirm = true
                         } label: {

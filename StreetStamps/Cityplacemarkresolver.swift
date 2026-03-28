@@ -501,7 +501,7 @@ enum CityPlacemarkResolver {
     private static let strategySubAdmin: Set<String> = ["CN", "GB", "AU", "NZ", "FR", "IT", "ES", "NL", "CH", "ID", "PH", "VN", "MY", "BE", "SE", "NO", "DK"]
 
     private static func decideLevel(candidates: LevelCandidates, preferred: CardLevel?) -> CardLevel {
-        if candidates.island != nil { return .island }
+        // Island detection disabled — skip straight to preference / country strategy.
 
         if let preferred,
            preferred.isUserSelectable,
@@ -583,17 +583,10 @@ enum CityPlacemarkResolver {
     }
 
     private static func detectIslandName(from name: String?, locality: String?, subAdmin: String?, admin: String?) -> String? {
-        let candidate = (name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !candidate.isEmpty else { return nil }
-
-        let lower = candidate.lowercased()
-        let looksLikeIsland = lower.contains(" island") || lower.contains(" islands") || candidate.contains("岛")
-        if !looksLikeIsland { return nil }
-
-        let compareTargets = [locality, subAdmin, admin].compactMap { $0?.lowercased() }
-        if compareTargets.contains(lower) { return nil }
-
-        return candidate
+        // Island detection disabled — islands now use normal city-level resolution
+        // (locality → subAdmin → admin → country) to avoid unstable CLGeocoder pm.name
+        // causing level drift between island/locality/country.
+        return nil
     }
 
     private static func isChineseMunicipality(_ admin: String?) -> Bool {
