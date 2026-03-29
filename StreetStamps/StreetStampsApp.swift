@@ -409,13 +409,10 @@ struct StreetStampsApp: App {
                     renderCacheStore: renderCache,
                     limit: 4
                 )
+                rebuildTrackTiles()
                 lifelogRenderCache.scheduleWarmupRecentDays(
                     countryISO2: lifelogStore.countryISO2 ?? locationHub.countryISO2
                 )
-
-                // Track tile rebuild is deferred — triggered lazily by
-                // onChange(trackTileRevision) + onChange(currentTab) when
-                // user navigates to the lifelog tab.
 
                 // Phase 3: Deferred non-critical services
                 Task { @MainActor in
@@ -513,11 +510,10 @@ struct StreetStampsApp: App {
                         renderCacheStore: renderCache,
                         limit: 4
                     )
+                    rebuildTrackTiles()
                     lifelogRenderCache.scheduleWarmupRecentDays(
                         countryISO2: lifelogStore.countryISO2 ?? locationHub.countryISO2
                     )
-
-                    // Track tile rebuild deferred — triggered by onChange handlers when needed.
 
                     applyIdleLocationPolicy(requestSingleRefreshWhenIdle: true)
                     syncMotionActivityPolicy()
@@ -701,23 +697,35 @@ struct StreetStampsApp: App {
            manifest.passiveRevision == passiveRevision {
             // Manifest matches — no rebuild needed. But tile data may not
             // be in memory yet (manifest was pre-loaded in init, tiles are
-            // lazy). Ensure they're loaded so tiles() returns data.
-            trackTileStore.ensureTilesLoaded(zoom: zoom)
+            // lazy). Load tiles off the main thread — _loadFromDisk() reads
+            // hundreds of JSON files and must NOT block the UI.
+            let tStore = trackTileStore
+            Task.detached(priority: .utility) {
+                tStore.ensureTilesLoaded(zoom: zoom)
+            }
             return
         }
 
         trackTileRebuildTask?.cancel()
-        trackTileRebuildTask = Task(priority: .utility) {
-            async let journeyEvents = journeyStore.trackRenderEventsAsync()
-            async let passiveEvents = lifelogStore.trackRenderEventsAsync()
+        // MUST use Task.detached — a plain Task inherits MainActor isolation
+        // from the caller, which would cause storageQueue.sync inside refresh()
+        // to block the main thread for seconds.
+        let jStore = journeyStore
+        let lStore = lifelogStore
+        let tStore = trackTileStore
+        let jRev = journeyRevision
+        let pRev = passiveRevision
+        trackTileRebuildTask = Task.detached(priority: .utility) {
+            async let journeyEvents = jStore.trackRenderEventsAsync()
+            async let passiveEvents = lStore.trackRenderEventsAsync()
             let (resolvedJourneyEvents, resolvedPassiveEvents) = await (journeyEvents, passiveEvents)
             guard !Task.isCancelled else { return }
             do {
-                try trackTileStore.refresh(
+                try tStore.refresh(
                     journeyEvents: resolvedJourneyEvents,
                     passiveEvents: resolvedPassiveEvents,
-                    journeyRevision: journeyRevision,
-                    passiveRevision: passiveRevision,
+                    journeyRevision: jRev,
+                    passiveRevision: pRev,
                     zoom: zoom
                 )
             } catch {

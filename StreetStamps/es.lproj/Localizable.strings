@@ -297,6 +297,7 @@
 "friends_logged_out_title" = "Sign in to view friends activity";
 "friends_mark_all_read" = "Mark All Read";
 "friends_photos_count_format" = "%d photos";
+"friends_marks_count_format" = "%d marcas";
 "friends_postcard_prompt" = "bring you a postcard";
 "friends_recent_journey_ago" = "Recent journey %@";
 "friends_reject_failed_format" = "Ignore failed: %@";

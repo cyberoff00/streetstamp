@@ -131,6 +131,52 @@ struct LifelogSegmentedRenderGroup: Sendable {
     let endTimestamp: Date
     let farRouteSegments: [RenderRouteSegment]
     let footprintRun: [CLLocationCoordinate2D]
+
+    /// Precomputed bounding box — avoids re-scanning coordinates on every
+    /// viewport intersection test.
+    let minLat: Double
+    let maxLat: Double
+    let minLon: Double
+    let maxLon: Double
+
+    init(
+        sourceType: TrackSourceType,
+        rawCoordsWGS84: [CLLocationCoordinate2D],
+        startTimestamp: Date,
+        endTimestamp: Date,
+        farRouteSegments: [RenderRouteSegment],
+        footprintRun: [CLLocationCoordinate2D]
+    ) {
+        self.sourceType = sourceType
+        self.rawCoordsWGS84 = rawCoordsWGS84
+        self.startTimestamp = startTimestamp
+        self.endTimestamp = endTimestamp
+        self.farRouteSegments = farRouteSegments
+        self.footprintRun = footprintRun
+
+        var loLat = Double.greatestFiniteMagnitude
+        var hiLat = -Double.greatestFiniteMagnitude
+        var loLon = Double.greatestFiniteMagnitude
+        var hiLon = -Double.greatestFiniteMagnitude
+        for c in rawCoordsWGS84 {
+            if c.latitude < loLat { loLat = c.latitude }
+            if c.latitude > hiLat { hiLat = c.latitude }
+            if c.longitude < loLon { loLon = c.longitude }
+            if c.longitude > hiLon { hiLon = c.longitude }
+        }
+        self.minLat = loLat
+        self.maxLat = hiLat
+        self.minLon = loLon
+        self.maxLon = hiLon
+    }
+
+    func intersectsViewport(_ viewport: TrackTileViewport) -> Bool {
+        guard !rawCoordsWGS84.isEmpty else { return false }
+        return !(maxLat < viewport.minLat ||
+                 minLat > viewport.maxLat ||
+                 maxLon < viewport.minLon ||
+                 minLon > viewport.maxLon)
+    }
 }
 
 struct LifelogSegmentedDaySnapshot: Sendable {
@@ -138,6 +184,30 @@ struct LifelogSegmentedDaySnapshot: Sendable {
     let segments: [TrackTileSegment]
     let renderGroups: [LifelogSegmentedRenderGroup]
     let selectedDayCenterCoordinate: CLLocationCoordinate2D?
+
+    /// Precomputed full-day snapshot — avoids repeated flatMap/filter on
+    /// every viewport==nil access.
+    let allDayRenderSnapshot: LifelogRenderSnapshot
+
+    init(
+        key: LifelogDaySnapshotKey,
+        segments: [TrackTileSegment],
+        renderGroups: [LifelogSegmentedRenderGroup],
+        selectedDayCenterCoordinate: CLLocationCoordinate2D?
+    ) {
+        self.key = key
+        self.segments = segments
+        self.renderGroups = renderGroups
+        self.selectedDayCenterCoordinate = selectedDayCenterCoordinate
+        self.allDayRenderSnapshot = LifelogRenderSnapshot(
+            selectedDay: key.day,
+            cachedPathCoordsWGS84: renderGroups.flatMap(\.rawCoordsWGS84),
+            farRouteSegments: renderGroups.flatMap(\.farRouteSegments),
+            footprintRuns: renderGroups.compactMap { $0.footprintRun.isEmpty ? nil : $0.footprintRun },
+            selectedDayCenterCoordinate: selectedDayCenterCoordinate,
+            isHighQuality: true
+        )
+    }
 
     var farRouteGroups: [[RenderRouteSegment]] {
         renderGroups.map(\.farRouteSegments)
@@ -147,26 +217,11 @@ struct LifelogSegmentedDaySnapshot: Sendable {
         renderGroups.map(\.footprintRun)
     }
 
-    var allDayRenderSnapshot: LifelogRenderSnapshot {
-        let runs = renderGroups.map(\.rawCoordsWGS84)
-        return LifelogRenderSnapshot(
-            selectedDay: key.day,
-            cachedPathCoordsWGS84: runs.flatMap { $0 },
-            farRouteSegments: renderGroups.flatMap(\.farRouteSegments),
-            footprintRuns: renderGroups.map(\.footprintRun).filter { !$0.isEmpty },
-            selectedDayCenterCoordinate: selectedDayCenterCoordinate,
-            isHighQuality: true
-        )
-    }
-
     func renderSnapshot(in viewport: TrackTileViewport?) -> LifelogRenderSnapshot {
         guard let viewport else { return allDayRenderSnapshot }
 
         let visibleIndices = renderGroups.indices.filter { index in
-            LifelogRenderSnapshotBuilder.runIntersectsViewport(
-                renderGroups[index].rawCoordsWGS84,
-                viewport: viewport
-            )
+            renderGroups[index].intersectsViewport(viewport)
         }
 
         let visibleRuns = visibleIndices.map { renderGroups[$0].rawCoordsWGS84 }
@@ -346,17 +401,6 @@ enum LifelogRenderSnapshotBuilder {
             renderGroups: mergedRenderGroups,
             selectedDayCenterCoordinate: center
         )
-    }
-
-    fileprivate static func runIntersectsViewport(
-        _ run: [CLLocationCoordinate2D],
-        viewport: TrackTileViewport
-    ) -> Bool {
-        let temp = TrackTileSegment(
-            sourceType: .passive,
-            coordinates: run.map { CoordinateCodable(lat: $0.latitude, lon: $0.longitude) }
-        )
-        return TrackRenderAdapter.segmentIntersectsViewport(temp, viewport: viewport)
     }
 
     private static func makeRenderRuns(

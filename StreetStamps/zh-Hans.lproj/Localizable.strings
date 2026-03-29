@@ -739,6 +739,7 @@
 "friends_ago_days_format" = "%d 天前";
 "friends_ago_weeks_format" = "%d 周前";
 "friends_photos_count_format" = "%d 张照片";
+"friends_marks_count_format" = "%d 个标记";
 "friends_distance_compact_format" = "%.1f公里";
 "friends_backend_not_configured" = "后端地址未配置，请先在 Account Center 配置 API_BASE_URL";
 "friends_request_accepted" = "已通过好友申请";

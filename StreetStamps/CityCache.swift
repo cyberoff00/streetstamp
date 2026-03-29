@@ -652,6 +652,9 @@ final class CityCache: ObservableObject {
     private var membershipIndex = CityMembershipIndex()
     private var cancellables: Set<AnyCancellable> = []
     private var hasRebuiltForCurrentLoadedState = false
+    private let diskQueue = DispatchQueue(label: "CityCache.disk", qos: .utility)
+    private var savePending = false
+    private var saveScheduled = false
 
     init(paths: StoragePath, journeyStore: JourneyStore) {
         self.fileURL = paths.cityCacheURL
@@ -926,12 +929,32 @@ final class CityCache: ObservableObject {
         }
     }
 
+    /// Schedules a coalesced background save. Multiple rapid calls collapse
+    /// into one encode+write cycle, keeping the main thread free.
     fileprivate func saveToDisk() {
-        do {
-            let data = try JSONEncoder().encode(cachedCities)
-            try data.write(to: fileURL, options: [.atomic])
-        } catch {
-            print("❌ city cache save failed:", error)
+        savePending = true
+        guard !saveScheduled else { return }
+        saveScheduled = true
+
+        // Snapshot on next run-loop tick so back-to-back mutations coalesce.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.savePending else {
+                self?.saveScheduled = false
+                return
+            }
+            self.savePending = false
+            self.saveScheduled = false
+
+            let snapshot = self.cachedCities
+            let url = self.fileURL
+            self.diskQueue.async {
+                do {
+                    let data = try JSONEncoder().encode(snapshot)
+                    try data.write(to: url, options: [.atomic])
+                } catch {
+                    print("❌ city cache save failed:", error)
+                }
+            }
         }
     }
 

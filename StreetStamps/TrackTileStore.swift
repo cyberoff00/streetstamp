@@ -159,11 +159,45 @@ final class TrackTileStore: ObservableObject {
     /// Loads tile files from disk if manifest exists but tiles haven't been
     /// loaded yet.  Called from the early-return path in `rebuildTrackTiles()`
     /// where manifest revisions already match so `refresh()` is skipped.
+    ///
+    /// Disk I/O runs outside the barrier so `tiles()` readers on the main
+    /// thread are never blocked by the load.
     func ensureTilesLoaded(zoom: Int) {
         let z = max(0, min(zoom, 22))
+
+        // Quick non-blocking check: already loaded?
+        let needsLoad: Bool = storageQueue.sync {
+            bucketsByZoom[z] == nil && _currentManifest != nil
+        }
+        guard needsLoad else { return }
+
+        // Disk I/O outside any lock — readers proceed freely.
+        guard fm.fileExists(atPath: paths.trackTileManifestURL.path),
+              let manifestData = try? Data(contentsOf: paths.trackTileManifestURL),
+              let manifest = try? decoder.decode(TrackTileManifest.self, from: manifestData) else {
+            return
+        }
+        var loaded: [TrackTileKey: TrackTileBucket] = [:]
+        if fm.fileExists(atPath: paths.trackTilesDir.path),
+           let files = try? fm.contentsOfDirectory(at: paths.trackTilesDir, includingPropertiesForKeys: nil) {
+            for fileURL in files where fileURL.pathExtension == "json" && fileURL.lastPathComponent != "manifest.json" {
+                guard let key = tileKey(fromFilename: fileURL.deletingPathExtension().lastPathComponent) else { continue }
+                if let data = try? Data(contentsOf: fileURL),
+                   let bucket = try? decoder.decode(TrackTileBucket.self, from: data) {
+                    loaded[key] = bucket
+                }
+            }
+        }
+        let dayIndex = buildDayIndex(for: loaded)
+
+        // Brief barrier: swap in-memory state only.
         storageQueue.sync(flags: .barrier) {
-            guard bucketsByZoom[z] == nil, _currentManifest != nil else { return }
-            try? _loadFromDisk()
+            // Double-check: another thread may have loaded while we were reading.
+            guard bucketsByZoom[z] == nil else { return }
+            _currentManifest = manifest
+            _syncManifestSnapshot()
+            bucketsByZoom[z] = loaded
+            dayIndexByZoom[z] = dayIndex
         }
     }
 

@@ -88,6 +88,9 @@ final class JourneyStore: ObservableObject {
     @Published private(set) var hasLoaded: Bool = false
     @Published private(set) var isLoading: Bool = false
     @Published private(set) var trackTileRevision: Int = 0
+    /// Bumped on metadata/memory changes that don't affect coordinates or journey count.
+    /// Memory pages observe this instead of trackTileRevision to avoid coordinate-update noise.
+    @Published private(set) var metadataRevision: Int = 0
     var syncHooks: SyncHooks = .disabled
 
     private var fileStore: JourneysFileStore
@@ -160,25 +163,44 @@ final class JourneyStore: ObservableObject {
         self.isLoading = true
         defer { self.isLoading = false }
 
-        var ids = await indexStore.loadJourneyIDsAsync()
+        // All disk I/O (index read, orphan scan, journey file reads) runs on a
+        // background queue. Only the final property assignments hop to MainActor.
+        let fStore = fileStore
+        let iStore = indexStore
+        let loaded = await withCheckedContinuation { (cont: CheckedContinuation<[JourneyRoute], Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var ids = (try? iStore.loadJourneyIDs()) ?? []
 
-        // Recover orphaned journey files not listed in index (e.g. crash between file write and index update).
-        let orphanIDs = fileStore.scanOrphanedIDs(knownIDs: Set(ids))
-        if !orphanIDs.isEmpty {
-            ids = orphanIDs + ids
-            try? indexStore.replaceIDs(ids)
-            print("⚠️ recovered \(orphanIDs.count) orphaned journey(s)")
+                // Recover orphaned journey files not listed in index.
+                let orphanIDs = fStore.scanOrphanedIDs(knownIDs: Set(ids))
+                if !orphanIDs.isEmpty {
+                    ids = orphanIDs + ids
+                    try? iStore.replaceIDs(ids)
+                    print("⚠️ recovered \(orphanIDs.count) orphaned journey(s)")
+                }
+
+                guard !ids.isEmpty else {
+                    cont.resume(returning: [])
+                    return
+                }
+
+                var result: [JourneyRoute] = []
+                result.reserveCapacity(ids.count)
+                for id in ids {
+                    if let j = try? fStore.loadJourney(id: id) { result.append(j) }
+                }
+                cont.resume(returning: result)
+            }
         }
 
-        guard !ids.isEmpty else {
-            self.journeys = []
+        self.journeys = loaded
+
+        guard !loaded.isEmpty else {
             self.latestOngoing = nil
             self.hasLoaded = true
             self.bumpTrackTileRevision()
             return
         }
-        let loaded = await fileStore.loadJourneys(ids: ids)
-        self.journeys = loaded
 
         // Best-effort: restore "ongoing" journey pointer after a cold start.
         self.latestOngoing = loaded.first(where: { $0.endTime == nil })
@@ -244,6 +266,7 @@ final class JourneyStore: ObservableObject {
 
         // Meta-only updates (e.g. memory add/edit): persist quickly without touching big coordinates.
         if !coordChanged {
+            metadataRevision &+= 1
             scheduleMetaPersist(journey: j)
         }
 

@@ -67,24 +67,14 @@ struct FilmCameraView: View {
         let safeTop = geo.safeAreaInsets.top
         let safeBot = geo.safeAreaInsets.bottom
         let screenW = geo.size.width
-        let screenH = geo.size.height + safeTop + safeBot  // full screen height
-
-        // Fixed chrome heights
-        let topH: CGFloat = safeTop + 52 + 1       // safe area + chrome strip + edge
-        let bottomH: CGFloat = 1 + 100 + safeBot + 16  // edge + controls + safe area + grip
-
-        // 4:3 viewfinder — fit to remaining height, capped by width
+        // 4:3 viewfinder with padding
         let viewfinderPadH: CGFloat = 2
-        let maxW = screenW - viewfinderPadH * 2
-        let maxH = screenH - topH - bottomH
-        let viewfinderH = min(maxW * (4.0 / 3.0), maxH)
-        let viewfinderW = viewfinderH * (3.0 / 4.0)
+        let viewfinderW = screenW - viewfinderPadH * 2
+        let viewfinderH = viewfinderW * (4.0 / 3.0)
 
         return VStack(spacing: 0) {
             // === Top camera body: brand plate + controls ===
             topCameraBody(safeTop: safeTop)
-
-            Spacer(minLength: 0)
 
             // === Viewfinder area ===
             ZStack {
@@ -107,13 +97,11 @@ struct FilmCameraView: View {
                 RoundedRectangle(cornerRadius: 3, style: .continuous)
                     .stroke(Color.black.opacity(0.8), lineWidth: 1.5)
             )
-
-            Spacer(minLength: 0)
+            .padding(.horizontal, viewfinderPadH)
 
             // === Bottom camera body: shutter + controls ===
             bottomCameraBody(safeBot: safeBot)
         }
-        .ignoresSafeArea()
     }
 
     // =====================================================
@@ -518,6 +506,7 @@ final class FilmCameraEngine: NSObject, ObservableObject {
     let captureSession = AVCaptureSession()
     @Published var flashEnabled = false
     @Published var isUsingFrontCamera = false
+    @Published var isSessionReady = false
 
     private var currentDevice: AVCaptureDevice?
     private var photoOutput = AVCapturePhotoOutput()
@@ -526,14 +515,17 @@ final class FilmCameraEngine: NSObject, ObservableObject {
 
     func startSession() {
         sessionQueue.async { [weak self] in
-            self?.configureSession()
-            self?.captureSession.startRunning()
+            guard let self else { return }
+            self.configureSession()
+            self.captureSession.startRunning()
+            DispatchQueue.main.async { self.isSessionReady = self.captureSession.isRunning }
         }
     }
 
     func stopSession() {
         sessionQueue.async { [weak self] in
             self?.captureSession.stopRunning()
+            DispatchQueue.main.async { self?.isSessionReady = false }
         }
     }
 
@@ -565,12 +557,18 @@ final class FilmCameraEngine: NSObject, ObservableObject {
     }
 
     func capturePhoto(completion: @escaping (UIImage?) -> Void) {
-        captureCompletion = completion
-        let settings = AVCapturePhotoSettings()
-        if let device = currentDevice, device.hasFlash {
-            settings.flashMode = flashEnabled ? .on : .off
+        sessionQueue.async { [weak self] in
+            guard let self, self.captureSession.isRunning else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            self.captureCompletion = completion
+            let settings = AVCapturePhotoSettings()
+            if let device = self.currentDevice, device.hasFlash {
+                settings.flashMode = self.flashEnabled ? .on : .off
+            }
+            self.photoOutput.capturePhoto(with: settings, delegate: self)
         }
-        photoOutput.capturePhoto(with: settings, delegate: self)
     }
 
     private func configureSession() {

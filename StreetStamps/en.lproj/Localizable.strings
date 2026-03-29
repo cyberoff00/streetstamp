@@ -750,6 +750,7 @@
 "friends_ago_days_format" = "%dd ago";
 "friends_ago_weeks_format" = "%dw ago";
 "friends_photos_count_format" = "%d photos";
+"friends_marks_count_format" = "%d marks";
 "friends_distance_compact_format" = "%.1fkm";
 "friends_backend_not_configured" = "Backend URL is not configured. Set API_BASE_URL in Account Center first.";
 "friends_request_accepted" = "Friend request accepted";

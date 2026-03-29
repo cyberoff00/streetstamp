@@ -172,8 +172,8 @@ enum FriendsFeedCacheBuilder {
                     metaText = ""
                 case .memory:
                     metaText = String(
-                        format: L10n.t("friends_photos_count_format"),
-                        max(photoCount, memoryCount)
+                        format: L10n.t("friends_marks_count_format"),
+                        memoryCount
                     )
                 case .journey:
                     metaText = "\(formatDistance(journey.distance))  \(formatDuration(journey.startTime, journey.endTime))"

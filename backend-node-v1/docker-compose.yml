@@ -11,6 +11,13 @@ services:
       - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "1.0"
+        reservations:
+          memory: 256m
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U streetstamps -d streetstamps"]
       interval: 5s
@@ -60,6 +67,14 @@ services:
       APNS_KEY_ID: "${APNS_KEY_ID:-}"
       APNS_TEAM_ID: "${APNS_TEAM_ID:-}"
       APNS_USE_SANDBOX: "${APNS_USE_SANDBOX:-false}"
+      PG_MAX_CLIENTS: "${PG_MAX_CLIENTS:-50}"
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "1.5"
+        reservations:
+          memory: 256m
     logging:
       driver: json-file
       options:

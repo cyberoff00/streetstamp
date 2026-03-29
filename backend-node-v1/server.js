@@ -47,7 +47,7 @@ const AUTH_REFRESH_RATE_LIMIT_MAX = Number(process.env.AUTH_REFRESH_RATE_LIMIT_M
 const WRITE_RATE_LIMIT_WINDOW_MS = Number(process.env.WRITE_RATE_LIMIT_WINDOW_MS || 60 * 1000);
 const WRITE_RATE_LIMIT_MAX = Number(process.env.WRITE_RATE_LIMIT_MAX || 80);
 const UPLOAD_RATE_LIMIT_WINDOW_MS = Number(process.env.UPLOAD_RATE_LIMIT_WINDOW_MS || 60 * 1000);
-const UPLOAD_RATE_LIMIT_MAX = Number(process.env.UPLOAD_RATE_LIMIT_MAX || 10);
+const UPLOAD_RATE_LIMIT_MAX = Number(process.env.UPLOAD_RATE_LIMIT_MAX || 30);
 const TEST_EMAIL_OUTBOX_FILE = (process.env.TEST_EMAIL_OUTBOX_FILE || "").trim();
 const AUTH_LINK_BASE = (process.env.AUTH_LINK_BASE || MEDIA_PUBLIC_BASE || "").trim();
 const SES_FROM_EMAIL = (process.env.SES_FROM_EMAIL || "").trim();
@@ -4485,6 +4485,13 @@ async function main() {
           } catch (e) {
             logTiming("media_r2_sync", { userID: uid, objectKey, bytes: fileBytes, status: "failed", message: e && e.message ? e.message : String(e) });
           }
+        });
+      }
+
+      // Warm Cloudflare CDN cache so first viewer gets a HIT instead of slow origin fetch
+      if (url.startsWith("http")) {
+        setImmediate(() => {
+          fetch(url).catch(() => {});
         });
       }
 

@@ -1011,19 +1011,9 @@ struct LifelogView: View {
 
                     MapPolyline(coordinates: seg.coords)
                         .stroke(
-                            base.opacity(seg.style == .dashed ? 0.08 : 0.14),
-                            style: StrokeStyle(
-                                lineWidth: seg.style == .dashed ? 2.0 : 3.0,
-                                lineCap: .round,
-                                lineJoin: .round,
-                                dash: seg.style == .dashed ? dash : []
-                            )
-                        )
-                    MapPolyline(coordinates: seg.coords)
-                        .stroke(
                             base.opacity(seg.style == .dashed ? 0.30 : 0.84),
                             style: StrokeStyle(
-                                lineWidth: seg.style == .dashed ? 1.1 : 1.6,
+                                lineWidth: seg.style == .dashed ? 1.6 : 2.2,
                                 lineCap: .round,
                                 lineJoin: .round,
                                 dash: seg.style == .dashed ? dash : []

@@ -211,6 +211,11 @@
 - Postcard `cityName` is a snapshot from send time. This is standard messaging behavior — sent messages do not dynamically re-translate.
 - Backend stores both `cityID` (stable) and `cityName` (display snapshot) separately.
 
+### Swift Concurrency Pitfalls (Verified)
+- **`Task { }` inherits actor isolation. `Task.detached { }` does not.** A `Task(priority: .utility)` created on `@MainActor` runs its ENTIRE body on the main thread — the priority only affects scheduling, not which thread it runs on. Any `sync` or blocking call inside such a Task will block the main thread. Use `Task.detached` when the body contains blocking I/O, `DispatchQueue.sync`, or any work that should not run on the main thread.
+- When using `Task.detached`, capture needed `@MainActor` properties into local variables BEFORE the detached block, since `self` cannot be directly referenced.
+- When diagnosing main-thread freezes, the first tool should be a **main-thread heartbeat detector** (a `Task { @MainActor }` that sleeps 16ms per iteration and logs gaps > 32ms). Measuring wall-clock time of individual functions is misleading — it shows elapsed time, not main-thread-occupied time.
+
 ### Code Style And Conventions
 - Prefer small, testable logic units over burying logic inside large SwiftUI views.
 - Follow existing Swift naming style: `UpperCamelCase` for types, descriptive noun-based names for helpers, and explicit suffixes like `Store`, `Service`, `Policy`, `Presentation`, `Resolver`.
@@ -280,12 +285,19 @@ bash scripts/readonly_prod_check.sh
 - If the user insists after hearing the concern, proceed but document the tradeoff in a code comment or commit message.
 - This is not about refusing work — it is about protecting the user from unintended consequences that are easier to prevent than to debug later.
 
+### Rule: Assume Long-Term Product With Growing Data
+- This is a long-lived product. Users will accumulate hundreds of journeys, dozens of cities, and years of lifelog data over time. **Always evaluate performance with heavy data in mind, not just current test data.**
+- When writing code that touches collections (journeys, cities, lifelog points, track tiles), ask: "What happens when there are 500+ journeys, 50+ cities, 3+ years of daily lifelog?" If the answer is "it gets slow on main thread", fix it now — not after users complain.
+- Synchronous main-thread operations that scale with data size (full rebuilds, full-collection scans, JSON encode/decode of growing arrays) are bugs waiting to happen. Move them off main thread or make them incremental.
+- "It's only 6 cities right now" is not a valid justification for synchronous full-rebuild on main thread. Design for the user who has been using the app for years.
+- This does not mean premature optimization of everything. It means: any O(n) work on main thread where n grows with user lifetime usage must be evaluated for eventual cost.
+
 ### Rule: Optimization Must Justify Its Cost
 - Every optimization introduces complexity. Before "improving" code, verify:
-  - Is there a measured problem? (performance issue, crash, data corruption, user complaint)
+  - Is there a measured problem, or a clear scaling concern per the rule above?
   - Does the optimization preserve all existing behavior, including edge cases?
   - Is the optimization's complexity proportional to the problem it solves?
-- Do not optimize for hypothetical scale, theoretical purity, or personal style preference. Optimize for real, demonstrated problems.
+- Do not optimize for theoretical purity or personal style preference. Optimize for real problems and foreseeable scaling bottlenecks.
 - If an optimization requires touching more than 3 files, pause and reconsider whether the scope is justified.
 
 ### Rule: Verify The Full Round-Trip Before Declaring Done

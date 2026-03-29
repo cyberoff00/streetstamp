@@ -7,6 +7,7 @@ struct MemoryPin: View {
         let hasPhoto = cluster.contains { !$0.imagePaths.isEmpty }
         let hasNote = cluster.contains { !$0.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         let count = cluster.count
+        let allPending = cluster.allSatisfy { $0.locationStatus == .pending }
 
         ZStack {
             Circle()
@@ -18,7 +19,11 @@ struct MemoryPin: View {
                 .shadow(color: .black.opacity(0.12), radius: 6, y: 3)
 
             ZStack {
-                if hasPhoto && hasNote {
+                if allPending {
+                    // Pending: GPS is resolving
+                    Image(systemName: "location.slash")
+                        .font(.system(size: 14, weight: .semibold))
+                } else if hasPhoto && hasNote {
                     Image(systemName: "camera.fill")
                         .font(.system(size: 13, weight: .semibold))
                         .offset(x: 6, y: 0)
@@ -45,5 +50,6 @@ struct MemoryPin: View {
                     .offset(x: 12, y: -12)
             }
         }
+        .opacity(allPending ? 0.55 : 1.0)
     }
 }

@@ -254,7 +254,7 @@ final class LifelogStore: ObservableObject {
 
     private func applyLoadedState(_ loaded: LoadedState) {
         points = loaded.points
-        coordinates = loaded.points.map(\.coord)
+        coordinates = loaded.coordinates
         if AppSettings.hasPassiveLifelogPreference {
             isEnabled = AppSettings.isPassiveLifelogEnabled
         } else {
@@ -949,13 +949,14 @@ final class LifelogStore: ObservableObject {
         deletedMoodDayKeys.forEach { mergedMoodByDay.removeValue(forKey: $0) }
         restoredMoodByDay.forEach { mergedMoodByDay[$0.key] = $0.value }
 
+        let mergedCoords = mergedPoints.map(\.coord)
         let nextState = LoadedState(
             points: mergedPoints,
-            coordinates: mergedPoints.map(\.coord),
+            coordinates: mergedCoords,
             isEnabled: isEnabled,
             archivedJourneyIDs: archivedJourneyIDs,
             moodByDay: mergedMoodByDay,
-            cachedDistanceMeters: totalDistanceMeters(coords: mergedPoints.map(\.coord)),
+            cachedDistanceMeters: totalDistanceMeters(coords: mergedCoords),
             availableDays: Self.computeAvailableDays(from: mergedPoints),
             countryISO2: countryISO2
         )

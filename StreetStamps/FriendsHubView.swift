@@ -1004,6 +1004,27 @@ struct FriendsHubView: View {
             return feedLikeLoadingKeys.contains(feedLikeKey(friendID: event.friendID, journeyID: journeyID))
         }
 
+        // MARK: - Feed Like Stats Cache
+
+        private static let likeStatsCacheKey = "streetstamps.feedLikeStatsCache"
+
+        private func saveLikeStatsToCache(_ stats: [String: (likes: Int, likedByMe: Bool)]) {
+            let encoded = stats.mapValues { ["l": $0.likes, "m": $0.likedByMe ? 1 : 0] }
+            UserDefaults.standard.set(encoded, forKey: Self.likeStatsCacheKey)
+        }
+
+        private func loadLikeStatsFromCache() -> [String: (likes: Int, likedByMe: Bool)] {
+            guard let raw = UserDefaults.standard.dictionary(forKey: Self.likeStatsCacheKey) else { return [:] }
+            var result: [String: (likes: Int, likedByMe: Bool)] = [:]
+            for (key, value) in raw {
+                guard let dict = value as? [String: Int],
+                      let likes = dict["l"],
+                      let m = dict["m"] else { continue }
+                result[key] = (likes: likes, likedByMe: m != 0)
+            }
+            return result
+        }
+
         @MainActor
         private func loadFeedLikeStatsIfNeeded() async {
             let t0 = CFAbsoluteTimeGetCurrent()
@@ -1021,16 +1042,24 @@ struct FriendsHubView: View {
                 feedLikeStats = [:]
                 return
             }
+
+            // Restore cached stats immediately so UI is not blank
+            if feedLikeStats.isEmpty {
+                let cached = loadLikeStatsFromCache()
+                if !cached.isEmpty {
+                    feedLikeStats = cached
+                    print("⏱ [FriendsHub] loadFeedLikeStats CACHED: \(cached.count) entries")
+                }
+            }
+
             print("⏱ [FriendsHub] loadFeedLikeStats START pairs=\(pairs.count)")
 
             let grouped = Dictionary(grouping: pairs, by: \.friendID)
-            do {
-                let results = try await withThrowingTaskGroup(
-                    of: [(String, (likes: Int, likedByMe: Bool))].self
-                ) { group in
-                    for (friendID, items) in grouped {
-                        let ids = Array(Set(items.map(\.journeyID)))
-                        group.addTask {
+            await withTaskGroup(of: [(String, (likes: Int, likedByMe: Bool))]?.self) { group in
+                for (friendID, items) in grouped {
+                    let ids = Array(Set(items.map(\.journeyID)))
+                    group.addTask {
+                        do {
                             let stats = try await BackendAPIClient.shared.fetchJourneyLikeStats(
                                 token: token,
                                 journeyIDs: ids,
@@ -1039,19 +1068,22 @@ struct FriendsHubView: View {
                             return stats.map { (journeyID, value) in
                                 ("\(friendID)|\(journeyID)", value)
                             }
+                        } catch {
+                            return nil
                         }
                     }
-                    var all: [(String, (likes: Int, likedByMe: Bool))] = []
-                    for try await batch in group {
-                        all.append(contentsOf: batch)
-                    }
-                    return all
                 }
-                feedLikeStats = Dictionary(results, uniquingKeysWith: { _, last in last })
-                print("⏱ [FriendsHub] loadFeedLikeStats DONE: \(Int((CFAbsoluteTimeGetCurrent()-t0)*1000))ms  groups=\(grouped.count)")
-            } catch {
-                print("⏱ [FriendsHub] loadFeedLikeStats FAILED: \(Int((CFAbsoluteTimeGetCurrent()-t0)*1000))ms  error=\(error)")
+                // Merge each batch as it arrives — progressive display
+                for await batch in group {
+                    guard let batch else { continue }
+                    for (key, value) in batch {
+                        feedLikeStats[key] = value
+                    }
+                }
             }
+            // Persist for next cold start
+            saveLikeStatsToCache(feedLikeStats)
+            print("⏱ [FriendsHub] loadFeedLikeStats DONE: \(Int((CFAbsoluteTimeGetCurrent()-t0)*1000))ms  groups=\(grouped.count)")
         }
 
         private var feedLikesSheetDetents: Set<PresentationDetent> {

@@ -714,6 +714,15 @@ struct SystemCameraPicker: UIViewControllerRepresentable {
         // 1. Show mirrored review for front camera selfies (iOS default review is un-mirrored)
         // 2. Provide a camera flip button so user can switch front/rear freely
         picker.showsCameraControls = false
+
+        // Shift the 4:3 preview down so it sits below a top control bar,
+        // like Apple's native Camera app layout.
+        let safeTop = UIApplication.shared.connectedScenes
+            .compactMap { ($0 as? UIWindowScene)?.keyWindow?.safeAreaInsets.top }
+            .first ?? 59.0
+        let topBarH = safeTop + 52.0  // safe area + control bar
+        picker.cameraViewTransform = CGAffineTransform(translationX: 0, y: topBarH)
+
         let overlay = CameraOverlayController(picker: picker, coordinator: context.coordinator)
         overlay.view.frame = UIScreen.main.bounds
         picker.cameraOverlayView = overlay.view
@@ -793,7 +802,27 @@ final class CameraOverlayController: UIViewController {
     // MARK: - Shooting mode UI
 
     private func setupShootingUI() {
-        // Close button (top-left)
+        let screenW = UIScreen.main.bounds.width
+        let screenH = UIScreen.main.bounds.height
+        let safeTop = view.safeAreaInsets.top > 0 ? view.safeAreaInsets.top : 59.0
+        let topBarH = safeTop + 52.0
+        let previewH = screenW * (4.0 / 3.0)
+        let previewBottom = topBarH + previewH
+        let bottomAreaH = screenH - previewBottom  // black area below preview
+
+        // Top black bar background
+        let topBar = UIView()
+        topBar.backgroundColor = .black
+        topBar.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(topBar)
+
+        // Bottom black bar background
+        let bottomBar = UIView()
+        bottomBar.backgroundColor = .black
+        bottomBar.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(bottomBar)
+
+        // Close button (top bar, left)
         let close = UIButton(type: .system)
         close.setImage(UIImage(systemName: "xmark")?.withConfiguration(
             UIImage.SymbolConfiguration(pointSize: 20, weight: .semibold)
@@ -804,7 +833,7 @@ final class CameraOverlayController: UIViewController {
         view.addSubview(close)
         self.closeButton = close
 
-        // Flip camera button (top-right)
+        // Flip camera button (top bar, right)
         let flip = UIButton(type: .system)
         flip.setImage(UIImage(systemName: "camera.rotate")?.withConfiguration(
             UIImage.SymbolConfiguration(pointSize: 20, weight: .semibold)
@@ -815,7 +844,7 @@ final class CameraOverlayController: UIViewController {
         view.addSubview(flip)
         self.flipButton = flip
 
-        // Shutter button (bottom-center)
+        // Shutter button (centered in bottom black area)
         let shutter = UIButton(type: .custom)
         shutter.translatesAutoresizingMaskIntoConstraints = false
         let shutterSize: CGFloat = 72
@@ -833,19 +862,36 @@ final class CameraOverlayController: UIViewController {
         view.addSubview(shutter)
         self.shutterButton = shutter
 
+        // Shutter Y: centered in the bottom black area
+        let shutterCenterY = previewBottom + bottomAreaH / 2.0
+
         NSLayoutConstraint.activate([
+            // Top bar
+            topBar.topAnchor.constraint(equalTo: view.topAnchor),
+            topBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            topBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            topBar.heightAnchor.constraint(equalToConstant: topBarH),
+
+            // Bottom bar
+            bottomBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            bottomBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bottomBar.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            bottomBar.topAnchor.constraint(equalTo: view.topAnchor, constant: previewBottom),
+
+            // Close / Flip: vertically centered in the 52pt control strip below safeTop
             close.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            close.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            close.centerYAnchor.constraint(equalTo: view.topAnchor, constant: safeTop + 26),
             close.widthAnchor.constraint(equalToConstant: 44),
             close.heightAnchor.constraint(equalToConstant: 44),
 
             flip.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            flip.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            flip.centerYAnchor.constraint(equalTo: close.centerYAnchor),
             flip.widthAnchor.constraint(equalToConstant: 44),
             flip.heightAnchor.constraint(equalToConstant: 44),
 
+            // Shutter: centered in bottom area
             shutter.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            shutter.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -30),
+            shutter.centerYAnchor.constraint(equalTo: view.topAnchor, constant: shutterCenterY),
             shutter.widthAnchor.constraint(equalToConstant: ringSize),
             shutter.heightAnchor.constraint(equalToConstant: ringSize),
 
@@ -2281,9 +2327,12 @@ struct MapView: View {
     private func computeGroupedMemories() -> [(key: String, coordinate: CLLocationCoordinate2D, items: [JourneyMemory])] {
         let thresholdMeters: CLLocationDistance = 20
 
+        // Fallback coordinate for pending memories: last track point or user location.
+        let pendingFallback: CLLocationCoordinate2D? = journeyRoute.coordinates.last?.cl
+            ?? tracking.userLocation?.coordinate
+
         // Stable ordering helps keep grouping deterministic.
         let src = journeyRoute.memories
-            .filter { $0.locationStatus != .pending }
             .sorted { $0.timestamp < $1.timestamp }
 
         var clusters: [(key: String, center: CLLocationCoordinate2D, items: [JourneyMemory])] = []
@@ -2294,8 +2343,12 @@ struct MapView: View {
         }
 
         for m in src {
-            let coord = CLLocationCoordinate2D(latitude: m.coordinate.0, longitude: m.coordinate.1)
-            guard coord.isValid else { continue }
+            var coord = CLLocationCoordinate2D(latitude: m.coordinate.0, longitude: m.coordinate.1)
+            // Pending memories have (0,0) — use fallback so they still appear on map.
+            if m.locationStatus == .pending || !coord.isValid {
+                guard let fallback = pendingFallback else { continue }
+                coord = fallback
+            }
 
             // Try to attach to an existing cluster within 20m.
             if let idx = clusters.firstIndex(where: { distance($0.center, coord) <= thresholdMeters }) {

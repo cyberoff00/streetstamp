@@ -6,12 +6,28 @@ enum BackendConfig {
     private static let firebaseInfoPlistName = "GoogleService-Info"
     private static let firebaseBackupEnabledKey = "streetstamps.firebase.backup_runtime_enabled"
 
+    /// Domestic (China mainland) users connect directly to Shanghai server (gray-cloud, no Cloudflare proxy).
+    /// Overseas users go through Cloudflare CDN (orange-cloud) for edge caching.
+    private static let domesticBaseURL = "https://api.streetstamps.cyberkkk.cn"
+    private static let globalBaseURL = "https://worldo-api.cyberkkk.cn"
+
+    static var isChineseMainlandDevice: Bool {
+        if let region = Locale.current.region?.identifier, region == "CN" {
+            return true
+        }
+        // Chinese users with non-CN locale still have Asia/Shanghai timezone
+        if TimeZone.current.identifier == "Asia/Shanghai" {
+            return true
+        }
+        return false
+    }
+
     static var defaultBaseURL: String {
         if let fromPlist = Bundle.main.object(forInfoDictionaryKey: "API_BASE_URL") as? String,
            !fromPlist.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return fromPlist
         }
-        return ""
+        return isChineseMainlandDevice ? domesticBaseURL : globalBaseURL
     }
 
     static var baseURLString: String {

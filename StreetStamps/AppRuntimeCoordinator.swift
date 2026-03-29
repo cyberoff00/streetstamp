@@ -250,7 +250,9 @@ enum AppJourneySyncCoordinator {
            manifest.zoom == zoom,
            manifest.journeyRevision == journeyRevision,
            manifest.passiveRevision == passiveRevision {
-            trackTileStore.ensureTilesLoaded(zoom: zoom)
+            Task.detached(priority: .utility) {
+                trackTileStore.ensureTilesLoaded(zoom: zoom)
+            }
             return
         }
         Task.detached(priority: .utility) {
@@ -356,7 +358,7 @@ final class TrackTileRebuildCoordinator: ObservableObject {
         }
 
         trackTileRebuildTask?.cancel()
-        trackTileRebuildTask = Task(priority: .utility) {
+        trackTileRebuildTask = Task.detached(priority: .utility) { [journeyStore, lifelogStore, trackTileStore] in
             async let journeyEvents = journeyStore.trackRenderEventsAsync()
             async let passiveEvents = lifelogStore.trackRenderEventsAsync()
             let (resolvedJourneyEvents, resolvedPassiveEvents) = await (journeyEvents, passiveEvents)

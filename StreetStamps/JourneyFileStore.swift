@@ -65,7 +65,8 @@ final class JourneysFileStore {
 
     /// Append-only coordinate persistence for ongoing journeys.
     /// Writes one JSON array per line to keep decoding simple and IO minimal.
-    /// Uses read-all + append + atomic-write to avoid partial lines on crash.
+    /// Uses FileHandle seek-to-end append for O(newLine) cost instead of O(file).
+    /// First write uses atomic write; subsequent writes append in-place.
     func appendDelta(journeyId: String, newCoords: [CoordinateCodable]) throws {
         guard !newCoords.isEmpty else { return }
         try ensureBaseDir()
@@ -75,11 +76,10 @@ final class JourneysFileStore {
         newLine.append(0x0A) // newline
 
         if fm.fileExists(atPath: target.path) {
-            var existing = try Data(contentsOf: target)
-            existing.append(newLine)
-            let tmp = target.appendingPathExtension("tmp")
-            try existing.write(to: tmp, options: .atomic)
-            _ = try fm.replaceItemAt(target, withItemAt: tmp)
+            let handle = try FileHandle(forWritingTo: target)
+            defer { try? handle.close() }
+            handle.seekToEndOfFile()
+            handle.write(newLine)
         } else {
             try newLine.write(to: target, options: .atomic)
         }

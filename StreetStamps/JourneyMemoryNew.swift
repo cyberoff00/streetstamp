@@ -134,6 +134,7 @@ struct JourneyMemoryMainView: View {
     @State private var localizedCityNameByKey: [String: String] = [:]
     @State private var cachedCityGroups: [CityGroupData] = []
     @State private var cachedLocalizationFingerprint: String = ""
+    @State private var rebuildWorkItem: DispatchWorkItem?
     
     @Binding var showSidebar: Bool
     private let usesSidebarHeader: Bool
@@ -255,22 +256,22 @@ struct JourneyMemoryMainView: View {
         }
         .onChange(of: store.journeys.count) { _, _ in
             cachedLocalizationFingerprint = rebuildLocalizationFingerprint()
-            rebuildCityGroups()
+            scheduleRebuild()
         }
-        .onChange(of: store.trackTileRevision) { _, _ in
-            rebuildCityGroups()
+        .onChange(of: store.metadataRevision) { _, _ in
+            scheduleRebuild()
         }
         .onChange(of: localizedCityNameByKey) { _, _ in
-            rebuildCityGroups()
+            scheduleRebuild()
         }
         .onChange(of: filterState.selectedStartDate) { _, _ in
-            rebuildCityGroups()
+            scheduleRebuild()
         }
         .onChange(of: filterState.selectedEndDate) { _, _ in
-            rebuildCityGroups()
+            scheduleRebuild()
         }
         .onChange(of: filterState.selectedActivityTag) { _, _ in
-            rebuildCityGroups()
+            scheduleRebuild()
         }
         // Keep city names localized to current language (do NOT rely on persisted English titles).
         .task(id: localizationFingerprint) {
@@ -400,6 +401,14 @@ struct JourneyMemoryMainView: View {
 
     private var cityGroups: [CityGroupData] {
         cachedCityGroups
+    }
+
+    /// Coalesce rapid-fire onChange triggers into a single rebuild.
+    private func scheduleRebuild() {
+        rebuildWorkItem?.cancel()
+        let item = DispatchWorkItem { [self] in rebuildCityGroups() }
+        rebuildWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: item)
     }
 
     private func rebuildCityGroups() {
@@ -1667,7 +1676,7 @@ struct JourneyMemoryDetailView: View {
             if !isEditing && (!draftOverallMemoryImagePaths.isEmpty || !journey.overallMemoryRemoteImageURLs.isEmpty) {
                 MemoryImagesView(
                     imagePaths: draftOverallMemoryImagePaths,
-                    remoteImageURLs: journey.overallMemoryRemoteImageURLs,
+                    remoteImageURLs: draftOverallMemoryImagePaths.isEmpty ? journey.overallMemoryRemoteImageURLs : [],
                     userID: sessionStore.currentUserID
                 )
             }
@@ -2308,7 +2317,7 @@ struct ReadOnlyMemoryTimelineItem: View {
             if !memory.imagePaths.isEmpty || !memory.remoteImageURLs.isEmpty {
                 MemoryImagesView(
                     imagePaths: memory.imagePaths,
-                    remoteImageURLs: memory.remoteImageURLs,
+                    remoteImageURLs: memory.imagePaths.isEmpty ? memory.remoteImageURLs : [],
                     userID: userID
                 )
             }

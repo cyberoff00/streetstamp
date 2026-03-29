@@ -297,6 +297,7 @@
 "friends_logged_out_title" = "登入后查看好友動態";
 "friends_mark_all_read" = "全部已讀";
 "friends_photos_count_format" = "%d 张照片";
+"friends_marks_count_format" = "%d 個標記";
 "friends_postcard_prompt" = "送你一张明信片";
 "friends_recent_journey_ago" = "最近旅程：%@";
 "friends_reject_failed_format" = "拒絕失敗：%@";
