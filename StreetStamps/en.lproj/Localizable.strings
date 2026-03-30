@@ -160,7 +160,7 @@
 "tracking_mode_daily" = "Daily";
 
 /* Film Camera Drop */
-"film_camera_drop_message" = "A custom film camera has been dropped for this journey";
+"film_camera_drop_message" = "You got a film camera on this journey (50% chance)";
 "film_camera_try_now" = "Try it";
 "film_camera_try_later" = "Maybe later";
 
@@ -480,10 +480,21 @@
 "settings_lifelog_bg_mode_high" = "HIGH PRECISION";
 "settings_lifelog_bg_mode_low" = "LOW PRECISION";
 "settings_lifelog_bg_mode_title" = "BACKGROUND RECORDING MODE";
-"settings_daily_precision_desc" = "Controls background GPS quality during Daily journey tracking. High precision keeps better route quality but uses more battery; low precision prioritizes battery life.";
+"settings_language_title" = "LANGUAGE";
+"settings_language_follow_system" = "Follow System";
+"settings_name_placeholder" = "Nickname (duplicates allowed)";
+"settings_scan_cancel" = "Cancel";
+"settings_scan_failed_title" = "Scan Failed";
+"settings_scan_failed_ok" = "OK";
+"settings_scan_camera_denied" = "Camera access denied. Cannot scan QR code.";
+"settings_scan_camera_disabled" = "Camera permission is off. Please enable it in system settings.";
+"settings_scan_camera_unavailable" = "Unable to access camera.";
+"settings_scan_camera_input_failed" = "Camera input initialization failed.";
+"settings_scan_output_failed" = "Scan output initialization failed.";
+"settings_daily_precision_desc" = "Controls background GPS quality during journey tracking. High precision keeps better route quality but uses more battery; low precision prioritizes battery life.";
 "settings_daily_precision_high" = "HIGH PRECISION";
 "settings_daily_precision_low" = "LOW PRECISION";
-"settings_daily_precision_title" = "DAILY JOURNEY PRECISION";
+"settings_daily_precision_title" = "TRACK PRECISION";
 "settings_map_appearance_desc" = "Apply to all maps and route rendering";
 "settings_stationary_reminder_desc" = "Alert when movement stays within 100 m for 90 minutes.";
 "settings_stationary_reminder_title" = "STILLNESS REMINDER";

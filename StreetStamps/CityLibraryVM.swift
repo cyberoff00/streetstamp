@@ -187,7 +187,7 @@ final class CityLibraryVM: ObservableObject {
         journeys: [JourneyRoute],
         cachedCities: [CachedCity]
     ) -> [City] {
-        let byId = Dictionary(uniqueKeysWithValues: journeys.map { ($0.id, $0) })
+        let byId = Dictionary(journeys.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
         let cached = cachedCities.filter { !($0.isTemporary ?? false) }
 
         struct Aggregate {

@@ -50,6 +50,7 @@ struct CityStampLibraryView: View {
     @State private var cityToDelete: City? = nil
     @State private var showDeleteCityAlert = false
     @State private var showPublicDetailUnavailableAlert = false
+    @State private var activeCityDetail: City? = nil
 
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var languagePreference = LanguagePreference.shared
@@ -179,6 +180,9 @@ struct CityStampLibraryView: View {
         } message: {
             Text(L10n.t("details_unavailable_message"))
         }
+        .fullScreenCover(item: $activeCityDetail) { city in
+            CityDeepView(city: city)
+        }
     }
 
     private func makeDigestMap(from cities: [CachedCity]) -> [String: CityDigest] {
@@ -232,7 +236,9 @@ struct CityStampLibraryView: View {
             ) {
                 ForEach(displayCities, id: \.id) { city in
                     if allowCityDetailNavigation {
-                        NavigationLink(destination: CityDeepView(city: city)) {
+                        Button {
+                            activeCityDetail = city
+                        } label: {
                             CityStampCard(city: city, cardWidth: cardW)
                         }
                         .buttonStyle(.plain)

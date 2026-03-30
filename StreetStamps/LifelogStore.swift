@@ -144,6 +144,12 @@ final class LifelogStore: ObservableObject {
     private var previewPolylineCache: [String: [CLLocationCoordinate2D]] = [:]
     private var previewCacheSourceCount: Int = -1
 
+    /// Maximum number of day entries kept in day-keyed caches.
+    /// Prevents unbounded memory growth for users with years of data.
+    /// 60 days covers typical UI lookback (recent month + scroll buffer).
+    private let maxDayCacheEntries = 60
+    private let maxPreviewCacheEntries = 30
+
     // Day-shard model (replaces monolith `points` + `coordinates` arrays)
     private var shardIndex: DayShardIndex = .empty
     private var todayShard: DayShard = .empty
@@ -255,6 +261,9 @@ final class LifelogStore: ObservableObject {
         let currentPaths = paths
         let moodURL = moodPersistURL
         let loaded = await Self.loadShardedState(paths: currentPaths, moodURL: moodURL)
+        // Guard: if task was cancelled or paths changed (profile switch in flight),
+        // discard stale data to avoid writing old profile's lifelog into current store.
+        guard !Task.isCancelled, self.paths.userID == currentPaths.userID else { return }
         applyShardedState(loaded)
         dirtyPointDayKeys = []
         dirtyMoodDayKeys = []
@@ -1125,6 +1134,7 @@ final class LifelogStore: ObservableObject {
             CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon)
         }
         previewPolylineCache[cacheKey] = result
+        trimDayCachesIfNeeded()
         return result
     }
 
@@ -1300,6 +1310,7 @@ final class LifelogStore: ObservableObject {
         var bucket = dayDownsampleCache[key] ?? [:]
         bucket[target] = sampled
         dayDownsampleCache[key] = bucket
+        trimDayCachesIfNeeded()
         return sampled
     }
 
@@ -1485,6 +1496,7 @@ final class LifelogStore: ObservableObject {
         let shard = shardForDay(key)
         let out = shard.points.map(\.coord)
         dayCoordsCache[key] = out
+        trimDayCachesIfNeeded()
         return out
     }
 
@@ -1654,13 +1666,13 @@ final class LifelogStore: ObservableObject {
 
     private func invalidatePolylineCaches() {
         downsampleCacheSourceCount = -1
-        downsampleCache.removeAll(keepingCapacity: true)
-        dayCoordsCache.removeAll(keepingCapacity: true)
-        dayDownsampleCache.removeAll(keepingCapacity: true)
+        downsampleCache.removeAll()
+        dayCoordsCache.removeAll()
+        dayDownsampleCache.removeAll()
         dayTileIndexSourceCount = -1
-        dayTileIndexCache.removeAll(keepingCapacity: true)
+        dayTileIndexCache.removeAll()
         previewCacheSourceCount = -1
-        previewPolylineCache.removeAll(keepingCapacity: true)
+        previewPolylineCache.removeAll()
     }
 
     /// Lightweight invalidation for a single day (used during ingest).
@@ -1668,9 +1680,41 @@ final class LifelogStore: ObservableObject {
         dayCoordsCache.removeValue(forKey: dayKey)
         dayDownsampleCache.removeValue(forKey: dayKey)
         dayTileIndexCache.removeValue(forKey: dayKey)
-        previewPolylineCache.removeAll(keepingCapacity: true)
+        previewPolylineCache.removeAll()
         previewCacheSourceCount = -1
         downsampleCacheSourceCount = -1
+        trimDayCachesIfNeeded()
+    }
+
+    /// Evict excess day entries to prevent unbounded memory growth.
+    /// Uses a simple count-based cap. Eviction is random (dictionary order)
+    /// which is acceptable because cache misses just trigger a cheap re-read
+    /// from the already-loaded shard.
+    private func trimDayCachesIfNeeded() {
+        if dayCoordsCache.count > maxDayCacheEntries {
+            let excess = dayCoordsCache.count - maxDayCacheEntries
+            for key in dayCoordsCache.keys.prefix(excess) {
+                dayCoordsCache.removeValue(forKey: key)
+            }
+        }
+        if dayDownsampleCache.count > maxDayCacheEntries {
+            let excess = dayDownsampleCache.count - maxDayCacheEntries
+            for key in dayDownsampleCache.keys.prefix(excess) {
+                dayDownsampleCache.removeValue(forKey: key)
+            }
+        }
+        if dayTileIndexCache.count > maxDayCacheEntries {
+            let excess = dayTileIndexCache.count - maxDayCacheEntries
+            for key in dayTileIndexCache.keys.prefix(excess) {
+                dayTileIndexCache.removeValue(forKey: key)
+            }
+        }
+        if previewPolylineCache.count > maxPreviewCacheEntries {
+            let excess = previewPolylineCache.count - maxPreviewCacheEntries
+            for key in previewPolylineCache.keys.prefix(excess) {
+                previewPolylineCache.removeValue(forKey: key)
+            }
+        }
     }
 
     private func makePreviewCacheKey(
@@ -1722,6 +1766,7 @@ final class LifelogStore: ObservableObject {
         var lodBucket = dayTileIndexCache[dayPart] ?? [:]
         lodBucket[sampleStride] = out
         dayTileIndexCache[dayPart] = lodBucket
+        trimDayCachesIfNeeded()
         return out
     }
 
@@ -1866,7 +1911,7 @@ final class LifelogStore: ObservableObject {
 
         let calendar = Calendar.current
         let targetDay = day.map { calendar.startOfDay(for: $0) }
-        let indexByPointID = Dictionary(uniqueKeysWithValues: points.enumerated().map { ($0.element.id, $0.offset) })
+        let indexByPointID = Dictionary(points.enumerated().map { ($0.element.id, $0.offset) }, uniquingKeysWith: { first, _ in first })
 
         return attribution.runs.compactMap { run in
             guard let startIndex = indexByPointID[run.startPointID],

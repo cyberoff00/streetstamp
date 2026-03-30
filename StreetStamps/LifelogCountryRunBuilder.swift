@@ -13,7 +13,7 @@ enum LifelogCountryRunBuilder {
         guard !points.isEmpty else { return [] }
 
         let clampedPointIndex = max(0, min(pointIndex, points.count - 1))
-        let pointIndexesByID = Dictionary(uniqueKeysWithValues: points.enumerated().map { ($0.element.pointID, $0.offset) })
+        let pointIndexesByID = Dictionary(points.enumerated().map { ($0.element.pointID, $0.offset) }, uniquingKeysWith: { first, _ in first })
         let expansionPointIndex = max(0, clampedPointIndex - 1)
         let rebuildStartIndex = existingRuns.first { run in
             guard let runStartIndex = pointIndexesByID[run.startPointID],

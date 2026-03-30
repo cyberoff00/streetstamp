@@ -73,29 +73,35 @@ struct SettingsRowPresentation {
     let iconColor: Color
     let textStyle: SettingsRowTextStyle
 
-    static let mapDarkMode = SettingsRowPresentation(
-        title: L10n.t("settings_map_dark_mode"),
-        subtitle: nil,
-        icon: "map",
-        iconColor: FigmaTheme.primary,
-        textStyle: .singleLine
-    )
+    static var mapDarkMode: SettingsRowPresentation {
+        SettingsRowPresentation(
+            title: L10n.t("settings_map_dark_mode"),
+            subtitle: nil,
+            icon: "map",
+            iconColor: FigmaTheme.primary,
+            textStyle: .singleLine
+        )
+    }
 
-    static let stationaryReminder = SettingsRowPresentation(
-        title: L10n.t("settings_stationary_reminder_title"),
-        subtitle: L10n.t("settings_stationary_reminder_desc"),
-        icon: "bell.badge",
-        iconColor: FigmaTheme.secondary,
-        textStyle: .supporting
-    )
+    static var stationaryReminder: SettingsRowPresentation {
+        SettingsRowPresentation(
+            title: L10n.t("settings_stationary_reminder_title"),
+            subtitle: L10n.t("settings_stationary_reminder_desc"),
+            icon: "bell.badge",
+            iconColor: FigmaTheme.secondary,
+            textStyle: .supporting
+        )
+    }
 
-    static let liveActivity = SettingsRowPresentation(
-        title: L10n.t("settings_live_activity_title"),
-        subtitle: L10n.t("settings_live_activity_desc"),
-        icon: "rectangle.badge.person.crop",
-        iconColor: FigmaTheme.primary,
-        textStyle: .supporting
-    )
+    static var liveActivity: SettingsRowPresentation {
+        SettingsRowPresentation(
+            title: L10n.t("settings_live_activity_title"),
+            subtitle: L10n.t("settings_live_activity_desc"),
+            icon: "rectangle.badge.person.crop",
+            iconColor: FigmaTheme.primary,
+            textStyle: .supporting
+        )
+    }
 }
 
 struct SettingsGeneralRowPresentation: Equatable {
@@ -144,7 +150,7 @@ enum SettingsGeneralPresentation {
                 destination: .notifications
             ),
             SettingsGeneralRowPresentation(
-                title: "语言 / Language",
+                title: L10n.t("settings_language_title"),
                 icon: "globe",
                 iconColor: FigmaTheme.primary,
                 badgeText: nil,
@@ -515,13 +521,13 @@ struct SettingsView: View {
     }
 
     private var languageSettingsView: some View {
-        SettingsDetailPage(title: "语言 / Language") {
+        SettingsDetailPage(title: L10n.t("settings_language_title")) {
             VStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 10) {
-                    sectionTitle("语言 / Language")
+                    sectionTitle(L10n.t("settings_language_title"))
 
                     VStack(spacing: 0) {
-                        languageOption(code: nil, name: "跟随系统 / Follow System")
+                        languageOption(code: nil, name: L10n.t("settings_language_follow_system"))
                         Divider().padding(.leading, 16)
                         languageOption(code: "zh-Hans", name: "简体中文")
                         Divider().padding(.leading, 16)
@@ -1017,7 +1023,7 @@ struct SettingsView: View {
                     .font(.system(size: 20, weight: .bold))
                     .foregroundColor(FigmaTheme.text)
 
-                TextField("昵称（可重复）", text: $displayNameInput)
+                TextField(L10n.t("settings_name_placeholder"), text: $displayNameInput)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 14, weight: .semibold))
 
@@ -3066,14 +3072,14 @@ private struct QRCodeScannerSheet: View {
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消", action: onCancel)
+                    Button(L10n.t("settings_scan_cancel"), action: onCancel)
                 }
             }
-            .alert("扫码失败", isPresented: Binding(
+            .alert(L10n.t("settings_scan_failed_title"), isPresented: Binding(
                 get: { scannerError != nil },
                 set: { if !$0 { scannerError = nil } }
             )) {
-                Button("好", role: .cancel) {}
+                Button(L10n.t("settings_scan_failed_ok"), role: .cancel) {}
             } message: {
                 Text(scannerError ?? "")
             }
@@ -3141,12 +3147,12 @@ private final class QRCodeScannerViewController: UIViewController, AVCaptureMeta
                     if granted {
                         self.configureSessionIfNeeded()
                     } else {
-                        self.onFailure?("未授予相机权限，无法扫码。")
+                        self.onFailure?(L10n.t("settings_scan_camera_denied"))
                     }
                 }
             }
         default:
-            onFailure?("相机权限已关闭，请在系统设置中开启。")
+            onFailure?(L10n.t("settings_scan_camera_disabled"))
         }
     }
 
@@ -3156,7 +3162,7 @@ private final class QRCodeScannerViewController: UIViewController, AVCaptureMeta
 
         guard let device = AVCaptureDevice.default(for: .video),
               let input = try? AVCaptureDeviceInput(device: device) else {
-            onFailure?("无法访问摄像头。")
+            onFailure?(L10n.t("settings_scan_camera_unavailable"))
             return
         }
 
@@ -3165,7 +3171,7 @@ private final class QRCodeScannerViewController: UIViewController, AVCaptureMeta
             session.addInput(input)
         } else {
             session.commitConfiguration()
-            onFailure?("相机输入初始化失败。")
+            onFailure?(L10n.t("settings_scan_camera_input_failed"))
             return
         }
 
@@ -3176,7 +3182,7 @@ private final class QRCodeScannerViewController: UIViewController, AVCaptureMeta
             output.metadataObjectTypes = [.qr]
         } else {
             session.commitConfiguration()
-            onFailure?("扫码输出初始化失败。")
+            onFailure?(L10n.t("settings_scan_output_failed"))
             return
         }
         session.commitConfiguration()

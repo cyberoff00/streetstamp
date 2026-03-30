@@ -17,3 +17,12 @@ struct SwipeBackEnabler: UIViewControllerRepresentable {
         }
     }
 }
+
+/// Defers creation of the wrapped view until it actually appears.
+/// Use inside NavigationLink destinations to prevent SwiftUI from
+/// eagerly evaluating heavy views and triggering re-render loops.
+struct LazyNavigationView<Content: View>: View {
+    let build: () -> Content
+    init(_ build: @autoclosure @escaping () -> Content) { self.build = build }
+    var body: some View { build() }
+}

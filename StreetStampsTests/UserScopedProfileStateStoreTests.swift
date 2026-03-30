@@ -331,6 +331,75 @@ final class UserScopedProfileStateStoreTests: XCTestCase {
         XCTAssertEqual(provider.forceRefreshCalls, [false, true])
     }
 
+    @MainActor
+    func test_filmCameraDropManager_firstSuccessfulJourneyShowsCenterAndMarksHistoricUnlock() throws {
+        let defaults = try makeDefaults()
+        defaults.set("account_camera", forKey: UserScopedProfileStateStore.activeLocalProfileIDKey)
+        let manager = FilmCameraDropManager(
+            defaults: defaults,
+            randomRoll: { true },
+            scheduleCenterDrop: { action in action() }
+        )
+
+        manager.dropForJourney(journeyID: "journey_1")
+
+        XCTAssertEqual(manager.phase, .center)
+
+        let reopened = FilmCameraDropManager(
+            defaults: defaults,
+            randomRoll: { false },
+            scheduleCenterDrop: { action in action() }
+        )
+        reopened.dropForJourney(journeyID: "journey_2")
+
+        XCTAssertEqual(reopened.phase, .none)
+    }
+
+    @MainActor
+    func test_filmCameraDropManager_historicUnlockRoutesSuccessfulFutureJourneysToSidebar() throws {
+        let defaults = try makeDefaults()
+        defaults.set("account_camera", forKey: UserScopedProfileStateStore.activeLocalProfileIDKey)
+
+        let firstManager = FilmCameraDropManager(
+            defaults: defaults,
+            randomRoll: { true },
+            scheduleCenterDrop: { action in action() }
+        )
+        firstManager.dropForJourney(journeyID: "journey_1")
+        firstManager.dismissToSidebar()
+
+        let futureManager = FilmCameraDropManager(
+            defaults: defaults,
+            randomRoll: { true },
+            scheduleCenterDrop: { action in action() }
+        )
+        futureManager.dropForJourney(journeyID: "journey_2")
+
+        XCTAssertEqual(futureManager.phase, .sidebar)
+    }
+
+    @MainActor
+    func test_filmCameraDropManager_reenteringSameJourneyKeepsSuccessfulRollWithoutRedroppingCenter() throws {
+        let defaults = try makeDefaults()
+        defaults.set("account_camera", forKey: UserScopedProfileStateStore.activeLocalProfileIDKey)
+        let firstManager = FilmCameraDropManager(
+            defaults: defaults,
+            randomRoll: { true },
+            scheduleCenterDrop: { action in action() }
+        )
+        firstManager.dropForJourney(journeyID: "journey_same")
+        firstManager.dismissToSidebar()
+
+        let reopened = FilmCameraDropManager(
+            defaults: defaults,
+            randomRoll: { false },
+            scheduleCenterDrop: { action in action() }
+        )
+        reopened.dropForJourney(journeyID: "journey_same")
+
+        XCTAssertEqual(reopened.phase, .sidebar)
+    }
+
     private func makeDefaults() throws -> UserDefaults {
         let suiteName = "UserScopedProfileStateStoreTests.\(UUID().uuidString)"
         guard let defaults = UserDefaults(suiteName: suiteName) else {

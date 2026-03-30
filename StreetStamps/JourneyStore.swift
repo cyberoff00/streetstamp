@@ -347,9 +347,15 @@ final class JourneyStore: ObservableObject {
         // data is durable before the process exits. This prevents the scenario
         // where the UI reports success but the app is killed before the async
         // write reaches disk, causing the journey to revert to "ongoing" on
-        // next cold start.
+        // next cold start. Delta files only contain coordinates, not endTime or
+        // metadata — so delta replay alone cannot recover the completed state.
         // ioQueue is a serial utility queue; the caller is on @MainActor, so
-        // ioQueue.sync will not deadlock.
+        // ioQueue.sync will not deadlock (but will block UI for the duration
+        // of JSON encode + write).
+        // TODO: To reduce the main-thread stall, consider writing a lightweight
+        // "completed marker" file synchronously (just endTime + id), then doing
+        // the full finalize asynchronously. loadJourney would check the marker
+        // to restore completed state even if the full file wasn't written yet.
         if snapshot.endTime != nil {
             ioQueue.sync { [self] in
                 do {
@@ -471,7 +477,7 @@ final class JourneyStore: ObservableObject {
     func applyBulkCompletedUpdates(_ updates: [JourneyRoute]) {
         guard !updates.isEmpty else { return }
 
-        let updateByID = Dictionary(uniqueKeysWithValues: updates.map { ($0.id, $0) })
+        let updateByID = Dictionary(updates.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
         for idx in journeys.indices {
             let id = journeys[idx].id
             if let updated = updateByID[id] {

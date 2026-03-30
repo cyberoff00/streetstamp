@@ -372,10 +372,7 @@ struct StreetStampsApp: App {
                     )
                     await lifelogStore.loadAsync()
                 }()
-                // CityCache load runs on main thread but executes during
-                // await suspension gaps of the parallel loads above, so it
-                // does not add serial time.
-                cityCache.loadInitialData()
+                async let cityCacheLoad: () = cityCache.loadInitialDataAsync()
 
                 await journeyLoad
                 if !journeyStore.journeys.contains(where: { $0.endTime == nil }) {
@@ -383,6 +380,9 @@ struct StreetStampsApp: App {
                 }
                 setupAutoEndHandler()
                 await lifelogMigrationThenLoad
+
+                // Ensure city cache decode finished before reading cachedCities
+                await cityCacheLoad
 
                 // Phase 2: Bind and reduced warmup (4 cities now, rest deferred)
                 lifelogStore.bind(to: locationHub)
@@ -469,7 +469,6 @@ struct StreetStampsApp: App {
                     guard !Task.isCancelled, sessionStore.activeLocalProfileID == uid else { return }
 
                     journeyStore.rebind(paths: paths)
-                    cityCache.rebind(paths: paths)
                     journeyStore.syncHooks = Self.makeJourneySyncHooks(
                         sessionStore: sessionStore,
                         cityCache: cityCache,
@@ -477,12 +476,15 @@ struct StreetStampsApp: App {
                     )
                     lifelogStore.rebind(paths: paths)
                     cityRenderCache.rebind(rootDir: paths.thumbnailsDir)
-                    trackTileStore.rebind(paths: paths)
 
-                    // Load journey and lifelog in parallel
+                    // Load journey, lifelog, city cache, and track tiles in parallel.
+                    // All four do heavy disk I/O — running them concurrently avoids
+                    // serializing the stall on the main thread during profile switch.
                     async let journeyLoad: () = journeyStore.loadAsync()
                     async let lifelogLoad: () = lifelogStore.loadAsync()
-                    _ = await (journeyLoad, lifelogLoad)
+                    async let cityCacheLoad: () = cityCache.rebindAsync(paths: paths)
+                    async let trackTileLoad: () = trackTileStore.rebindAsync(paths: paths)
+                    _ = await (journeyLoad, lifelogLoad, cityCacheLoad, trackTileLoad)
                     guard !Task.isCancelled else { return }
 
                     onboardingGuide.markExistingUserIfNeeded(hasJourneys: !journeyStore.journeys.isEmpty)

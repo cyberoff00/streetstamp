@@ -99,12 +99,12 @@ final class AppFlowCoordinator: ObservableObject {
     }
 
     func pushSidebarButtonHidden(token: String) {
-        guard !token.isEmpty else { return }
+        guard !token.isEmpty, !sidebarHiddenTokens.contains(token) else { return }
         sidebarHiddenTokens.insert(token)
     }
 
     func popSidebarButtonHidden(token: String) {
-        guard !token.isEmpty else { return }
+        guard !token.isEmpty, sidebarHiddenTokens.contains(token) else { return }
         sidebarHiddenTokens.remove(token)
     }
 }

@@ -34,7 +34,7 @@ actor LifelogCountryAttributionCoordinator {
     func enqueue(points: [LifelogCountryAttributionPointInput]) async {
         guard !points.isEmpty else { return }
 
-        let cellsByID = Dictionary(uniqueKeysWithValues: snapshot.cells.map { ($0.cellID, $0) })
+        let cellsByID = Dictionary(snapshot.cells.map { ($0.cellID, $0) }, uniquingKeysWith: { _, latest in latest })
         var didChange = false
         var earliestChangedPointIndex: Int?
 
@@ -114,7 +114,7 @@ actor LifelogCountryAttributionCoordinator {
 
         unresolvedCellIDs.remove(cellID)
 
-        var cellsByID = Dictionary(uniqueKeysWithValues: snapshot.cells.map { ($0.cellID, $0) })
+        var cellsByID = Dictionary(snapshot.cells.map { ($0.cellID, $0) }, uniquingKeysWith: { _, latest in latest })
         cellsByID[cellID] = LifelogCellCountryRecord(
             cellID: cellID,
             iso2: iso2,

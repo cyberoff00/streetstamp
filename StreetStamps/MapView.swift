@@ -1372,7 +1372,7 @@ struct MapView: View {
         }
         .onAppear {
             onAppearSetup()
-            filmCameraDrop.dropForJourney()
+            filmCameraDrop.dropForJourney(journeyID: journeyRoute.id)
             groupedMemoriesCache = computeGroupedMemories()
             if flow.pendingWidgetCaptureSignal > 0 {
                 if WidgetCaptureLaunchPolicy.shouldOpenEditorOnMapAppear(
@@ -1417,6 +1417,7 @@ struct MapView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openAddMemoryFromWidget)) { _ in
             guard tracking.isTracking && !tracking.isPaused else { return }
             editingMemory = nil
+            MemoryDraftStore.clear(userID: sessionStore.currentUserID, memoryID: "new")
             showMemoryEditor = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .openCaptureFromWidget)) { _ in
@@ -1458,6 +1459,8 @@ struct MapView: View {
 
             floatingActionButton(icon: "note.text", label: "MEMORY", dark: false) {
                 editingMemory = nil
+                // Clear any stale "new" draft left by a previous debounce race
+                MemoryDraftStore.clear(userID: sessionStore.currentUserID, memoryID: "new")
                 showMemoryEditor = true
             }
 
@@ -1816,6 +1819,7 @@ struct MapView: View {
             return
         }
         editingMemory = nil
+        MemoryDraftStore.clear(userID: sessionStore.currentUserID, memoryID: "new")
         DispatchQueue.main.async {
             self.showMemoryEditor = true
         }
@@ -1827,6 +1831,7 @@ struct MapView: View {
         guard let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) else { return }
         cameraPreloadedPaths = [filename]
         editingMemory = nil
+        MemoryDraftStore.clear(userID: sessionStore.currentUserID, memoryID: "new")
 
         // Also save to photo library
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
@@ -1847,6 +1852,7 @@ struct MapView: View {
         guard let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) else { return }
         cameraPreloadedPaths = [filename]
         editingMemory = nil
+        MemoryDraftStore.clear(userID: sessionStore.currentUserID, memoryID: "new")
 
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
             guard status == .authorized || status == .limited else { return }
@@ -3428,6 +3434,8 @@ private var hasUnsavedChanges: Bool {
 
     private func saveAndDismiss() {
         didExitExplicitly = true
+        draftDebounceTask?.cancel()
+        draftDebounceTask = nil
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -3453,6 +3461,8 @@ private var hasUnsavedChanges: Bool {
 
     private func closeWithoutSaving() {
         didExitExplicitly = true
+        draftDebounceTask?.cancel()
+        draftDebounceTask = nil
         clearDraft()
         MemoryDraftResumeStore.set(false, userID: userID, memoryID: draftMemoryID)
         isPresented = false
@@ -3461,6 +3471,8 @@ private var hasUnsavedChanges: Bool {
     private func deleteExistingMemory() {
         guard existing != nil else { return }
         didExitExplicitly = true
+        draftDebounceTask?.cancel()
+        draftDebounceTask = nil
         clearDraft()
         MemoryDraftResumeStore.set(false, userID: userID, memoryID: draftMemoryID)
         onSave(nil)

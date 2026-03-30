@@ -157,7 +157,7 @@
 "tracking_mode_daily" = "日常";
 
 /* Film Camera Drop - 胶片相机掉落 */
-"film_camera_drop_message" = "本次旅程为您掉落一款定制胶片相机";
+"film_camera_drop_message" = "本趟旅程你获得了一台胶片相机（50%几率）";
 "film_camera_try_now" = "试试";
 "film_camera_try_later" = "一会儿再试";
 
@@ -470,10 +470,21 @@
 "settings_lifelog_bg_mode_high" = "高精度";
 "settings_lifelog_bg_mode_low" = "低精度";
 "settings_lifelog_bg_mode_title" = "后台记录模式";
-"settings_daily_precision_desc" = "控制日常模式 Journey 的后台 GPS 质量。高精度路线更准确但更耗电，低精度优先节省电量。";
+"settings_language_title" = "语言";
+"settings_language_follow_system" = "跟随系统";
+"settings_name_placeholder" = "昵称（可重复）";
+"settings_scan_cancel" = "取消";
+"settings_scan_failed_title" = "扫码失败";
+"settings_scan_failed_ok" = "好";
+"settings_scan_camera_denied" = "未授予相机权限，无法扫码。";
+"settings_scan_camera_disabled" = "相机权限已关闭，请在系统设置中开启。";
+"settings_scan_camera_unavailable" = "无法访问摄像头。";
+"settings_scan_camera_input_failed" = "相机输入初始化失败。";
+"settings_scan_output_failed" = "扫码输出初始化失败。";
+"settings_daily_precision_desc" = "控制轨迹记录的后台 GPS 质量。高精度路线更准确但更耗电，低精度优先节省电量。";
 "settings_daily_precision_high" = "高精度";
 "settings_daily_precision_low" = "低精度";
-"settings_daily_precision_title" = "日常模式精度";
+"settings_daily_precision_title" = "轨迹精度";
 "settings_stationary_reminder_desc" = "当 90 分钟内移动范围小于 100 米时提醒。";
 "settings_stationary_reminder_title" = "静止提醒";
 "settings_title" = "设置";

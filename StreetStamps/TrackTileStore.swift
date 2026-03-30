@@ -59,6 +59,68 @@ final class TrackTileStore: ObservableObject {
         }
     }
 
+    /// Async rebind that moves disk I/O off the calling thread.
+    /// Follows the same pattern as ensureTilesLoaded: heavy I/O outside
+    /// the barrier, brief barrier for in-memory swap only.
+    func rebindAsync(paths newPaths: StoragePath) async {
+        // 1) Clear in-memory state immediately (brief barrier)
+        storageQueue.sync(flags: .barrier) {
+            self.paths = newPaths
+            self.bucketsByZoom.removeAll(keepingCapacity: true)
+            self.dayIndexByZoom.removeAll(keepingCapacity: true)
+            self._currentManifest = nil
+            self._syncManifestSnapshot()
+        }
+
+        // 2) Heavy disk I/O on background queue
+        let manifestURL = newPaths.trackTileManifestURL
+        let tilesDir = newPaths.trackTilesDir
+        let dec = decoder
+
+        let result: (TrackTileManifest, [TrackTileKey: TrackTileBucket], [String: [IndexedSegment]])? = await withCheckedContinuation { cont in
+            DispatchQueue.global(qos: .utility).async {
+                guard FileManager.default.fileExists(atPath: manifestURL.path),
+                      let manifestData = try? Data(contentsOf: manifestURL),
+                      let manifest = try? dec.decode(TrackTileManifest.self, from: manifestData) else {
+                    cont.resume(returning: nil)
+                    return
+                }
+
+                var loaded: [TrackTileKey: TrackTileBucket] = [:]
+                if FileManager.default.fileExists(atPath: tilesDir.path),
+                   let files = try? FileManager.default.contentsOfDirectory(at: tilesDir, includingPropertiesForKeys: nil) {
+                    for fileURL in files where fileURL.pathExtension == "json" && fileURL.lastPathComponent != "manifest.json" {
+                        let name = fileURL.deletingPathExtension().lastPathComponent
+                        let parts = name.split(separator: "_")
+                        guard parts.count == 3,
+                              let z = Int(parts[0]), let x = Int(parts[1]), let y = Int(parts[2]) else { continue }
+                        let key = TrackTileKey(z: z, x: x, y: y)
+                        if let data = try? Data(contentsOf: fileURL),
+                           let bucket = try? dec.decode(TrackTileBucket.self, from: data) {
+                            loaded[key] = bucket
+                        }
+                    }
+                }
+                cont.resume(returning: (manifest, loaded, [:]))
+            }
+        }
+
+        // 3) Guard: if task was cancelled or paths changed (another rebind in flight),
+        // discard this result to avoid writing stale data from a previous profile.
+        guard !Task.isCancelled else { return }
+
+        if let (manifest, loaded, _) = result {
+            storageQueue.sync(flags: .barrier) {
+                // Double-check paths still match (another rebind may have run)
+                guard self.paths.trackTileManifestURL == manifestURL else { return }
+                self._currentManifest = manifest
+                self._syncManifestSnapshot()
+                self.bucketsByZoom[manifest.zoom] = loaded
+                self.dayIndexByZoom[manifest.zoom] = self.buildDayIndex(for: loaded)
+            }
+        }
+    }
+
     func refresh(
         journeyEvents: [TrackRenderEvent],
         passiveEvents: [TrackRenderEvent],
@@ -547,12 +609,17 @@ final class TrackTileStore: ObservableObject {
         return out
     }
 
+    // Thread-safe day key using Calendar + String(format:) instead of
+    // DateFormatter. Avoids both the per-call allocation cost of creating
+    // a new DateFormatter AND the thread-safety issue of sharing one.
+    // Matches LifelogStore.dayKeyString(for:).
     private func dayKey(for day: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = .current
-        f.dateFormat = "yyyy-MM-dd"
-        return f.string(from: Calendar.current.startOfDay(for: day))
+        let cal = Calendar.current
+        let parts = cal.dateComponents([.year, .month, .day], from: cal.startOfDay(for: day))
+        let y = parts.year ?? 1970
+        let m = parts.month ?? 1
+        let d = parts.day ?? 1
+        return String(format: "%04d-%02d-%02d", y, m, d)
     }
 
     private func sortKeys(_ lhs: TrackTileKey, _ rhs: TrackTileKey) -> Bool {

@@ -21,6 +21,8 @@ struct CollectionTabView: View {
     @EnvironmentObject private var flow: AppFlowCoordinator
     @State private var page: WorldoPage = .cities
     @StateObject private var memoryFilterState = MemoryFilterState()
+    @State private var cachedSortedJourneys: [JourneyRoute] = []
+    @State private var cachedActivityTags: [String] = []
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -58,19 +60,22 @@ struct CollectionTabView: View {
         }
         .background(SwipeBackEnabler())
         .navigationBarBackButtonHidden(true)
+        .onAppear { refreshDerivedJourneyData() }
+        .onChange(of: store.journeys.count) { _, _ in refreshDerivedJourneyData() }
+        .onChange(of: store.metadataRevision) { _, _ in refreshDerivedJourneyData() }
     }
 
-    private var availableActivityTags: [String] {
-        let tags = store.journeys.compactMap { j -> String? in
+    private var availableActivityTags: [String] { cachedActivityTags }
+    private var allMemoryJourneys: [JourneyRoute] { cachedSortedJourneys }
+
+    private func refreshDerivedJourneyData() {
+        cachedSortedJourneys = store.journeys
+            .sorted { ($0.endTime ?? $0.startTime ?? .distantPast) > ($1.endTime ?? $1.startTime ?? .distantPast) }
+        let tags = cachedSortedJourneys.compactMap { j -> String? in
             let tag = (j.activityTag ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             return tag.isEmpty ? nil : tag
         }
-        return Array(Set(tags)).sorted()
-    }
-
-    private var allMemoryJourneys: [JourneyRoute] {
-        store.journeys
-            .sorted { ($0.endTime ?? $0.startTime ?? .distantPast) > ($1.endTime ?? $1.startTime ?? .distantPast) }
+        cachedActivityTags = Array(Set(tags)).sorted()
     }
 
     private var header: some View {
@@ -125,23 +130,39 @@ struct CollectionTabView: View {
     }
 
     private var pager: some View {
-        TabView(selection: $page) {
-            CityStampLibraryView(
-                showSidebar: .constant(false),
-                usesSidebarHeader: false,
-                showHeader: false
-            )
-            .tag(WorldoPage.cities)
-
-            JourneyMemoryMainView(
-                showSidebar: .constant(false),
-                usesSidebarHeader: false,
-                hideLeadingControl: true,
-                showHeader: false,
-                filterState: memoryFilterState
-            )
-            .tag(WorldoPage.memories)
+        ZStack {
+            if page == .cities {
+                CityStampLibraryView(
+                    showSidebar: .constant(false),
+                    usesSidebarHeader: false,
+                    showHeader: false
+                )
+                .transition(.move(edge: .leading))
+            } else {
+                JourneyMemoryMainView(
+                    showSidebar: .constant(false),
+                    usesSidebarHeader: false,
+                    hideLeadingControl: true,
+                    showHeader: false,
+                    filterState: memoryFilterState
+                )
+                .transition(.move(edge: .trailing))
+            }
         }
-        .tabViewStyle(.page(indexDisplayMode: .never))
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 30, coordinateSpace: .local)
+                .onEnded { value in
+                    guard abs(value.translation.width) > abs(value.translation.height) * 1.5 else { return }
+                    if value.translation.width < -30, page == .cities {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                            page = .memories
+                        }
+                    } else if value.translation.width > 30, page == .memories {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                            page = .cities
+                        }
+                    }
+                }
+        )
     }
 }

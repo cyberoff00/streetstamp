@@ -95,6 +95,8 @@ struct PostcardFrontFaceView: View {
     let avatarLoadout: RobotLoadout
     let cornerRadius: CGFloat
     var showOverlays: Bool = true
+    @State private var localImage: UIImage?
+    @State private var localImagePath: String?
 
     var body: some View {
         ZStack {
@@ -190,7 +192,7 @@ struct PostcardFrontFaceView: View {
                     .frame(width: geo.size.width, height: geo.size.height)
                     .clipped()
             case .localPath(let path):
-                if let image = UIImage(contentsOfFile: path) {
+                if let image = self.localImage, self.localImagePath == path {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFill()
@@ -198,6 +200,12 @@ struct PostcardFrontFaceView: View {
                         .clipped()
                 } else {
                     placeholder
+                        .task(id: path) {
+                            let targetSize = geo.size
+                            let loaded = await Self.loadAndDownsample(path: path, targetSize: targetSize)
+                            self.localImage = loaded
+                            self.localImagePath = path
+                        }
                 }
             case .remoteURL(let raw):
                 if let url = URL(string: raw) {
@@ -234,6 +242,39 @@ struct PostcardFrontFaceView: View {
             Image(systemName: "photo.on.rectangle")
                 .font(.system(size: 28, weight: .light))
                 .foregroundColor(Color.black.opacity(0.2))
+        }
+    }
+}
+
+extension PostcardFrontFaceView {
+    /// Load and downsample an image to the target display size on a background thread.
+    /// Uses ImageIO for memory-efficient decoding — avoids loading the full bitmap.
+    private static func loadAndDownsample(path: String, targetSize: CGSize) async -> UIImage? {
+        await withCheckedContinuation { cont in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let scale = UIScreen.main.scale
+                let maxPixel = max(targetSize.width, targetSize.height) * scale
+                guard maxPixel > 0 else {
+                    cont.resume(returning: UIImage(contentsOfFile: path))
+                    return
+                }
+                let url = URL(fileURLWithPath: path)
+                guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+                    cont.resume(returning: nil)
+                    return
+                }
+                let options: [CFString: Any] = [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceShouldCacheImmediately: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize: maxPixel
+                ]
+                guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+                    cont.resume(returning: UIImage(contentsOfFile: path))
+                    return
+                }
+                cont.resume(returning: UIImage(cgImage: cgImage))
+            }
         }
     }
 }

@@ -346,7 +346,7 @@ struct EquipmentView: View {
     }
 
     private var orderedCategories: [GearCategory] {
-        let map = Dictionary(uniqueKeysWithValues: store.catalog.categories.map { ($0.id, $0) })
+        let map = Dictionary(store.catalog.categories.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
         let preferred = ["expression", "hair", "suit", "upper", "under", "hat", "glass", "accessory", "pat", "shoes"]
         let preferredItems = preferred.compactMap { map[$0] }
         let rest = store.catalog.categories.filter { !preferred.contains($0.id) }

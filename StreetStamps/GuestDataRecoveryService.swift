@@ -129,7 +129,7 @@ enum GuestDataRecoveryService {
         let importedJourneyIDs = Array(Set(targetAfterIDs).subtracting(targetBeforeIDs))
         let sourceTag = repairSource(for: sourceUserID)
         if sourceTag != .unknown {
-            let entries = Dictionary(uniqueKeysWithValues: importedJourneyIDs.map { ($0, sourceTag) })
+            let entries = Dictionary(importedJourneyIDs.map { ($0, sourceTag) }, uniquingKeysWith: { _, latest in latest })
             JourneyRepairSourceStore.merge(entries, userID: targetUserID)
         }
 

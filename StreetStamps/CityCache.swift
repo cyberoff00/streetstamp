@@ -701,6 +701,49 @@ final class CityCache: ObservableObject {
         handleJourneyStoreLoadedState(journeyStore.hasLoaded)
     }
 
+    /// Async variant that moves JSON decode off the main thread.
+    /// Safe to use in startup .task because cachedCities is first consumed
+    /// after `await journeyLoad` completes (StreetStampsApp Phase 2).
+    func loadInitialDataAsync() async {
+        let cityURL = fileURL
+        let membershipURL = membershipIndexURL
+
+        // Heavy JSON decode on background queue
+        let (cities, membership) = await withCheckedContinuation { (cont: CheckedContinuation<([CachedCity], CityMembershipIndex), Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var decodedCities: [CachedCity] = []
+                if let data = try? Data(contentsOf: cityURL) {
+                    decodedCities = (try? JSONDecoder().decode([CachedCity].self, from: data)) ?? []
+                }
+                // Deduplicate by city ID
+                var seen = Set<String>()
+                decodedCities = decodedCities.filter { seen.insert($0.id).inserted }
+
+                var decodedIndex = CityMembershipIndex()
+                if let data = try? Data(contentsOf: membershipURL) {
+                    decodedIndex = (try? JSONDecoder().decode(CityMembershipIndex.self, from: data)) ?? CityMembershipIndex()
+                }
+
+                cont.resume(returning: (decodedCities, decodedIndex))
+            }
+        }
+
+        // Guard: if the task was cancelled (profile switched again), don't overwrite
+        // current store with data from the old profile's files.
+        guard !Task.isCancelled, self.fileURL == cityURL else { return }
+
+        // Apply on main thread (lightweight: property assignment + string iteration)
+        self.cachedCities = cities
+        self.membershipIndex = membership
+        backfillLocalizedNamesFromGeocodeDefaults()
+        refreshAllResolvedDisplayNames()
+        invalidateThumbnailsIfStyleChanged()
+        migrateThumbnailPathsIfNeeded()
+        migrateInterCityRoutesToStartingCitiesIfNeeded()
+        removeLegacyDiskThumbnailsIfNeeded()
+        handleJourneyStoreLoadedState(journeyStore.hasLoaded)
+    }
+
     func rebind(paths: StoragePath) {
         self.paths = paths
         self.fileURL = paths.cityCacheURL
@@ -713,6 +756,51 @@ final class CityCache: ObservableObject {
 
         loadFromDisk()
         loadMembershipIndexFromDisk()
+        migrateThumbnailPathsIfNeeded()
+        migrateInterCityRoutesToStartingCitiesIfNeeded()
+        removeLegacyDiskThumbnailsIfNeeded()
+        handleJourneyStoreLoadedState(journeyStore.hasLoaded)
+    }
+
+    /// Async rebind that moves JSON decode off the main thread.
+    func rebindAsync(paths: StoragePath) async {
+        self.paths = paths
+        self.fileURL = paths.cityCacheURL
+        self.membershipIndexURL = paths.cityMembershipIndexURL
+        self.thumbnails = CityThumbnailCache(dir: paths.thumbnailsDir)
+        self.migrationMarkerV2URL = paths.migrationMarkerV2_thumbnailPaths
+        self.migrationMarkerV3URL = paths.migrationMarkerV3_intercityToStartingCity
+        self.migrationMarkerV4URL = paths.migrationMarkerV4_removeLegacyThumbnails
+        self.migrationMarkerV6URL = paths.migrationMarkerV6_autoLevelRekey
+
+        let cityURL = fileURL
+        let membershipURL = membershipIndexURL
+        let (cities, membership) = await withCheckedContinuation { (cont: CheckedContinuation<([CachedCity], CityMembershipIndex), Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var decodedCities: [CachedCity] = []
+                if let data = try? Data(contentsOf: cityURL) {
+                    decodedCities = (try? JSONDecoder().decode([CachedCity].self, from: data)) ?? []
+                }
+                var seen = Set<String>()
+                decodedCities = decodedCities.filter { seen.insert($0.id).inserted }
+
+                var decodedIndex = CityMembershipIndex()
+                if let data = try? Data(contentsOf: membershipURL) {
+                    decodedIndex = (try? JSONDecoder().decode(CityMembershipIndex.self, from: data)) ?? CityMembershipIndex()
+                }
+                cont.resume(returning: (decodedCities, decodedIndex))
+            }
+        }
+
+        // Guard: if the task was cancelled or another rebind changed the paths,
+        // discard stale data to avoid overwriting the current profile.
+        guard !Task.isCancelled, self.fileURL == cityURL else { return }
+
+        self.cachedCities = cities
+        self.membershipIndex = membership
+        backfillLocalizedNamesFromGeocodeDefaults()
+        refreshAllResolvedDisplayNames()
+        invalidateThumbnailsIfStyleChanged()
         migrateThumbnailPathsIfNeeded()
         migrateInterCityRoutesToStartingCitiesIfNeeded()
         removeLegacyDiskThumbnailsIfNeeded()
@@ -1032,7 +1120,7 @@ final class CityCache: ObservableObject {
 
         let movedIDs = movedJourneys.map(\.id)
         let movedIDSet = Set(movedIDs)
-        let movedMemoriesByID = Dictionary(uniqueKeysWithValues: movedJourneys.map { ($0.id, $0.memories.count) })
+        let movedMemoriesByID = Dictionary(movedJourneys.map { ($0.id, $0.memories.count) }, uniquingKeysWith: { _, latest in latest })
 
         let normalizedISO: String? = {
             let trimmed = (targetISO2 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
@@ -1136,7 +1224,7 @@ final class CityCache: ObservableObject {
             cachedCities[idx].parentScopeKey = parentRegionKey
         }
         if let availableLevels {
-            let mapped = Dictionary(uniqueKeysWithValues: availableLevels.map { ($0.key.rawValue, $0.value) })
+            let mapped = Dictionary(availableLevels.map { ($0.key.rawValue, $0.value) }, uniquingKeysWith: { _, latest in latest })
             cachedCities[idx].availableLevelNames = mapped
             let fallbackLocaleID = LanguagePreference.shared.effectiveLocaleIdentifier
             let localeID = (availableLevelsLocaleIdentifier ?? fallbackLocaleID)
@@ -1230,9 +1318,29 @@ final class CityCache: ObservableObject {
 
     func rebuildFromJourneyStore() {
         guard journeyStore.hasLoaded else { return }
-        membershipIndex = CityCache.buildMembershipIndex(from: journeyStore.journeys)
-        saveMembershipIndexToDisk()
-        replaceCachedCitiesFromMembershipIndex()
+        let journeysSnapshot = journeyStore.journeys
+        let membershipURL = membershipIndexURL
+        // Capture revision before background work. If it changes while we're
+        // computing, a newer mutation has occurred and our result is stale.
+        let revisionAtStart = journeyStore.trackTileRevision
+
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let index = CityCache.buildMembershipIndex(from: journeysSnapshot)
+            let indexData = try? JSONEncoder().encode(index)
+
+            await MainActor.run {
+                guard let self else { return }
+                // Guard: if journeyStore changed since we started, discard stale result.
+                // The newer mutation will have already triggered its own rebuild or
+                // applyJourneyMutation path.
+                guard self.journeyStore.trackTileRevision == revisionAtStart else { return }
+                self.membershipIndex = index
+                if let indexData {
+                    try? indexData.write(to: membershipURL, options: [.atomic])
+                }
+                self.replaceCachedCitiesFromMembershipIndex()
+            }
+        }
     }
 
     func applyJourneyMutation(oldJourney: JourneyRoute?, newJourney: JourneyRoute?) {
@@ -1250,7 +1358,7 @@ final class CityCache: ObservableObject {
         refreshCachedCities(for: affectedCityKeys, preferredAnchorJourney: newJourney)
     }
 
-    private static func buildMembershipIndex(from journeys: [JourneyRoute]) -> CityMembershipIndex {
+    private nonisolated static func buildMembershipIndex(from journeys: [JourneyRoute]) -> CityMembershipIndex {
         var index = CityMembershipIndex()
         for journey in journeys where journey.isCompleted {
             index.applyJourneyMutation(oldJourney: nil, newJourney: journey)
@@ -1280,7 +1388,7 @@ final class CityCache: ObservableObject {
         guard !cityKeys.isEmpty else { return }
 
         var stableCities = cachedCities.filter { !($0.isTemporary ?? false) }
-        let existingByKey = Dictionary(uniqueKeysWithValues: stableCities.map { ($0.id, $0) })
+        let existingByKey = Dictionary(stableCities.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
 
         stableCities.removeAll { cityKeys.contains($0.id) }
 

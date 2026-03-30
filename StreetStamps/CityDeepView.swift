@@ -83,7 +83,7 @@ struct CityDeepView: View {
     }
 
     private var currentJourneys: [JourneyRoute] {
-        let byId = Dictionary(uniqueKeysWithValues: store.journeys.map { ($0.id, $0) })
+        let byId = Dictionary(store.journeys.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
         let cachedIDs = Array(cityJourneyIDs)
         if !cachedIDs.isEmpty {
             return cachedIDs.compactMap { byId[$0] }
@@ -532,6 +532,7 @@ private struct CityDeepMKMap: UIViewRepresentable {
     }
 
     func updateUIView(_ map: MKMapView, context: Context) {
+        context.coordinator.parent = self
         map.overrideUserInterfaceStyle = MapAppearanceSettings.interfaceStyle
         map.mapType = MapAppearanceSettings.mapType
 
@@ -540,25 +541,37 @@ private struct CityDeepMKMap: UIViewRepresentable {
             map.setRegion(r, animated: false)
         }
 
-        map.removeOverlays(map.overlays)
-        for seg in segments {
-            guard seg.coords.count >= 2 else { continue }
-            let poly = StyledPolyline(coordinates: seg.coords, count: seg.coords.count)
-            poly.isGap = seg.isGap
-            poly.repeatWeight = max(0, min(1, seg.repeatWeight))
-            map.addOverlay(poly)
+        // Only rebuild overlays when segment data actually changes
+        let segFP = segments.map { "\($0.coords.count)_\($0.isGap)_\($0.repeatWeight)" }.joined(separator: "|")
+        if segFP != context.coordinator.lastSegmentFingerprint {
+            context.coordinator.lastSegmentFingerprint = segFP
+            map.removeOverlays(map.overlays)
+            for seg in segments {
+                guard seg.coords.count >= 2 else { continue }
+                let poly = StyledPolyline(coordinates: seg.coords, count: seg.coords.count)
+                poly.isGap = seg.isGap
+                poly.repeatWeight = max(0, min(1, seg.repeatWeight))
+                map.addOverlay(poly)
+            }
         }
 
-        map.removeAnnotations(map.annotations)
-        for g in memoryGroups {
-            let ann = MemoryGroupAnnotation(group: g)
-            map.addAnnotation(ann)
+        // Only rebuild annotations when memory data actually changes
+        let memFP = memoryGroups.map { $0.id }.joined(separator: "|")
+        if memFP != context.coordinator.lastMemoryFingerprint {
+            context.coordinator.lastMemoryFingerprint = memFP
+            map.removeAnnotations(map.annotations)
+            for g in memoryGroups {
+                let ann = MemoryGroupAnnotation(group: g)
+                map.addAnnotation(ann)
+            }
         }
     }
 
     final class Coordinator: NSObject, MKMapViewDelegate {
-        let parent: CityDeepMKMap
+        var parent: CityDeepMKMap
         var didSetInitialRegion = false
+        var lastSegmentFingerprint: String = ""
+        var lastMemoryFingerprint: String = ""
 
         init(_ parent: CityDeepMKMap) {
             self.parent = parent

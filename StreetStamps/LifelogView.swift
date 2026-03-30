@@ -571,7 +571,17 @@ struct LifelogView: View {
     @State private var isSheetExpanded = true
     @State private var bottomDockHeight: CGFloat = 0
     @State private var visibleRegion: MKCoordinateRegion? = nil
-    @State private var cameraRegion: MKCoordinateRegion? = nil
+    /// Non-reactive storage for camera region — updated every frame during drag
+    /// but does NOT trigger SwiftUI body re-evaluation. This prevents per-frame
+    /// re-evaluation of the Map content closure (which was causing unnecessary
+    /// work including AvatarLoadoutStore.load() on every frame).
+    private final class _CameraBox { var region: MKCoordinateRegion? }
+    @State private var _cameraBox = _CameraBox()
+    /// Stable near-mode flag with hysteresis to prevent toggling at the 0.08
+    /// threshold boundary. Without this, brief MapKit span fluctuations during
+    /// drag cause farRouteSegments polylines to flash for a single frame
+    /// (the "start-end connecting line" artifact).
+    @State private var stableNearFootprintMode = false
     @State private var renderSnapshot: LifelogRenderSnapshot = .empty
     @State private var renderTask: Task<Void, Never>? = nil
     @State private var mapContentReady = false
@@ -606,9 +616,7 @@ struct LifelogView: View {
     private var isDarkAppearance: Bool { mapAppearance == .dark }
     private var panelBackground: Color { isDarkAppearance ? Color.black.opacity(0.80) : FigmaTheme.card.opacity(0.96) }
     private var panelText: Color { isDarkAppearance ? .white : .black }
-    private var isNearFootprintMode: Bool {
-        LifelogRenderModeSelector.isNearMode(cameraRegion ?? visibleRegion)
-    }
+    private var isNearFootprintMode: Bool { stableNearFootprintMode }
 
     private var locationCenterKey: Int {
         guard let loc = locationHub.currentLocation else { return 0 }
@@ -703,7 +711,7 @@ struct LifelogView: View {
         guard mapDiagnosticsEnabled else { return }
         guard diagnosticsLastNearModeValue != newValue else { return }
         diagnosticsLastNearModeValue = newValue
-        let region = cameraRegion ?? visibleRegion
+        let region = _cameraBox.region ?? visibleRegion
         let spanLat = region?.span.latitudeDelta ?? -1
         let spanLon = region?.span.longitudeDelta ?? -1
         diagnosticsLog(
@@ -715,7 +723,7 @@ struct LifelogView: View {
         LifelogMapDiagnosticsSnapshot(
             mapContentReady: mapContentReady,
             hasVisibleRegion: visibleRegion != nil,
-            hasCameraRegion: cameraRegion != nil,
+            hasCameraRegion: _cameraBox.region != nil,
             hasLocationHubLocation: locationHub.currentLocation != nil,
             hasLastKnownLocation: locationHub.lastKnownLocation != nil,
             hasLifelogLocation: lifelogStore.currentLocation != nil,
@@ -743,7 +751,7 @@ struct LifelogView: View {
             "\(reason) t=\(elapsedMs)ms " +
             "mapContentReady=\(snapshot.mapContentReady) " +
             "visibleRegion=\(snapshot.hasVisibleRegion) " +
-            "cameraRegion=\(snapshot.hasCameraRegion) " +
+            "_cameraBox.region=\(snapshot.hasCameraRegion) " +
             "locationHub=\(snapshot.hasLocationHubLocation) " +
             "lastKnown=\(snapshot.hasLastKnownLocation) " +
             "lifelogLocation=\(snapshot.hasLifelogLocation) " +
@@ -764,7 +772,7 @@ struct LifelogView: View {
             }
             return
         }
-        guard let region = cameraRegion ?? visibleRegion else {
+        guard let region = _cameraBox.region ?? visibleRegion else {
             if !computedFootprintMarkers.isEmpty {
 #if DEBUG
                 diagnosticsLog("footprints clear reason=no-region")
@@ -801,12 +809,16 @@ struct LifelogView: View {
             "span=(\(String(format: "%.4f", region.span.latitudeDelta)),\(String(format: "%.4f", region.span.longitudeDelta)))"
         )
 #endif
-        footprintMarkerTask = Task(priority: .userInitiated) {
-            let markers = LifelogFootprintRenderPlanner.plannedMarkers(
-                from: runs,
-                region: region,
-                lodLevel: lod
-            )
+        footprintMarkerTask = Task {
+            // Compute markers off the main thread — plannedMarkers does
+            // spatial clipping and decimation that should not block UI.
+            let markers = await Task.detached(priority: .userInitiated) {
+                LifelogFootprintRenderPlanner.plannedMarkers(
+                    from: runs,
+                    region: region,
+                    lodLevel: lod
+                )
+            }.value
             guard !Task.isCancelled else { return }
             footprintViewportCache.insert(markers, for: key)
             if markers != computedFootprintMarkers {
@@ -828,7 +840,7 @@ struct LifelogView: View {
             refreshFootprintMarkers()
         }
         pendingFootprintRefresh = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
     }
 
     private func resetFootprintRenderState() {
@@ -840,7 +852,7 @@ struct LifelogView: View {
             computedFootprintMarkers = []
         }
         footprintViewportCache.removeAll()
-        cameraRegion = nil
+        _cameraBox.region = nil
         visibleRegion = nil
 #if DEBUG
         diagnosticsLastFootprintSignature = nil
@@ -1183,7 +1195,28 @@ struct LifelogView: View {
         .environment(\.colorScheme, isDarkAppearance ? .dark : .light)
         .onMapCameraChange(frequency: .continuous) { context in
             let incoming = context.region
-            cameraRegion = incoming
+            // Store in non-reactive box — does NOT trigger body re-evaluation.
+            _cameraBox.region = incoming
+
+            // Update stable near-mode flag with hysteresis: require a larger
+            // span to EXIT near mode than to enter it, preventing one-frame
+            // toggles at the boundary that cause polyline flash artifacts.
+            let rawNear = LifelogRenderModeSelector.isNearMode(incoming)
+            if rawNear != stableNearFootprintMode {
+                if rawNear {
+                    // Entering near mode — apply immediately
+                    stableNearFootprintMode = true
+                } else {
+                    // Exiting near mode — require a wider margin to prevent
+                    // brief polyline flashes (the "connecting line" artifact).
+                    let exitThreshold = LifelogRenderModeSelector.nearModeLatitudeDeltaThreshold * 1.25
+                    let span = max(abs(incoming.span.latitudeDelta), abs(incoming.span.longitudeDelta))
+                    if span > exitThreshold {
+                        stableNearFootprintMode = false
+                    }
+                }
+            }
+
             if shouldUpdateVisibleRegion(incoming) {
                 visibleRegion = incoming
 #if DEBUG
@@ -1206,10 +1239,6 @@ struct LifelogView: View {
             }
             diagnosticsUpdateIfNeeded(reason: "cameraChange")
 #endif
-            // Footprint markers are NOT refreshed here on every frame.
-            // Rapid annotation add/remove during drag causes visible flash.
-            // Markers update via renderViewportRefreshKey onChange (>120m move
-            // or >20% zoom change) which is sufficient for smooth experience.
         }
     }
 

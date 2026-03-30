@@ -136,6 +136,8 @@ struct JourneyMemoryMainView: View {
     @State private var cachedCityGroups: [CityGroupData] = []
     @State private var cachedLocalizationFingerprint: String = ""
     @State private var rebuildWorkItem: DispatchWorkItem?
+    @State private var cachedSortedJourneys: [JourneyRoute] = []
+    @State private var cachedActivityTags: [String] = []
     
     @Binding var showSidebar: Bool
     private let usesSidebarHeader: Bool
@@ -168,17 +170,20 @@ struct JourneyMemoryMainView: View {
         self.filterState = filterState ?? MemoryFilterState()
     }
 
-    private var allMemoryJourneys: [JourneyRoute] {
-        store.journeys
-            .sorted { ($0.endTime ?? $0.startTime ?? .distantPast) > ($1.endTime ?? $1.startTime ?? .distantPast) }
-    }
+    /// Cached sorted journeys — rebuilt by refreshSortedJourneys() on data change,
+    /// instead of O(n log n) re-sort on every body evaluate.
+    private var allMemoryJourneys: [JourneyRoute] { cachedSortedJourneys }
 
-    private var availableActivityTags: [String] {
-        let tags = allMemoryJourneys.compactMap { j -> String? in
+    private var availableActivityTags: [String] { cachedActivityTags }
+
+    private func refreshSortedJourneys() {
+        cachedSortedJourneys = store.journeys
+            .sorted { ($0.endTime ?? $0.startTime ?? .distantPast) > ($1.endTime ?? $1.startTime ?? .distantPast) }
+        let tags = cachedSortedJourneys.compactMap { j -> String? in
             let tag = (j.activityTag ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             return tag.isEmpty ? nil : tag
         }
-        return Array(Set(tags)).sorted()
+        cachedActivityTags = Array(Set(tags)).sorted()
     }
 
     private var filteredMemoryJourneys: [JourneyRoute] {
@@ -223,7 +228,7 @@ struct JourneyMemoryMainView: View {
                                 isExpanded: expandedCities.contains(city.cityKey),
                                 readOnly: readOnly,
                                 onToggle: {
-                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                                    withAnimation(.easeInOut(duration: 0.25)) {
                                         if expandedCities.contains(city.cityKey) {
                                             expandedCities.remove(city.cityKey)
                                         } else {
@@ -252,6 +257,7 @@ struct JourneyMemoryMainView: View {
                 store.load()
             }
             onboardingGuide.advance(.openMemory)
+            refreshSortedJourneys()
             cachedLocalizationFingerprint = rebuildLocalizationFingerprint()
             rebuildCityGroups()
         }
@@ -407,7 +413,10 @@ struct JourneyMemoryMainView: View {
     /// Coalesce rapid-fire onChange triggers into a single rebuild.
     private func scheduleRebuild() {
         rebuildWorkItem?.cancel()
-        let item = DispatchWorkItem { [self] in rebuildCityGroups() }
+        let item = DispatchWorkItem { [self] in
+            refreshSortedJourneys()
+            rebuildCityGroups()
+        }
         rebuildWorkItem = item
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: item)
     }
@@ -415,7 +424,7 @@ struct JourneyMemoryMainView: View {
     private func rebuildCityGroups() {
         let citiesByKey = buildCachedCitiesByKey()
         let journeys = filteredMemoryJourneys
-        let journeyById = Dictionary(uniqueKeysWithValues: journeys.map { ($0.id, $0) })
+        let journeyById = Dictionary(journeys.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
 
         // cityKey -> (journeyId -> [memories])
         var buckets: [String: [String: [JourneyMemory]]] = [:]
@@ -736,6 +745,7 @@ private struct CitySection: View {
     
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var sessionStore: UserSessionStore
+    @State private var activeJourneyDetail: JourneyMemoryDetailDestination? = nil
     
     var body: some View {
         VStack(spacing: 0) {
@@ -776,16 +786,15 @@ private struct CitySection: View {
                     ForEach(Array(city.journeys.enumerated()), id: \.element.id) { index, journey in
                         let memories = city.memoriesByJourney[journey.id] ?? []
 
-                        NavigationLink {
-                            JourneyMemoryDetailView(
+                        Button {
+                            activeJourneyDetail = JourneyMemoryDetailDestination(
                                 journey: journey,
                                 memories: memories,
                                 cityName: city.cityName,
                                 countryName: city.countryName,
-                                readOnly: readOnly
+                                readOnly: readOnly,
+                                friendLoadout: nil
                             )
-                            .environmentObject(store)
-                            .environmentObject(sessionStore)
                         } label: {
                             JourneyEntryRow(
                                 journey: journey,
@@ -808,6 +817,18 @@ private struct CitySection: View {
         }
         .figmaSurfaceCard(radius: 32)
         .padding(.horizontal, 24)
+        .navigationDestination(item: $activeJourneyDetail) { destination in
+            JourneyMemoryDetailView(
+                journey: destination.journey,
+                memories: destination.memories,
+                cityName: destination.cityName,
+                countryName: destination.countryName,
+                readOnly: destination.readOnly,
+                friendLoadout: destination.friendLoadout
+            )
+            .environmentObject(store)
+            .environmentObject(sessionStore)
+        }
     }
 }
 
@@ -1034,6 +1055,7 @@ struct JourneyMemoryDetailView: View {
 
     // Visibility
     @State private var activeJourneySheet: JourneyDetailSheetRoutePresentation? = nil
+    @State private var showRouteDetail = false
     @State private var pendingVisibility: JourneyVisibility = .private
     @State private var likesCount: Int = 0
     @State private var likedByMe: Bool = false
@@ -1184,8 +1206,6 @@ struct JourneyMemoryDetailView: View {
                 }
             }
         }
-        // ✅ Keep the NavigationController's edge-swipe "back" gesture.
-        // `navigationBarBackButtonHidden(true)` often disables interactive pop.
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
         .overlay(alignment: .bottom) {
@@ -1573,14 +1593,8 @@ struct JourneyMemoryDetailView: View {
 
     private var overallMemorySection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            NavigationLink {
-                JourneyRouteDetailView(
-                    journeyID: journey.id,
-                    isReadOnly: readOnly,
-                    headerTitle: cityName,
-                    friendLoadout: friendLoadout
-                )
-                .environmentObject(store)
+            Button {
+                showRouteDetail = true
             } label: {
                 VStack(spacing: 0) {
                     // Map thumbnail with route overlay
@@ -1606,6 +1620,15 @@ struct JourneyMemoryDetailView: View {
                 )
             }
             .buttonStyle(.plain)
+            .fullScreenCover(isPresented: $showRouteDetail) {
+                JourneyRouteDetailView(
+                    journeyID: journey.id,
+                    isReadOnly: readOnly,
+                    headerTitle: cityName,
+                    friendLoadout: friendLoadout
+                )
+                .environmentObject(store)
+            }
 
             Text(L10n.t("overall_memory"))
                 .font(.system(size: 12, weight: .bold))

@@ -1727,6 +1727,7 @@ struct RecentJourneyCard: View {
     @State private var showSaveToast = false
     @State private var saveToastText = L10n.t("share_saved_to_photos")
     @State private var imageSaver: ImageSaver? = nil
+    @State private var activeJourneyDetail: JourneyMemoryDetailDestination? = nil
 
     private var durationText: String {
         guard let start = journey.startTime else {
@@ -1831,17 +1832,15 @@ struct RecentJourneyCard: View {
             }
             .padding(.horizontal, 2)
 
-            NavigationLink {
-                DeferredView {
-                    JourneyMemoryDetailView(
-                        journey: journey,
-                        memories: journey.memories.sorted(by: { $0.timestamp < $1.timestamp }),
-                        cityName: cityName,
-                        countryName: localizedCountryName
-                    )
-                    .environmentObject(store)
-                    .environmentObject(sessionStore)
-                }
+            Button {
+                activeJourneyDetail = JourneyMemoryDetailDestination(
+                    journey: journey,
+                    memories: journey.memories.sorted(by: { $0.timestamp < $1.timestamp }),
+                    cityName: cityName,
+                    countryName: localizedCountryName,
+                    readOnly: false,
+                    friendLoadout: nil
+                )
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "book.pages")
@@ -1863,6 +1862,18 @@ struct RecentJourneyCard: View {
         .padding(14)
         .background(Color.white)
         .cornerRadius(18)
+        .fullScreenCover(item: $activeJourneyDetail) { destination in
+            JourneyMemoryDetailView(
+                journey: destination.journey,
+                memories: destination.memories,
+                cityName: destination.cityName,
+                countryName: destination.countryName,
+                readOnly: destination.readOnly,
+                friendLoadout: destination.friendLoadout
+            )
+            .environmentObject(store)
+            .environmentObject(sessionStore)
+        }
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(Color.black.opacity(0.08), lineWidth: 1)

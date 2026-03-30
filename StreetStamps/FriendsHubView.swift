@@ -3140,36 +3140,52 @@ private struct FriendCollectionScreen: View {
     }
 
     private func collectionPager(friend: FriendProfileSnapshot) -> some View {
-        TabView(selection: $page) {
-            CityStampLibraryView(
-                showSidebar: .constant(false),
-                autoRebuildFromJourneyStore: false,
-                usesSidebarHeader: false,
-                showHeader: false,
-                allowCityDetailNavigation: false,
-                emptyTitleKey: "friend_city_cards_empty_title",
-                emptySubtitleKey: "friend_city_cards_empty_subtitle"
-            )
-            .environmentObject(mirror.journeyStore)
-            .environmentObject(mirror.cityCache)
-            .environmentObject(mirror.renderCacheStore)
-            .tag(FriendCollectionPage.cities)
-
-            JourneyMemoryMainView(
-                showSidebar: .constant(false),
-                usesSidebarHeader: false,
-                hideLeadingControl: true,
-                showHeader: false,
-                readOnly: true,
-                emptyTitleKey: "friend_memories_empty_title",
-                emptySubtitleKey: "friend_memories_empty_subtitle"
-            )
-            .environmentObject(mirror.journeyStore)
-            .environmentObject(mirror.cityCache)
-            .environmentObject(sessionStore)
-            .tag(FriendCollectionPage.memories)
+        ZStack {
+            if page == .cities {
+                CityStampLibraryView(
+                    showSidebar: .constant(false),
+                    autoRebuildFromJourneyStore: false,
+                    usesSidebarHeader: false,
+                    showHeader: false,
+                    allowCityDetailNavigation: false,
+                    emptyTitleKey: "friend_city_cards_empty_title",
+                    emptySubtitleKey: "friend_city_cards_empty_subtitle"
+                )
+                .environmentObject(mirror.journeyStore)
+                .environmentObject(mirror.cityCache)
+                .environmentObject(mirror.renderCacheStore)
+                .transition(.move(edge: .leading))
+            } else {
+                JourneyMemoryMainView(
+                    showSidebar: .constant(false),
+                    usesSidebarHeader: false,
+                    hideLeadingControl: true,
+                    showHeader: false,
+                    readOnly: true,
+                    emptyTitleKey: "friend_memories_empty_title",
+                    emptySubtitleKey: "friend_memories_empty_subtitle"
+                )
+                .environmentObject(mirror.journeyStore)
+                .environmentObject(mirror.cityCache)
+                .environmentObject(sessionStore)
+                .transition(.move(edge: .trailing))
+            }
         }
-        .tabViewStyle(.page(indexDisplayMode: .never))
+        .gesture(
+            DragGesture(minimumDistance: 30, coordinateSpace: .local)
+                .onEnded { value in
+                    guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                    if value.translation.width < -30, page == .cities {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                            page = .memories
+                        }
+                    } else if value.translation.width > 30, page == .memories {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                            page = .cities
+                        }
+                    }
+                }
+        )
     }
 }
 

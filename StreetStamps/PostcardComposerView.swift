@@ -83,7 +83,7 @@ struct PostcardComposerView: View {
         }) else {
             return 1
         }
-        let journeysByID = Dictionary(uniqueKeysWithValues: journeyStore.journeys.map { ($0.id, $0) })
+        let journeysByID = Dictionary(journeyStore.journeys.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
         let validCount = city.journeyIds.count(where: { journeyID in
             guard let j = journeysByID[journeyID] else { return false }
             return j.distance >= 1000
@@ -415,27 +415,26 @@ struct PostcardComposerView: View {
     }
 
     private var previewLink: some View {
-        NavigationLink(isActive: $showPreview) {
-            if let selectedRecipient {
-                PostcardPreviewView(
-                    friendID: selectedRecipient.userID,
-                    friendName: selectedRecipient.displayName,
-                    selectedCityID: selectedCityID,
-                    selectedCityName: selectedCityName,
-                    selectedCityJourneyCount: selectedCityJourneyCount,
-                    messageText: messageText,
-                    localImagePath: localImagePath,
-                    selectedImage: selectedImage,
-                    allowedCityIDs: cityOptions.map(\.id),
-                    onSent: {
-                        onSent?()
-                        dismiss()
-                    }
-                )
+        EmptyView()
+            .navigationDestination(isPresented: $showPreview) {
+                if let selectedRecipient {
+                    PostcardPreviewView(
+                        friendID: selectedRecipient.userID,
+                        friendName: selectedRecipient.displayName,
+                        selectedCityID: selectedCityID,
+                        selectedCityName: selectedCityName,
+                        selectedCityJourneyCount: selectedCityJourneyCount,
+                        messageText: messageText,
+                        localImagePath: localImagePath,
+                        selectedImage: selectedImage,
+                        allowedCityIDs: cityOptions.map(\.id),
+                        onSent: {
+                            onSent?()
+                            dismiss()
+                        }
+                    )
+                }
             }
-        } label: {
-            EmptyView()
-        }
     }
 
     private var previewButton: some View {

@@ -186,12 +186,12 @@ enum AppJourneySyncCoordinator {
         )
         lifelogStore.rebind(paths: paths)
         cityRenderCache.rebind(rootDir: paths.thumbnailsDir)
-        trackTileStore.rebind(paths: paths)
 
-        // Load journey and lifelog in parallel
+        // Load journey, lifelog, and track tiles in parallel
         async let journeyLoad: () = journeyStore.loadAsync()
         async let lifelogLoad: () = lifelogStore.loadAsync()
-        _ = await (journeyLoad, lifelogLoad)
+        async let trackTileLoad: () = trackTileStore.rebindAsync(paths: paths)
+        _ = await (journeyLoad, lifelogLoad, trackTileLoad)
 
         lifelogStore.bind(to: locationHub)
         lifelogRenderCache.reset()
