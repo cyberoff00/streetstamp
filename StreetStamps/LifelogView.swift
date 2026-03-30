@@ -592,10 +592,12 @@ struct LifelogView: View {
     @State private var footprintMarkerTask: Task<Void, Never>? = nil
     @State private var pendingFootprintRefresh: DispatchWorkItem? = nil
 #if DEBUG
-    @AppStorage("streetstamps.debug.lifelog.mapDiagnosticsEnabled") private var mapDiagnosticsEnabled = false
+    @AppStorage("streetstamps.debug.lifelog.mapDiagnosticsEnabled") private var mapDiagnosticsEnabled = true
     @State private var diagnosticsAppearAt: Date? = nil
     @State private var diagnosticsFirstCameraCallbackAt: Date? = nil
     @State private var diagnosticsLastSnapshot: LifelogMapDiagnosticsSnapshot? = nil
+    @State private var diagnosticsLastFootprintSignature: String? = nil
+    @State private var diagnosticsLastNearModeValue: Bool? = nil
 #endif
 
     private var mapAppearance: MapAppearanceStyle {
@@ -673,6 +675,42 @@ struct LifelogView: View {
         print("[LifelogMapDiag] \(message)")
     }
 
+    private func diagnosticsMarkerToken(_ marker: LifelogFootprintProjectedMarker) -> String {
+        String(
+            format: "%.5f,%.5f@%.0f",
+            marker.coordinate.latitude,
+            marker.coordinate.longitude,
+            marker.angleDegrees
+        )
+    }
+
+    private func diagnosticsFootprintSignature(_ markers: [LifelogFootprintProjectedMarker]) -> String {
+        guard !markers.isEmpty else { return "empty" }
+        let head = markers.prefix(3).map(diagnosticsMarkerToken).joined(separator: ",")
+        let tail = markers.suffix(3).map(diagnosticsMarkerToken).joined(separator: ",")
+        return "count=\(markers.count) head=[\(head)] tail=[\(tail)]"
+    }
+
+    private func diagnosticsLogFootprintMarkers(reason: String, markers: [LifelogFootprintProjectedMarker]) {
+        guard mapDiagnosticsEnabled else { return }
+        let signature = diagnosticsFootprintSignature(markers)
+        guard diagnosticsLastFootprintSignature != signature || reason != "camera-steady" else { return }
+        diagnosticsLastFootprintSignature = signature
+        diagnosticsLog("footprints \(reason) nearMode=\(isNearFootprintMode) lod=\(renderLodLevel) \(signature)")
+    }
+
+    private func diagnosticsLogNearModeChange(_ newValue: Bool, reason: String) {
+        guard mapDiagnosticsEnabled else { return }
+        guard diagnosticsLastNearModeValue != newValue else { return }
+        diagnosticsLastNearModeValue = newValue
+        let region = cameraRegion ?? visibleRegion
+        let spanLat = region?.span.latitudeDelta ?? -1
+        let spanLon = region?.span.longitudeDelta ?? -1
+        diagnosticsLog(
+            "nearMode \(reason) -> \(newValue) span=(\(String(format: "%.4f", spanLat)),\(String(format: "%.4f", spanLon)))"
+        )
+    }
+
     private func diagnosticsCaptureSnapshot() -> LifelogMapDiagnosticsSnapshot {
         LifelogMapDiagnosticsSnapshot(
             mapContentReady: mapContentReady,
@@ -718,37 +756,69 @@ struct LifelogView: View {
     private func refreshFootprintMarkers() {
         footprintMarkerTask?.cancel()
         guard isNearFootprintMode else {
-            if !computedFootprintMarkers.isEmpty { computedFootprintMarkers = [] }
+            if !computedFootprintMarkers.isEmpty {
+#if DEBUG
+                diagnosticsLog("footprints clear reason=not-near-mode")
+#endif
+                computedFootprintMarkers = []
+            }
             return
         }
         guard let region = cameraRegion ?? visibleRegion else {
-            if !computedFootprintMarkers.isEmpty { computedFootprintMarkers = [] }
+            if !computedFootprintMarkers.isEmpty {
+#if DEBUG
+                diagnosticsLog("footprints clear reason=no-region")
+#endif
+                computedFootprintMarkers = []
+            }
             return
         }
 
         let key = LifelogFootprintViewportCache.Key(
             lodLevel: renderLodLevel,
             region: region,
-            runsSignature: LifelogFootprintRenderPlanner.runsSignature(footprintRuns),
-            exclusionCoordinate: currentDisplayLocation?.coordinate
+            runsSignature: LifelogFootprintRenderPlanner.runsSignature(footprintRuns)
         )
         if let cached = footprintViewportCache.storage(for: key) {
-            computedFootprintMarkers = cached
+            if cached != computedFootprintMarkers {
+                computedFootprintMarkers = cached
+#if DEBUG
+                diagnosticsLogFootprintMarkers(reason: "cache-hit", markers: cached)
+#endif
+            } else {
+#if DEBUG
+                diagnosticsLog("footprints cache-hit unchanged")
+#endif
+            }
             return
         }
         let runs = footprintRuns
         let lod = renderLodLevel
-        let currentCoord = currentDisplayLocation?.coordinate
+#if DEBUG
+        diagnosticsLog(
+            "footprints build start runs=\(runs.count) lod=\(lod) " +
+            "region=(\(String(format: "%.4f", region.center.latitude)),\(String(format: "%.4f", region.center.longitude))) " +
+            "span=(\(String(format: "%.4f", region.span.latitudeDelta)),\(String(format: "%.4f", region.span.longitudeDelta)))"
+        )
+#endif
         footprintMarkerTask = Task(priority: .userInitiated) {
             let markers = LifelogFootprintRenderPlanner.plannedMarkers(
                 from: runs,
                 region: region,
-                lodLevel: lod,
-                currentCoordinate: currentCoord
+                lodLevel: lod
             )
             guard !Task.isCancelled else { return }
             footprintViewportCache.insert(markers, for: key)
-            computedFootprintMarkers = markers
+            if markers != computedFootprintMarkers {
+                computedFootprintMarkers = markers
+#if DEBUG
+                diagnosticsLogFootprintMarkers(reason: "rebuilt", markers: markers)
+#endif
+            } else {
+#if DEBUG
+                diagnosticsLog("footprints rebuilt unchanged")
+#endif
+            }
         }
     }
 
@@ -759,6 +829,23 @@ struct LifelogView: View {
         }
         pendingFootprintRefresh = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
+    }
+
+    private func resetFootprintRenderState() {
+        pendingFootprintRefresh?.cancel()
+        pendingFootprintRefresh = nil
+        footprintMarkerTask?.cancel()
+        footprintMarkerTask = nil
+        if !computedFootprintMarkers.isEmpty {
+            computedFootprintMarkers = []
+        }
+        footprintViewportCache.removeAll()
+        cameraRegion = nil
+        visibleRegion = nil
+#if DEBUG
+        diagnosticsLastFootprintSignature = nil
+        diagnosticsLastNearModeValue = nil
+#endif
     }
 
     private var currentDisplayLocation: CLLocation? {
@@ -907,6 +994,8 @@ struct LifelogView: View {
                 diagnosticsAppearAt = Date()
                 diagnosticsFirstCameraCallbackAt = nil
                 diagnosticsLastSnapshot = nil
+                diagnosticsLastFootprintSignature = nil
+                diagnosticsLastNearModeValue = nil
                 diagnosticsLog(
                     "onAppear " +
                     "position=automatic " +
@@ -967,8 +1056,7 @@ struct LifelogView: View {
         .onDisappear {
             renderTask?.cancel()
             renderTask = nil
-            footprintMarkerTask?.cancel()
-            footprintMarkerTask = nil
+            resetFootprintRenderState()
         }
         .onChange(of: lifelogStore.availableDays) { _ in
             seedSelectedDayIfNeeded()
@@ -980,15 +1068,26 @@ struct LifelogView: View {
 #endif
         }
         .onChange(of: tileRevisionKey) { _ in
-            scheduleRenderSnapshotRefresh()
+            scheduleRenderSnapshotRefresh(debounceNanoseconds: 400_000_000)
         }
         .onChange(of: lifelogCountryISO2) { _ in
             scheduleRenderSnapshotRefresh()
         }
         .onChange(of: renderViewportRefreshKey) { _ in
-            scheduleRenderSnapshotRefresh(debounceNanoseconds: 400_000_000)
+            // Viewport changes only need footprint marker re-planning.
+            // Route polylines use the full-day snapshot (no viewport clipping)
+            // so MapKit handles culling natively — no snapshot rebuild needed.
+#if DEBUG
+            diagnosticsLog("viewportRefreshKey changed -> \(renderViewportRefreshKey)")
+#endif
+            throttledRefreshFootprintMarkers()
 #if DEBUG
             diagnosticsUpdateIfNeeded(reason: "viewportKey")
+#endif
+        }
+        .onChange(of: isNearFootprintMode) { newValue in
+#if DEBUG
+            diagnosticsLogNearModeChange(newValue, reason: "onChange")
 #endif
         }
         .onChange(of: selectedDay) { _ in
@@ -1087,8 +1186,15 @@ struct LifelogView: View {
             cameraRegion = incoming
             if shouldUpdateVisibleRegion(incoming) {
                 visibleRegion = incoming
+#if DEBUG
+                diagnosticsLog(
+                    "visibleRegion update center=(\(String(format: "%.4f", incoming.center.latitude)),\(String(format: "%.4f", incoming.center.longitude))) " +
+                    "span=(\(String(format: "%.4f", incoming.span.latitudeDelta)),\(String(format: "%.4f", incoming.span.longitudeDelta)))"
+                )
+#endif
             }
 #if DEBUG
+            diagnosticsLogNearModeChange(isNearFootprintMode, reason: "camera")
             if mapDiagnosticsEnabled, diagnosticsFirstCameraCallbackAt == nil {
                 diagnosticsFirstCameraCallbackAt = Date()
                 let elapsedMs = diagnosticsAppearAt.map { Int(Date().timeIntervalSince($0) * 1000) } ?? -1
@@ -1100,7 +1206,10 @@ struct LifelogView: View {
             }
             diagnosticsUpdateIfNeeded(reason: "cameraChange")
 #endif
-            throttledRefreshFootprintMarkers()
+            // Footprint markers are NOT refreshed here on every frame.
+            // Rapid annotation add/remove during drag causes visible flash.
+            // Markers update via renderViewportRefreshKey onChange (>120m move
+            // or >20% zoom change) which is sufficient for smooth experience.
         }
     }
 
@@ -1659,6 +1768,12 @@ struct LifelogView: View {
         )
         renderSnapshot = snapshot
 #if DEBUG
+        diagnosticsLog(
+            "snapshot apply generation=\(generation) " +
+            "farSegs=\(snapshot.farRouteSegments.count) footprintRuns=\(snapshot.footprintRuns.count)"
+        )
+#endif
+#if DEBUG
         diagnosticsUpdateIfNeeded(reason: "renderSnapshot")
 #endif
         refreshFootprintMarkers()
@@ -1685,7 +1800,11 @@ struct LifelogView: View {
         renderGenerationState = generationState
 
         let targetDay = Calendar.current.startOfDay(for: selectedDay ?? Date())
-        let viewport = TrackRenderAdapter.viewport(from: visibleRegion)
+        // Always use full-day snapshot (no viewport clipping). A single day's
+        // route data (10-50 segments) is well within MapKit's native culling
+        // capacity, and avoiding viewport-specific rebuilds eliminates the
+        // polyline-swap flash that occurs when dragging the map.
+        let viewport: TrackTileViewport? = nil
         let countryISO2 = lifelogCountryISO2
         debugRenderLog(
             "schedule generation=\(generation) day=\(debugDayString(targetDay)) " +
@@ -1698,6 +1817,11 @@ struct LifelogView: View {
         )
         if let cachedSnapshot {
             applyRenderSnapshotIfCurrent(cachedSnapshot, generation: generation)
+        } else if renderSnapshot.isHighQuality,
+                  let snapshotDay = renderSnapshot.selectedDay,
+                  Calendar.current.isDate(snapshotDay, inSameDayAs: targetDay) {
+            // Current snapshot is same-day and high quality — keep it visible
+            // instead of applying a placeholder that would cause a flash.
         } else {
             applyRenderSnapshotIfCurrent(
                 LifelogRenderRefreshPolicy.placeholderSnapshot(

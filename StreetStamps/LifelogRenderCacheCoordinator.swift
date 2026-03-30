@@ -72,7 +72,13 @@ final class LifelogRenderCacheCoordinator: ObservableObject {
         viewport: TrackTileViewport?
     ) -> LifelogRenderSnapshot? {
         guard let key = currentDayKey(day: day, countryISO2: countryISO2) else { return nil }
+        return cachedRenderSnapshot(for: key, viewport: viewport)
+    }
 
+    private func cachedRenderSnapshot(
+        for key: LifelogDaySnapshotKey,
+        viewport: TrackTileViewport?
+    ) -> LifelogRenderSnapshot? {
         let viewportKey = LifelogViewportRenderKey(
             dayKey: key,
             viewportBucket: LifelogViewportBucket.bucket(for: viewport)
@@ -86,7 +92,8 @@ final class LifelogRenderCacheCoordinator: ObservableObject {
             debugLog("cached day snapshot hit day=\(debugDayString(key.day)) j=\(key.journeyRevision) p=\(key.lifelogRevision)")
             return exact.renderSnapshot(in: viewport)
         }
-        if let fallback = bestExistingSnapshot(for: key.day, countryISO2: key.countryISO2) {
+        if !Calendar.current.isDateInToday(key.day),
+           let fallback = bestExistingSnapshot(for: key.day, countryISO2: key.countryISO2) {
             debugLog(
                 "cached fallback day snapshot hit day=\(debugDayString(key.day)) " +
                 "requested=(j:\(key.journeyRevision),p:\(key.lifelogRevision)) " +
@@ -244,13 +251,16 @@ final class LifelogRenderCacheCoordinator: ObservableObject {
               manifest.zoom == TrackRenderAdapter.unifiedRenderZoom,
               manifest.journeyRevision >= key.journeyRevision,
               manifest.passiveRevision >= key.lifelogRevision else {
+            // Track tiles not ready yet — build a quick fallback snapshot
+            // from raw lifelog shard data so the user sees content immediately
+            // on cold start instead of an empty map.
             let manifest = trackTileStore.currentManifest
             debugLog(
-                "day snapshot blocked day=\(debugDayString(key.day)) " +
+                "day snapshot tiles not ready day=\(debugDayString(key.day)) " +
                 "requested=(j:\(key.journeyRevision),p:\(key.lifelogRevision)) " +
-                "manifest=\(debugManifestString(manifest))"
+                "manifest=\(debugManifestString(manifest)) → fallback from raw points"
             )
-            return nil
+            return buildFallbackFromRawPoints(for: key)
         }
         let existing = bestExistingSnapshot(for: key.day, countryISO2: key.countryISO2)
         let task = Task<LifelogSegmentedDaySnapshot?, Never>(priority: .utility) {
@@ -303,6 +313,26 @@ final class LifelogRenderCacheCoordinator: ObservableObject {
             saveToDisk(snapshot.allDayRenderSnapshot)
         }
         return snapshot
+    }
+
+    /// Build a lightweight render snapshot directly from raw lifelog shard
+    /// coordinates, bypassing the track tile system.  Used as a cold-start
+    /// fallback so the user sees today's route immediately while tiles build
+    /// in the background.  The snapshot is NOT cached in `daySnapshots` —
+    /// once tiles are ready the normal path will produce a proper snapshot
+    /// that replaces it.
+    private func buildFallbackFromRawPoints(for key: LifelogDaySnapshotKey) -> LifelogSegmentedDaySnapshot? {
+        guard let lifelogStore else { return nil }
+        let rawCoords = lifelogStore.rawCoordsForDay(key.day)
+        guard rawCoords.count >= 2 else { return nil }
+        let segment = TrackTileSegment(
+            sourceType: .passive,
+            coordinates: rawCoords
+        )
+        return LifelogRenderSnapshotBuilder.buildDaySnapshot(
+            key: key,
+            segments: [segment]
+        )
     }
 
     private func bestExistingSnapshot(for day: Date, countryISO2: String?) -> LifelogSegmentedDaySnapshot? {
@@ -558,6 +588,13 @@ private extension JSONDecoder {
 extension LifelogRenderCacheCoordinator {
     func seedDaySnapshotForTesting(_ snapshot: LifelogSegmentedDaySnapshot) {
         daySnapshots[snapshot.key] = snapshot
+    }
+
+    func cachedRenderSnapshotForTesting(
+        key: LifelogDaySnapshotKey,
+        viewport: TrackTileViewport?
+    ) -> LifelogRenderSnapshot? {
+        cachedRenderSnapshot(for: key, viewport: viewport)
     }
 
     func hasCachedDaySnapshotForTesting(_ key: LifelogDaySnapshotKey) -> Bool {

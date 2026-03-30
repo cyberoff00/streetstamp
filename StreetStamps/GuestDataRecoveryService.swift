@@ -116,8 +116,8 @@ enum GuestDataRecoveryService {
         let copiedPhotos = try copyMissingFiles(from: source.photosDir, to: target.photosDir)
         let copiedThumbnails = try copyMissingFiles(from: source.thumbnailsDir, to: target.thumbnailsDir)
         let replacedLifelog = try mergeLifelog(
-            sourceURL: source.lifelogRouteURL,
-            targetURL: target.lifelogRouteURL,
+            source: source,
+            target: target,
             allowReplacement: options.replaceLifelogWhenSourceIsMoreComplete
         )
         let mergedMood = try mergeMood(
@@ -186,7 +186,7 @@ enum GuestDataRecoveryService {
             return files.count
         }()
 
-        let lifelogPointCount = lifelogCount(url: paths.lifelogRouteURL)
+        let lifelogPointCount = lifelogCount(paths: paths)
         let lastModified = (try? paths.userRoot.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? nil
 
         return GuestRecoveryCandidate(
@@ -428,20 +428,38 @@ enum GuestDataRecoveryService {
     }
 
     private static func mergeLifelog(
-        sourceURL: URL,
-        targetURL: URL,
+        source: StoragePath,
+        target: StoragePath,
         allowReplacement: Bool
     ) throws -> Bool {
         let fm = FileManager.default
-        guard fm.fileExists(atPath: sourceURL.path) else { return false }
 
-        let sourceCount = lifelogCount(url: sourceURL)
-        let targetCount = lifelogCount(url: targetURL)
+        let sourceCount = lifelogCount(paths: source)
+        let targetCount = lifelogCount(paths: target)
+        guard sourceCount > 0 else { return false }
         if targetCount > 0 && !allowReplacement {
             return false
         }
         guard sourceCount > targetCount || targetCount == 0 else { return false }
 
+        // Copy whichever layout exists in source to target
+        let sourceShardDir = source.lifelogDaysDir
+        let targetShardDir = target.lifelogDaysDir
+
+        if fm.fileExists(atPath: source.lifelogDayShardIndexURL.path) {
+            // Source is sharded: copy entire lifelog_days directory
+            try fm.createDirectory(at: targetShardDir.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if fm.fileExists(atPath: targetShardDir.path) {
+                try fm.removeItem(at: targetShardDir)
+            }
+            try fm.copyItem(at: sourceShardDir, to: targetShardDir)
+            return true
+        }
+
+        // Source is monolith: copy monolith file (target will migrate on next load)
+        let sourceURL = source.lifelogRouteURL
+        let targetURL = target.lifelogRouteURL
+        guard fm.fileExists(atPath: sourceURL.path) else { return false }
         try fm.createDirectory(at: targetURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         if fm.fileExists(atPath: targetURL.path) {
             try fm.removeItem(at: targetURL)
@@ -508,7 +526,25 @@ enum GuestDataRecoveryService {
         return (try? JSONDecoder().decode([String: String].self, from: data)) ?? [:]
     }
 
-    private static func lifelogCount(url: URL) -> Int {
+    private static func lifelogCount(paths: StoragePath) -> Int {
+        let fm = FileManager.default
+
+        // Check sharded layout first
+        let indexURL = paths.lifelogDayShardIndexURL
+        if let data = try? Data(contentsOf: indexURL),
+           let index = try? JSONDecoder().decode(LifelogStore.DayShardIndex.self, from: data) {
+            // Count by loading each shard
+            let daysDir = paths.lifelogDaysDir
+            var total = 0
+            for dayKey in index.cachedAvailableDayKeys {
+                let shard = LifelogStore.loadShardFromDisk(dir: daysDir, dayKey: dayKey)
+                total += shard.points.count
+            }
+            return total
+        }
+
+        // Fall back to monolith probe
+        let url = paths.lifelogRouteURL
         guard let data = try? Data(contentsOf: url),
               let payload = try? JSONDecoder().decode(LifelogProbe.self, from: data) else {
             return 0

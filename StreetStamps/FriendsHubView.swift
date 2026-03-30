@@ -240,6 +240,24 @@ struct FriendsHubView: View {
         )
     }
 
+    private var cachedMyProfileVersion: Int {
+        var h = Hasher()
+        h.combine(socialStore.cachedMyProfile?.id)
+        h.combine(socialStore.cachedMyProfile?.journeys.hashValue)
+        h.combine(socialStore.cachedMyProfile?.unlockedCityCards.hashValue)
+        return h.finalize()
+    }
+
+    private func adoptCachedMyProfileIfNeeded() {
+        let resolved = FriendsSelfProfileCacheHydrator.resolve(
+            currentRemoteProfile: myRemoteProfile,
+            cachedProfile: socialStore.cachedMyProfile,
+            didSeedFromCache: didSeedProfileFromCache
+        )
+        myRemoteProfile = resolved.profile
+        didSeedProfileFromCache = resolved.didSeedFromCache
+    }
+
     private func feedSourceProfiles(using snapshots: [FriendProfileSnapshot]) -> [FriendProfileSnapshot] {
         let sorted = snapshots.sorted { lhs, rhs in
             lastActiveDate(of: lhs) > lastActiveDate(of: rhs)
@@ -453,14 +471,14 @@ struct FriendsHubView: View {
             let t0 = CFAbsoluteTimeGetCurrent()
             socialStore.ensureLoaded()
             print("⏱ [FriendsHub] ensureLoaded: \(Int((CFAbsoluteTimeGetCurrent()-t0)*1000))ms")
-            if !didSeedProfileFromCache, let cached = socialStore.cachedMyProfile {
-                myRemoteProfile = cached
-                didSeedProfileFromCache = true
-            }
+            adoptCachedMyProfileIfNeeded()
             let t1 = CFAbsoluteTimeGetCurrent()
             updateCachedFeedEventsIfNeeded()
             print("⏱ [FriendsHub] updateCachedFeedEvents (onAppear): \(Int((CFAbsoluteTimeGetCurrent()-t1)*1000))ms")
             print("⏱ [FriendsHub] onAppear total: \(Int((CFAbsoluteTimeGetCurrent()-t0)*1000))ms  friends=\(socialStore.friends.count)")
+        }
+        .onChange(of: cachedMyProfileVersion) { _, _ in
+            adoptCachedMyProfileIfNeeded()
         }
         .onChange(of: feedSourceVersion) { _, _ in
             let t0 = CFAbsoluteTimeGetCurrent()

@@ -13,6 +13,7 @@ import SwiftUI
 import UIKit
 import CoreLocation
 import MapKit
+import Photos
 
 // MARK: - Route Thumbnail Cache
 
@@ -1347,7 +1348,7 @@ struct JourneyMemoryDetailView: View {
                 mirrorOnCapture: mirrorSelfie,
                 onImage: { image in
                     showCamera = false
-                    appendCapturedToActiveMemory(image)
+                    appendImagesToActiveMemory([image], writesToPhotoLibrary: true)
                 },
                 onCancel: { showCamera = false }
             )
@@ -1358,7 +1359,7 @@ struct JourneyMemoryDetailView: View {
                 selectionLimit: max(1, remainingPhotoSlotsForActiveTarget()),
                 onImages: { images in
                     showPhotoLibrary = false
-                    appendLibraryImagesToActiveMemory(images)
+                    appendImagesToActiveMemory(images, writesToPhotoLibrary: false)
                 },
                 onCancel: { showPhotoLibrary = false }
             )
@@ -1834,27 +1835,23 @@ struct JourneyMemoryDetailView: View {
         showPhotoLibrary = true
     }
 
-    private func appendCapturedToActiveMemory(_ image: UIImage) {
+    private func appendImagesToActiveMemory(_ images: [UIImage], writesToPhotoLibrary: Bool) {
         guard let target = activePhotoTarget else { return }
-        switch target {
-        case .overallMemory:
-            guard draftOverallMemoryImagePaths.count < photoLimit else { return }
-            if let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) {
-                draftOverallMemoryImagePaths.append(filename)
-            }
-        case .memory(let idx):
-            guard draftMemories.indices.contains(idx), draftMemories[idx].imagePaths.count < photoLimit else { return }
-            if let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) {
-                draftMemories[idx].imagePaths.append(filename)
-            }
-        }
-    }
 
-    private func appendLibraryImagesToActiveMemory(_ images: [UIImage]) {
-        guard let target = activePhotoTarget else { return }
+        let remainingSlots: Int
         switch target {
         case .overallMemory:
-            for image in images {
+            remainingSlots = max(0, photoLimit - draftOverallMemoryImagePaths.count)
+        case .memory(let idx):
+            guard draftMemories.indices.contains(idx) else { return }
+            remainingSlots = max(0, photoLimit - draftMemories[idx].imagePaths.count)
+        }
+
+        let trimmed = Array(images.prefix(remainingSlots))
+        guard !trimmed.isEmpty else { return }
+        switch target {
+        case .overallMemory:
+            for image in trimmed {
                 if draftOverallMemoryImagePaths.count >= photoLimit { break }
                 if let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) {
                     draftOverallMemoryImagePaths.append(filename)
@@ -1862,11 +1859,21 @@ struct JourneyMemoryDetailView: View {
             }
         case .memory(let idx):
             guard draftMemories.indices.contains(idx) else { return }
-            for image in images {
+            for image in trimmed {
                 if draftMemories[idx].imagePaths.count >= photoLimit { break }
                 if let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) {
                     draftMemories[idx].imagePaths.append(filename)
                 }
+            }
+        }
+
+        guard writesToPhotoLibrary else { return }
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else { return }
+            for image in trimmed {
+                PHPhotoLibrary.shared().performChanges({
+                    PHAssetChangeRequest.creationRequestForAsset(from: image)
+                }, completionHandler: nil)
             }
         }
     }
@@ -2575,6 +2582,10 @@ enum JourneyMemoryDetailTitlePresentation {
         }
         return trimmed
     }
+
+    static func exportTitle(customTitle: String?, fallbackCityName: String) -> String {
+        normalizedCustomTitle(from: customTitle) ?? fallbackCityName
+    }
 }
 
 // =======================================================
@@ -2658,6 +2669,13 @@ private struct JourneyMemoryDetailExportSnapshotView: View {
         )
     }
 
+    private var exportTitle: String {
+        JourneyMemoryDetailTitlePresentation.exportTitle(
+            customTitle: journey.customTitle,
+            fallbackCityName: cityName
+        )
+    }
+
     var body: some View {
         ZStack {
             FigmaTheme.background
@@ -2703,7 +2721,7 @@ private struct JourneyMemoryDetailExportSnapshotView: View {
             // Title + avatar
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(cityName.uppercased())
+                    Text(exportTitle.uppercased())
                         .font(.system(size: 22, weight: .bold))
                         .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
                         .lineLimit(2)

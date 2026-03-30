@@ -13,4 +13,8 @@ final class MemoryEditorPresentationTests: XCTestCase {
         XCTAssertEqual(MemoryEditorPresentation.sheet.surfaceStyle, .card)
         XCTAssertEqual(MemoryEditorPresentation.fullScreen.surfaceStyle, .page)
     }
+
+    func test_newMedia_requiresEditing_beforePersistence() {
+        XCTAssertTrue(MemoryEditorMediaPolicy.requiresEditingBeforeSave)
+    }
 }

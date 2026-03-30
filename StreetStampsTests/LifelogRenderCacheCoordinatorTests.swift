@@ -78,6 +78,68 @@ final class LifelogRenderCacheCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.hasDirtyTodayForTesting)
     }
 
+    @MainActor
+    func test_cachedRenderSnapshotForTesting_skipsStaleTodayFallbackSnapshot() {
+        let coordinator = LifelogRenderCacheCoordinator()
+        let today = Calendar.current.startOfDay(for: Date())
+
+        let oldKey = LifelogDaySnapshotKey(day: today, countryISO2: "US", journeyRevision: 1, lifelogRevision: 1)
+        let newKey = LifelogDaySnapshotKey(day: today, countryISO2: "US", journeyRevision: 2, lifelogRevision: 2)
+
+        coordinator.seedDaySnapshotForTesting(
+            LifelogRenderSnapshotBuilder.buildDaySnapshot(
+                key: oldKey,
+                segments: [
+                    TrackTileSegment(
+                        sourceType: .passive,
+                        coordinates: [
+                            CoordinateCodable(lat: 37.7749, lon: -122.4194),
+                            CoordinateCodable(lat: 37.7752, lon: -122.4190)
+                        ],
+                        startTimestamp: today,
+                        endTimestamp: today.addingTimeInterval(60)
+                    )
+                ]
+            )
+        )
+
+        let cached = coordinator.cachedRenderSnapshotForTesting(key: newKey, viewport: nil)
+
+        XCTAssertNil(cached)
+    }
+
+    @MainActor
+    func test_cachedRenderSnapshotForTesting_keepsFallbackForHistoricalDay() {
+        let coordinator = LifelogRenderCacheCoordinator()
+        let today = Calendar.current.startOfDay(for: Date())
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: today) ?? today
+
+        let oldKey = LifelogDaySnapshotKey(day: yesterday, countryISO2: "US", journeyRevision: 1, lifelogRevision: 1)
+        let newKey = LifelogDaySnapshotKey(day: yesterday, countryISO2: "US", journeyRevision: 2, lifelogRevision: 2)
+
+        coordinator.seedDaySnapshotForTesting(
+            LifelogRenderSnapshotBuilder.buildDaySnapshot(
+                key: oldKey,
+                segments: [
+                    TrackTileSegment(
+                        sourceType: .passive,
+                        coordinates: [
+                            CoordinateCodable(lat: 48.8566, lon: 2.3522),
+                            CoordinateCodable(lat: 48.8569, lon: 2.3529)
+                        ],
+                        startTimestamp: yesterday,
+                        endTimestamp: yesterday.addingTimeInterval(60)
+                    )
+                ]
+            )
+        )
+
+        let cached = coordinator.cachedRenderSnapshotForTesting(key: newKey, viewport: nil)
+
+        XCTAssertNotNil(cached)
+        XCTAssertEqual(cached?.selectedDay, yesterday)
+    }
+
     func test_countryAttributionCoordinator_buildsRunsFromResolvedAndUnknownPoints() async throws {
         let userID = "lifelog-country-runs-\(UUID().uuidString)"
         let paths = StoragePath(userID: userID)

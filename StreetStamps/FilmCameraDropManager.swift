@@ -2,60 +2,51 @@ import Foundation
 
 // =======================================================
 // MARK: - Film Camera Drop Manager
-// Manages random camera drops when user enters MapView.
-// Each session entry has a chance to "find" a film camera.
+// Per-journey film camera: drops from top to center when
+// journey first starts, then stays in sidebar for the
+// rest of the journey session.
 // =======================================================
 
 final class FilmCameraDropManager: ObservableObject {
-    @Published private(set) var hasFilmCamera: Bool = false
-    @Published var showDropAnimation: Bool = false
+    enum Phase: Equatable {
+        case none       // Not yet triggered for this journey
+        case center     // Showing in center of screen (just dropped)
+        case sidebar    // Dismissed to sidebar (above camera icon)
+    }
 
-    /// Drop probability per MapView session.
-    /// Tune this down later once the novelty factor is calibrated.
-    private let dropChance: Double = 0.5
+    @Published private(set) var phase: Phase = .none
 
-    /// Cooldown: minimum seconds between drops to avoid spam.
-    /// Set to 0 during development; raise to 120–300 for production.
-    private let cooldownInterval: TimeInterval = 0
+    /// Whether the center drop has already been shown for this journey.
+    /// Once shown and dismissed, subsequent MapView appearances go straight to sidebar.
+    private var hasDroppedThisJourney: Bool = false
 
-    private static let lastDropKey = "FilmCamera.lastDropTimestamp"
-
-    /// Call this when MapView appears. Rolls the dice for a camera drop.
-    func rollForDrop() {
-        // Already showing — don't re-trigger
-        guard !hasFilmCamera else { return }
-
-        // Check cooldown
-        let lastDrop = UserDefaults.standard.double(forKey: Self.lastDropKey)
-        let now = Date().timeIntervalSince1970
-        guard now - lastDrop > cooldownInterval else { return }
-
-        // Roll
-        let roll = Double.random(in: 0...1)
-        if roll < dropChance {
-            UserDefaults.standard.set(now, forKey: Self.lastDropKey)
-            // Small delay for natural feel
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                self?.hasFilmCamera = true
-                self?.showDropAnimation = true
-                // Auto-dismiss animation flag
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                    self?.showDropAnimation = false
-                }
+    /// Call when MapView appears during active tracking.
+    /// First call: drops to center. Subsequent calls: straight to sidebar.
+    func dropForJourney() {
+        if hasDroppedThisJourney {
+            // Re-entering MapView during same journey — go straight to sidebar
+            if phase == .none {
+                phase = .sidebar
             }
+            return
+        }
+
+        guard phase == .none else { return }
+        hasDroppedThisJourney = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self, self.phase == .none else { return }
+            self.phase = .center
         }
     }
 
-    /// Call after the user has used the camera (or dismissed it).
-    /// The camera stays available for the rest of this MapView session.
-    func markUsed() {
-        // Camera remains available until MapView disappears.
-        // No-op for now; extend if single-use is desired.
+    /// User tapped "试试" or "一会儿再试" — move to sidebar.
+    func dismissToSidebar() {
+        phase = .sidebar
     }
 
-    /// Reset when MapView disappears.
+    /// Reset when journey ends (MapView disappears at finish).
     func reset() {
-        hasFilmCamera = false
-        showDropAnimation = false
+        phase = .none
+        hasDroppedThisJourney = false
     }
 }

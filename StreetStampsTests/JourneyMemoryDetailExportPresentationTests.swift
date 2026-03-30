@@ -33,6 +33,26 @@ final class JourneyMemoryDetailExportPresentationTests: XCTestCase {
         XCTAssertNil(JourneyMemoryDetailTitlePresentation.normalizedCustomTitle(from: " \n "))
     }
 
+    func test_exportTitle_prefersTrimmedCustomTitle() {
+        XCTAssertEqual(
+            JourneyMemoryDetailTitlePresentation.exportTitle(
+                customTitle: "  Sunset Run  ",
+                fallbackCityName: "London"
+            ),
+            "Sunset Run"
+        )
+    }
+
+    func test_exportTitle_fallsBackToCityNameWhenCustomTitleBlank() {
+        XCTAssertEqual(
+            JourneyMemoryDetailTitlePresentation.exportTitle(
+                customTitle: " \n ",
+                fallbackCityName: "London"
+            ),
+            "London"
+        )
+    }
+
     func test_shouldShowOverallMemory_isFalseForNilOrWhitespace() {
         XCTAssertFalse(JourneyMemoryDetailExportPresentation(overallMemory: nil, overallMemoryImagePaths: []).shouldShowOverallMemory)
         XCTAssertFalse(JourneyMemoryDetailExportPresentation(overallMemory: "", overallMemoryImagePaths: []).shouldShowOverallMemory)

@@ -10,14 +10,19 @@ enum FAQContent {
     static func items() -> [FAQItem] {
         [
             FAQItem(
+                id: "overview",
+                question: L10n.t("faq_q_overview"),
+                answer: L10n.t("faq_a_overview")
+            ),
+            FAQItem(
                 id: "track_accuracy",
                 question: L10n.t("faq_q_track_accuracy"),
                 answer: L10n.t("faq_a_track_accuracy")
             ),
             FAQItem(
-                id: "straight_lines",
-                question: L10n.t("faq_q_straight_lines"),
-                answer: L10n.t("faq_a_straight_lines")
+                id: "passive_tracking",
+                question: L10n.t("faq_q_passive_tracking"),
+                answer: L10n.t("faq_a_passive_tracking")
             ),
             FAQItem(
                 id: "battery",
@@ -25,24 +30,34 @@ enum FAQContent {
                 answer: L10n.t("faq_a_battery")
             ),
             FAQItem(
-                id: "data_storage",
-                question: L10n.t("faq_q_data_storage"),
-                answer: L10n.t("faq_a_data_storage")
-            ),
-            FAQItem(
-                id: "city_wrong",
-                question: L10n.t("faq_q_city_wrong"),
-                answer: L10n.t("faq_a_city_wrong")
-            ),
-            FAQItem(
                 id: "sport_vs_daily",
                 question: L10n.t("faq_q_sport_vs_daily"),
                 answer: L10n.t("faq_a_sport_vs_daily")
             ),
             FAQItem(
+                id: "data_storage",
+                question: L10n.t("faq_q_data_storage"),
+                answer: L10n.t("faq_a_data_storage")
+            ),
+            FAQItem(
+                id: "phone_migration",
+                question: L10n.t("faq_q_phone_migration"),
+                answer: L10n.t("faq_a_phone_migration")
+            ),
+            FAQItem(
                 id: "icloud_sync",
                 question: L10n.t("faq_q_icloud_sync"),
                 answer: L10n.t("faq_a_icloud_sync")
+            ),
+            FAQItem(
+                id: "gpx_import",
+                question: L10n.t("faq_q_gpx_import"),
+                answer: L10n.t("faq_a_gpx_import")
+            ),
+            FAQItem(
+                id: "city_wrong",
+                question: L10n.t("faq_q_city_wrong"),
+                answer: L10n.t("faq_a_city_wrong")
             ),
             FAQItem(
                 id: "location_permission",

@@ -156,6 +156,24 @@
 "tracking_mode_sport" = "运动";
 "tracking_mode_daily" = "日常";
 
+/* Film Camera Drop - 胶片相机掉落 */
+"film_camera_drop_message" = "本次旅程为您掉落一款定制胶片相机";
+"film_camera_try_now" = "试试";
+"film_camera_try_later" = "一会儿再试";
+
+/* Photo Edit - 照片编辑 */
+"photo_edit_done" = "完成";
+"photo_edit_done_all" = "全部完成";
+"photo_edit_button" = "编辑";
+"photo_edit_rotate" = "旋转";
+"photo_edit_text_tool" = "文字";
+"photo_edit_crop" = "裁剪";
+"photo_edit_add_text" = "添加文字";
+"photo_edit_edit_text" = "编辑文字";
+"photo_edit_delete_text" = "删除文字";
+"photo_edit_skip" = "跳过";
+"photo_edit_text_placeholder" = "输入文字...";
+
 /* Lock Screen Tracking Cards - 锁屏追踪卡片 */
 "lockscreen_tracking_active" = "追踪中";
 "lockscreen_sport_mode" = "运动模式";
@@ -1124,22 +1142,28 @@
 "faq_title" = "常见问题";
 "faq_subtitle" = "关于 Worldo 的常见问题解答";
 "settings_faq_title" = "常见问题";
+"faq_q_overview" = "Worldo 怎么玩？";
+"faq_a_overview" = "Worldo 是一款融合旅程记录与地图社交的产品。开启旅程记录跑步、骑行、徒步或城市探索的轨迹，沿途拍照写下心情，用图文轨迹留住每一段真实的出行记忆。你的足迹会绘制在 Worldo 地图和 3D 地球上，解锁去过的城市卡片。开启始终追踪模式后，每天的足迹也会自动记录，无需手动开始。你可以关注朋友，在动态中看到他们正在探索的城市、走过的路线和旅途记忆，参与彼此的线下生活。还能互寄明信片、收集独特装备来个性化你的档案。";
 "faq_q_track_accuracy" = "为什么轨迹不准？";
-"faq_a_track_accuracy" = "GPS 精度取决于你的环境。高楼、隧道和室内会削弱 GPS 信号，导致定位漂移。建议将定位权限设为「始终允许」或「使用期间」，尽量在开阔区域使用。运动模式使用更高精度的 GPS 采样，轨迹会更准确。";
-"faq_q_straight_lines" = "为什么轨迹会拉直线？";
-"faq_a_straight_lines" = "直线出现在 GPS 信号丢失时（如地铁、隧道、建筑物内）。App 会将最后已知位置与信号恢复处连接。这是正常的 GPS 行为。运动模式通过更频繁的采样可以减少这种情况，但在信号盲区无法完全避免。";
+"faq_a_track_accuracy" = "GPS 精度取决于你所处的环境。高楼密集区、隧道和室内会削弱 GPS 信号，导致定位漂移和轨迹偏移。在 GPS 信号丢失的地方（如地铁、隧道、建筑物内），Worldo 的轨迹会出现跳点，连成直线或显示为虚线，这是所有 GPS 应用的正常现象。此外，手机的性能状态和电量也会影响 GPS 芯片的工作精度。建议将定位权限设为「始终允许」，尽量在开阔区域使用。运动模式下 GPS 采样更精确，轨迹会更准确，但在信号盲区仍无法完全避免。";
+"faq_q_passive_tracking" = "为什么我没开启旅程，Worldo 页面也有足迹？";
+"faq_a_passive_tracking" = "Worldo 页面右下角的按钮可以控制始终追踪模式。开启后，即使你不主动开始旅程，你每天的轨迹也会自动被记录，显示在 Worldo 页面和右上角的 3D 视图中。";
 "faq_q_battery" = "Worldo 耗电吗？";
-"faq_a_battery" = "追踪 Journey 时会使用 GPS，确实会消耗电量。运动模式比日常模式更耗电，因为 GPS 采样频率更高。不追踪时，后台 Lifelog 记录通过低精度定位更新，耗电量很小。你可以在 设置 → 后台记录模式 调整精度。";
-"faq_q_data_storage" = "我的数据存在哪里？";
-"faq_a_data_storage" = "所有 Journey 数据、照片和 Lifelog 首先存储在本地设备上。如果你有账号，数据会同步到 iCloud 备份。你的数据不会与任何第三方共享。你可以在 设置 → 数据管理 中手动备份或恢复 iCloud 数据。";
-"faq_q_city_wrong" = "为什么 Journey 的城市归属不对？";
-"faq_a_city_wrong" = "城市归属基于你开始 Journey 的 GPS 位置，通过 Apple 的地理编码服务解析。有时地理编码数据库中的城市边界可能与你的预期不同。这种情况会随着 Apple 更新数据而改善。";
+"faq_a_battery" = "Worldo 在耗电方面做了大量优化。运动模式为了 GPS 和轨迹更精确，相对较为耗电；但 Worldo 默认使用日常模式，比同类轨迹软件省电很多。不追踪旅程时，后台追踪使用低精度定位更新，耗电量极小。你还可以在设置中进一步调整精度以节省电量。";
 "faq_q_sport_vs_daily" = "运动模式和日常模式有什么区别？";
-"faq_a_sport_vs_daily" = "运动模式以高精度录制（3米采样间隔），带路线平滑处理 — 适合跑步、骑行或徒步等需要精确轨迹的场景。日常模式为省电优化（12米采样），会根据出行方式自动调整 — 适合通勤或全天记录等更看重续航的场景。";
+"faq_a_sport_vs_daily" = "运动模式以高精度录制，带路线平滑处理 — 适合跑步、骑行或徒步等需要精确轨迹的场景。日常模式为省电优化，会根据出行方式自动调整 — 适合通勤或全天记录等更看重续航的场景。";
+"faq_q_data_storage" = "我的数据存在哪里？";
+"faq_a_data_storage" = "所有数据首先存储在本地设备上。公开旅程登录账号后会通过服务器同步，方便好友查看你的足迹；私密旅程、记忆照片和后台追踪数据仅存在本地，可通过 iCloud 备份。你的数据会被加密保护，不会被用作任何商业用途。";
+"faq_q_phone_migration" = "我要换手机，数据怎么办？";
+"faq_a_phone_migration" = "设置中有专门的「数据迁移」功能。公开旅程登录账号后通过服务器同步，换机后登录同一账号即可恢复。对于本地私密旅程、记忆照片和后台追踪数据，可以使用「设备迁移」功能：两台设备连接同一 Wi-Fi，旧设备生成二维码，新设备扫码即可将数据通过局域网直接传输，无需上传云端。建议换机前先在设置 → 数据迁移中完成迁移操作。";
 "faq_q_icloud_sync" = "iCloud 同步怎么运作？";
-"faq_a_icloud_sync" = "Worldo 会将你的 Journey、记忆、Lifelog 和设置同步到你的个人 iCloud 存储。有账号时会自动同步。你也可以在 设置 → 数据管理 → iCloud 备份 中手动触发完整备份或恢复。同步使用你自己的 iCloud 配额，不是 Worldo 的服务器。";
+"faq_a_icloud_sync" = "公开旅程登录后通过 Worldo 服务器同步，好友可以看到你的足迹。私密旅程、记忆照片、后台追踪数据和设置会同步到你的个人 iCloud 存储，使用你自己的 iCloud 配额。你也可以在 设置 → 数据管理 → iCloud 备份 中手动触发完整备份或恢复。";
+"faq_q_gpx_import" = "什么是 GPX？";
+"faq_a_gpx_import" = "GPX（GPS Exchange Format）是一种通用的 GPS 数据交换格式，被大多数运动和地图应用支持。你可以将其他应用（如 Strava、佳明等）的运动轨迹导出为 GPX 文件，然后导入到 Worldo，将之前的运动记录整合到你的足迹地图里。";
+"faq_q_city_wrong" = "为什么旅程的城市归属不对？";
+"faq_a_city_wrong" = "城市归属基于你开始旅程的 GPS 位置，通过 Apple 的地理编码服务解析。有时地理编码数据库中的城市边界可能与你的预期不同。这种情况会随着 Apple 更新数据而改善。";
 "faq_q_location_permission" = "Worldo 需要什么定位权限？";
-"faq_a_location_permission" = "为获得最佳体验，建议授予「始终允许」定位权限。这样可以启用后台 Lifelog 记录和追踪时的实时活动。「使用期间」可以用于主动追踪，但会禁用后台功能。你可以随时在 iOS 设置 → Worldo → 定位 中更改。";
+"faq_a_location_permission" = "为获得最佳体验，建议授予「始终允许」定位权限。这样可以启用后台追踪和追踪旅程时的实时活动。「使用期间」可以用于主动追踪，但会禁用后台功能。你可以随时在 iOS 设置 → Worldo → 定位 中更改。";
 
 // MARK: - Feedback & Rating
 "settings_feedback_title" = "发送反馈";

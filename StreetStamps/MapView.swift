@@ -778,7 +778,9 @@ final class CameraOverlayController: UIViewController {
     // Shooting UI
     private var shutterButton: UIButton?
     private var closeButton: UIButton?
+    private var flashButton: UIButton?
     private var flipButton: UIButton?
+    private var currentFlashMode: UIImagePickerController.CameraFlashMode = .off
 
     // Review UI
     private var reviewImage: UIImage?
@@ -833,6 +835,17 @@ final class CameraOverlayController: UIViewController {
         view.addSubview(close)
         self.closeButton = close
 
+        // Flash toggle button (top bar, center)
+        let flash = UIButton(type: .system)
+        flash.setImage(UIImage(systemName: "bolt.slash.fill")?.withConfiguration(
+            UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
+        ), for: .normal)
+        flash.tintColor = .white
+        flash.addTarget(self, action: #selector(flashTapped), for: .touchUpInside)
+        flash.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(flash)
+        self.flashButton = flash
+
         // Flip camera button (top bar, right)
         let flip = UIButton(type: .system)
         flip.setImage(UIImage(systemName: "camera.rotate")?.withConfiguration(
@@ -878,11 +891,16 @@ final class CameraOverlayController: UIViewController {
             bottomBar.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             bottomBar.topAnchor.constraint(equalTo: view.topAnchor, constant: previewBottom),
 
-            // Close / Flip: vertically centered in the 52pt control strip below safeTop
+            // Close / Flash / Flip: vertically centered in the 52pt control strip below safeTop
             close.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             close.centerYAnchor.constraint(equalTo: view.topAnchor, constant: safeTop + 26),
             close.widthAnchor.constraint(equalToConstant: 44),
             close.heightAnchor.constraint(equalToConstant: 44),
+
+            flash.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            flash.centerYAnchor.constraint(equalTo: close.centerYAnchor),
+            flash.widthAnchor.constraint(equalToConstant: 44),
+            flash.heightAnchor.constraint(equalToConstant: 44),
 
             flip.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
             flip.centerYAnchor.constraint(equalTo: close.centerYAnchor),
@@ -910,6 +928,7 @@ final class CameraOverlayController: UIViewController {
         // Hide shooting controls
         shutterButton?.isHidden = true
         closeButton?.isHidden = true
+        flashButton?.isHidden = true
         flipButton?.isHidden = true
 
         // Show photo full screen
@@ -965,6 +984,7 @@ final class CameraOverlayController: UIViewController {
 
         shutterButton?.isHidden = false
         closeButton?.isHidden = false
+        flashButton?.isHidden = false
         flipButton?.isHidden = false
     }
 
@@ -979,12 +999,46 @@ final class CameraOverlayController: UIViewController {
         picker?.takePicture()
     }
 
+    @objc private func flashTapped() {
+        guard let picker else { return }
+        switch currentFlashMode {
+        case .off:
+            currentFlashMode = .on
+            picker.cameraFlashMode = .on
+            flashButton?.setImage(UIImage(systemName: "bolt.fill")?.withConfiguration(
+                UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
+            ), for: .normal)
+            flashButton?.tintColor = .systemYellow
+        case .on:
+            currentFlashMode = .auto
+            picker.cameraFlashMode = .auto
+            flashButton?.setImage(UIImage(systemName: "bolt.badge.automatic.fill")?.withConfiguration(
+                UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
+            ), for: .normal)
+            flashButton?.tintColor = .white
+        default:
+            currentFlashMode = .off
+            picker.cameraFlashMode = .off
+            flashButton?.setImage(UIImage(systemName: "bolt.slash.fill")?.withConfiguration(
+                UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
+            ), for: .normal)
+            flashButton?.tintColor = .white
+        }
+    }
+
     @objc private func flipTapped() {
         guard let picker else { return }
         if picker.cameraDevice == .front {
             picker.cameraDevice = .rear
         } else {
             picker.cameraDevice = .front
+        }
+        // Update flash visibility — front camera typically has no flash
+        let hasFlash = UIImagePickerController.isFlashAvailable(for: picker.cameraDevice)
+        flashButton?.isHidden = !hasFlash
+        if !hasFlash {
+            currentFlashMode = .off
+            picker.cameraFlashMode = .off
         }
     }
 
@@ -1136,10 +1190,11 @@ struct MapView: View {
     @State private var activeMapHint: OnboardingGuideStore.Hint?
     @State private var mapHintTask: Task<Void, Never>?
 
-    // Film camera
+    // Camera
     @StateObject private var filmCameraDrop = FilmCameraDropManager()
     @State private var showFilmCamera = false
-    @State private var filmCameraPreloadedPaths: [String] = []
+    @State private var showDirectCamera = false
+    @State private var cameraPreloadedPaths: [String] = []
 
     private func mapCoord(_ c: CLLocationCoordinate2D) -> CLLocationCoordinate2D {
         tracking.mapReady(c)
@@ -1188,12 +1243,22 @@ struct MapView: View {
             }
         }
         .overlay {
+            if filmCameraDrop.phase == .center {
+                filmCameraCenterDrop
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .top).combined(with: .opacity),
+                        removal: .scale(scale: 0.3).combined(with: .opacity)
+                    ))
+            }
+        }
+        .animation(.spring(response: 0.5, dampingFraction: 0.72), value: filmCameraDrop.phase)
+        .overlay {
             if showMemoryEditor {
                 MemoryEditorSheet(
                     isPresented: $showMemoryEditor,
                     userID: sessionStore.currentUserID,
                     existing: editingMemory,
-                    preloadedImagePaths: filmCameraPreloadedPaths,
+                    preloadedImagePaths: cameraPreloadedPaths,
                     onSave: { draft in
                         if draft == nil {
                             if let existingID = editingMemory?.id,
@@ -1257,7 +1322,7 @@ struct MapView: View {
         .onChange(of: showMemoryEditor) { visible in
             if !visible {
                 editingMemory = nil
-                filmCameraPreloadedPaths = []
+                cameraPreloadedPaths = []
             }
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.78), value: showModeSelector)
@@ -1291,9 +1356,23 @@ struct MapView: View {
             )
             .ignoresSafeArea()
         }
+        .fullScreenCover(isPresented: $showDirectCamera) {
+            SystemCameraPicker(
+                preferredDevice: .rear,
+                mirrorOnCapture: false,
+                onImage: { image in
+                    showDirectCamera = false
+                    handleDirectCameraCapture(image)
+                },
+                onCancel: {
+                    showDirectCamera = false
+                }
+            )
+            .ignoresSafeArea()
+        }
         .onAppear {
             onAppearSetup()
-            filmCameraDrop.rollForDrop()
+            filmCameraDrop.dropForJourney()
             groupedMemoriesCache = computeGroupedMemories()
             if flow.pendingWidgetCaptureSignal > 0 {
                 if WidgetCaptureLaunchPolicy.shouldOpenEditorOnMapAppear(
@@ -1363,8 +1442,8 @@ struct MapView: View {
     // =======================
     private var rightMiddleButtons: some View {
         VStack(spacing: 12) {
-            // Film camera — shown when dropped
-            if filmCameraDrop.hasFilmCamera {
+            // Film camera — shown in sidebar after user dismisses center drop
+            if filmCameraDrop.phase == .sidebar {
                 filmCameraButton
                     .transition(.asymmetric(
                         insertion: .scale(scale: 0.3).combined(with: .opacity).combined(with: .offset(y: -12)),
@@ -1372,18 +1451,22 @@ struct MapView: View {
                     ))
             }
 
+            floatingActionButton(icon: "camera", label: "CAPTURE", dark: true) {
+                showDirectCamera = true
+                dismissMapHint(.mapMemoryIcon)
+            }
+
+            floatingActionButton(icon: "note.text", label: "MEMORY", dark: false) {
+                editingMemory = nil
+                showMemoryEditor = true
+            }
+
             floatingActionButton(icon: "scope", label: "LOCATE", dark: false) {
                 followUser = false
                 if let loc = tracking.userLocation { updateCamera(for: loc) }
             }
-
-            floatingActionButton(icon: "camera", label: "CAPTURE", dark: true) {
-                editingMemory = nil
-                showMemoryEditor = true
-                dismissMapHint(.mapMemoryIcon)
-            }
         }
-        .animation(.spring(response: 0.5, dampingFraction: 0.7), value: filmCameraDrop.hasFilmCamera)
+        .animation(.spring(response: 0.5, dampingFraction: 0.7), value: filmCameraDrop.phase == .sidebar)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
         .padding(.trailing, 24)
     }
@@ -1480,6 +1563,129 @@ struct MapView: View {
         .buttonStyle(.plain)
     }
 
+    /// Film camera center drop overlay — shown when journey starts,
+    /// user picks "试试" to open or "一会儿再试" to dismiss to sidebar.
+    private var filmCameraCenterDrop: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                // Camera icon
+                ZStack {
+                    // Camera body
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.18, green: 0.18, blue: 0.20),
+                                    Color(red: 0.10, green: 0.10, blue: 0.12)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .frame(width: 80, height: 60)
+
+                    // Viewfinder bump
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(Color(red: 0.14, green: 0.14, blue: 0.16))
+                        .frame(width: 26, height: 10)
+                        .offset(y: -35)
+
+                    // Chrome edge
+                    Rectangle()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color(white: 0.35), Color(white: 0.22)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: 80, height: 2)
+                        .offset(y: -29)
+
+                    // Lens
+                    Circle()
+                        .fill(Color(red: 0.06, green: 0.06, blue: 0.08))
+                        .frame(width: 32, height: 32)
+                    Circle()
+                        .stroke(Color(white: 0.30), lineWidth: 1.5)
+                        .frame(width: 32, height: 32)
+                    Circle()
+                        .fill(
+                            RadialGradient(
+                                colors: [
+                                    Color(red: 0.2, green: 0.25, blue: 0.4),
+                                    Color(red: 0.06, green: 0.08, blue: 0.14)
+                                ],
+                                center: .center,
+                                startRadius: 2,
+                                endRadius: 14
+                            )
+                        )
+                        .frame(width: 24, height: 24)
+                    Circle()
+                        .fill(Color.white.opacity(0.25))
+                        .frame(width: 6, height: 6)
+                        .offset(x: -5, y: -5)
+
+                    // Flash window
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color(red: 0.95, green: 0.80, blue: 0.4).opacity(0.6))
+                        .frame(width: 8, height: 8)
+                        .offset(x: 26, y: -16)
+                }
+                .frame(width: 80, height: 80)
+                .padding(.bottom, 20)
+
+                // Copy
+                Text(L10n.t("film_camera_drop_message"))
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+                    .padding(.bottom, 28)
+
+                // Action buttons
+                VStack(spacing: 12) {
+                    Button {
+                        showFilmCamera = true
+                        UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            filmCameraDrop.dismissToSidebar()
+                        }
+                    } label: {
+                        Text(L10n.t("film_camera_try_now"))
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.black)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 48)
+                            .background(Color.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            filmCameraDrop.dismissToSidebar()
+                        }
+                    } label: {
+                        Text(L10n.t("film_camera_try_later"))
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundColor(.white.opacity(0.8))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 48)
+                            .background(Color.white.opacity(0.15))
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 40)
+            }
+        }
+    }
+
     private var mapLayer: some View {
         JourneyMKMapView(
             controller: mapController,
@@ -1530,9 +1736,7 @@ struct MapView: View {
     }
 
     private var topTrackingHeader: some View {
-        let pillPresentation = journeyRoute.trackingMode.mapPillPresentation
-
-        return ZStack {
+        ZStack {
             Text(journeyRoute.displayCityName.uppercased())
                 .font(.system(size: 20, weight: .bold))
                 .tracking(-0.9)
@@ -1574,11 +1778,17 @@ struct MapView: View {
                         showModeSelector = true
                     }
                 } label: {
-                    Image(systemName: pillPresentation.symbolName)
-                        .font(.system(size: pillPresentation.iconFontSize, weight: .medium))
-                        .foregroundColor(FigmaTheme.text.opacity(pillPresentation.foregroundOpacity))
-                        .frame(width: 32, height: 32)
-                        .contentShape(Rectangle())
+                    HStack(spacing: 4) {
+                        Image(systemName: journeyRoute.trackingMode.icon)
+                            .font(.system(size: 11, weight: .medium))
+                        Text(journeyRoute.trackingMode.displayName)
+                            .font(.system(size: 13, weight: .semibold))
+                            .tracking(-0.3)
+                    }
+                    .foregroundColor(FigmaTheme.text.opacity(0.82))
+                    .padding(.horizontal, 6)
+                    .frame(height: 32)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
@@ -1615,7 +1825,7 @@ struct MapView: View {
     /// Film camera capture → save photo → auto-open MemoryEditor with image pre-loaded
     private func handleFilmCameraCapture(_ image: UIImage) {
         guard let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) else { return }
-        filmCameraPreloadedPaths = [filename]
+        cameraPreloadedPaths = [filename]
         editingMemory = nil
 
         // Also save to photo library
@@ -1627,6 +1837,24 @@ struct MapView: View {
         }
 
         // Small delay so fullScreenCover dismiss completes before sheet opens
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            self.showMemoryEditor = true
+        }
+    }
+
+    /// Direct camera capture → save photo → auto-open MemoryEditor with image pre-loaded
+    private func handleDirectCameraCapture(_ image: UIImage) {
+        guard let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) else { return }
+        cameraPreloadedPaths = [filename]
+        editingMemory = nil
+
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else { return }
+            PHPhotoLibrary.shared().performChanges({
+                PHAssetChangeRequest.creationRequestForAsset(from: image)
+            }, completionHandler: nil)
+        }
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
             self.showMemoryEditor = true
         }
@@ -2851,13 +3079,13 @@ struct MemoryEditorSheet: View {
     @State private var showExpanded = false
     @State private var showDiscardAlert = false
     @State private var showDeleteAlert = false
-
     // ✅ Used to decide whether we should auto-resume the editor when user returns
     // (Back gesture / swipe-dismiss). Save & Cancel will set this to true.
     @State private var didExitExplicitly: Bool = false
 
     /// ✅ 镜像开关：默认不镜像
     @State private var mirrorSelfie: Bool = false
+    @State private var draftDebounceTask: Task<Void, Never>?
     @State private var initialTitle: String
     @State private var initialNotes: String
     @State private var initialImagePaths: [String]
@@ -2913,6 +3141,15 @@ private func persistDraft() {
     MemoryDraftStore.save(d, userID: userID, memoryID: draftMemoryID)
 }
 
+private func scheduleDraftPersist() {
+    draftDebounceTask?.cancel()
+    draftDebounceTask = Task { @MainActor in
+        try? await Task.sleep(nanoseconds: 1_500_000_000) // 1.5s debounce
+        guard !Task.isCancelled else { return }
+        persistDraft()
+    }
+}
+
 private func clearDraft() {
     MemoryDraftStore.clear(userID: userID, memoryID: draftMemoryID)
 }
@@ -2960,13 +3197,14 @@ private var hasUnsavedChanges: Bool {
             .padding(.horizontal, 18)
         }
         
-.onChange(of: title) { _ in persistDraft() }
-.onChange(of: notes) { _ in persistDraft() }
+.onChange(of: title) { _ in scheduleDraftPersist() }
+.onChange(of: notes) { _ in scheduleDraftPersist() }
 .onChange(of: imagePaths) { _ in persistDraft() }
 .onChange(of: mirrorSelfie) { _ in persistDraft() }
 .interactiveDismissDisabled(hasUnsavedChanges)
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             // ✅ If the app is backgrounded / killed, keep the draft
+            draftDebounceTask?.cancel()
             if !didExitExplicitly, hasUnsavedChanges {
                 persistDraft()
                 MemoryDraftResumeStore.set(true, userID: userID, memoryID: draftMemoryID)
@@ -2975,6 +3213,7 @@ private var hasUnsavedChanges: Bool {
         .onDisappear {
             // ✅ Back gesture / swipe-dismiss should keep editing state
             // unless user explicitly saved or canceled.
+            draftDebounceTask?.cancel()
             if !didExitExplicitly, hasUnsavedChanges {
                 persistDraft()
                 MemoryDraftResumeStore.set(true, userID: userID, memoryID: draftMemoryID)
@@ -2985,9 +3224,8 @@ private var hasUnsavedChanges: Bool {
                 preferredDevice: .rear,
                 mirrorOnCapture: mirrorSelfie,
                 onImage: { image in
-                    // 这里回调已经在 UIKit dismiss completion 之后触发
                     showCamera = false
-                    appendCaptured(image)
+                    storeEditedImages([image], writesToPhotoLibrary: true)
                 },
                 onCancel: {
                     showCamera = false
@@ -3000,7 +3238,7 @@ private var hasUnsavedChanges: Bool {
                 selectionLimit: max(1, remainingPhotoSlots),
                 onImages: { images in
                     showPhotoLibrary = false
-                    appendPhotosFromLibrary(images)
+                    storeEditedImages(images, writesToPhotoLibrary: false)
                 },
                 onCancel: {
                     showPhotoLibrary = false
@@ -3229,28 +3467,22 @@ private var hasUnsavedChanges: Bool {
         isPresented = false
     }
 
-
-    private func appendCaptured(_ image: UIImage) {
-        guard canAddPhoto else { return }
-        if let filename = try? PhotoStore.saveJPEG(image, userID: userID) {
-            imagePaths.append(filename)
-        }
-
-        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
-            guard status == .authorized || status == .limited else { return }
-            PHPhotoLibrary.shared().performChanges({
-                PHAssetChangeRequest.creationRequestForAsset(from: image)
-            }, completionHandler: nil)
-        }
-    }
-
-    /// 从相册选择的照片（不保存回相册，因为本来就在相册里）
-    private func appendPhotosFromLibrary(_ images: [UIImage]) {
+    private func storeEditedImages(_ images: [UIImage], writesToPhotoLibrary: Bool) {
         guard canAddPhoto else { return }
         for image in images {
             if !canAddPhoto { break }
             if let filename = try? PhotoStore.saveJPEG(image, userID: userID) {
                 imagePaths.append(filename)
+            }
+        }
+
+        guard writesToPhotoLibrary else { return }
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else { return }
+            for image in images {
+                PHPhotoLibrary.shared().performChanges({
+                    PHAssetChangeRequest.creationRequestForAsset(from: image)
+                }, completionHandler: nil)
             }
         }
     }
@@ -3329,7 +3561,7 @@ struct MemoryEditorPage: View {
                 mirrorOnCapture: mirrorSelfie,
                 onImage: { image in
                     showCamera = false
-                    appendCaptured(image)
+                    storeEditedImages([image], writesToPhotoLibrary: true)
                 },
                 onCancel: { showCamera = false }
             )
@@ -3340,7 +3572,7 @@ struct MemoryEditorPage: View {
                 selectionLimit: max(1, remainingPhotoSlots),
                 onImages: { images in
                     showPhotoLibrary = false
-                    appendPhotosFromLibrary(images)
+                    storeEditedImages(images, writesToPhotoLibrary: false)
                 },
                 onCancel: { showPhotoLibrary = false }
             )
@@ -3491,26 +3723,22 @@ struct MemoryEditorPage: View {
         .background(Color.white)
     }
 
-    private func appendCaptured(_ image: UIImage) {
-        guard canAddPhoto else { return }
-        if let filename = try? PhotoStore.saveJPEG(image, userID: userID) {
-            imagePaths.append(filename)
-        }
-
-        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
-            guard status == .authorized || status == .limited else { return }
-            PHPhotoLibrary.shared().performChanges({
-                PHAssetChangeRequest.creationRequestForAsset(from: image)
-            }, completionHandler: nil)
-        }
-    }
-
-    private func appendPhotosFromLibrary(_ images: [UIImage]) {
+    private func storeEditedImages(_ images: [UIImage], writesToPhotoLibrary: Bool) {
         guard canAddPhoto else { return }
         for image in images {
             if !canAddPhoto { break }
             if let filename = try? PhotoStore.saveJPEG(image, userID: userID) {
                 imagePaths.append(filename)
+            }
+        }
+
+        guard writesToPhotoLibrary else { return }
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else { return }
+            for image in images {
+                PHPhotoLibrary.shared().performChanges({
+                    PHAssetChangeRequest.creationRequestForAsset(from: image)
+                }, completionHandler: nil)
             }
         }
     }

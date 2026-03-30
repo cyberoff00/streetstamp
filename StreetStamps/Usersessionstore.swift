@@ -772,6 +772,7 @@ final class UserSessionStore: ObservableObject {
             || dirHasEntries(paths.photosDir)
             || dirHasEntries(paths.thumbnailsDir)
             || fm.fileExists(atPath: paths.lifelogRouteURL.path)
+            || fm.fileExists(atPath: paths.lifelogDayShardIndexURL.path)
     }
 
     private func loadAutoRecoveredGuestSources() -> [String: [String]] {
@@ -950,6 +951,7 @@ final class UserSessionStore: ObservableObject {
             || dirHasEntries(paths.photosDir)
             || dirHasEntries(paths.thumbnailsDir)
             || fm.fileExists(atPath: paths.lifelogRouteURL.path)
+            || fm.fileExists(atPath: paths.lifelogDayShardIndexURL.path)
     }
 
     nonisolated private static func loadLegacyBindingsWorker() -> [LegacyGuestBinding] {

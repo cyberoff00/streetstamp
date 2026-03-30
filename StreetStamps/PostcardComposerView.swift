@@ -258,22 +258,14 @@ struct PostcardComposerView: View {
                 do {
                     guard let data = try await item.loadTransferable(type: Data.self) else { return }
 
-                    let (previewImage, compressedData) = try await Task.detached(priority: .userInitiated) {
+                    let previewImage = try await Task.detached(priority: .userInitiated) {
                         guard let uiImage = UIImage(data: data) else {
                             throw NSError(domain: "PostcardError", code: -1)
                         }
-                        let prepared = uiImage.downscaled(maxPixel: MediaUploadPreparation.postcardMaxPixel)
-                        guard let jpeg = prepared.jpegData(compressionQuality: MediaUploadPreparation.postcardCompressionQuality) else {
-                            throw NSError(domain: "PostcardError", code: -2)
-                        }
-                        return (prepared, jpeg)
+                        return uiImage.downscaled(maxPixel: MediaUploadPreparation.postcardMaxPixel)
                     }.value
 
-                    let filename = "postcard_\(UUID().uuidString).jpg"
-                    let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
-                    try compressedData.write(to: url, options: .atomic)
-                    selectedImage = previewImage
-                    localImagePath = url.path
+                    persistEditedPostcardImage(previewImage)
                 } catch {
                     photoErrorText = L10n.t("postcard_send_failed")
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2) { photoErrorText = nil }
@@ -467,6 +459,27 @@ struct PostcardComposerView: View {
             ) { recipient in
                 selectedRecipient = recipient
             }
+        }
+    }
+}
+
+private extension PostcardComposerView {
+    func persistEditedPostcardImage(_ image: UIImage) {
+        guard let compressedData = image.jpegData(compressionQuality: MediaUploadPreparation.postcardCompressionQuality) else {
+            photoErrorText = L10n.t("postcard_send_failed")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { photoErrorText = nil }
+            return
+        }
+
+        do {
+            let filename = "postcard_\(UUID().uuidString).jpg"
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+            try compressedData.write(to: url, options: .atomic)
+            selectedImage = image
+            localImagePath = url.path
+        } catch {
+            photoErrorText = L10n.t("postcard_send_failed")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { photoErrorText = nil }
         }
     }
 }

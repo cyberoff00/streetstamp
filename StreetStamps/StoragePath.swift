@@ -50,6 +50,7 @@ struct StoragePath: Sendable {
     var photosDir: URL { userRoot.appendingPathComponent("Photos", isDirectory: true) }
     var thumbnailsDir: URL { userRoot.appendingPathComponent("Thumbnails", isDirectory: true) }
     var trackTilesDir: URL { cachesDir.appendingPathComponent("track_tiles", isDirectory: true) }
+    var lifelogDaysDir: URL { cachesDir.appendingPathComponent("lifelog_days", isDirectory: true) }
     var quarantineDir: URL { userRoot.appendingPathComponent("Quarantine", isDirectory: true) }
 
     // MARK: - Files
@@ -59,6 +60,8 @@ struct StoragePath: Sendable {
     var lifelogLegacyRouteURL: URL { cachesDir.appendingPathComponent("lifelog_route.json", isDirectory: false) }
     var lifelogPassiveRouteURL: URL { cachesDir.appendingPathComponent("lifelog_passive_route.json", isDirectory: false) }
     var lifelogRouteURL: URL { lifelogPassiveRouteURL }
+    var lifelogDayShardIndexURL: URL { lifelogDaysDir.appendingPathComponent("index.json", isDirectory: false) }
+    var lifelogTodayDeltaURL: URL { lifelogDaysDir.appendingPathComponent("today.delta.jsonl", isDirectory: false) }
     var lifelogCountryCellsURL: URL { cachesDir.appendingPathComponent("lifelog_country_cells.json", isDirectory: false) }
     var lifelogPointCountriesURL: URL { cachesDir.appendingPathComponent("lifelog_point_countries.json", isDirectory: false) }
     var lifelogCountryRunsURL: URL { cachesDir.appendingPathComponent("lifelog_country_runs.json", isDirectory: false) }

@@ -10,7 +10,6 @@ struct LifelogFootprintProjectedMarker: Equatable, Identifiable {
         var hasher = Hasher()
         hasher.combine(Int(coordinate.latitude * 1_000_000))
         hasher.combine(Int(coordinate.longitude * 1_000_000))
-        hasher.combine(Int(angleDegrees * 100))
         return hasher.finalize()
     }
 }
@@ -23,14 +22,11 @@ final class LifelogFootprintViewportCache {
         let minLonE4: Int
         let maxLonE4: Int
         let runsSignature: Int
-        let exclusionLatE4: Int?
-        let exclusionLonE4: Int?
 
         init(
             lodLevel: Int,
             region: MKCoordinateRegion,
-            runsSignature: Int,
-            exclusionCoordinate: CLLocationCoordinate2D?
+            runsSignature: Int
         ) {
             self.lodLevel = lodLevel
             self.minLatE4 = Self.quantize(region.center.latitude - (region.span.latitudeDelta / 2.0))
@@ -38,8 +34,6 @@ final class LifelogFootprintViewportCache {
             self.minLonE4 = Self.quantize(region.center.longitude - (region.span.longitudeDelta / 2.0))
             self.maxLonE4 = Self.quantize(region.center.longitude + (region.span.longitudeDelta / 2.0))
             self.runsSignature = runsSignature
-            self.exclusionLatE4 = exclusionCoordinate.map { Self.quantize($0.latitude) }
-            self.exclusionLonE4 = exclusionCoordinate.map { Self.quantize($0.longitude) }
         }
 
         private static func quantize(_ value: Double) -> Int {
@@ -106,7 +100,6 @@ enum LifelogFootprintRenderPlanner {
         let maxMarkers: Int
         let minSeparationMeters: CLLocationDistance
         let gridCellRatio: Double
-        let exclusionMeters: CLLocationDistance
         let viewportBufferRatio: Double
     }
 
@@ -130,8 +123,7 @@ enum LifelogFootprintRenderPlanner {
     static func plannedMarkers(
         from runs: [[CLLocationCoordinate2D]],
         region: MKCoordinateRegion,
-        lodLevel: Int,
-        currentCoordinate: CLLocationCoordinate2D?
+        lodLevel: Int
     ) -> [LifelogFootprintProjectedMarker] {
         let settings = settings(for: lodLevel)
         var markers: [LifelogFootprintProjectedMarker] = []
@@ -142,10 +134,7 @@ enum LifelogFootprintRenderPlanner {
                 in: region,
                 bufferRatio: settings.viewportBufferRatio
             )
-            let filtered = clipped.compactMap { subrun in
-                filteredSubrun(subrun, excluding: currentCoordinate, radiusMeters: settings.exclusionMeters)
-            }
-            for subrun in filtered {
+            for subrun in clipped {
                 let decimatedRun = decimated(subrun, region: region, settings: settings)
                 for (index, coord) in decimatedRun.enumerated() {
                     guard isInsideBufferedViewport(coord, region: region, bufferRatio: settings.viewportBufferRatio) else {
@@ -170,7 +159,6 @@ enum LifelogFootprintRenderPlanner {
                 maxMarkers: 140,
                 minSeparationMeters: 24,
                 gridCellRatio: 0.020,
-                exclusionMeters: 26,
                 viewportBufferRatio: 0.12
             )
         case 2:
@@ -178,7 +166,6 @@ enum LifelogFootprintRenderPlanner {
                 maxMarkers: 92,
                 minSeparationMeters: 36,
                 gridCellRatio: 0.036,
-                exclusionMeters: 34,
                 viewportBufferRatio: 0.14
             )
         case 1:
@@ -186,7 +173,6 @@ enum LifelogFootprintRenderPlanner {
                 maxMarkers: 56,
                 minSeparationMeters: 52,
                 gridCellRatio: 0.056,
-                exclusionMeters: 44,
                 viewportBufferRatio: 0.16
             )
         default:
@@ -194,7 +180,6 @@ enum LifelogFootprintRenderPlanner {
                 maxMarkers: 34,
                 minSeparationMeters: 56,
                 gridCellRatio: 0.090,
-                exclusionMeters: 56,
                 viewportBufferRatio: 0.18
             )
         }
@@ -234,23 +219,6 @@ enum LifelogFootprintRenderPlanner {
         }
 
         return clipped.filter { $0.count >= 2 }
-    }
-
-    private static func filteredSubrun(
-        _ run: [CLLocationCoordinate2D],
-        excluding currentCoordinate: CLLocationCoordinate2D?,
-        radiusMeters: CLLocationDistance
-    ) -> [CLLocationCoordinate2D]? {
-        guard let currentCoordinate, radiusMeters > 0 else {
-            return run.count >= 2 ? run : nil
-        }
-
-        let me = CLLocation(latitude: currentCoordinate.latitude, longitude: currentCoordinate.longitude)
-        let filtered = run.filter { coord in
-            let point = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
-            return point.distance(from: me) > radiusMeters
-        }
-        return filtered.count >= 2 ? filtered : nil
     }
 
     private static func decimated(

@@ -33,8 +33,7 @@ final class LifelogFootprintRenderPlannerTests: XCTestCase {
         let markers = LifelogFootprintRenderPlanner.plannedMarkers(
             from: [run],
             region: region,
-            lodLevel: 3,
-            currentCoordinate: nil
+            lodLevel: 3
         )
 
         XCTAssertFalse(markers.isEmpty)
@@ -57,12 +56,32 @@ final class LifelogFootprintRenderPlannerTests: XCTestCase {
         let markers = LifelogFootprintRenderPlanner.plannedMarkers(
             from: [run],
             region: region,
-            lodLevel: 3,
-            currentCoordinate: nil
+            lodLevel: 3
         )
 
         XCTAssertLessThanOrEqual(markers.count, 140)
         XCTAssertGreaterThan(markers.count, 0)
+    }
+
+    func test_plannedMarkers_keepFootstepsNearCurrentCoordinateStable() {
+        let region = MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
+            span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
+        )
+        let run = [
+            CLLocationCoordinate2D(latitude: 37.77480, longitude: -122.41950),
+            CLLocationCoordinate2D(latitude: 37.77488, longitude: -122.41944),
+            CLLocationCoordinate2D(latitude: 37.77496, longitude: -122.41938),
+            CLLocationCoordinate2D(latitude: 37.77504, longitude: -122.41932)
+        ]
+
+        let markers = LifelogFootprintRenderPlanner.plannedMarkers(
+            from: [run],
+            region: region,
+            lodLevel: 3
+        )
+
+        XCTAssertEqual(markers.map(\.coordinate), run)
     }
 
     func test_viewportCache_reusesPlannedMarkersForSameKey() {
@@ -73,8 +92,7 @@ final class LifelogFootprintRenderPlannerTests: XCTestCase {
                 center: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
                 span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
             ),
-            runsSignature: 42,
-            exclusionCoordinate: nil
+            runsSignature: 42
         )
         let expected = [
             LifelogFootprintProjectedMarker(
@@ -96,5 +114,14 @@ final class LifelogFootprintRenderPlannerTests: XCTestCase {
         XCTAssertEqual(buildCount, 1)
         XCTAssertEqual(first, expected)
         XCTAssertEqual(second, expected)
+    }
+
+    func test_projectedMarker_id_isStableWhenOnlyAngleChanges() {
+        let coordinate = CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194)
+        let first = LifelogFootprintProjectedMarker(coordinate: coordinate, angleDegrees: 12)
+        let second = LifelogFootprintProjectedMarker(coordinate: coordinate, angleDegrees: 148)
+
+        XCTAssertEqual(first.id, second.id)
+        XCTAssertNotEqual(first.angleDegrees, second.angleDegrees)
     }
 }

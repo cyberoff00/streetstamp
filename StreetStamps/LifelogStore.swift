@@ -14,15 +14,19 @@ final class LifelogStore: ObservableObject {
         case archive
     }
 
-    private(set) var coordinates: [CoordinateCodable] = []
     @Published private(set) var currentLocation: CLLocation?
+
+    /// Coordinates for the active (today) shard. Used by tests and legacy callers.
+    var coordinates: [CoordinateCodable] { todayShard.points.map(\.coord) }
     @Published private(set) var isEnabled: Bool = true
     @Published private(set) var availableDays: [Date] = []
     @Published private(set) var countryISO2: String? = nil
     @Published private(set) var trackTileRevision: Int = 0
     @Published private(set) var hasLoaded: Bool = false
 
-    private struct PersistedPayload: Codable {
+    // MARK: - Legacy monolith payload (used for migration only)
+
+    private struct LegacyPersistedPayload: Codable {
         var points: [LifelogTrackPoint]?
         var coordinates: [CoordinateCodable]
         var isEnabled: Bool
@@ -30,6 +34,27 @@ final class LifelogStore: ObservableObject {
         var moodByDay: [String: String]?
         var cachedDistanceMeters: Double?
         var cachedAvailableDays: [Date]?
+    }
+
+    // MARK: - Day-shard types
+
+    struct DayShard: Codable, Sendable {
+        var dayKey: String
+        var points: [LifelogTrackPoint]
+
+        static let empty = DayShard(dayKey: "", points: [])
+    }
+
+    struct DayShardIndex: Codable {
+        var schemaVersion: Int = 1
+        var isEnabled: Bool = true
+        var archivedJourneyIDs: [String] = []
+        var cachedDistanceMeters: Double = 0
+        var cachedAvailableDayKeys: [String] = []
+        var lastPointCoord: CoordinateCodable?
+        var lastPointTimestamp: Date?
+
+        static let empty = DayShardIndex()
     }
 
     struct LifelogTrackPoint: Codable {
@@ -91,17 +116,6 @@ final class LifelogStore: ObservableObject {
         }
     }
 
-    private struct LoadedState {
-        let points: [LifelogTrackPoint]
-        let coordinates: [CoordinateCodable]
-        let isEnabled: Bool
-        let archivedJourneyIDs: Set<String>
-        let moodByDay: [String: String]
-        let cachedDistanceMeters: Double
-        let availableDays: [Date]
-        let countryISO2: String?
-    }
-
     // Keep passive lifelog dense enough for continuous fog-of-world coverage.
     private let minDistanceMeters: CLLocationDistance = 10
     private let maxAcceptedHorizontalAccuracyStationary: CLLocationAccuracy = 65
@@ -116,8 +130,7 @@ final class LifelogStore: ObservableObject {
     private let motionHub = MotionActivityHub.shared
 
     private var userID: String
-    private var persistURL: URL
-    private var deltaURL: URL
+    private var paths: StoragePath
     private var moodPersistURL: URL
     private var bag = Set<AnyCancellable>()
     private var lastAccepted: CLLocation?
@@ -130,7 +143,14 @@ final class LifelogStore: ObservableObject {
     private var dayTileIndexSourceCount: Int = -1
     private var previewPolylineCache: [String: [CLLocationCoordinate2D]] = [:]
     private var previewCacheSourceCount: Int = -1
-    private var points: [LifelogTrackPoint] = []
+
+    // Day-shard model (replaces monolith `points` + `coordinates` arrays)
+    private var shardIndex: DayShardIndex = .empty
+    private var todayShard: DayShard = .empty
+    private var loadedShards: [String: DayShard] = [:]
+    private let maxCachedShards = 14
+    private var loadedShardsLRU: [String] = []
+
     private var archivedJourneyIDs = Set<String>()
     private var moodByDay: [String: String] = [:]
     private var availableDayKeys = Set<String>()
@@ -175,10 +195,7 @@ final class LifelogStore: ObservableObject {
         }
     ) {
         self.userID = paths.userID
-        self.persistURL = paths.lifelogRouteURL
-        self.deltaURL = paths.lifelogRouteURL
-            .deletingPathExtension()
-            .appendingPathExtension("delta.jsonl")
+        self.paths = paths
         self.moodPersistURL = paths.cachesDir.appendingPathComponent("lifelog_mood.json", isDirectory: false)
         self.trackTileRevisionDebounce = max(0, trackTileRevisionDebounce)
         self.attributionCoordinatorFactory = attributionCoordinatorFactory
@@ -187,10 +204,7 @@ final class LifelogStore: ObservableObject {
 
     func rebind(paths: StoragePath) {
         userID = paths.userID
-        persistURL = paths.lifelogRouteURL
-        deltaURL = paths.lifelogRouteURL
-            .deletingPathExtension()
-            .appendingPathExtension("delta.jsonl")
+        self.paths = paths
         moodPersistURL = paths.cachesDir.appendingPathComponent("lifelog_mood.json", isDirectory: false)
         pendingSnapshotPersist?.cancel()
         pendingSnapshotPersist = nil
@@ -201,7 +215,6 @@ final class LifelogStore: ObservableObject {
         bag.removeAll()
         pendingBindHub = nil
         resetPassiveMotionState()
-        coordinates = []
         currentLocation = nil
         lastAccepted = nil
         cachedDistanceMeters = 0
@@ -213,7 +226,10 @@ final class LifelogStore: ObservableObject {
         dayTileIndexSourceCount = -1
         previewPolylineCache = [:]
         previewCacheSourceCount = -1
-        points = []
+        shardIndex = .empty
+        todayShard = .empty
+        loadedShards = [:]
+        loadedShardsLRU = []
         archivedJourneyIDs = []
         moodByDay = [:]
         availableDayKeys = []
@@ -236,11 +252,10 @@ final class LifelogStore: ObservableObject {
 
     func loadAsync() async {
         hasLoaded = false
-        let url = persistURL
-        let delta = deltaURL
+        let currentPaths = paths
         let moodURL = moodPersistURL
-        let loaded = await Self.loadState(from: url, deltaURL: delta, moodURL: moodURL)
-        applyLoadedState(loaded)
+        let loaded = await Self.loadShardedState(paths: currentPaths, moodURL: moodURL)
+        applyShardedState(loaded)
         dirtyPointDayKeys = []
         dirtyMoodDayKeys = []
         deletedMoodDayKeys = []
@@ -252,18 +267,28 @@ final class LifelogStore: ObservableObject {
         bumpTrackTileRevision()
     }
 
-    private func applyLoadedState(_ loaded: LoadedState) {
-        points = loaded.points
-        coordinates = loaded.coordinates
+    private struct ShardedLoadedState {
+        let index: DayShardIndex
+        let todayShard: DayShard
+        let moodByDay: [String: String]
+        let countryISO2: String?
+    }
+
+    private func applyShardedState(_ loaded: ShardedLoadedState) {
+        shardIndex = loaded.index
+        todayShard = loaded.todayShard
+        loadedShards = [:]
+        loadedShardsLRU = []
+
         if AppSettings.hasPassiveLifelogPreference {
             isEnabled = AppSettings.isPassiveLifelogEnabled
         } else {
-            isEnabled = loaded.isEnabled
-            AppSettings.setPassiveLifelogEnabled(loaded.isEnabled)
+            isEnabled = loaded.index.isEnabled
+            AppSettings.setPassiveLifelogEnabled(loaded.index.isEnabled)
         }
-        archivedJourneyIDs = loaded.archivedJourneyIDs
+        archivedJourneyIDs = Set(loaded.index.archivedJourneyIDs)
         moodByDay = loaded.moodByDay
-        cachedDistanceMeters = loaded.cachedDistanceMeters
+        cachedDistanceMeters = loaded.index.cachedDistanceMeters
         resetPassiveMotionState()
         downsampleCache = [:]
         downsampleCacheSourceCount = -1
@@ -273,11 +298,13 @@ final class LifelogStore: ObservableObject {
         dayTileIndexSourceCount = -1
         previewPolylineCache = [:]
         previewCacheSourceCount = -1
-        availableDays = loaded.availableDays
-        availableDayKeys = Set(loaded.availableDays.map(dayKey))
+        availableDayKeys = Set(loaded.index.cachedAvailableDayKeys)
+        availableDays = loaded.index.cachedAvailableDayKeys.compactMap { Self.dateFromDayKey($0) }.sorted(by: >)
         countryISO2 = loaded.countryISO2
 
-        if let last = points.last?.coord {
+        if let coord = loaded.index.lastPointCoord {
+            lastAccepted = CLLocation(latitude: coord.lat, longitude: coord.lon)
+        } else if let last = todayShard.points.last?.coord {
             lastAccepted = CLLocation(latitude: last.lat, longitude: last.lon)
         } else {
             lastAccepted = nil
@@ -288,18 +315,16 @@ final class LifelogStore: ObservableObject {
         pendingDayIndexBuild?.cancel()
         dayIndexBuildGeneration &+= 1
         let generation = dayIndexBuildGeneration
-        let snapshot = points
+        let snapshot = todayShard.points
+        let todayKey = todayShard.dayKey
         let work = DispatchWorkItem {
-            var grouped: [String: [CoordinateCodable]] = [:]
-            grouped.reserveCapacity(32)
-            for point in snapshot {
-                let key = Self.dayKeyString(for: point.timestamp)
-                grouped[key, default: []].append(point.coord)
-            }
+            let coords = snapshot.map(\.coord)
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 guard generation == self.dayIndexBuildGeneration else { return }
-                self.dayCoordsCache = grouped
+                if !todayKey.isEmpty {
+                    self.dayCoordsCache[todayKey] = coords
+                }
             }
         }
         pendingDayIndexBuild = work
@@ -311,28 +336,69 @@ final class LifelogStore: ObservableObject {
         dayCoordsCache[key, default: []].append(coord)
     }
 
-    private nonisolated static func loadState(from persistURL: URL, deltaURL: URL, moodURL: URL) async -> LoadedState {
+    // MARK: - Sharded load (index + today only)
+
+    private nonisolated static func loadShardedState(paths: StoragePath, moodURL: URL) async -> ShardedLoadedState {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
                 let moodFallback = loadMoodState(from: moodURL)
+                let indexURL = paths.lifelogDayShardIndexURL
+                let daysDir = paths.lifelogDaysDir
+
+                // Check if sharded layout exists
+                if let indexData = try? Data(contentsOf: indexURL),
+                   let index = try? JSONDecoder().decode(DayShardIndex.self, from: indexData) {
+                    // Load today's shard
+                    let todayKey = dayKeyString(for: Date())
+                    let todayShard = loadShardFromDisk(dir: daysDir, dayKey: todayKey)
+                    // Replay today's delta if any
+                    let deltaURL = paths.lifelogTodayDeltaURL
+                    let replayed = replayDelta(base: todayShard.points, deltaURL: deltaURL, fallbackTimestamp: Date())
+                    let finalToday = DayShard(dayKey: todayKey, points: replayed)
+                    let mergedMood = mergeMoodState(primary: index.archivedJourneyIDs.isEmpty ? nil : [:], fallback: moodFallback)
+                    continuation.resume(returning: ShardedLoadedState(
+                        index: index,
+                        todayShard: finalToday,
+                        moodByDay: mergedMood,
+                        countryISO2: nil
+                    ))
+                    return
+                }
+
+                // Sharded layout does not exist — migrate from monolith
+                let monolithURL = paths.lifelogRouteURL
+                let legacyDeltaURL = monolithURL
+                    .deletingPathExtension()
+                    .appendingPathExtension("delta.jsonl")
                 let legacyFallbackTS = unknownHistoricalTimestamp()
+
                 guard
-                    let data = try? Data(contentsOf: persistURL),
-                    let payload = try? JSONDecoder().decode(PersistedPayload.self, from: data)
+                    let data = try? Data(contentsOf: monolithURL),
+                    let payload = try? JSONDecoder().decode(LegacyPersistedPayload.self, from: data)
                 else {
-                    let replayed = replayDelta(base: [], deltaURL: deltaURL, fallbackTimestamp: legacyFallbackTS)
-                    let replayedCoords = replayed.map(\.coord)
-                    continuation.resume(returning: LoadedState(
-                        points: replayed,
-                        coordinates: replayedCoords,
+                    // No monolith either — try delta only, or start fresh
+                    let replayed = replayDelta(base: [], deltaURL: legacyDeltaURL, fallbackTimestamp: legacyFallbackTS)
+                    if replayed.isEmpty {
+                        // Brand new user
+                        let todayKey = dayKeyString(for: Date())
+                        continuation.resume(returning: ShardedLoadedState(
+                            index: .empty,
+                            todayShard: DayShard(dayKey: todayKey, points: []),
+                            moodByDay: moodFallback,
+                            countryISO2: nil
+                        ))
+                        return
+                    }
+                    let result = migratePointsToShards(
+                        allPoints: replayed,
                         isEnabled: true,
                         archivedJourneyIDs: [],
                         moodByDay: moodFallback,
-
-                        cachedDistanceMeters: computeTotalDistanceMeters(coords: replayedCoords),
-                        availableDays: computeAvailableDays(from: replayed),
-                        countryISO2: nil
-                    ))
+                        daysDir: daysDir
+                    )
+                    // Clean up legacy files
+                    try? FileManager.default.removeItem(at: legacyDeltaURL)
+                    continuation.resume(returning: result)
                     return
                 }
 
@@ -344,27 +410,151 @@ final class LifelogStore: ObservableObject {
                     loadedPoints = payload.coordinates.map { LifelogTrackPoint($0, timestamp: fallbackTS) }
                 }
 
-                let mergedPoints = replayDelta(base: loadedPoints, deltaURL: deltaURL, fallbackTimestamp: legacyFallbackTS)
-                let loadedCoordinates = mergedPoints.map(\.coord)
-                // Use cached distance/days if no delta was replayed (counts match).
-                let deltaApplied = mergedPoints.count != loadedPoints.count
-                let distance = (!deltaApplied && payload.cachedDistanceMeters != nil)
-                    ? payload.cachedDistanceMeters!
-                    : computeTotalDistanceMeters(coords: loadedCoordinates)
-                let days = (!deltaApplied && payload.cachedAvailableDays != nil)
-                    ? payload.cachedAvailableDays!
-                    : computeAvailableDays(from: mergedPoints)
-                continuation.resume(returning: LoadedState(
-                    points: mergedPoints,
-                    coordinates: loadedCoordinates,
+                let mergedPoints = replayDelta(base: loadedPoints, deltaURL: legacyDeltaURL, fallbackTimestamp: legacyFallbackTS)
+                let mergedMood = mergeMoodState(primary: payload.moodByDay, fallback: moodFallback)
+
+                let result = migratePointsToShards(
+                    allPoints: mergedPoints,
                     isEnabled: payload.isEnabled,
-                    archivedJourneyIDs: Set(payload.archivedJourneyIDs ?? []),
-                    moodByDay: mergeMoodState(primary: payload.moodByDay, fallback: moodFallback),
-                    cachedDistanceMeters: distance,
-                    availableDays: days,
-                    countryISO2: nil
-                ))
+                    archivedJourneyIDs: payload.archivedJourneyIDs ?? [],
+                    moodByDay: mergedMood,
+                    daysDir: daysDir,
+                    cachedDistanceMeters: payload.cachedDistanceMeters
+                )
+
+                // Backup and clean up legacy files
+                let bakURL = monolithURL
+                    .deletingPathExtension()
+                    .appendingPathExtension("pre_shard_bak.json")
+                try? FileManager.default.moveItem(at: monolithURL, to: bakURL)
+                try? FileManager.default.removeItem(at: legacyDeltaURL)
+
+                continuation.resume(returning: result)
             }
+        }
+    }
+
+    // MARK: - Migration helper
+
+    private nonisolated static func migratePointsToShards(
+        allPoints: [LifelogTrackPoint],
+        isEnabled: Bool,
+        archivedJourneyIDs: [String],
+        moodByDay: [String: String],
+        daysDir: URL,
+        cachedDistanceMeters: Double? = nil
+    ) -> ShardedLoadedState {
+        // Group points by day
+        var grouped: [String: [LifelogTrackPoint]] = [:]
+        for point in allPoints {
+            let key = dayKeyString(for: point.timestamp)
+            grouped[key, default: []].append(point)
+        }
+
+        let dayKeys = grouped.keys.sorted()
+        let todayKey = dayKeyString(for: Date())
+
+        // Compute distance if not cached
+        let distance: Double
+        if let cached = cachedDistanceMeters {
+            distance = cached
+        } else {
+            distance = computeTotalDistanceMeters(coords: allPoints.map(\.coord))
+        }
+
+        // Write shard files to disk
+        let fm = FileManager.default
+        try? fm.createDirectory(at: daysDir, withIntermediateDirectories: true)
+
+        let encoder = JSONEncoder()
+        for (key, points) in grouped {
+            let shard = DayShard(dayKey: key, points: points)
+            let shardURL = daysDir.appendingPathComponent("\(key).json", isDirectory: false)
+            if let data = try? encoder.encode(shard) {
+                try? data.write(to: shardURL, options: .atomic)
+            }
+        }
+
+        // Build index
+        var index = DayShardIndex()
+        index.isEnabled = isEnabled
+        index.archivedJourneyIDs = archivedJourneyIDs
+        index.cachedDistanceMeters = distance
+        index.cachedAvailableDayKeys = dayKeys.reversed() // descending
+        if let last = allPoints.last {
+            index.lastPointCoord = last.coord
+            index.lastPointTimestamp = last.timestamp
+        }
+
+        // Write index
+        let indexURL = daysDir.appendingPathComponent("index.json", isDirectory: false)
+        if let data = try? encoder.encode(index) {
+            try? data.write(to: indexURL, options: .atomic)
+        }
+
+        let todayShard = grouped[todayKey].map { DayShard(dayKey: todayKey, points: $0) }
+            ?? DayShard(dayKey: todayKey, points: [])
+
+        return ShardedLoadedState(
+            index: index,
+            todayShard: todayShard,
+            moodByDay: moodByDay,
+            countryISO2: nil
+        )
+    }
+
+    // MARK: - Shard disk I/O
+
+    nonisolated static func loadShardFromDisk(dir: URL, dayKey: String) -> DayShard {
+        let url = dir.appendingPathComponent("\(dayKey).json", isDirectory: false)
+        guard let data = try? Data(contentsOf: url),
+              let shard = try? JSONDecoder().decode(DayShard.self, from: data) else {
+            return DayShard(dayKey: dayKey, points: [])
+        }
+        return shard
+    }
+
+    private nonisolated static func writeShardToDisk(shard: DayShard, dir: URL) {
+        let url = dir.appendingPathComponent("\(shard.dayKey).json", isDirectory: false)
+        guard let data = try? JSONEncoder().encode(shard) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    private nonisolated static func writeIndexToDisk(_ index: DayShardIndex, dir: URL) {
+        let url = dir.appendingPathComponent("index.json", isDirectory: false)
+        guard let data = try? JSONEncoder().encode(index) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    private nonisolated static func dateFromDayKey(_ key: String) -> Date? {
+        let parts = key.split(separator: "-")
+        guard parts.count == 3,
+              let y = Int(parts[0]),
+              let m = Int(parts[1]),
+              let d = Int(parts[2]) else { return nil }
+        var comps = DateComponents()
+        comps.year = y
+        comps.month = m
+        comps.day = d
+        return Calendar.current.date(from: comps)
+    }
+
+    /// Load a shard on demand and cache it in the LRU.
+    private func shardForDay(_ dayKey: String) -> DayShard {
+        if dayKey == todayShard.dayKey { return todayShard }
+        if let cached = loadedShards[dayKey] { return cached }
+        let shard = Self.loadShardFromDisk(dir: paths.lifelogDaysDir, dayKey: dayKey)
+        insertIntoShardLRU(dayKey: dayKey, shard: shard)
+        return shard
+    }
+
+    private func insertIntoShardLRU(dayKey: String, shard: DayShard) {
+        loadedShards[dayKey] = shard
+        loadedShardsLRU.removeAll { $0 == dayKey }
+        loadedShardsLRU.append(dayKey)
+        while loadedShardsLRU.count > maxCachedShards {
+            let evict = loadedShardsLRU.removeFirst()
+            loadedShards.removeValue(forKey: evict)
         }
     }
 
@@ -502,15 +692,22 @@ final class LifelogStore: ObservableObject {
         persistAsync()
     }
 
-    var hasTrack: Bool { coordinates.count >= 2 }
+    var hasTrack: Bool { todayShard.points.count >= 2 || shardIndex.cachedAvailableDayKeys.count > 1 }
     var totalDistanceMeters: Double { cachedDistanceMeters }
+
+    /// Quick access to a day's raw coordinates for the render fallback path.
+    /// Used when track tiles aren't built yet and the render cache needs
+    /// immediate content to display on cold start.
+    func rawCoordsForDay(_ day: Date) -> [CoordinateCodable] {
+        let key = dayKey(day)
+        return shardForDay(key).points.map(\.coord)
+    }
 
     /// Call from debug console: `LifelogStore.shared.diagnosePassiveGaps()`
     /// Prints today's point gap analysis to console.
     func diagnosePassiveGaps() {
-        let cal = Calendar.current
-        let todayStart = cal.startOfDay(for: Date())
-        let todayPoints = points.filter { $0.timestamp >= todayStart }
+        let todayStart = Calendar.current.startOfDay(for: Date())
+        let todayPoints = todayShard.points
 
         guard todayPoints.count >= 2 else {
             print("📊 [Lifelog Diag] Today has \(todayPoints.count) points — not enough to analyze.")
@@ -624,13 +821,13 @@ final class LifelogStore: ObservableObject {
         }
 
         let c = CoordinateCodable(lat: loc.coordinate.latitude, lon: loc.coordinate.longitude)
-        if let prev = points.last?.coord,
+        if let prev = todayShard.points.last?.coord,
            abs(prev.lat - c.lat) < 0.0000005,
            abs(prev.lon - c.lon) < 0.0000005 {
             return
         }
 
-        if let prev = points.last?.coord {
+        if let prev = todayShard.points.last?.coord {
             let a = CLLocation(latitude: prev.lat, longitude: prev.lon)
             let b = CLLocation(latitude: c.lat, longitude: c.lon)
             cachedDistanceMeters += b.distance(from: a)
@@ -641,12 +838,20 @@ final class LifelogStore: ObservableObject {
             timestamp: loc.timestamp,
             accuracy: loc.horizontalAccuracy
         )
-        points.append(appendedPoint)
-        coordinates.append(c)
-        dirtyPointDayKeys.insert(dayKey(loc.timestamp))
+
+        // Day rollover: if a new day started, persist old shard and start fresh
+        let incomingDayKey = dayKey(loc.timestamp)
+        if !todayShard.dayKey.isEmpty && incomingDayKey != todayShard.dayKey {
+            rolloverTodayShard(newDayKey: incomingDayKey)
+        }
+
+        todayShard.points.append(appendedPoint)
+        dirtyPointDayKeys.insert(incomingDayKey)
         enqueueCountryAttribution(for: [appendedPoint])
-        invalidatePolylineCaches()
+        invalidateDayCaches(dayKey: incomingDayKey)
         lastAccepted = loc
+        shardIndex.lastPointCoord = c
+        shardIndex.lastPointTimestamp = loc.timestamp
         let hadTrackedDays = !availableDayKeys.isEmpty
         let didInsertDay = insertAvailableDayIfNeeded(loc.timestamp)
         requestGlobeRefreshForPassiveDayRolloverIfNeeded(
@@ -657,6 +862,26 @@ final class LifelogStore: ObservableObject {
         appendDelta(points: [appendedPoint])
         persistAsync()
         scheduleTrackTileRevisionBump()
+    }
+
+    private func rolloverTodayShard(newDayKey: String) {
+        let oldKey = todayShard.dayKey
+        if !oldKey.isEmpty && !todayShard.points.isEmpty {
+            // Persist old shard immediately
+            let oldShard = todayShard
+            let daysDir = paths.lifelogDaysDir
+            fileIOQueue.async {
+                Self.writeShardToDisk(shard: oldShard, dir: daysDir)
+            }
+            loadedShards[oldKey] = oldShard
+        }
+        todayShard = DayShard(dayKey: newDayKey, points: [])
+        dirtyPointDayKeys.insert(newDayKey)
+        // Clear today delta file
+        let deltaURL = paths.lifelogTodayDeltaURL
+        fileIOQueue.async {
+            try? FileManager.default.removeItem(at: deltaURL)
+        }
     }
 
     private func shouldAcceptPassiveLocation(_ loc: CLLocation) -> Bool {
@@ -768,42 +993,73 @@ final class LifelogStore: ObservableObject {
         source: ExternalTrackImportSource = .archive
     ) {
         guard !imported.isEmpty else { return }
-        var appended: [LifelogTrackPoint] = []
+
+        // Group imported points by day and route to appropriate shards
+        var groupedByDay: [String: [LifelogTrackPoint]] = [:]
+        var lastCoord: CoordinateCodable? = todayShard.points.last?.coord
+
         for item in imported {
             let coord = item.coord
             let timestamp = item.timestamp
 
-            if let prev = points.last?.coord,
+            if let prev = lastCoord,
                abs(prev.lat - coord.lat) < 0.0000005,
                abs(prev.lon - coord.lon) < 0.0000005 {
                 continue
             }
 
-            if let prev = points.last?.coord {
+            if let prev = lastCoord {
                 let a = CLLocation(latitude: prev.lat, longitude: prev.lon)
                 let b = CLLocation(latitude: coord.lat, longitude: coord.lon)
                 cachedDistanceMeters += b.distance(from: a)
             }
 
             let appendedPoint = LifelogTrackPoint(coord, timestamp: timestamp)
-            points.append(appendedPoint)
-            appended.append(appendedPoint)
-            coordinates.append(coord)
-            dirtyPointDayKeys.insert(dayKey(timestamp))
+            let key = dayKey(timestamp)
+            groupedByDay[key, default: []].append(appendedPoint)
+            dirtyPointDayKeys.insert(key)
+            lastCoord = coord
         }
 
-        guard !appended.isEmpty else { return }
-        enqueueCountryAttribution(for: appended)
+        guard !groupedByDay.isEmpty else { return }
+
+        // Append to appropriate shards
+        var allAppended: [LifelogTrackPoint] = []
+        let todayKey = todayShard.dayKey
+        for (key, dayPoints) in groupedByDay {
+            if key == todayKey {
+                todayShard.points.append(contentsOf: dayPoints)
+            } else {
+                // Load, append, persist historical shard
+                var shard = shardForDay(key)
+                shard.points.append(contentsOf: dayPoints)
+                shard.points.sort { $0.timestamp < $1.timestamp }
+                insertIntoShardLRU(dayKey: key, shard: shard)
+                // Write immediately
+                let daysDir = paths.lifelogDaysDir
+                let shardCopy = shard
+                fileIOQueue.async {
+                    Self.writeShardToDisk(shard: shardCopy, dir: daysDir)
+                }
+            }
+            allAppended.append(contentsOf: dayPoints)
+        }
+
+        if let last = lastCoord {
+            shardIndex.lastPointCoord = last
+        }
+
+        enqueueCountryAttribution(for: allAppended)
         invalidatePolylineCaches()
         let hadTrackedDays = !availableDayKeys.isEmpty
-        let didInsertDay = mergeAvailableDays(from: appended.map(\.timestamp))
+        let didInsertDay = mergeAvailableDays(from: allAppended.map(\.timestamp))
         if source == .passiveRecovery {
             requestGlobeRefreshForPassiveDayRolloverIfNeeded(
                 hadTrackedDays: hadTrackedDays,
                 didInsertDay: didInsertDay
             )
         }
-        appendDelta(points: appended)
+        appendDelta(points: allAppended)
         persistAsync()
         scheduleBackgroundDayIndexBuild()
         scheduleTrackTileRevisionBump()
@@ -816,9 +1072,10 @@ final class LifelogStore: ObservableObject {
         recentCount: Int = 420,
         maxPoints: Int = 420
     ) -> [CLLocationCoordinate2D] {
-        if previewCacheSourceCount != coordinates.count {
+        let todayCount = todayShard.points.count
+        if previewCacheSourceCount != todayCount {
             previewPolylineCache.removeAll(keepingCapacity: true)
-            previewCacheSourceCount = coordinates.count
+            previewCacheSourceCount = todayCount
         }
 
         let cacheKey = makePreviewCacheKey(
@@ -880,17 +1137,38 @@ final class LifelogStore: ObservableObject {
     }
 
     func snapshotPointsByDay() -> [String: [LifelogTrackPoint]] {
-        Dictionary(grouping: points, by: { dayKey($0.timestamp) })
+        var result: [String: [LifelogTrackPoint]] = [:]
+        let daysDir = paths.lifelogDaysDir
+        for dayKey in shardIndex.cachedAvailableDayKeys {
+            if dayKey == todayShard.dayKey {
+                result[dayKey] = todayShard.points
+            } else if let cached = loadedShards[dayKey] {
+                result[dayKey] = cached.points
+            } else {
+                let shard = Self.loadShardFromDisk(dir: daysDir, dayKey: dayKey)
+                result[dayKey] = shard.points
+            }
+        }
+        return result
     }
 
     func snapshotDirtyPointsByDay() -> [String: [LifelogTrackPoint]] {
         guard !dirtyPointDayKeys.isEmpty else { return [:] }
-        let all = snapshotPointsByDay()
-        return dirtyPointDayKeys.reduce(into: [String: [LifelogTrackPoint]]()) { partial, key in
-            if let points = all[key] {
-                partial[key] = points
+        var result: [String: [LifelogTrackPoint]] = [:]
+        let daysDir = paths.lifelogDaysDir
+        for dayKey in dirtyPointDayKeys {
+            if dayKey == todayShard.dayKey {
+                result[dayKey] = todayShard.points
+            } else if let cached = loadedShards[dayKey] {
+                result[dayKey] = cached.points
+            } else {
+                let shard = Self.loadShardFromDisk(dir: daysDir, dayKey: dayKey)
+                if !shard.points.isEmpty {
+                    result[dayKey] = shard.points
+                }
             }
         }
+        return result
     }
 
     func snapshotMoodByDay() -> [String: String] {
@@ -933,39 +1211,70 @@ final class LifelogStore: ObservableObject {
         moodByDay restoredMoodByDay: [String: String],
         deletedMoodDayKeys: [String]
     ) {
-        let touchedDayKeys = Set(dayBatches.keys).union(deletedDayKeys)
-        var mergedPoints = points.filter { point in
-            !touchedDayKeys.contains(dayKey(point.timestamp))
-        }
-        mergedPoints.append(contentsOf: dayBatches.values.flatMap { $0 })
-        mergedPoints.sort { lhs, rhs in
-            if lhs.timestamp == rhs.timestamp {
-                return lhs.id < rhs.id
+        let daysDir = paths.lifelogDaysDir
+        let todayKey = todayShard.dayKey
+
+        // Write restored day batches to shard files
+        for (key, restoredPoints) in dayBatches {
+            var sorted = restoredPoints.sorted { $0.timestamp < $1.timestamp }
+
+            if key == todayKey {
+                todayShard.points = sorted
+            } else {
+                let shard = DayShard(dayKey: key, points: sorted)
+                insertIntoShardLRU(dayKey: key, shard: shard)
+                let shardCopy = shard
+                fileIOQueue.async {
+                    Self.writeShardToDisk(shard: shardCopy, dir: daysDir)
+                }
             }
-            return lhs.timestamp < rhs.timestamp
         }
 
-        var mergedMoodByDay = moodByDay
-        deletedMoodDayKeys.forEach { mergedMoodByDay.removeValue(forKey: $0) }
-        restoredMoodByDay.forEach { mergedMoodByDay[$0.key] = $0.value }
+        // Delete shards for deleted day keys
+        for key in deletedDayKeys where !dayBatches.keys.contains(key) {
+            if key == todayKey {
+                todayShard.points = []
+            } else {
+                loadedShards.removeValue(forKey: key)
+                loadedShardsLRU.removeAll { $0 == key }
+                let url = daysDir.appendingPathComponent("\(key).json", isDirectory: false)
+                fileIOQueue.async {
+                    try? FileManager.default.removeItem(at: url)
+                }
+            }
+            availableDayKeys.remove(key)
+        }
 
-        let mergedCoords = mergedPoints.map(\.coord)
-        let nextState = LoadedState(
-            points: mergedPoints,
-            coordinates: mergedCoords,
-            isEnabled: isEnabled,
-            archivedJourneyIDs: archivedJourneyIDs,
-            moodByDay: mergedMoodByDay,
-            cachedDistanceMeters: totalDistanceMeters(coords: mergedCoords),
-            availableDays: Self.computeAvailableDays(from: mergedPoints),
-            countryISO2: countryISO2
-        )
-        applyLoadedState(nextState)
+        // Update available days with restored keys
+        for key in dayBatches.keys {
+            availableDayKeys.insert(key)
+        }
+        shardIndex.cachedAvailableDayKeys = availableDayKeys.sorted().reversed()
+        availableDays = shardIndex.cachedAvailableDayKeys.compactMap { Self.dateFromDayKey($0) }.sorted(by: >)
+
+        // Merge mood
+        deletedMoodDayKeys.forEach { moodByDay.removeValue(forKey: $0) }
+        restoredMoodByDay.forEach { moodByDay[$0.key] = $0.value }
+
+        // Recompute distance — read all shards for accurate sum
+        let allCoords = snapshotPointsByDay().values.flatMap { $0.map(\.coord) }
+        cachedDistanceMeters = Self.computeTotalDistanceMeters(coords: Array(allCoords))
+        shardIndex.cachedDistanceMeters = cachedDistanceMeters
+
+        // Update last point
+        if let last = todayShard.points.last {
+            shardIndex.lastPointCoord = last.coord
+            shardIndex.lastPointTimestamp = last.timestamp
+        }
+
+        let touchedDayKeys = Set(dayBatches.keys).union(deletedDayKeys)
         dirtyPointDayKeys.subtract(touchedDayKeys)
         dirtyMoodDayKeys.subtract(Set(restoredMoodByDay.keys))
         dirtyMoodDayKeys.subtract(Set(deletedMoodDayKeys))
         self.deletedMoodDayKeys.subtract(Set(restoredMoodByDay.keys))
         self.deletedMoodDayKeys.subtract(Set(deletedMoodDayKeys))
+
+        invalidatePolylineCaches()
         scheduleBackgroundDayIndexBuild()
         persistSnapshotNow()
         bumpTrackTileRevision()
@@ -982,28 +1291,15 @@ final class LifelogStore: ObservableObject {
     }
 
     func sampledCoordinates(day: Date?, maxPoints: Int) -> [CoordinateCodable] {
-        if day != nil {
-            let target = max(maxPoints, 2)
-            let key = dayKey(day!)
-            if let cached = dayDownsampleCache[key]?[target] {
-                return cached
-            }
-            let sampled = downsample(coords: coordsFor(day: day), maxPoints: target)
-            var bucket = dayDownsampleCache[key] ?? [:]
-            bucket[target] = sampled
-            dayDownsampleCache[key] = bucket
-            return sampled
-        }
         let target = max(maxPoints, 2)
-        if downsampleCacheSourceCount != coordinates.count {
-            downsampleCache.removeAll(keepingCapacity: true)
-            downsampleCacheSourceCount = coordinates.count
-        }
-        if let cached = downsampleCache[target] {
+        let key = day.map(dayKey) ?? todayShard.dayKey
+        if let cached = dayDownsampleCache[key]?[target] {
             return cached
         }
-        let sampled = downsample(coords: coordinates, maxPoints: target)
-        downsampleCache[target] = sampled
+        let sampled = downsample(coords: coordsFor(day: day), maxPoints: target)
+        var bucket = dayDownsampleCache[key] ?? [:]
+        bucket[target] = sampled
+        dayDownsampleCache[key] = bucket
         return sampled
     }
 
@@ -1069,7 +1365,7 @@ final class LifelogStore: ObservableObject {
 
     private func appendDelta(points appended: [LifelogTrackPoint]) {
         guard !appended.isEmpty else { return }
-        let target = deltaURL
+        let target = paths.lifelogTodayDeltaURL
         let baseDir = target.deletingLastPathComponent()
         let chunk = appended
         fileIOQueue.async {
@@ -1093,35 +1389,52 @@ final class LifelogStore: ObservableObject {
 
     private func persistSnapshotNow() {
         guard hasLoaded else { return }
-        let payload = PersistedPayload(
-            points: points,
-            coordinates: coordinates,
-            isEnabled: isEnabled,
-            archivedJourneyIDs: Array(archivedJourneyIDs),
-            moodByDay: moodByDay,
-            cachedDistanceMeters: cachedDistanceMeters,
-            cachedAvailableDays: availableDays
-        )
-        let url = persistURL
-        let delta = deltaURL
+
+        // Update index metadata
+        shardIndex.isEnabled = isEnabled
+        shardIndex.archivedJourneyIDs = Array(archivedJourneyIDs)
+        shardIndex.cachedDistanceMeters = cachedDistanceMeters
+        shardIndex.cachedAvailableDayKeys = availableDayKeys.sorted().reversed()
+
+        let indexSnapshot = shardIndex
+        let todaySnapshot = todayShard
+        let dirtyKeys = dirtyPointDayKeys
+        let daysDir = paths.lifelogDaysDir
+        let deltaURL = paths.lifelogTodayDeltaURL
         let moodURL = moodPersistURL
         let moodSnapshot = moodByDay
-        fileIOQueue.async {
-            do {
-                let data = try JSONEncoder().encode(payload)
-                try FileManager.default.createDirectory(
-                    at: url.deletingLastPathComponent(),
-                    withIntermediateDirectories: true
-                )
-                try data.write(to: url, options: .atomic)
-                if FileManager.default.fileExists(atPath: delta.path) {
-                    try? FileManager.default.removeItem(at: delta)
-                }
-            } catch {
-                print("❌ lifelog save failed:", error)
+
+        // Capture dirty historical shards
+        var dirtyHistoricalShards: [DayShard] = []
+        for key in dirtyKeys where key != todaySnapshot.dayKey {
+            if let cached = loadedShards[key] {
+                dirtyHistoricalShards.append(cached)
             }
+        }
+
+        fileIOQueue.async {
+            let fm = FileManager.default
+            try? fm.createDirectory(at: daysDir, withIntermediateDirectories: true)
+
+            // Write index
+            Self.writeIndexToDisk(indexSnapshot, dir: daysDir)
+
+            // Write today's shard
+            if !todaySnapshot.dayKey.isEmpty {
+                Self.writeShardToDisk(shard: todaySnapshot, dir: daysDir)
+                // Clear today delta after successful shard write
+                try? fm.removeItem(at: deltaURL)
+            }
+
+            // Write dirty historical shards
+            for shard in dirtyHistoricalShards {
+                Self.writeShardToDisk(shard: shard, dir: daysDir)
+            }
+
             Self.persistMoodSnapshot(moodSnapshot, to: moodURL)
         }
+
+        dirtyPointDayKeys.removeAll()
     }
 
     private func persistMoodSnapshotNow() {
@@ -1161,15 +1474,16 @@ final class LifelogStore: ObservableObject {
     }
 
     private func coordsFor(day: Date?) -> [CoordinateCodable] {
-        guard let day else { return coordinates }
+        guard let day else {
+            // No day specified — return today's coords as default
+            return todayShard.points.map(\.coord)
+        }
         let key = dayKey(day)
         if let cached = dayCoordsCache[key] {
             return cached
         }
-        let cal = Calendar.current
-        let out = points
-            .filter { cal.isDate($0.timestamp, inSameDayAs: day) }
-            .map(\.coord)
+        let shard = shardForDay(key)
+        let out = shard.points.map(\.coord)
         dayCoordsCache[key] = out
         return out
     }
@@ -1340,12 +1654,23 @@ final class LifelogStore: ObservableObject {
 
     private func invalidatePolylineCaches() {
         downsampleCacheSourceCount = -1
+        downsampleCache.removeAll(keepingCapacity: true)
         dayCoordsCache.removeAll(keepingCapacity: true)
         dayDownsampleCache.removeAll(keepingCapacity: true)
         dayTileIndexSourceCount = -1
         dayTileIndexCache.removeAll(keepingCapacity: true)
         previewCacheSourceCount = -1
         previewPolylineCache.removeAll(keepingCapacity: true)
+    }
+
+    /// Lightweight invalidation for a single day (used during ingest).
+    private func invalidateDayCaches(dayKey: String) {
+        dayCoordsCache.removeValue(forKey: dayKey)
+        dayDownsampleCache.removeValue(forKey: dayKey)
+        dayTileIndexCache.removeValue(forKey: dayKey)
+        previewPolylineCache.removeAll(keepingCapacity: true)
+        previewCacheSourceCount = -1
+        downsampleCacheSourceCount = -1
     }
 
     private func makePreviewCacheKey(
@@ -1370,9 +1695,10 @@ final class LifelogStore: ObservableObject {
     }
 
     private func tileIndex(for day: Date?, stride sampleStride: Int, z: Int) -> [TileKey: [IndexedCoord]] {
-        if dayTileIndexSourceCount != coordinates.count {
+        let currentCount = todayShard.points.count
+        if dayTileIndexSourceCount != currentCount {
             dayTileIndexCache.removeAll(keepingCapacity: true)
-            dayTileIndexSourceCount = coordinates.count
+            dayTileIndexSourceCount = currentCount
         }
 
         let dayPart = day.map(dayKey) ?? "all"
@@ -1469,22 +1795,52 @@ final class LifelogStore: ObservableObject {
     }
 
     func trackRenderEvents() -> [TrackRenderEvent] {
-        Self.makeTrackRenderEvents(from: points)
+        // Synchronous: use today's shard only (fast path for UI)
+        Self.makeTrackRenderEvents(from: todayShard.points)
     }
 
     func trackRenderEventsAsync() async -> [TrackRenderEvent] {
-        let snapshot = points
+        // Streaming: load all shards from disk without holding all raw points in memory
+        let dayKeys = shardIndex.cachedAvailableDayKeys.sorted()
+        let todayKey = todayShard.dayKey
+        let todayPoints = todayShard.points
+        let daysDir = paths.lifelogDaysDir
         return await Task.detached(priority: .utility) {
-            Self.makeTrackRenderEvents(from: snapshot)
+            var events: [TrackRenderEvent] = []
+            events.reserveCapacity(dayKeys.count * 300)
+            for key in dayKeys {
+                let shardPoints: [LifelogTrackPoint]
+                if key == todayKey {
+                    shardPoints = todayPoints
+                } else {
+                    shardPoints = Self.loadShardFromDisk(dir: daysDir, dayKey: key).points
+                }
+                events.append(contentsOf: shardPoints.map {
+                    TrackRenderEvent(sourceType: .passive, timestamp: $0.timestamp, coordinate: $0.coord)
+                })
+            }
+            return events
         }.value
     }
 
     func passiveCountryRuns(day: Date? = nil) async -> [LifelogAttributedCoordinateRun] {
-        let pointsSnapshot = points
+        // Load all points streaming for attribution
+        let dayKeys = shardIndex.cachedAvailableDayKeys.sorted()
+        let todayKey = todayShard.dayKey
+        let todayPoints = todayShard.points
+        let daysDir = paths.lifelogDaysDir
         let attributionSnapshot = await attributionCoordinator.loadSnapshot()
         return await Task.detached(priority: .utility) {
-            Self.makePassiveCountryRuns(
-                from: pointsSnapshot,
+            var allPoints: [LifelogTrackPoint] = []
+            for key in dayKeys {
+                if key == todayKey {
+                    allPoints.append(contentsOf: todayPoints)
+                } else {
+                    allPoints.append(contentsOf: Self.loadShardFromDisk(dir: daysDir, dayKey: key).points)
+                }
+            }
+            return Self.makePassiveCountryRuns(
+                from: allPoints,
                 attribution: attributionSnapshot,
                 day: day
             )

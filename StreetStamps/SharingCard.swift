@@ -115,7 +115,7 @@ struct PopSharingCard: View {
                     mirrorOnCapture: false,
                     onImage: { image in
                         showCamera = false
-                        appendCapturedOverallMemoryPhoto(image)
+                        appendOverallMemoryPhotos([image], writesToPhotoLibrary: true)
                     },
                     onCancel: {
                         showCamera = false
@@ -128,7 +128,7 @@ struct PopSharingCard: View {
                     selectionLimit: max(1, remainingOverallMemoryPhotoSlots),
                     onImages: { images in
                         showPhotoLibrary = false
-                        appendOverallMemoryPhotosFromLibrary(images)
+                        appendOverallMemoryPhotos(images, writesToPhotoLibrary: false)
                     },
                     onCancel: {
                         showPhotoLibrary = false
@@ -570,26 +570,24 @@ struct PopSharingCard: View {
         showVisibilityRestrictionAlert = true
     }
 
-    private func appendCapturedOverallMemoryPhoto(_ image: UIImage) {
+    private func appendOverallMemoryPhotos(_ images: [UIImage], writesToPhotoLibrary: Bool) {
+        let trimmed = Array(images.prefix(remainingOverallMemoryPhotoSlots))
+        guard !trimmed.isEmpty else { return }
         guard canAddOverallMemoryPhoto else { return }
-        if let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) {
-            overallMemoryImagePaths.append(filename)
-        }
-
-        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
-            guard status == .authorized || status == .limited else { return }
-            PHPhotoLibrary.shared().performChanges({
-                PHAssetChangeRequest.creationRequestForAsset(from: image)
-            }, completionHandler: nil)
-        }
-    }
-
-    private func appendOverallMemoryPhotosFromLibrary(_ images: [UIImage]) {
-        guard canAddOverallMemoryPhoto else { return }
-        for image in images {
+        for image in trimmed {
             if !canAddOverallMemoryPhoto { break }
             if let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) {
                 overallMemoryImagePaths.append(filename)
+            }
+        }
+
+        guard writesToPhotoLibrary else { return }
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else { return }
+            for image in trimmed {
+                PHPhotoLibrary.shared().performChanges({
+                    PHAssetChangeRequest.creationRequestForAsset(from: image)
+                }, completionHandler: nil)
             }
         }
     }

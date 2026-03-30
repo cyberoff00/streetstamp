@@ -159,6 +159,24 @@
 "tracking_mode_sport" = "Sport";
 "tracking_mode_daily" = "Daily";
 
+/* Film Camera Drop */
+"film_camera_drop_message" = "A custom film camera has been dropped for this journey";
+"film_camera_try_now" = "Try it";
+"film_camera_try_later" = "Maybe later";
+
+/* Photo Edit */
+"photo_edit_done" = "Done";
+"photo_edit_done_all" = "Done All";
+"photo_edit_button" = "Edit";
+"photo_edit_rotate" = "Rotate";
+"photo_edit_text_tool" = "Text";
+"photo_edit_crop" = "Crop";
+"photo_edit_add_text" = "Add Text";
+"photo_edit_edit_text" = "Edit Text";
+"photo_edit_delete_text" = "Delete Text";
+"photo_edit_skip" = "Skip";
+"photo_edit_text_placeholder" = "Enter text...";
+
 /* Lock Screen Tracking Cards */
 "lockscreen_tracking_active" = "TRACKING ACTIVE";
 "lockscreen_sport_mode" = "SPORT MODE";
@@ -1130,22 +1148,28 @@
 "faq_title" = "FAQ";
 "faq_subtitle" = "Common questions about using Worldo";
 "settings_faq_title" = "FAQ";
+"faq_q_overview" = "What can I do with Worldo?";
+"faq_a_overview" = "Worldo combines journey tracking with map-based social features. Start a journey to record your routes while running, cycling, hiking, or exploring a city — snap photos and jot down moments along the way to create a rich visual record of every trip. Your footprints are painted onto the Worldo map and 3D globe, unlocking city cards as you visit new places. Enable always-on tracking to passively record your daily footprints without starting a journey. Follow friends to see the cities they're exploring, the routes they've taken, and their trip memories in your feed — staying connected to each other's real-world adventures. Send postcards to friends and collect unique equipment to personalize your profile.";
 "faq_q_track_accuracy" = "Why is my route inaccurate?";
-"faq_a_track_accuracy" = "GPS accuracy depends on your environment. Tall buildings, tunnels, and indoor areas can weaken GPS signals, causing position drift. For best results, make sure Location Services is set to \"Always\" or \"While Using\" and try to stay in open areas. Sport mode uses higher precision GPS sampling for better accuracy.";
-"faq_q_straight_lines" = "Why do I see straight lines on my route?";
-"faq_a_straight_lines" = "Straight lines appear when GPS signal is lost (e.g., in subways, tunnels, or buildings). The app connects the last known position to where signal resumes. This is normal GPS behavior. Sport mode minimizes this with more frequent sampling, but cannot fully prevent it in signal-dead zones.";
+"faq_a_track_accuracy" = "GPS accuracy depends on your environment. Tall buildings, tunnels, and indoor areas can weaken GPS signals, causing position drift. Where GPS signal is lost (subways, tunnels, buildings), the route may show jump points connected as straight lines or dashed segments — this is normal behavior for all GPS apps. Your phone's battery level and performance state can also affect GPS chip accuracy. For best results, make sure Location Services is set to \"Always\" and try to stay in open areas. Sport mode uses higher precision GPS sampling for better accuracy, but cannot fully prevent this in signal-dead zones.";
+"faq_q_passive_tracking" = "Why does the Worldo page show footprints when I haven't started a journey?";
+"faq_a_passive_tracking" = "The button in the bottom-right corner of the Worldo page controls always-on tracking mode. When enabled, your daily routes are automatically recorded without opening the app, and shown on the Worldo page and the 3D view in the top-right corner.";
 "faq_q_battery" = "Does Worldo drain my battery?";
-"faq_a_battery" = "During active journey tracking, Worldo uses GPS which does consume battery. Sport mode uses more battery than Daily mode because it samples GPS more frequently. When not tracking, background Lifelog recording uses minimal battery via low-precision location updates. You can adjust background precision in Settings → Background Recording Mode.";
+"faq_a_battery" = "Worldo has been heavily optimized to minimize battery usage. Sport mode consumes more battery for higher GPS precision and route accuracy. However, Worldo defaults to Daily mode, which is significantly more efficient than similar tracking apps. When not actively tracking, background tracking uses minimal battery via low-precision location updates. You can further adjust precision in Settings to save even more battery.";
+"faq_q_sport_vs_daily" = "What's the difference between Sport and Daily mode?";
+"faq_a_sport_vs_daily" = "Sport mode records at high precision with route smoothing — ideal for running, cycling, or hiking where route detail matters. Daily mode is battery-optimized and auto-adjusts based on your travel method — best for commuting or all-day tracking where battery life is more important than route precision.";
 "faq_q_data_storage" = "Where is my data stored?";
-"faq_a_data_storage" = "All your journey data, photos, and Lifelog are stored locally on your device first. If you have an account, data syncs to iCloud for backup. Your data is never shared with third parties. You can manually backup or restore via iCloud in Settings → Data Management.";
+"faq_a_data_storage" = "All data is stored locally on your device first. Public journeys sync through Worldo's servers when you sign in, so friends can see your footprints. Private journeys, memory photos, and background tracking data stay on-device and can be backed up via iCloud. Your data is encrypted and never used for any commercial purposes.";
+"faq_q_phone_migration" = "I'm switching phones — what about my data?";
+"faq_a_phone_migration" = "There's a dedicated Data Migration feature in Settings. Public journeys sync through Worldo's servers — just sign in with the same account on your new phone to restore them. For local private journeys, memory photos, and background tracking data, use the Device Transfer feature: connect both devices to the same Wi-Fi, generate a QR code on the old device, and scan it on the new one to transfer data directly over your local network — nothing goes through the cloud. We recommend completing the transfer in Settings → Data Migration before switching devices.";
+"faq_q_icloud_sync" = "How does iCloud sync work?";
+"faq_a_icloud_sync" = "Public journeys sync through Worldo's servers after signing in, so friends can see your footprints. Private journeys, memory photos, background tracking data, and settings sync to your personal iCloud storage using your own iCloud quota. You can also manually trigger a full backup or restore in Settings → Data Management → iCloud Backup.";
+"faq_q_gpx_import" = "What is GPX?";
+"faq_a_gpx_import" = "GPX (GPS Exchange Format) is a universal GPS data format supported by most sports and mapping apps. You can export activity routes from other apps (like Strava, Garmin, etc.) as GPX files, then import them into Worldo to consolidate your past activities onto your footprint map.";
 "faq_q_city_wrong" = "Why is a journey assigned to the wrong city?";
 "faq_a_city_wrong" = "City assignment is based on the GPS location where you start your journey, resolved via Apple's geocoding service. Occasionally, city boundaries in the geocoding database may differ from what you expect. If this happens, the city will be corrected on future journeys from the same area as Apple updates its data.";
-"faq_q_sport_vs_daily" = "What's the difference between Sport and Daily mode?";
-"faq_a_sport_vs_daily" = "Sport mode records at high precision (3m sampling interval) with route smoothing — ideal for running, cycling, or hiking where route detail matters. Daily mode is battery-optimized (12m sampling) and auto-adjusts based on your travel method — best for commuting or all-day tracking where battery life is more important than route precision.";
-"faq_q_icloud_sync" = "How does iCloud sync work?";
-"faq_a_icloud_sync" = "Worldo syncs your journeys, memories, Lifelog, and settings to your personal iCloud storage. Sync happens automatically when you have an account. You can also manually trigger a full backup or restore in Settings → Data Management → iCloud Backup. Sync uses your own iCloud quota, not Worldo's servers.";
 "faq_q_location_permission" = "What location permission does Worldo need?";
-"faq_a_location_permission" = "For best experience, grant \"Always Allow\" location access. This enables background Lifelog recording and Live Activity during tracking. \"While Using\" works for active tracking but disables background features. You can change this anytime in iOS Settings → Worldo → Location.";
+"faq_a_location_permission" = "For best experience, grant \"Always Allow\" location access. This enables background tracking and Live Activity during journey tracking. \"While Using\" works for active tracking but disables background features. You can change this anytime in iOS Settings → Worldo → Location.";
 
 // MARK: - Feedback & Rating
 "settings_feedback_title" = "SEND FEEDBACK";
