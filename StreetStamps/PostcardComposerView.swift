@@ -193,7 +193,6 @@ struct PostcardComposerView: View {
                 cityPickerCard
                 photoPickerCard
                 messageCard
-                previewLink
                 previewButton
             }
             .padding(20)
@@ -203,6 +202,25 @@ struct PostcardComposerView: View {
     var body: some View {
         content
         .background(FigmaTheme.background.ignoresSafeArea())
+        .navigationDestination(isPresented: $showPreview) {
+            if let selectedRecipient {
+                PostcardPreviewView(
+                    friendID: selectedRecipient.userID,
+                    friendName: selectedRecipient.displayName,
+                    selectedCityID: selectedCityID,
+                    selectedCityName: selectedCityName,
+                    selectedCityJourneyCount: selectedCityJourneyCount,
+                    messageText: messageText,
+                    localImagePath: localImagePath,
+                    selectedImage: selectedImage,
+                    allowedCityIDs: cityOptions.map(\.id),
+                    onSent: {
+                        onSent?()
+                        dismiss()
+                    }
+                )
+            }
+        }
         .onAppear {
             socialStore.ensureLoaded()
             guard PostcardSidebarVisibilityScope.composer.hidesGlobalSidebarButton else { return }
@@ -412,29 +430,6 @@ struct PostcardComposerView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
         .postcardFeatureCardStyle()
-    }
-
-    private var previewLink: some View {
-        EmptyView()
-            .navigationDestination(isPresented: $showPreview) {
-                if let selectedRecipient {
-                    PostcardPreviewView(
-                        friendID: selectedRecipient.userID,
-                        friendName: selectedRecipient.displayName,
-                        selectedCityID: selectedCityID,
-                        selectedCityName: selectedCityName,
-                        selectedCityJourneyCount: selectedCityJourneyCount,
-                        messageText: messageText,
-                        localImagePath: localImagePath,
-                        selectedImage: selectedImage,
-                        allowedCityIDs: cityOptions.map(\.id),
-                        onSent: {
-                            onSent?()
-                            dismiss()
-                        }
-                    )
-                }
-            }
     }
 
     private var previewButton: some View {

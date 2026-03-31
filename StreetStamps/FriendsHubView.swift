@@ -1466,6 +1466,11 @@ struct FriendsHubView: View {
                     } else if item.type == "friend_request" {
                         showSocialNotificationsSheet = false
                         tab = .allFriends
+                    } else if item.type == "journey_like",
+                              let jid = item.journeyID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                              !jid.isEmpty {
+                        showSocialNotificationsSheet = false
+                        activeRoute = .myJourney(jid)
                     } else if let fromUserID = item.fromUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
                               !fromUserID.isEmpty {
                         showSocialNotificationsSheet = false
@@ -3385,7 +3390,7 @@ private struct FriendJourneyDetailScreen: View {
     }
 }
 
-private struct SelfJourneyDetailScreen: View {
+struct SelfJourneyDetailScreen: View {
     @EnvironmentObject private var journeyStore: JourneyStore
     @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var sessionStore: UserSessionStore

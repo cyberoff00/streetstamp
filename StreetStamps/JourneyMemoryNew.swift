@@ -138,7 +138,8 @@ struct JourneyMemoryMainView: View {
     @State private var rebuildWorkItem: DispatchWorkItem?
     @State private var cachedSortedJourneys: [JourneyRoute] = []
     @State private var cachedActivityTags: [String] = []
-    
+    @State private var activeJourneyDetail: JourneyMemoryDetailDestination? = nil
+
     @Binding var showSidebar: Bool
     private let usesSidebarHeader: Bool
     private let hideLeadingControl: Bool
@@ -235,6 +236,9 @@ struct JourneyMemoryMainView: View {
                                             expandedCities.insert(city.cityKey)
                                         }
                                     }
+                                },
+                                onSelectJourney: { destination in
+                                    activeJourneyDetail = destination
                                 }
                             )
                             .environmentObject(store)
@@ -252,6 +256,18 @@ struct JourneyMemoryMainView: View {
             }
         }
         .navigationBarBackButtonHidden(true)
+        .navigationDestination(item: $activeJourneyDetail) { destination in
+            JourneyMemoryDetailView(
+                journey: destination.journey,
+                memories: destination.memories,
+                cityName: destination.cityName,
+                countryName: destination.countryName,
+                readOnly: destination.readOnly,
+                friendLoadout: destination.friendLoadout
+            )
+            .environmentObject(store)
+            .environmentObject(sessionStore)
+        }
         .onAppear {
             if JourneyMemoryMainLoadPolicy.shouldLoadOnAppear(hasLoaded: store.hasLoaded) {
                 store.load()
@@ -742,10 +758,10 @@ private struct CitySection: View {
     let isExpanded: Bool
     let readOnly: Bool
     let onToggle: () -> Void
-    
+    let onSelectJourney: (JourneyMemoryDetailDestination) -> Void
+
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var sessionStore: UserSessionStore
-    @State private var activeJourneyDetail: JourneyMemoryDetailDestination? = nil
     
     var body: some View {
         VStack(spacing: 0) {
@@ -787,14 +803,14 @@ private struct CitySection: View {
                         let memories = city.memoriesByJourney[journey.id] ?? []
 
                         Button {
-                            activeJourneyDetail = JourneyMemoryDetailDestination(
+                            onSelectJourney(JourneyMemoryDetailDestination(
                                 journey: journey,
                                 memories: memories,
                                 cityName: city.cityName,
                                 countryName: city.countryName,
                                 readOnly: readOnly,
                                 friendLoadout: nil
-                            )
+                            ))
                         } label: {
                             JourneyEntryRow(
                                 journey: journey,
@@ -817,18 +833,6 @@ private struct CitySection: View {
         }
         .figmaSurfaceCard(radius: 32)
         .padding(.horizontal, 24)
-        .navigationDestination(item: $activeJourneyDetail) { destination in
-            JourneyMemoryDetailView(
-                journey: destination.journey,
-                memories: destination.memories,
-                cityName: destination.cityName,
-                countryName: destination.countryName,
-                readOnly: destination.readOnly,
-                friendLoadout: destination.friendLoadout
-            )
-            .environmentObject(store)
-            .environmentObject(sessionStore)
-        }
     }
 }
 

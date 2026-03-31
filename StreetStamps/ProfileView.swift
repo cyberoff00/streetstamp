@@ -12,6 +12,10 @@ import CoreLocation
 import AVFoundation
 import PhotosUI
 
+private struct NotifJourneyPush: Identifiable, Hashable {
+    let id: String // journeyID
+}
+
 struct ProfileView: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var store: JourneyStore
@@ -32,6 +36,7 @@ struct ProfileView: View {
     @ObservedObject private var featureFlags = FeatureFlagStore.shared
     @State private var showNotificationsSheet = false
     @State private var showPostcardInboxFromNotification = false
+    @State private var notifSheetJourneyPush: NotifJourneyPush? = nil
     @State private var postcardInboxIntent = PostcardInboxIntent(box: "received", messageID: nil)
     @State private var lastSyncedLoadout: RobotLoadout?
     @State private var pendingLocalLoadout: RobotLoadout?
@@ -459,6 +464,9 @@ struct ProfileView: View {
                     .accessibilityLabel(L10n.t("friends_mark_all_read"))
                 }
             }
+            .navigationDestination(item: $notifSheetJourneyPush) { push in
+                SelfJourneyDetailScreen(journeyID: push.id)
+            }
             .toolbar(.hidden, for: .navigationBar)
             .task {
                 await notificationStore.refresh(token: sessionStore.currentAccessToken)
@@ -523,6 +531,10 @@ struct ProfileView: View {
                 } else if item.type == "friend_request" {
                     showNotificationsSheet = false
                     AppFlowCoordinator.shared.requestSelectTab(.friends)
+                } else if item.type == "journey_like",
+                          let jid = item.journeyID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                          !jid.isEmpty {
+                    notifSheetJourneyPush = NotifJourneyPush(id: jid)
                 }
             }
         }
