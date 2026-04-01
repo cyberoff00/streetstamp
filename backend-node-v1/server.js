@@ -2543,8 +2543,6 @@ async function main() {
         db.emailIndex[email] = uid;
         db.inviteIndex[invite] = uid;
       }
-      const handleResult = await setUserHandleAsync(uid, null, { strict: false });
-      user.handle = handleResult.handle || user.handle;
       const identityID = `aid_${randHex(12)}`;
       const identityObj = {
         id: identityID,
@@ -2560,11 +2558,13 @@ async function main() {
       if (!pgPool) {
         db.authIdentities[identityID] = identityObj;
       }
-      const verificationToken = await issueEmailVerificationTokenAsync(uid, email);
       await persistPG(async () => {
         await DB.insertUser(pgPool, user);
         await DB.insertAuthIdentity(pgPool, identityObj);
       });
+      const handleResult = await setUserHandleAsync(uid, null, { strict: false });
+      user.handle = handleResult.handle || user.handle;
+      const verificationToken = await issueEmailVerificationTokenAsync(uid, email);
       await deliverVerificationEmail(email, verificationToken);
 
       return res.status(200).json({
@@ -2972,12 +2972,12 @@ async function main() {
       }
 
       const userEmail = user.email || email;
-      const verificationToken = await issueEmailVerificationTokenAsync(uid, email);
       await persistPG(async () => {
         await DB.insertAuthIdentity(pgPool, identityObj);
         await DB.updateUser(pgPool, uid, { email: userEmail });
       });
       if (!pgPool) await saveDB();
+      const verificationToken = await issueEmailVerificationTokenAsync(uid, email);
       await deliverVerificationEmail(email, verificationToken);
 
       return res.status(200).json({
