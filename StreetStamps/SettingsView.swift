@@ -529,11 +529,11 @@ struct SettingsView: View {
                     VStack(spacing: 0) {
                         languageOption(code: nil, name: L10n.t("settings_language_follow_system"))
                         Divider().padding(.leading, 16)
-                        languageOption(code: "zh-Hans", name: "简体中文")
+                        languageOption(code: "zh-Hans", name: L10n.t("settings_language_option_simplified_chinese"))
                         Divider().padding(.leading, 16)
-                        languageOption(code: "zh-Hant", name: "繁體中文")
+                        languageOption(code: "zh-Hant", name: L10n.t("settings_language_option_traditional_chinese"))
                         Divider().padding(.leading, 16)
-                        languageOption(code: "en", name: "English")
+                        languageOption(code: "en", name: L10n.t("settings_language_option_english"))
                     }
                     .figmaSurfaceCard(radius: 30)
                 }

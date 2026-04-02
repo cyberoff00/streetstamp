@@ -104,9 +104,10 @@ struct FriendSharedJourney: Identifiable, Codable, Hashable {
     var sharedAt: Date?
     var routeCoordinates: [CoordinateCodable]
     var memories: [FriendSharedMemory]
+    var privacyOptions: Set<JourneyPrivacyOption>
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, cityID, cityId, activityTag, overallMemory, overallMemoryImageURLs, distance, startTime, endTime, visibility, sharedAt, routeCoordinates, coordinates, memories
+        case id, title, cityID, cityId, activityTag, overallMemory, overallMemoryImageURLs, distance, startTime, endTime, visibility, sharedAt, routeCoordinates, coordinates, memories, privacyOptions
     }
 
     init(
@@ -122,7 +123,8 @@ struct FriendSharedJourney: Identifiable, Codable, Hashable {
         visibility: JourneyVisibility,
         sharedAt: Date? = nil,
         routeCoordinates: [CoordinateCodable],
-        memories: [FriendSharedMemory]
+        memories: [FriendSharedMemory],
+        privacyOptions: Set<JourneyPrivacyOption> = []
     ) {
         self.id = id
         self.title = title
@@ -137,6 +139,7 @@ struct FriendSharedJourney: Identifiable, Codable, Hashable {
         self.sharedAt = sharedAt
         self.routeCoordinates = routeCoordinates
         self.memories = memories
+        self.privacyOptions = privacyOptions
     }
 
     init(from decoder: Decoder) throws {
@@ -159,6 +162,14 @@ struct FriendSharedJourney: Identifiable, Codable, Hashable {
             ?? (try? c.decode([CoordinateCodable].self, forKey: .coordinates))
             ?? []
         memories = (try? c.decode([FriendSharedMemory].self, forKey: .memories)) ?? []
+        // Decode privacyOptions from either Set<JourneyPrivacyOption> or [String] format
+        if let opts = try? c.decode(Set<JourneyPrivacyOption>.self, forKey: .privacyOptions) {
+            privacyOptions = opts
+        } else if let raw = try? c.decode([String].self, forKey: .privacyOptions) {
+            privacyOptions = Set(raw.compactMap { JourneyPrivacyOption(rawValue: $0) })
+        } else {
+            privacyOptions = []
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -176,6 +187,9 @@ struct FriendSharedJourney: Identifiable, Codable, Hashable {
         try c.encodeIfPresent(sharedAt, forKey: .sharedAt)
         try c.encode(routeCoordinates, forKey: .routeCoordinates)
         try c.encode(memories, forKey: .memories)
+        if !privacyOptions.isEmpty {
+            try c.encode(privacyOptions, forKey: .privacyOptions)
+        }
     }
 }
 

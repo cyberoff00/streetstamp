@@ -265,7 +265,8 @@ enum JourneyCloudMigrationService {
         for route in journeys {
             let title = route.customTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
             let finalTitle = (title?.isEmpty == false) ? (title ?? route.displayCityName) : route.displayCityName
-            let routeCoordinates = route.coordinates.isEmpty ? route.thumbnailCoordinates : route.coordinates
+            let rawRouteCoordinates = route.coordinates.isEmpty ? route.thumbnailCoordinates : route.coordinates
+            let routeCoordinates = route.privacyFilteredCoordinates(rawRouteCoordinates)
 
             var memories: [BackendMemoryUploadDTO] = []
             var memoryURLs: [String: [String]] = [:]
@@ -322,7 +323,8 @@ enum JourneyCloudMigrationService {
                     visibility: route.visibility,
                     sharedAt: route.sharedAt,
                     routeCoordinates: routeCoordinates,
-                    memories: memories
+                    memories: memories,
+                    privacyOptions: route.privacyOptions.isEmpty ? nil : route.privacyOptions.map(\.rawValue)
                 )
             )
         }
@@ -514,7 +516,8 @@ enum JourneyCloudMigrationService {
             customTitle: journey.title,
             activityTag: journey.activityTag,
             overallMemory: journey.overallMemory,
-            overallMemoryRemoteImageURLs: journey.overallMemoryImageURLs
+            overallMemoryRemoteImageURLs: journey.overallMemoryImageURLs,
+            privacyOptions: journey.privacyOptions
         )
     }
 

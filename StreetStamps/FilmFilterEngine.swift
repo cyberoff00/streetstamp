@@ -26,17 +26,17 @@ enum FilmFilterEngine {
         let vignetteIntensity: CGFloat
 
         static let sakuraCCDSoft = CaptureLookTuning(
-            tonePoint0: CGPoint(x: 0.0, y: 0.06),
-            tonePoint1: CGPoint(x: 0.25, y: 0.27),
-            tonePoint2: CGPoint(x: 0.50, y: 0.53),
-            tonePoint3: CGPoint(x: 0.75, y: 0.76),
-            tonePoint4: CGPoint(x: 1.0, y: 0.96),
+            tonePoint0: CGPoint(x: 0.0, y: 0.04),
+            tonePoint1: CGPoint(x: 0.25, y: 0.25),
+            tonePoint2: CGPoint(x: 0.50, y: 0.50),
+            tonePoint3: CGPoint(x: 0.75, y: 0.74),
+            tonePoint4: CGPoint(x: 1.0, y: 0.94),
             targetNeutral: CIVector(x: 6350, y: -6),
             saturation: 0.94,
-            brightness: 0.006,
-            contrast: 0.97,
+            brightness: 0.0,
+            contrast: 1.0,
             bloomRadius: 8.0,
-            bloomIntensity: 0.085,
+            bloomIntensity: 0.055,
             grainStrength: 0.010,
             vignetteIntensity: 0.12
         )

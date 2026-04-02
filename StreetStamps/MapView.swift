@@ -283,6 +283,14 @@ enum MediaUploadPreparation {
 // =======================================================
 // MARK: - Journey merge helper
 // =======================================================
+// MARK: - Journey Privacy Options
+enum JourneyPrivacyOption: String, Codable, Hashable, CaseIterable, Sendable {
+    /// Hide route within 300m of start and end points.
+    case trimEndpoints
+    /// Hide map landmarks/POI labels in exported images.
+    case hideLandmarks
+}
+
 struct JourneyRoute: Codable {
     enum RouteSource: String, Codable {
         case raw
@@ -327,6 +335,7 @@ struct JourneyRoute: Codable {
     var overallMemory: String? = nil
     var overallMemoryImagePaths: [String] = []
     var overallMemoryRemoteImageURLs: [String] = []
+    var privacyOptions: Set<JourneyPrivacyOption> = []
 
     // ✅ 加回普通 init，修复 “Missing argument for 'from'”
     init(
@@ -360,7 +369,8 @@ struct JourneyRoute: Codable {
         activityTag: String? = nil,
         overallMemory: String? = nil,
         overallMemoryImagePaths: [String] = [],
-        overallMemoryRemoteImageURLs: [String] = []
+        overallMemoryRemoteImageURLs: [String] = [],
+        privacyOptions: Set<JourneyPrivacyOption> = []
     ) {
         self.id = id
         self.startTime = startTime
@@ -393,6 +403,7 @@ struct JourneyRoute: Codable {
         self.overallMemory = overallMemory
         self.overallMemoryImagePaths = overallMemoryImagePaths
         self.overallMemoryRemoteImageURLs = overallMemoryRemoteImageURLs
+        self.privacyOptions = privacyOptions
     }
 
     var isCompleted: Bool { endTime != nil && startTime != nil }
@@ -441,6 +452,7 @@ struct JourneyRoute: Codable {
         case currentCity, cityName, startCityKey, endCityKey
         case exploreMode, trackingMode
         case visibility, sharedAt, customTitle, activityTag, overallMemory, overallMemoryImagePaths, overallMemoryRemoteImageURLs
+        case privacyOptions
 
         // 兼容更老字段名（如果你确实历史里用过）
         case coords
@@ -493,6 +505,7 @@ struct JourneyRoute: Codable {
         overallMemory = try c.decodeIfPresent(String.self, forKey: .overallMemory)
         overallMemoryImagePaths = try c.decodeIfPresent([String].self, forKey: .overallMemoryImagePaths) ?? []
         overallMemoryRemoteImageURLs = try c.decodeIfPresent([String].self, forKey: .overallMemoryRemoteImageURLs) ?? []
+        privacyOptions = (try? c.decode(Set<JourneyPrivacyOption>.self, forKey: .privacyOptions)) ?? []
     }
 
     // ✅ 自己实现 encode，修复 Encodable 合成失败（并且你可以选择写出 coords 兼容）
@@ -548,11 +561,42 @@ struct JourneyRoute: Codable {
         if !overallMemoryRemoteImageURLs.isEmpty {
             try c.encode(overallMemoryRemoteImageURLs, forKey: .overallMemoryRemoteImageURLs)
         }
+        if !privacyOptions.isEmpty {
+            try c.encode(privacyOptions, forKey: .privacyOptions)
+        }
     }
 }
 
 extension JourneyRoute: @unchecked Sendable {}
 
+// MARK: - Privacy Coordinate Trimming
+
+extension JourneyRoute {
+    /// Returns coordinates with privacy options applied.
+    /// - `.trimEndpoints`: removes points within 300m of the first and last coordinate.
+    func privacyFilteredCoordinates(_ coords: [CoordinateCodable]) -> [CoordinateCodable] {
+        guard privacyOptions.contains(.trimEndpoints), coords.count >= 2 else { return coords }
+        return Self.trimEndpoints(coords, radiusMeters: 300)
+    }
+
+    /// Removes coordinate points within `radiusMeters` of the first and last point.
+    static func trimEndpoints(_ coords: [CoordinateCodable], radiusMeters: Double) -> [CoordinateCodable] {
+        guard coords.count >= 2 else { return coords }
+        let startLoc = CLLocation(latitude: coords.first!.lat, longitude: coords.first!.lon)
+        let endLoc = CLLocation(latitude: coords.last!.lat, longitude: coords.last!.lon)
+
+        let filtered = coords.filter { c in
+            let loc = CLLocation(latitude: c.lat, longitude: c.lon)
+            return loc.distance(from: startLoc) > radiusMeters
+                && loc.distance(from: endLoc) > radiusMeters
+        }
+        // If trimming removes everything (very short route), return empty rather than leaking endpoints.
+        return filtered
+    }
+
+    /// Whether exported map snapshots should hide POI labels.
+    var shouldHideLandmarks: Bool { privacyOptions.contains(.hideLandmarks) }
+}
 
 //
 extension JourneyRoute {
@@ -692,6 +736,7 @@ struct SystemCameraPicker: UIViewControllerRepresentable {
     var preferredDevice: UIImagePickerController.CameraDevice = .rear
     var mirrorOnCapture: Bool
     var onImage: (UIImage) -> Void
+    var onEdit: ((UIImage) -> Void)? = nil
     var onCancel: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
@@ -787,6 +832,7 @@ final class CameraOverlayController: UIViewController {
     private var reviewImageView: UIImageView?
     private var retakeButton: UIButton?
     private var usePhotoButton: UIButton?
+    private var editButton: UIButton?
 
     init(picker: UIImagePickerController, coordinator: SystemCameraPicker.Coordinator) {
         self.picker = picker
@@ -949,6 +995,19 @@ final class CameraOverlayController: UIViewController {
         view.addSubview(retake)
         self.retakeButton = retake
 
+        // Edit button (bottom-center)
+        let edit = UIButton(type: .system)
+        let editConfig = UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+        let editIcon = UIImage(systemName: "slider.horizontal.3", withConfiguration: editConfig)
+        edit.setImage(editIcon, for: .normal)
+        edit.setTitle(" " + NSLocalizedString("Edit", comment: ""), for: .normal)
+        edit.titleLabel?.font = .systemFont(ofSize: 18, weight: .semibold)
+        edit.tintColor = .white
+        edit.addTarget(self, action: #selector(editTapped), for: .touchUpInside)
+        edit.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(edit)
+        self.editButton = edit
+
         // Use Photo button (bottom-right)
         let usePhoto = UIButton(type: .system)
         usePhoto.setTitle(NSLocalizedString("Use Photo", comment: ""), for: .normal)
@@ -968,6 +1027,9 @@ final class CameraOverlayController: UIViewController {
             retake.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             retake.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -30),
 
+            edit.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            edit.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -30),
+
             usePhoto.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
             usePhoto.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -30),
         ])
@@ -978,6 +1040,8 @@ final class CameraOverlayController: UIViewController {
         reviewImageView = nil
         retakeButton?.removeFromSuperview()
         retakeButton = nil
+        editButton?.removeFromSuperview()
+        editButton = nil
         usePhotoButton?.removeFromSuperview()
         usePhotoButton = nil
         reviewImage = nil
@@ -1046,6 +1110,13 @@ final class CameraOverlayController: UIViewController {
         dismissReview()
     }
 
+    @objc private func editTapped() {
+        guard let image = reviewImage, let picker else { return }
+        picker.dismiss(animated: true) { [weak self] in
+            self?.coordinator?.parent.onEdit?(image)
+        }
+    }
+
     @objc private func usePhotoTapped() {
         guard let image = reviewImage, let picker else { return }
         picker.dismiss(animated: true) { [weak self] in
@@ -1083,26 +1154,26 @@ struct PhotoLibraryPicker: UIViewControllerRepresentable {
         init(parent: PhotoLibraryPicker) { self.parent = parent }
 
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
-            picker.dismiss(animated: true) {
-                if results.isEmpty {
+            if results.isEmpty {
+                picker.dismiss(animated: true) {
                     self.parent.onCancel()
-                    return
                 }
-
-                self.loadImages(from: results)
+                return
             }
+            // Load images FIRST, dismiss AFTER — so onImages fires in dismiss completion
+            self.loadImages(from: results, picker: picker)
         }
 
-        private func loadImages(from results: [PHPickerResult]) {
+        private func loadImages(from results: [PHPickerResult], picker: PHPickerViewController) {
             let group = DispatchGroup()
-            var images: [(Int, UIImage)] = [] // (index, image) 保持顺序
+            var images: [(Int, UIImage)] = []
 
             for (index, result) in results.enumerated() {
                 group.enter()
                 let provider = result.itemProvider
 
                 if provider.canLoadObject(ofClass: UIImage.self) {
-                    provider.loadObject(ofClass: UIImage.self) { obj, error in
+                    provider.loadObject(ofClass: UIImage.self) { obj, _ in
                         defer { group.leave() }
                         if let image = obj as? UIImage {
                             DispatchQueue.main.async {
@@ -1116,9 +1187,10 @@ struct PhotoLibraryPicker: UIViewControllerRepresentable {
             }
 
             group.notify(queue: .main) {
-                // 按原始顺序排序
                 let sorted = images.sorted { $0.0 < $1.0 }.map { $0.1 }
-                self.parent.onImages(sorted)
+                picker.dismiss(animated: true) {
+                    self.parent.onImages(sorted)
+                }
             }
         }
     }
@@ -1205,8 +1277,8 @@ struct MapView: View {
         return mapCoord(loc.coordinate)
     }
 
-    private var displaySegments: [RenderRouteSegment] { tracking.renderUnifiedSegmentsForMap }
-    private var liveTail: [CLLocationCoordinate2D] { tracking.renderLiveTailForMap }
+    private var displaySegments: [RenderRouteSegment] { tracking.renderSnapshot.unifiedSegments }
+    private var liveTail: [CLLocationCoordinate2D] { tracking.renderSnapshot.liveTail }
     private enum PersistReason { case coordsTick, memoryAdded, exitToHome, finish, sharingContinue, sharingComplete }
 
     private func persistSnapshot(_ reason: PersistReason) {
@@ -1401,7 +1473,7 @@ struct MapView: View {
             filmCameraDrop.reset()
             if journeyRoute.endTime == nil { flushSnapshot(.exitToHome) }
         }
-        .onReceive(tracking.$coords) { onCoordsUpdated($0) }
+        .onReceive(tracking.$coordVersion) { _ in onCoordsUpdated() }
         .onReceive(tracking.$userLocation.compactMap { $0 }) { loc in
             if followUser, !isUserInteractingWithMap {
                 updateCamera(for: loc)
@@ -2232,7 +2304,7 @@ struct MapView: View {
             return
         }
 
-        let all = tracking.renderUnifiedSegmentsForMap.flatMap { $0.coords }
+        let all = tracking.renderSnapshot.unifiedSegments.flatMap { $0.coords }
         if all.count >= 2 {
             autoFitMap(to: all)
             return
@@ -2243,11 +2315,16 @@ struct MapView: View {
         }
     }
 
-    private func onCoordsUpdated(_ coords: [CLLocationCoordinate2D]) {
+    private func onCoordsUpdated() {
+        let coords = tracking.coords
         syncJourneyCoordinatesIncremental(from: coords)
-        journeyRoute.distance = tracking.totalDistance
-        journeyRoute.elevationGain = tracking.totalAscent
-        journeyRoute.elevationLoss = tracking.totalDescent
+        // Only write to journeyRoute when values actually changed (avoids unnecessary @Binding invalidation)
+        let dist = tracking.totalDistance
+        let gain = tracking.totalAscent
+        let loss = tracking.totalDescent
+        if journeyRoute.distance != dist { journeyRoute.distance = dist }
+        if journeyRoute.elevationGain != gain { journeyRoute.elevationGain = gain }
+        if journeyRoute.elevationLoss != loss { journeyRoute.elevationLoss = loss }
         syncTimingFields()
         guard journeyRoute.endTime == nil else { return }
         let now = Date()
@@ -3076,6 +3153,7 @@ struct MemoryEditorSheet: View {
     @State private var title: String
     @State private var notes: String
     @State private var imagePaths: [String]
+    @State private var remoteImageURLs: [String]
     @State private var notesFocused: Bool = false
 
     @State private var showCamera = false
@@ -3083,6 +3161,8 @@ struct MemoryEditorSheet: View {
     @State private var showPhotoViewer = false
     @State private var viewerIndex = 0
     @State private var showExpanded = false
+    @State private var showPhotoEditor = false
+    @State private var pendingEditorImages: [UIImage] = []
     @State private var showDiscardAlert = false
     @State private var showDeleteAlert = false
     // ✅ Used to decide whether we should auto-resume the editor when user returns
@@ -3095,6 +3175,7 @@ struct MemoryEditorSheet: View {
     @State private var initialTitle: String
     @State private var initialNotes: String
     @State private var initialImagePaths: [String]
+    @State private var initialRemoteImageURLs: [String]
     @State private var initialMirrorSelfie: Bool
     private var maxPhotos: Int { MembershipStore.shared.maxPhotosPerMemory }
 
@@ -3116,27 +3197,21 @@ struct MemoryEditorSheet: View {
         self.onSave = onSave
 
         let memoryID = existing?.id ?? "new"
-        if let draft = MemoryDraftStore.load(userID: userID, memoryID: memoryID) {
-            _title = State(initialValue: draft.title)
-            _notes = State(initialValue: draft.notes)
-            _imagePaths = State(initialValue: draft.imagePaths)
-            _mirrorSelfie = State(initialValue: draft.mirrorSelfie)
-        } else if !preloadedImagePaths.isEmpty && existing == nil {
-            // Film camera pre-loaded images
-            _title = State(initialValue: "")
-            _notes = State(initialValue: "")
-            _imagePaths = State(initialValue: preloadedImagePaths)
-            _mirrorSelfie = State(initialValue: false)
-        } else {
-            _title = State(initialValue: existing?.title ?? "")
-            _notes = State(initialValue: existing?.notes ?? "")
-            _imagePaths = State(initialValue: existing?.imagePaths ?? [])
-            _mirrorSelfie = State(initialValue: false)
-        }
+        let bootstrap = MemoryEditorBootstrapState.make(
+            draft: MemoryDraftStore.load(userID: userID, memoryID: memoryID),
+            existing: existing,
+            preloadedImagePaths: preloadedImagePaths
+        )
+        _title = State(initialValue: bootstrap.title)
+        _notes = State(initialValue: bootstrap.notes)
+        _imagePaths = State(initialValue: bootstrap.imagePaths)
+        _remoteImageURLs = State(initialValue: bootstrap.remoteImageURLs)
+        _mirrorSelfie = State(initialValue: bootstrap.mirrorSelfie)
 
         _initialTitle = State(initialValue: existing?.title ?? "")
         _initialNotes = State(initialValue: existing?.notes ?? "")
         _initialImagePaths = State(initialValue: existing?.imagePaths ?? [])
+        _initialRemoteImageURLs = State(initialValue: existing?.remoteImageURLs ?? [])
         _initialMirrorSelfie = State(initialValue: false)
     }
 
@@ -3164,10 +3239,30 @@ private var hasUnsavedChanges: Bool {
         title.trimmingCharacters(in: .whitespacesAndNewlines) != initialTitle.trimmingCharacters(in: .whitespacesAndNewlines) ||
         notes.trimmingCharacters(in: .whitespacesAndNewlines) != initialNotes.trimmingCharacters(in: .whitespacesAndNewlines) ||
         imagePaths != initialImagePaths ||
+        remoteImageURLs != initialRemoteImageURLs ||
         mirrorSelfie != initialMirrorSelfie
     }
-    private var canAddPhoto: Bool { imagePaths.count < maxPhotos }
-    private var remainingPhotoSlots: Int { max(0, maxPhotos - imagePaths.count) }
+    private var totalPhotoCount: Int { imagePaths.count + remoteImageURLs.count }
+    private var canAddPhoto: Bool { totalPhotoCount < maxPhotos }
+    private var remainingPhotoSlots: Int { max(0, maxPhotos - totalPhotoCount) }
+
+    private func launchCameraPicker() {
+        PhotoInputPresentationPolicy.launchPicker(dismissTextInput: {
+            notesFocused = false
+            hideKeyboard()
+        }) {
+            showCamera = true
+        }
+    }
+
+    private func launchPhotoLibraryPicker() {
+        PhotoInputPresentationPolicy.launchPicker(dismissTextInput: {
+            notesFocused = false
+            hideKeyboard()
+        }) {
+            showPhotoLibrary = true
+        }
+    }
 
     private func dismissSmart() {
         if hasUnsavedChanges { showDiscardAlert = true }
@@ -3230,8 +3325,7 @@ private var hasUnsavedChanges: Bool {
                 preferredDevice: .rear,
                 mirrorOnCapture: mirrorSelfie,
                 onImage: { image in
-                    showCamera = false
-                    storeEditedImages([image], writesToPhotoLibrary: true)
+                    pendingEditorImages = [image]
                 },
                 onCancel: {
                     showCamera = false
@@ -3243,14 +3337,32 @@ private var hasUnsavedChanges: Bool {
             PhotoLibraryPicker(
                 selectionLimit: max(1, remainingPhotoSlots),
                 onImages: { images in
-                    showPhotoLibrary = false
-                    storeEditedImages(images, writesToPhotoLibrary: false)
+                    pendingEditorImages = images
                 },
                 onCancel: {
                     showPhotoLibrary = false
                 }
             )
             .ignoresSafeArea()
+        }
+        .onChange(of: pendingEditorImages.count) { count in
+            if count > 0 && !showCamera && !showPhotoEditor {
+                showPhotoEditor = true
+            }
+        }
+        .fullScreenCover(isPresented: $showPhotoEditor) {
+            PhotoEditorView(
+                images: pendingEditorImages,
+                onComplete: { edited in
+                    showPhotoEditor = false
+                    pendingEditorImages = []
+                    storeEditedImages(edited, writesToPhotoLibrary: false)
+                },
+                onCancel: {
+                    showPhotoEditor = false
+                    pendingEditorImages = []
+                }
+            )
         }
         .fullScreenCover(isPresented: $showExpanded) {
             NavigationStack {
@@ -3330,7 +3442,7 @@ private var hasUnsavedChanges: Bool {
                     .padding(.horizontal, 6)
                     .padding(.top, 8)
 
-                if !imagePaths.isEmpty {
+                if !imagePaths.isEmpty || !remoteImageURLs.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 10) {
                             ForEach(Array(imagePaths.enumerated()), id: \.offset) { idx, p in
@@ -3342,8 +3454,8 @@ private var hasUnsavedChanges: Bool {
                                         }
 
                                     Button {
-                                        let removed = imagePaths.remove(at: idx)
-                                        PhotoStore.delete(named: removed, userID: userID)
+                                        // Deferred: only remove from array. File deletion on save.
+                                        imagePaths.remove(at: idx)
                                     } label: {
                                         Image(systemName: "xmark.circle.fill")
                                             .font(.system(size: 20))
@@ -3352,6 +3464,35 @@ private var hasUnsavedChanges: Bool {
                                             .appMinTapTarget()
                                     }
                                     .buttonStyle(.plain)
+                                }
+                            }
+                            ForEach(Array(remoteImageURLs.enumerated()), id: \.offset) { idx, rawURL in
+                                if let url = URL(string: rawURL) {
+                                    ZStack(alignment: .topTrailing) {
+                                        CachedRemoteImage(url: url) { $0.resizable() } placeholder: {
+                                            ProgressView()
+                                                .frame(width: 88, height: 88)
+                                        } failure: {
+                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                .fill(Color(UIColor(white: 0.92, alpha: 1)))
+                                                .frame(width: 88, height: 88)
+                                        }
+                                        .scaledToFill()
+                                        .frame(width: 88, height: 88)
+                                        .clipped()
+                                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                                        Button {
+                                            remoteImageURLs.remove(at: idx)
+                                        } label: {
+                                            Image(systemName: "xmark.circle.fill")
+                                                .font(.system(size: 20))
+                                                .foregroundColor(FigmaTheme.text.opacity(0.6))
+                                                .background(Color.white.opacity(0.75).clipShape(Circle()))
+                                                .appMinTapTarget()
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
                                 }
                             }
                         }
@@ -3379,7 +3520,7 @@ private var hasUnsavedChanges: Bool {
     private var footer: some View {
         HStack {
             HStack(spacing: 12) {
-                Button { showCamera = true } label: {
+                Button(action: launchCameraPicker) {
                     Image(systemName: "camera")
                         .font(.system(size: 20, weight: .medium))
                         .foregroundColor(FigmaTheme.text.opacity(0.82))
@@ -3389,7 +3530,7 @@ private var hasUnsavedChanges: Bool {
                 .disabled(!canAddPhoto)
                 .opacity(canAddPhoto ? 1 : 0.35)
 
-                Button { showPhotoLibrary = true } label: {
+                Button(action: launchPhotoLibraryPicker) {
                     Image(systemName: "photo")
                         .font(.system(size: 20, weight: .medium))
                         .foregroundColor(FigmaTheme.text.opacity(0.82))
@@ -3436,6 +3577,13 @@ private var hasUnsavedChanges: Bool {
         didExitExplicitly = true
         draftDebounceTask?.cancel()
         draftDebounceTask = nil
+
+        // Deferred deletion: delete local files removed during editing.
+        let removedPaths = Set(initialImagePaths).subtracting(Set(imagePaths))
+        for path in removedPaths {
+            PhotoStore.delete(named: path, userID: userID)
+        }
+
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -3446,6 +3594,7 @@ private var hasUnsavedChanges: Bool {
             notes: trimmedNotes,
             imageData: nil,
             imagePaths: imagePaths,
+            remoteImageURLs: remoteImageURLs,
             cityKey: existing?.cityKey,
             cityName: existing?.cityName,
             coordinate: existing?.coordinate ?? (0, 0),
@@ -3463,6 +3612,11 @@ private var hasUnsavedChanges: Bool {
         didExitExplicitly = true
         draftDebounceTask?.cancel()
         draftDebounceTask = nil
+        // Clean up any NEW photos added during this editing session (not yet saved).
+        let newPaths = Set(imagePaths).subtracting(Set(initialImagePaths))
+        for path in newPaths {
+            PhotoStore.delete(named: path, userID: userID)
+        }
         clearDraft()
         MemoryDraftResumeStore.set(false, userID: userID, memoryID: draftMemoryID)
         isPresented = false
@@ -3503,6 +3657,7 @@ private var hasUnsavedChanges: Bool {
 struct PhotoThumb: View {
     let path: String
     let userID: String
+    @State private var image: UIImage?
 
     var body: some View {
         ZStack {
@@ -3510,7 +3665,7 @@ struct PhotoThumb: View {
                 .fill(UITheme.iconBtnBg)
                 .frame(width: 76, height: 76)
 
-            if let img = PhotoStore.loadImage(named: path, userID: userID) {
+            if let img = image {
                 Image(uiImage: img)
                     .resizable()
                     .scaledToFill()
@@ -3522,6 +3677,13 @@ struct PhotoThumb: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(UITheme.subText)
             }
+        }
+        .task(id: path) {
+            let uid = userID
+            let p = path
+            image = await Task.detached(priority: .userInitiated) {
+                PhotoStore.loadImage(named: p, userID: uid)
+            }.value
         }
     }
 }
@@ -3549,8 +3711,28 @@ struct MemoryEditorPage: View {
     @State private var showPhotoViewer: Bool = false
     @State private var viewerIndex: Int = 0
     @State private var showDeleteConfirm: Bool = false
+    @State private var showPhotoEditor: Bool = false
+    @State private var pendingEditorImages: [UIImage] = []
     private var canAddPhoto: Bool { imagePaths.count < maxPhotos }
     private var remainingPhotoSlots: Int { max(0, maxPhotos - imagePaths.count) }
+
+    private func launchCameraPicker() {
+        PhotoInputPresentationPolicy.launchPicker(dismissTextInput: {
+            notesFocused = false
+            endEditingGlobal()
+        }) {
+            showCamera = true
+        }
+    }
+
+    private func launchPhotoLibraryPicker() {
+        PhotoInputPresentationPolicy.launchPicker(dismissTextInput: {
+            notesFocused = false
+            endEditingGlobal()
+        }) {
+            showPhotoLibrary = true
+        }
+    }
 
     var body: some View {
         ZStack {
@@ -3572,8 +3754,7 @@ struct MemoryEditorPage: View {
                 preferredDevice: .rear,
                 mirrorOnCapture: mirrorSelfie,
                 onImage: { image in
-                    showCamera = false
-                    storeEditedImages([image], writesToPhotoLibrary: true)
+                    pendingEditorImages = [image]
                 },
                 onCancel: { showCamera = false }
             )
@@ -3583,12 +3764,30 @@ struct MemoryEditorPage: View {
             PhotoLibraryPicker(
                 selectionLimit: max(1, remainingPhotoSlots),
                 onImages: { images in
-                    showPhotoLibrary = false
-                    storeEditedImages(images, writesToPhotoLibrary: false)
+                    pendingEditorImages = images
                 },
                 onCancel: { showPhotoLibrary = false }
             )
             .ignoresSafeArea()
+        }
+        .onChange(of: pendingEditorImages.count) { count in
+            if count > 0 && !showCamera && !showPhotoEditor {
+                showPhotoEditor = true
+            }
+        }
+        .fullScreenCover(isPresented: $showPhotoEditor) {
+            PhotoEditorView(
+                images: pendingEditorImages,
+                onComplete: { edited in
+                    showPhotoEditor = false
+                    pendingEditorImages = []
+                    storeEditedImages(edited, writesToPhotoLibrary: false)
+                },
+                onCancel: {
+                    showPhotoEditor = false
+                    pendingEditorImages = []
+                }
+            )
         }
         .fullScreenCover(isPresented: $showPhotoViewer) {
             PhotoViewer(
@@ -3634,8 +3833,8 @@ struct MemoryEditorPage: View {
                                         }
 
                                     Button {
-                                        let removed = imagePaths.remove(at: idx)
-                                        PhotoStore.delete(named: removed, userID: userID)
+                                        // Deferred: only remove from array. File deletion on save.
+                                        imagePaths.remove(at: idx)
                                     } label: {
                                         Image(systemName: "xmark.circle.fill")
                                             .font(.system(size: 20))
@@ -3665,7 +3864,7 @@ struct MemoryEditorPage: View {
     private var footer: some View {
         HStack {
             HStack(spacing: 12) {
-                Button { showCamera = true } label: {
+                Button(action: launchCameraPicker) {
                     Image(systemName: "camera")
                         .font(.system(size: 20, weight: .medium))
                         .foregroundColor(FigmaTheme.text.opacity(0.82))
@@ -3675,7 +3874,7 @@ struct MemoryEditorPage: View {
                 .disabled(!canAddPhoto)
                 .opacity(canAddPhoto ? 1 : 0.35)
 
-                Button { showPhotoLibrary = true } label: {
+                Button(action: launchPhotoLibraryPicker) {
                     Image(systemName: "photo")
                         .font(.system(size: 20, weight: .medium))
                         .foregroundColor(FigmaTheme.text.opacity(0.82))

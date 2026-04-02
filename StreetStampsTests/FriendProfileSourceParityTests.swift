@@ -57,6 +57,17 @@ final class FriendProfileSourceParityTests: XCTestCase {
         XCTAssertTrue(contents.contains("socialStore.friends.first(where: { $0.id == friendID }) ?? fallbackSnapshot"))
     }
 
+    func test_journeyMemoryMainViewPresentsDetailWithFullScreenCover() throws {
+        let root = projectRoot().appendingPathComponent("StreetStamps", isDirectory: true)
+        let contents = try String(
+            contentsOf: root.appendingPathComponent("JourneyMemoryNew.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(contents.contains(".fullScreenCover(item: $activeJourneyDetail) { destination in"))
+        XCTAssertFalse(contents.contains(".navigationDestination(item: $activeJourneyDetail) { destination in"))
+    }
+
     func test_activityFeedUsesPromptRefreshAndScrollRestoreFlow() throws {
         let root = projectRoot().appendingPathComponent("StreetStamps", isDirectory: true)
         let contents = try String(

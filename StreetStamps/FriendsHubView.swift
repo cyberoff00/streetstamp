@@ -164,6 +164,7 @@ struct FriendsHubView: View {
     @EnvironmentObject private var notificationStore: SocialNotificationStore
     @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
     @EnvironmentObject private var blockStore: UserBlockStore
+    @ObservedObject private var languagePreference = LanguagePreference.shared
     // NOTE: journeyStore, cityCache, flow removed from here to prevent
     // spurious body recomputation. Those stores update frequently but are
     // only used by child screens which obtain them via @EnvironmentObject
@@ -286,6 +287,7 @@ struct FriendsHubView: View {
 
     private var feedSourceVersion: Int {
         var h = Hasher()
+        h.combine(languagePreference.effectiveLocaleIdentifier)
         h.combine(socialStore.friends.hashValue)
         h.combine(myRemoteProfile?.id)
         h.combine(myRemoteProfile?.journeys.hashValue)
@@ -1983,6 +1985,7 @@ enum FriendProfileLayout {
 
 private struct FriendProfileScreen: View {
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var languagePreference = LanguagePreference.shared
     @EnvironmentObject private var socialStore: SocialGraphStore
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var flow: AppFlowCoordinator
@@ -2406,7 +2409,7 @@ private struct FriendProfileScreen: View {
 
     private func heroJoinedDateText(_ date: Date) -> String {
         let formatter = DateFormatter()
-        formatter.locale = Locale.current
+        formatter.locale = languagePreference.displayLocale
         formatter.dateFormat = "yyyy/M/d"
         return formatter.string(from: date)
     }
@@ -2489,7 +2492,7 @@ private struct FriendProfileScreen: View {
 
     private func dateText(_ date: Date) -> String {
         let df = DateFormatter()
-        df.locale = Locale.current
+        df.locale = languagePreference.displayLocale
         df.dateStyle = .medium
         df.timeStyle = .none
         return df.string(from: date)
@@ -3022,7 +3025,8 @@ private final class FriendMirrorContext: ObservableObject {
             customTitle: friendJourney.title,
             activityTag: friendJourney.activityTag,
             overallMemory: friendJourney.overallMemory,
-            overallMemoryRemoteImageURLs: friendJourney.overallMemoryImageURLs
+            overallMemoryRemoteImageURLs: friendJourney.overallMemoryImageURLs,
+            privacyOptions: friendJourney.privacyOptions
         )
     }
 

@@ -165,7 +165,13 @@ final class LiveActivityManager: ObservableObject {
     func endActivity() {
         stopUpdateTimer()
         guard let activity = currentActivity else { return }
-        
+
+        // 同步清除引用，防止 startActivity() 创建新 activity 后被异步回调覆盖
+        currentActivity = nil
+        trackingStartTime = nil
+        accumulatedPausedDuration = 0
+        currentPauseStartedAt = nil
+
         let finalState = TrackingActivityAttributes.ContentState(
             distanceMeters: 0,
             elapsedSeconds: 0,
@@ -173,16 +179,12 @@ final class LiveActivityManager: ObservableObject {
             isPaused: false,
             memoriesCount: 0
         )
-        
+
         Task {
             await activity.end(
                 ActivityContent(state: finalState, staleDate: nil),
                 dismissalPolicy: .immediate
             )
-            currentActivity = nil
-            trackingStartTime = nil
-            accumulatedPausedDuration = 0
-            currentPauseStartedAt = nil
             print("[LiveActivity] Ended")
         }
     }

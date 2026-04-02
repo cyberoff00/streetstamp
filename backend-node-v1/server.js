@@ -968,6 +968,7 @@ function normalizeJourneyPayload(raw, ownerUserID) {
     sharedAt: normalizeISOTime(raw?.sharedAt),
     routeCoordinates: normalizeRouteCoordinates(raw?.routeCoordinates || raw?.coordinates),
     memories: normalizeJourneyMemories(raw?.memories),
+    privacyOptions: Array.isArray(raw?.privacyOptions) ? raw.privacyOptions.filter(x => typeof x === "string").slice(0, 10) : undefined,
     ownerUserID: ownerUserID || undefined
   };
 }

@@ -256,7 +256,7 @@ struct JourneyMemoryMainView: View {
             }
         }
         .navigationBarBackButtonHidden(true)
-        .navigationDestination(item: $activeJourneyDetail) { destination in
+        .fullScreenCover(item: $activeJourneyDetail) { destination in
             JourneyMemoryDetailView(
                 journey: destination.journey,
                 memories: destination.memories,
@@ -1037,6 +1037,8 @@ struct JourneyMemoryDetailView: View {
     @State private var snapshotOverallMemoryBeforeEdit: String = ""
     @State private var draftOverallMemoryImagePaths: [String] = []
     @State private var snapshotOverallMemoryImagePathsBeforeEdit: [String] = []
+    @State private var draftOverallMemoryRemoteImageURLs: [String] = []
+    @State private var snapshotOverallMemoryRemoteImageURLsBeforeEdit: [String] = []
     @State private var showRepublishConfirmation = false
 
     // Which memory's text field is focused (used to keep caret visible in the outer ScrollView).
@@ -1050,11 +1052,15 @@ struct JourneyMemoryDetailView: View {
 
     @State private var showDeleteAllConfirm = false
     @State private var showDeleteJourneyConfirm = false
+    @State private var showPrivacySheet = false
     // Photo / Camera (edit mode)
     @State private var showCamera: Bool = false
     @State private var showPhotoLibrary: Bool = false
+    @State private var showPhotoEditor: Bool = false
+    @State private var pendingEditorImages: [UIImage] = []
     @State private var activePhotoTarget: ActivePhotoTarget? = nil
     @State private var mirrorSelfie: Bool = false
+    @State private var showJourneyPhotoLimitToast = false
     @State private var sidebarHideToken = UUID().uuidString
 
     // Visibility
@@ -1225,6 +1231,25 @@ struct JourneyMemoryDetailView: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: showMemoryHint)
+        .overlay(alignment: .bottom) {
+            if showJourneyPhotoLimitToast {
+                Text(String(format: L10n.t("journey_photo_limit_toast"), journeyPhotoLimit))
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Color.black.opacity(0.8))
+                    .clipShape(Capsule())
+                    .padding(.bottom, 32)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                            withAnimation { showJourneyPhotoLimitToast = false }
+                        }
+                    }
+            }
+        }
+        .animation(.easeInOut(duration: 0.3), value: showJourneyPhotoLimitToast)
         .task {
             if let cached = RouteThumbnailCache.shared.get(journey.id) {
                 routeThumbnail = cached
@@ -1245,6 +1270,8 @@ struct JourneyMemoryDetailView: View {
                 snapshotOverallMemoryBeforeEdit = draftOverallMemory
                 draftOverallMemoryImagePaths = journey.overallMemoryImagePaths
                 snapshotOverallMemoryImagePathsBeforeEdit = journey.overallMemoryImagePaths
+                draftOverallMemoryRemoteImageURLs = journey.overallMemoryRemoteImageURLs
+                snapshotOverallMemoryRemoteImageURLsBeforeEdit = journey.overallMemoryRemoteImageURLs
                 isEditing = false
                 focusedMemoryID = nil
                 return
@@ -1260,6 +1287,8 @@ struct JourneyMemoryDetailView: View {
                 snapshotOverallMemoryBeforeEdit = draftOverallMemory
                 draftOverallMemoryImagePaths = saved.overallMemoryImagePaths
                 snapshotOverallMemoryImagePathsBeforeEdit = saved.overallMemoryImagePaths
+                draftOverallMemoryRemoteImageURLs = saved.overallMemoryRemoteImageURLs
+                snapshotOverallMemoryRemoteImageURLsBeforeEdit = saved.overallMemoryRemoteImageURLs
                 isEditing = true
                 focusedMemoryID = saved.focusedMemoryID
                 JourneyMemoryDetailResumeStore.set(false, userID: uid, journeyID: journey.id)
@@ -1273,6 +1302,8 @@ struct JourneyMemoryDetailView: View {
                 snapshotOverallMemoryBeforeEdit = draftOverallMemory
                 draftOverallMemoryImagePaths = journey.overallMemoryImagePaths
                 snapshotOverallMemoryImagePathsBeforeEdit = journey.overallMemoryImagePaths
+                draftOverallMemoryRemoteImageURLs = journey.overallMemoryRemoteImageURLs
+                snapshotOverallMemoryRemoteImageURLsBeforeEdit = journey.overallMemoryRemoteImageURLs
             }
         }
         .onAppear { showMemoryHintIfNeeded() }
@@ -1366,13 +1397,19 @@ struct JourneyMemoryDetailView: View {
             }
         }
 
+        .sheet(isPresented: $showPrivacySheet) {
+            JourneyPrivacyOptionsSheet(journey: currentJourney) { updatedOptions in
+                updatePrivacyOptions(updatedOptions)
+            }
+            .presentationDetents([.height(280)])
+            .presentationDragIndicator(.visible)
+        }
         .fullScreenCover(isPresented: $showCamera) {
             SystemCameraPicker(
                 preferredDevice: .rear,
                 mirrorOnCapture: mirrorSelfie,
                 onImage: { image in
-                    showCamera = false
-                    appendImagesToActiveMemory([image], writesToPhotoLibrary: true)
+                    pendingEditorImages = [image]
                 },
                 onCancel: { showCamera = false }
             )
@@ -1382,12 +1419,30 @@ struct JourneyMemoryDetailView: View {
             PhotoLibraryPicker(
                 selectionLimit: max(1, remainingPhotoSlotsForActiveTarget()),
                 onImages: { images in
-                    showPhotoLibrary = false
-                    appendImagesToActiveMemory(images, writesToPhotoLibrary: false)
+                    pendingEditorImages = images
                 },
                 onCancel: { showPhotoLibrary = false }
             )
             .ignoresSafeArea()
+        }
+        .onChange(of: pendingEditorImages.count) { count in
+            if count > 0 && !showCamera && !showPhotoEditor {
+                showPhotoEditor = true
+            }
+        }
+        .fullScreenCover(isPresented: $showPhotoEditor) {
+            PhotoEditorView(
+                images: pendingEditorImages,
+                onComplete: { edited in
+                    showPhotoEditor = false
+                    pendingEditorImages = []
+                    appendImagesToActiveMemory(edited, writesToPhotoLibrary: false)
+                },
+                onCancel: {
+                    showPhotoEditor = false
+                    pendingEditorImages = []
+                }
+            )
         }
     }
     
@@ -1500,6 +1555,15 @@ struct JourneyMemoryDetailView: View {
                                 } label: {
                                     Label(L10n.t("export_long_image"), systemImage: "square.and.arrow.up")
                                 }
+
+                                if !readOnly {
+                                    Button {
+                                        showPrivacySheet = true
+                                    } label: {
+                                        Label(L10n.t("privacy_toggle_title"), systemImage: "hand.raised.fill")
+                                    }
+                                }
+
                                 Divider()
 
                                 Button(role: .destructive) {
@@ -1661,8 +1725,8 @@ struct JourneyMemoryDetailView: View {
                             .clipShape(Circle())
                             .appMinTapTarget()
                     }
-                    .disabled(draftOverallMemoryImagePaths.count >= photoLimit)
-                    .opacity(draftOverallMemoryImagePaths.count >= photoLimit ? 0.35 : 1.0)
+                    .disabled(overallMemoryTotalPhotoCount >= photoLimit)
+                    .opacity(overallMemoryTotalPhotoCount >= photoLimit ? 0.35 : 1.0)
 
                     Button {
                         openPhotoLibraryForOverallMemory()
@@ -1675,19 +1739,20 @@ struct JourneyMemoryDetailView: View {
                             .clipShape(Circle())
                             .appMinTapTarget()
                     }
-                    .disabled(draftOverallMemoryImagePaths.count >= photoLimit)
-                    .opacity(draftOverallMemoryImagePaths.count >= photoLimit ? 0.35 : 1.0)
+                    .disabled(overallMemoryTotalPhotoCount >= photoLimit)
+                    .opacity(overallMemoryTotalPhotoCount >= photoLimit ? 0.35 : 1.0)
 
-                    Text(String(format: L10n.t("photo_count"), draftOverallMemoryImagePaths.count, photoLimit))
+                    Text(String(format: L10n.t("photo_count"), overallMemoryTotalPhotoCount, photoLimit))
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(.gray)
 
                     Spacer()
                 }
 
-                if !draftOverallMemoryImagePaths.isEmpty {
+                if !draftOverallMemoryImagePaths.isEmpty || !draftOverallMemoryRemoteImageURLs.isEmpty {
                     EditableMemoryImagesView(
                         imagePaths: $draftOverallMemoryImagePaths,
+                        remoteImageURLs: draftOverallMemoryImagePaths.isEmpty ? $draftOverallMemoryRemoteImageURLs : .constant([]),
                         userID: sessionStore.currentUserID
                     )
                 }
@@ -1701,10 +1766,10 @@ struct JourneyMemoryDetailView: View {
                 }
             }
 
-            if !isEditing && (!draftOverallMemoryImagePaths.isEmpty || !journey.overallMemoryRemoteImageURLs.isEmpty) {
+            if !isEditing && (!draftOverallMemoryImagePaths.isEmpty || !draftOverallMemoryRemoteImageURLs.isEmpty) {
                 MemoryImagesView(
                     imagePaths: draftOverallMemoryImagePaths,
-                    remoteImageURLs: draftOverallMemoryImagePaths.isEmpty ? journey.overallMemoryRemoteImageURLs : [],
+                    remoteImageURLs: draftOverallMemoryImagePaths.isEmpty ? draftOverallMemoryRemoteImageURLs : [],
                     userID: sessionStore.currentUserID
                 )
             }
@@ -1715,27 +1780,37 @@ struct JourneyMemoryDetailView: View {
 
     // MARK: - Edit controls
 
+    private var overallMemoryTotalPhotoCount: Int {
+        draftOverallMemoryImagePaths.count + draftOverallMemoryRemoteImageURLs.count
+    }
+
     private func beginEditing() {
         snapshotBeforeEdit = draftMemories
         snapshotJourneyTitleBeforeEdit = draftJourneyTitle
         snapshotOverallMemoryBeforeEdit = draftOverallMemory
         snapshotOverallMemoryImagePathsBeforeEdit = draftOverallMemoryImagePaths
+        snapshotOverallMemoryRemoteImageURLsBeforeEdit = draftOverallMemoryRemoteImageURLs
         isEditing = true
         // Enter edit mode without auto-focusing any field; user controls scroll position.
         focusedMemoryID = nil
     }
 
     private func cancelEditing() {
+        // Clean up any NEW photos added during this editing session (not yet saved).
+        let uid = sessionStore.currentUserID
+        cleanupNewlyAddedPhotos(userID: uid)
+
         draftMemories = snapshotBeforeEdit
         draftJourneyTitle = snapshotJourneyTitleBeforeEdit
         draftOverallMemory = snapshotOverallMemoryBeforeEdit
         draftOverallMemoryImagePaths = snapshotOverallMemoryImagePathsBeforeEdit
+        draftOverallMemoryRemoteImageURLs = snapshotOverallMemoryRemoteImageURLsBeforeEdit
         isEditing = false
         endEditing()
 
         // Cancel is an explicit discard: clear persisted draft.
-        JourneyMemoryDetailDraftStore.clear(userID: sessionStore.currentUserID, journeyID: journey.id)
-        JourneyMemoryDetailResumeStore.set(false, userID: sessionStore.currentUserID, journeyID: journey.id)
+        JourneyMemoryDetailDraftStore.clear(userID: uid, journeyID: journey.id)
+        JourneyMemoryDetailResumeStore.set(false, userID: uid, journeyID: journey.id)
     }
 
     @MainActor
@@ -1749,7 +1824,9 @@ struct JourneyMemoryDetailView: View {
             snapshotOverallMemory: snapshotOverallMemoryBeforeEdit,
             draftOverallMemory: draftOverallMemory,
             snapshotOverallMemoryImagePaths: snapshotOverallMemoryImagePathsBeforeEdit,
-            draftOverallMemoryImagePaths: draftOverallMemoryImagePaths
+            draftOverallMemoryImagePaths: draftOverallMemoryImagePaths,
+            snapshotOverallMemoryRemoteImageURLs: snapshotOverallMemoryRemoteImageURLsBeforeEdit,
+            draftOverallMemoryRemoteImageURLs: draftOverallMemoryRemoteImageURLs
         )
         switch action {
         case .saveLocal:
@@ -1784,11 +1861,16 @@ struct JourneyMemoryDetailView: View {
             return
         }
 
+        // Deferred deletion: delete local files that were removed during editing.
+        let uid = sessionStore.currentUserID
+        deferredDeleteRemovedPhotos(userID: uid)
+
         j.memories = draftMemories
         j.customTitle = JourneyMemoryDetailTitlePresentation.normalizedCustomTitle(from: draftJourneyTitle)
         let trimmedOverall = draftOverallMemory.trimmingCharacters(in: .whitespacesAndNewlines)
         j.overallMemory = trimmedOverall.isEmpty ? nil : trimmedOverall
         j.overallMemoryImagePaths = draftOverallMemoryImagePaths
+        j.overallMemoryRemoteImageURLs = draftOverallMemoryRemoteImageURLs
         store.upsertSnapshotThrottled(j, coordCount: j.coordinates.count)
         store.flushPersist(journey: j)
 
@@ -1797,12 +1879,67 @@ struct JourneyMemoryDetailView: View {
         snapshotJourneyTitleBeforeEdit = draftJourneyTitle
         snapshotOverallMemoryBeforeEdit = draftOverallMemory
         snapshotOverallMemoryImagePathsBeforeEdit = draftOverallMemoryImagePaths
+        snapshotOverallMemoryRemoteImageURLsBeforeEdit = draftOverallMemoryRemoteImageURLs
         isEditing = false
         endEditing()
 
         // Save is explicit: clear any persisted draft.
-        JourneyMemoryDetailDraftStore.clear(userID: sessionStore.currentUserID, journeyID: journey.id)
-        JourneyMemoryDetailResumeStore.set(false, userID: sessionStore.currentUserID, journeyID: journey.id)
+        JourneyMemoryDetailDraftStore.clear(userID: uid, journeyID: journey.id)
+        JourneyMemoryDetailResumeStore.set(false, userID: uid, journeyID: journey.id)
+    }
+
+    private func updatePrivacyOptions(_ options: Set<JourneyPrivacyOption>) {
+        guard var j = store.journeys.first(where: { $0.id == journey.id }) else { return }
+        j.privacyOptions = options
+        store.upsertSnapshotThrottled(j, coordCount: j.coordinates.count)
+        store.flushPersist(journey: j)
+        // Regenerate route thumbnail with updated privacy
+        Task { await generateRouteThumbnail() }
+    }
+
+    /// Delete NEW local photo files that were added during editing but not saved (cancel).
+    private func cleanupNewlyAddedPhotos(userID: String) {
+        // Overall memory
+        let newOverall = Set(draftOverallMemoryImagePaths).subtracting(Set(snapshotOverallMemoryImagePathsBeforeEdit))
+        for path in newOverall {
+            PhotoStore.delete(named: path, userID: userID)
+        }
+        // Per-memory
+        let snapshotByID = Dictionary(snapshotBeforeEdit.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        for draft in draftMemories {
+            guard let old = snapshotByID[draft.id] else {
+                // Entirely new memory — delete all its photos
+                for path in draft.imagePaths { PhotoStore.delete(named: path, userID: userID) }
+                continue
+            }
+            let newPaths = Set(draft.imagePaths).subtracting(Set(old.imagePaths))
+            for path in newPaths { PhotoStore.delete(named: path, userID: userID) }
+        }
+    }
+
+    /// Delete local photo files that were present before editing but removed by the user.
+    private func deferredDeleteRemovedPhotos(userID: String) {
+        // Overall memory images
+        let removedOverall = Set(snapshotOverallMemoryImagePathsBeforeEdit).subtracting(Set(draftOverallMemoryImagePaths))
+        for path in removedOverall {
+            PhotoStore.delete(named: path, userID: userID)
+        }
+        // Per-memory images
+        let snapshotByID = Dictionary(snapshotBeforeEdit.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        for draft in draftMemories {
+            guard let old = snapshotByID[draft.id] else { continue }
+            let removed = Set(old.imagePaths).subtracting(Set(draft.imagePaths))
+            for path in removed {
+                PhotoStore.delete(named: path, userID: userID)
+            }
+        }
+        // Memories that were entirely deleted during editing
+        let draftIDs = Set(draftMemories.map(\.id))
+        for old in snapshotBeforeEdit where !draftIDs.contains(old.id) {
+            for path in old.imagePaths {
+                PhotoStore.delete(named: path, userID: userID)
+            }
+        }
     }
 
     // MARK: - Draft persistence (Journey Memory Detail)
@@ -1821,7 +1958,8 @@ struct JourneyMemoryDetailView: View {
             focusedMemoryID: focusedMemoryID,
             journeyTitle: draftJourneyTitle,
             overallMemory: draftOverallMemory,
-            overallMemoryImagePaths: draftOverallMemoryImagePaths
+            overallMemoryImagePaths: draftOverallMemoryImagePaths,
+            overallMemoryRemoteImageURLs: draftOverallMemoryRemoteImageURLs
         )
         JourneyMemoryDetailDraftStore.save(draft, userID: uid, journeyID: journey.id)
         JourneyMemoryDetailResumeStore.set(true, userID: uid, journeyID: journey.id)
@@ -1829,57 +1967,95 @@ struct JourneyMemoryDetailView: View {
 
     // MARK: - Photo add helpers (edit mode)
     private var photoLimit: Int { membership.maxPhotosPerMemory }
+    private var journeyPhotoLimit: Int { membership.maxJourneyPhotos }
+    private var journeyTotalPhotoCount: Int {
+        let overallCount = draftOverallMemoryImagePaths.count + draftOverallMemoryRemoteImageURLs.count
+        let memoriesCount = draftMemories.reduce(0) { $0 + $1.imagePaths.count + $1.remoteImageURLs.count }
+        return overallCount + memoriesCount
+    }
 
     private func remainingPhotoSlotsForActiveTarget() -> Int {
+        let journeyRemaining = max(0, journeyPhotoLimit - journeyTotalPhotoCount)
+        let perMemoryRemaining: Int
         switch activePhotoTarget {
         case .overallMemory:
-            return photoLimit - draftOverallMemoryImagePaths.count
+            perMemoryRemaining = photoLimit - draftOverallMemoryImagePaths.count - draftOverallMemoryRemoteImageURLs.count
         case .memory(let idx):
-            guard draftMemories.indices.contains(idx) else { return photoLimit }
-            return photoLimit - draftMemories[idx].imagePaths.count
+            guard draftMemories.indices.contains(idx) else { return min(journeyRemaining, photoLimit) }
+            perMemoryRemaining = photoLimit - draftMemories[idx].imagePaths.count - draftMemories[idx].remoteImageURLs.count
         case nil:
-            return photoLimit
+            return min(journeyRemaining, photoLimit)
         }
+        return min(journeyRemaining, perMemoryRemaining)
     }
 
     private func openCamera(for index: Int) {
         activePhotoTarget = .memory(index: index)
-        showCamera = true
+        PhotoInputPresentationPolicy.launchPicker(dismissTextInput: {
+            endEditing()
+        }) {
+            showCamera = true
+        }
     }
 
     private func openPhotoLibrary(for index: Int) {
         activePhotoTarget = .memory(index: index)
-        showPhotoLibrary = true
+        PhotoInputPresentationPolicy.launchPicker(dismissTextInput: {
+            endEditing()
+        }) {
+            showPhotoLibrary = true
+        }
     }
 
     private func openCameraForOverallMemory() {
         activePhotoTarget = .overallMemory
-        showCamera = true
+        PhotoInputPresentationPolicy.launchPicker(dismissTextInput: {
+            endEditing()
+        }) {
+            showCamera = true
+        }
     }
 
     private func openPhotoLibraryForOverallMemory() {
         activePhotoTarget = .overallMemory
-        showPhotoLibrary = true
+        PhotoInputPresentationPolicy.launchPicker(dismissTextInput: {
+            endEditing()
+        }) {
+            showPhotoLibrary = true
+        }
     }
 
     private func appendImagesToActiveMemory(_ images: [UIImage], writesToPhotoLibrary: Bool) {
         guard let target = activePhotoTarget else { return }
 
+        // Journey-level photo cap
+        let journeyRemaining = max(0, journeyPhotoLimit - journeyTotalPhotoCount)
+        if journeyRemaining <= 0 {
+            if membership.tier == .free {
+                showMembershipGate = .journeyPhotos
+            } else {
+                showJourneyPhotoLimitToast = true
+            }
+            return
+        }
+
         let remainingSlots: Int
         switch target {
         case .overallMemory:
-            remainingSlots = max(0, photoLimit - draftOverallMemoryImagePaths.count)
+            remainingSlots = min(journeyRemaining, max(0, photoLimit - draftOverallMemoryImagePaths.count - draftOverallMemoryRemoteImageURLs.count))
         case .memory(let idx):
             guard draftMemories.indices.contains(idx) else { return }
-            remainingSlots = max(0, photoLimit - draftMemories[idx].imagePaths.count)
+            remainingSlots = min(journeyRemaining, max(0, photoLimit - draftMemories[idx].imagePaths.count - draftMemories[idx].remoteImageURLs.count))
         }
 
         let trimmed = Array(images.prefix(remainingSlots))
+        let didTruncate = images.count > trimmed.count && images.count > journeyRemaining
         guard !trimmed.isEmpty else { return }
         switch target {
         case .overallMemory:
             for image in trimmed {
-                if draftOverallMemoryImagePaths.count >= photoLimit { break }
+                if overallMemoryTotalPhotoCount >= photoLimit { break }
+                if journeyTotalPhotoCount >= journeyPhotoLimit { break }
                 if let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) {
                     draftOverallMemoryImagePaths.append(filename)
                 }
@@ -1887,10 +2063,19 @@ struct JourneyMemoryDetailView: View {
         case .memory(let idx):
             guard draftMemories.indices.contains(idx) else { return }
             for image in trimmed {
-                if draftMemories[idx].imagePaths.count >= photoLimit { break }
+                if (draftMemories[idx].imagePaths.count + draftMemories[idx].remoteImageURLs.count) >= photoLimit { break }
+                if journeyTotalPhotoCount >= journeyPhotoLimit { break }
                 if let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) {
                     draftMemories[idx].imagePaths.append(filename)
                 }
+            }
+        }
+
+        if didTruncate || journeyTotalPhotoCount >= journeyPhotoLimit {
+            if membership.tier == .free {
+                showMembershipGate = .journeyPhotos
+            } else {
+                showJourneyPhotoLimitToast = true
             }
         }
 
@@ -1931,10 +2116,9 @@ struct JourneyMemoryDetailView: View {
     func exportLongImage() {
         guard #available(iOS 16.0, *) else { return }
 
-        // Export at ~1080px width (360 * 3)
         let exportWidth: CGFloat = 360
 
-        let view = JourneyMemoryDetailExportSnapshotView(
+        let snapshotView = JourneyMemoryDetailExportSnapshotView(
             journey: journey,
             memories: draftMemories,
             overallMemory: draftOverallMemory,
@@ -1950,15 +2134,22 @@ struct JourneyMemoryDetailView: View {
         .frame(width: exportWidth)
         .fixedSize(horizontal: false, vertical: true)
 
-        let renderer = ImageRenderer(content: view)
-        renderer.scale = 3
+        // Measure content height to cap render scale within GPU texture limits.
+        // All iOS rendering paths go through Metal, whose max texture dimension
+        // is 8192px on A12+ devices. Use 8000 as safe ceiling with margin.
+        let measuringHost = UIHostingController(rootView: snapshotView)
+        let fittingSize = measuringHost.sizeThatFits(in: CGSize(width: exportWidth, height: .greatestFiniteMagnitude))
+        let maxSafePixels: CGFloat = 8000
+        let scale = max(1.0, min(3.0, maxSafePixels / max(fittingSize.height, 1)))
+
+        let renderer = ImageRenderer(content: snapshotView)
+        renderer.scale = scale
         renderer.proposedSize = .init(width: exportWidth, height: nil)
         renderer.isOpaque = true
 
         if let img = renderer.uiImage {
-            shareItem = ShareImageItem(image: img)   // ✅ 有图才弹
+            shareItem = ShareImageItem(image: img)
         }
-
     }
 
     @MainActor
@@ -1977,7 +2168,10 @@ struct JourneyMemoryDetailView: View {
     }
 
     private func generateRouteThumbnail() async {
-        let coords = journey.coordinates.clCoords
+        let j = currentJourney
+        let rawCoords = j.coordinates
+        let privacyCoords = j.privacyFilteredCoordinates(rawCoords)
+        let coords = privacyCoords.map { CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon) }
         guard coords.count >= 2 else {
             // No route points — generate a plain map tile from the city key center.
             await generateFallbackRouteThumbnail()
@@ -1986,7 +2180,7 @@ struct JourneyMemoryDetailView: View {
 
         let built = RouteRenderingPipeline.buildSegments(
             .init(coordsWGS84: coords, applyGCJForChina: false, gapDistanceMeters: 2_200,
-                  countryISO2: journey.countryISO2, cityKey: journey.stableCityKey),
+                  countryISO2: j.countryISO2, cityKey: j.stableCityKey),
             surface: .mapKit
         )
         let drawCoords: [CLLocationCoordinate2D] = built.segments.flatMap { $0.coords }
@@ -2012,11 +2206,19 @@ struct JourneyMemoryDetailView: View {
         options.scale = UIScreen.main.scale
         options.mapType = MapAppearanceSettings.mapType(for: appearance)
         options.traitCollection = UITraitCollection(userInterfaceStyle: MapAppearanceSettings.interfaceStyle(for: appearance))
+        if j.shouldHideLandmarks {
+            options.showsPointsOfInterest = false
+        }
 
         do {
             let snap = try await MKMapSnapshotter(options: options).start()
             let img = UIGraphicsImageRenderer(size: snapshotSize).image { renderer in
-                snap.image.draw(at: .zero)
+                let base = snap.image
+                if j.shouldHideLandmarks {
+                    mapPrivacyBlurred(base, radius: 14).draw(at: .zero)
+                } else {
+                    base.draw(at: .zero)
+                }
                 RouteSnapshotDrawer.draw(
                     segments: built.segments,
                     isFlightLike: built.isFlightLike,
@@ -2299,7 +2501,7 @@ private struct SyncMemoryImagesView: View {
     var body: some View {
         VStack(spacing: 12) {
             ForEach(imagePaths, id: \.self) { path in
-                if let img = PhotoStore.loadImage(named: path, userID: userID)?.downscaled(maxPixel: 720) {
+                if let img = PhotoStore.loadImage(named: path, userID: userID) {
                     Image(uiImage: img)
                         .resizable()
                         .scaledToFit()
@@ -2470,6 +2672,7 @@ private struct MemoryImagesView: View {
 
 private struct EditableMemoryImagesView: View {
     @Binding var imagePaths: [String]
+    @Binding var remoteImageURLs: [String]
     let userID: String
 
     var body: some View {
@@ -2479,25 +2682,60 @@ private struct EditableMemoryImagesView: View {
                     AsyncLocalImage(path: path, userID: userID)
 
                     Button {
-                        PhotoStore.delete(named: path, userID: userID)
+                        // Deferred: only remove from array. Actual file deletion happens on save.
                         withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
                             imagePaths.removeAll(where: { $0 == path })
                         }
                     } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundColor(Color.black.opacity(0.65))
-                            .background(
-                                Circle()
-                                    .fill(Color.white.opacity(0.92))
-                                    .frame(width: 26, height: 26)
-                            )
-                            .appMinTapTarget()
+                        editableImageDeleteButton
                     }
                     .buttonStyle(.plain)
                 }
             }
+            ForEach(remoteImageURLs, id: \.self) { rawURL in
+                if let url = URL(string: rawURL) {
+                    ZStack(alignment: .topTrailing) {
+                        CachedRemoteImage(url: url) { $0.resizable() } placeholder: {
+                            ProgressView()
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 140)
+                        } failure: {
+                            Color(red: 0.95, green: 0.95, blue: 0.95)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 140)
+                        }
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity)
+                        .overlay(
+                            Rectangle()
+                                .inset(by: 0.5)
+                                .stroke(Color(red: 0.90, green: 0.91, blue: 0.92), lineWidth: 0.5)
+                        )
+
+                        Button {
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
+                                remoteImageURLs.removeAll(where: { $0 == rawURL })
+                            }
+                        } label: {
+                            editableImageDeleteButton
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
         }
+    }
+
+    private var editableImageDeleteButton: some View {
+        Image(systemName: "xmark.circle.fill")
+            .font(.system(size: 20, weight: .semibold))
+            .foregroundColor(Color.black.opacity(0.65))
+            .background(
+                Circle()
+                    .fill(Color.white.opacity(0.92))
+                    .frame(width: 26, height: 26)
+            )
+            .appMinTapTarget()
     }
 }
 
@@ -2516,6 +2754,10 @@ private struct EditableMemoryTimelineItem: View {
         return formatter.string(from: memory.timestamp).uppercased()
     }
 
+    private var totalPhotoCount: Int {
+        memory.imagePaths.count + memory.remoteImageURLs.count
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(timeText)
@@ -2532,8 +2774,8 @@ private struct EditableMemoryTimelineItem: View {
                         .background(Color.black.opacity(0.05))
                         .clipShape(Circle())
                 }
-                .disabled(memory.imagePaths.count >= maxPhotos)
-                .opacity(memory.imagePaths.count >= maxPhotos ? 0.35 : 1.0)
+                .disabled(totalPhotoCount >= maxPhotos)
+                .opacity(totalPhotoCount >= maxPhotos ? 0.35 : 1.0)
 
                 Button(action: onOpenPhotoLibrary) {
                     Image(systemName: "photo.on.rectangle.angled")
@@ -2543,10 +2785,10 @@ private struct EditableMemoryTimelineItem: View {
                         .background(Color.black.opacity(0.05))
                         .clipShape(Circle())
                 }
-                .disabled(memory.imagePaths.count >= maxPhotos)
-                .opacity(memory.imagePaths.count >= maxPhotos ? 0.35 : 1.0)
+                .disabled(totalPhotoCount >= maxPhotos)
+                .opacity(totalPhotoCount >= maxPhotos ? 0.35 : 1.0)
 
-                Text(String(format: L10n.t("photo_count"), memory.imagePaths.count, maxPhotos))
+                Text(String(format: L10n.t("photo_count"), totalPhotoCount, maxPhotos))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.gray)
 
@@ -2554,9 +2796,10 @@ private struct EditableMemoryTimelineItem: View {
             }
             .padding(.top, 2)
 
-            if !memory.imagePaths.isEmpty {
+            if !memory.imagePaths.isEmpty || !memory.remoteImageURLs.isEmpty {
                 EditableMemoryImagesView(
                     imagePaths: $memory.imagePaths,
+                    remoteImageURLs: memory.imagePaths.isEmpty ? $memory.remoteImageURLs : .constant([]),
                     userID: userID
                 )
             }

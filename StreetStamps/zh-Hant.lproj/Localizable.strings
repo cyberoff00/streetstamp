@@ -478,6 +478,10 @@
 "pop_note_title" = "筆記";
 "postcard_box_received" = "收到";
 "postcard_box_sent" = "寄出";
+"postcard_picker_title" = "明信片";
+"postcard_new_accessibility_label" = "新增明信片";
+"postcard_save_original" = "保存原圖";
+"postcard_saved_to_album" = "已保存到相冊";
 "postcard_brand_stamps" = "STAMPS";
 "postcard_brand_street" = "STREET";
 "postcard_city" = "城市";
@@ -637,6 +641,9 @@
 "settings_lifelog_bg_mode_title" = "後台記錄模式";
 "settings_language_title" = "語言";
 "settings_language_follow_system" = "跟隨系統";
+"settings_language_option_simplified_chinese" = "簡體中文";
+"settings_language_option_traditional_chinese" = "繁體中文";
+"settings_language_option_english" = "英文";
 "settings_name_placeholder" = "暱稱（可重複）";
 "settings_scan_cancel" = "取消";
 "settings_scan_failed_title" = "掃碼失敗";
@@ -889,6 +896,7 @@
 "membership_compare_premium" = "Premium";
 "membership_compare_photos" = "照片 / 旅程";
 "membership_info_photos" = "每段旅程最多可添加的照片數，每條記憶最多 2 張。免費 6 張，Premium 12 張。";
+"journey_photo_limit_toast" = "本段旅程最多可添加 %d 張照片";
 "membership_info_postcard" = "每個城市：可向每位好友發 1 張(免費)/2 張(Premium)明信片，最多 3 位(免費)/10 位(Premium)好友。該城市每多一段旅程，每位好友 +1 張，可發好友數也增加。";
 "membership_compare_friends" = "好友";
 "membership_compare_unlimited" = "無限";
@@ -1040,3 +1048,15 @@
 "auth_terms_and" = "和";
 "auth_terms_privacy_policy" = "隱私政策";
 "auth_terms_required" = "請先同意用戶協議和隱私政策。";
+
+// MARK: - Privacy Options
+"privacy_toggle_title" = "隱私保護";
+"privacy_description" = "隱私選項將應用於分享的圖片和好友動態。";
+"privacy_trim_endpoints" = "隱藏起終點附近位置（300公尺）";
+"privacy_hide_landmarks" = "隱藏地標與興趣點標註";
+
+// MARK: - Photo Editor
+"photo_editor_text" = "文字";
+"photo_editor_skip" = "跳過";
+"photo_editor_type_text" = "輸入文字…";
+"photo_editor_tap_to_place" = "點擊圖片放置文字";

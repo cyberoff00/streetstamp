@@ -59,8 +59,13 @@ struct PopSharingCard: View {
     @State private var overallMemory: String = ""
     @State private var overallMemoryImagePaths: [String] = []
     @State private var hideMapDetails = false
+    @State private var privacyEnabled = false
+    @State private var privacyTrimEndpoints = true
+    @State private var privacyHideLandmarks = true
     @State private var showCamera = false
     @State private var showPhotoLibrary = false
+    @State private var showPhotoEditor = false
+    @State private var pendingEditorImages: [UIImage] = []
     @State private var showVisibilityRestrictionAlert = false
     @State private var visibilityRestrictionMessage = ""
     private var canRenderCard: Bool { journey.coordinates.count >= 1 && !journey.isTooShort }
@@ -114,8 +119,7 @@ struct PopSharingCard: View {
                     preferredDevice: .rear,
                     mirrorOnCapture: false,
                     onImage: { image in
-                        showCamera = false
-                        appendOverallMemoryPhotos([image], writesToPhotoLibrary: true)
+                        pendingEditorImages = [image]
                     },
                     onCancel: {
                         showCamera = false
@@ -127,8 +131,7 @@ struct PopSharingCard: View {
                 PhotoLibraryPicker(
                     selectionLimit: max(1, remainingOverallMemoryPhotoSlots),
                     onImages: { images in
-                        showPhotoLibrary = false
-                        appendOverallMemoryPhotos(images, writesToPhotoLibrary: false)
+                        pendingEditorImages = images
                     },
                     onCancel: {
                         showPhotoLibrary = false
@@ -156,8 +159,6 @@ struct PopSharingCard: View {
                 }
             }
 
-            }
-
             .onAppear {
                 selectedVisibility = journey.visibility
                 customTitle = (journey.customTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
@@ -173,6 +174,25 @@ struct PopSharingCard: View {
                         generateShareCard()
                     }
                 }
+            }
+            .onChange(of: pendingEditorImages.count) { count in
+                if count > 0 && !showCamera && !showPhotoEditor {
+                    showPhotoEditor = true
+                }
+            }
+            .fullScreenCover(isPresented: $showPhotoEditor) {
+                PhotoEditorView(
+                    images: pendingEditorImages,
+                    onComplete: { edited in
+                        showPhotoEditor = false
+                        pendingEditorImages = []
+                        appendOverallMemoryPhotos(edited, writesToPhotoLibrary: false)
+                    },
+                    onCancel: {
+                        showPhotoEditor = false
+                        pendingEditorImages = []
+                    }
+                )
             }
 
             .overlay(alignment: .top) {
@@ -207,7 +227,7 @@ struct PopSharingCard: View {
                 Text(visibilityRestrictionMessage)
             }
         }
-    
+    }
 
     // MARK: - UI parts
 
@@ -490,6 +510,11 @@ struct PopSharingCard: View {
                 }
             }
 
+            // MARK: Privacy Options — only when sharing with friends
+            if selectedVisibility != .private {
+                privacyToggleSection
+            }
+
             Button(action: completeJourneyAndMaybeUnlock) {
                 Text(L10n.t("save"))
                     .font(.system(size: AppTypography.bodyStrongSize, weight: .semibold))
@@ -536,7 +561,79 @@ struct PopSharingCard: View {
         out.activityTag = trimmedTag.isEmpty ? nil : trimmedTag
         out.overallMemory = trimmedOverall.isEmpty ? nil : trimmedOverall
         out.overallMemoryImagePaths = overallMemoryImagePaths
+        out.privacyOptions = buildPrivacyOptions()
         return out
+    }
+
+    private func buildPrivacyOptions() -> Set<JourneyPrivacyOption> {
+        guard privacyEnabled else { return [] }
+        var opts = Set<JourneyPrivacyOption>()
+        if privacyTrimEndpoints { opts.insert(.trimEndpoints) }
+        if privacyHideLandmarks { opts.insert(.hideLandmarks) }
+        return opts
+    }
+
+    // MARK: - Privacy Toggle Section
+    private var privacyToggleSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle(isOn: Binding(
+                get: { privacyEnabled },
+                set: { newValue in
+                    privacyEnabled = newValue
+                    if newValue {
+                        privacyTrimEndpoints = true
+                        privacyHideLandmarks = true
+                    }
+                }
+            )) {
+                HStack(spacing: 6) {
+                    Image(systemName: "hand.raised.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(.black.opacity(0.6))
+                    Text(L10n.t("privacy_toggle_title"))
+                        .font(.system(size: AppTypography.bodySize, weight: .medium))
+                        .foregroundColor(.black)
+                }
+            }
+            .tint(.black)
+
+            if privacyEnabled {
+                VStack(alignment: .leading, spacing: 6) {
+                    privacyCheckRow(
+                        title: L10n.t("privacy_trim_endpoints"),
+                        isOn: $privacyTrimEndpoints
+                    )
+                    privacyCheckRow(
+                        title: L10n.t("privacy_hide_landmarks"),
+                        isOn: $privacyHideLandmarks
+                    )
+                }
+                .padding(.leading, 20)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: privacyEnabled)
+    }
+
+    private func privacyCheckRow(title: String, isOn: Binding<Bool>) -> some View {
+        Button {
+            let willBe = !isOn.wrappedValue
+            isOn.wrappedValue = willBe
+            // If both unchecked, turn off the master toggle
+            if !privacyTrimEndpoints && !privacyHideLandmarks {
+                privacyEnabled = false
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: isOn.wrappedValue ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 16))
+                    .foregroundColor(isOn.wrappedValue ? .black : .black.opacity(0.35))
+                Text(title)
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundColor(.black.opacity(0.75))
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     private var visibilitySelection: Binding<JourneyVisibility> {
@@ -902,7 +999,7 @@ struct PopSharingCard: View {
                     case .exact:
                         base.draw(at: .zero)
                     case .hidden:
-                        blurred(base, radius: 14).draw(at: .zero)
+                        mapPrivacyBlurred(base, radius: 14).draw(at: .zero)
                     }
 
                     guard drawRoute, drawCoords.count > 1 else {
@@ -1042,10 +1139,12 @@ struct ShareCardGenerator {
         journey: JourneyRoute,
         cachedCitiesByKey: [String: CachedCity] = [:],
         privacy: ShareMapPrivacyMode = .exact,
+        applyJourneyPrivacy: Bool = false,
         completion: @escaping (UIImage) -> Void
     ) {
-        let raw = journey.displayRouteCoordinates.clCoords
-        let safeCoords = raw.filter { CLLocationCoordinate2DIsValid($0) && abs($0.latitude) <= 90 && abs($0.longitude) <= 180 }
+        let raw = journey.displayRouteCoordinates
+        let privacyFiltered = applyJourneyPrivacy ? journey.privacyFilteredCoordinates(raw) : raw
+        let safeCoords = privacyFiltered.clCoords.filter { CLLocationCoordinate2DIsValid($0) && abs($0.latitude) <= 90 && abs($0.longitude) <= 180 }
 
         let center = safeCoords.last
         let safeCenter: CLLocationCoordinate2D? = {
@@ -1086,6 +1185,7 @@ struct ShareCardGenerator {
                 privacy: privacy,
                 countryISO2: journey.countryISO2,
                 cityKey: journey.cityKey,
+                hideLandmarks: applyJourneyPrivacy && journey.shouldHideLandmarks,
                 completion: completion
             )
         }
@@ -1169,6 +1269,7 @@ struct ShareCardGenerator {
         privacy: ShareMapPrivacyMode,
         countryISO2: String?,
         cityKey: String?,
+        hideLandmarks: Bool = false,
         completion: @escaping (UIImage) -> Void
     ) {
         makeMapSnapshotWithRoute(
@@ -1176,7 +1277,8 @@ struct ShareCardGenerator {
             fallbackCenter: fallbackCenter,
             privacy: privacy,
             countryISO2: countryISO2,
-            cityKey: cityKey
+            cityKey: cityKey,
+            hideLandmarks: hideLandmarks
         ) { mapImage in
 
             let canvasSize = CGSize(width: 900, height: 1200)
@@ -1330,6 +1432,7 @@ struct ShareCardGenerator {
         cityKey: String?,
         snapshotSize: CGSize = CGSize(width: 900, height: 1200),
         drawRobot: Bool = true,
+        hideLandmarks: Bool = false,
         completion: @escaping (UIImage) -> Void
     ) {
         let scale: CGFloat = 2
@@ -1357,6 +1460,9 @@ struct ShareCardGenerator {
             options.traitCollection = UITraitCollection(userInterfaceStyle: MapAppearanceSettings.interfaceStyle(for: appearance))
             options.size = snapshotSize
             options.scale = scale
+            if hideLandmarks {
+                options.showsPointsOfInterest = false
+            }
 
             MKMapSnapshotter(options: options).start(with: DispatchQueue.global(qos: .userInitiated)) { snapshot, error in
                 guard let snap = snapshot else {
@@ -1367,12 +1473,12 @@ struct ShareCardGenerator {
 
                 let img = UIGraphicsImageRenderer(size: snapshotSize).image { renderer in
                     let base = snap.image
+                    let shouldBlur = (privacy == .hidden) || hideLandmarks
 
-                    switch privacy {
-                    case .exact:
+                    if shouldBlur {
+                        mapPrivacyBlurred(base, radius: 14).draw(at: .zero)
+                    } else {
                         base.draw(at: .zero)
-                    case .hidden:
-                        blurred(base, radius: 14).draw(at: .zero)
                     }
 
                     guard drawRoute, drawCoords.count > 1 else {
@@ -1597,7 +1703,8 @@ private struct UnlockRouteMapPreview: View {
 }
 
 // MARK: - Blur helper (CoreImage)
-private func blurred(_ image: UIImage, radius: Double) -> UIImage {
+/// Gaussian blur utility for map privacy rendering. Accessible from other files.
+func mapPrivacyBlurred(_ image: UIImage, radius: Double = 14) -> UIImage {
     guard let cg = image.cgImage else { return image }
     let ciImage = CIImage(cgImage: cg)
 
@@ -1611,6 +1718,30 @@ private func blurred(_ image: UIImage, radius: Double) -> UIImage {
     let cropped = output.cropped(to: ciImage.extent)
     guard let cgOut = context.createCGImage(cropped, from: ciImage.extent) else { return image }
     return UIImage(cgImage: cgOut, scale: image.scale, orientation: image.imageOrientation)
+}
+
+private func drawPrivacyLandmarkShadow(in ctx: CGContext, rect: CGRect) {
+    ctx.saveGState()
+
+    UIColor.black.withAlphaComponent(0.12).setFill()
+    UIRectFillUsingBlendMode(rect, .multiply)
+
+    let colors = [
+        UIColor.black.withAlphaComponent(0.06).cgColor,
+        UIColor.black.withAlphaComponent(0.16).cgColor,
+        UIColor.black.withAlphaComponent(0.26).cgColor
+    ] as CFArray
+    let locations: [CGFloat] = [0.0, 0.58, 1.0]
+    if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: locations) {
+        ctx.drawLinearGradient(
+            gradient,
+            start: CGPoint(x: rect.midX, y: rect.minY),
+            end: CGPoint(x: rect.midX, y: rect.maxY),
+            options: []
+        )
+    }
+
+    ctx.restoreGState()
 }
 
 // MARK: - ShareSheet

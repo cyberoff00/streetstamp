@@ -15,8 +15,74 @@ enum UnifiedLifelogRenderProvider {
         journeyEvents: [TrackRenderEvent],
         passiveEvents: [TrackRenderEvent]
     ) -> [TrackRenderEvent] {
-        let merged = journeyEvents + passiveEvents
+        let filtered = excludeArchivedPassiveDuplicates(
+            journeyEvents: journeyEvents,
+            passiveEvents: passiveEvents
+        )
+        let merged = journeyEvents + filtered
         return merged.sorted(by: stableEventOrdering)
+    }
+
+    /// Journey coordinates are archived into LifelogStore as passive points
+    /// by `archiveJourneyPointsIfNeeded`. Without dedup, both the original
+    /// journey events and the archived passive copies are rendered, creating
+    /// overlapping/divergent polylines (multiple lines or "rays" from shared
+    /// points). This removes passive events whose timestamps fall within a
+    /// journey's time range.
+    private static func excludeArchivedPassiveDuplicates(
+        journeyEvents: [TrackRenderEvent],
+        passiveEvents: [TrackRenderEvent]
+    ) -> [TrackRenderEvent] {
+        guard !journeyEvents.isEmpty, !passiveEvents.isEmpty else {
+            return passiveEvents
+        }
+
+        // Build sorted, merged time ranges covered by journeys.
+        var ranges: [(start: Date, end: Date)] = []
+        var currentStart: Date?
+        var currentEnd: Date?
+
+        let sorted = journeyEvents.sorted { $0.timestamp < $1.timestamp }
+        for event in sorted {
+            let ts = event.timestamp
+            if let s = currentStart, let e = currentEnd {
+                // Extend if contiguous (within 2s tolerance for interpolated timestamps).
+                if ts <= e.addingTimeInterval(2) {
+                    currentEnd = max(e, ts)
+                } else {
+                    ranges.append((start: s, end: e))
+                    currentStart = ts
+                    currentEnd = ts
+                }
+            } else {
+                currentStart = ts
+                currentEnd = ts
+            }
+        }
+        if let s = currentStart, let e = currentEnd {
+            ranges.append((start: s, end: e))
+        }
+
+        guard !ranges.isEmpty else { return passiveEvents }
+
+        // Binary search helper: does `ts` fall inside any journey range?
+        func isInsideJourneyRange(_ ts: Date) -> Bool {
+            var lo = 0, hi = ranges.count - 1
+            while lo <= hi {
+                let mid = (lo + hi) / 2
+                let r = ranges[mid]
+                if ts < r.start {
+                    hi = mid - 1
+                } else if ts > r.end {
+                    lo = mid + 1
+                } else {
+                    return true
+                }
+            }
+            return false
+        }
+
+        return passiveEvents.filter { !isInsideJourneyRange($0.timestamp) }
     }
 
     static func trackRenderEventsAsync(

@@ -365,18 +365,45 @@ enum CityDeepRenderEngine {
         context.restoreGState()
     }
 
+    /// Adaptive focus radius based on per-journey reach distribution.
+    /// Uses P75 of each journey's max distance from anchor so that one
+    /// long intercity trip doesn't blow up the bounding box for a city
+    /// dominated by short local routes.
+    private static func adaptiveFocusRadius(
+        journeys: [JourneyRoute],
+        anchorWGS: CLLocationCoordinate2D
+    ) -> CLLocationDistance {
+        let anchorLoc = CLLocation(latitude: anchorWGS.latitude, longitude: anchorWGS.longitude)
+
+        let reaches: [CLLocationDistance] = journeys.compactMap { journey in
+            let coords = journey.allCLCoords
+            guard !coords.isEmpty else { return nil }
+            return coords.lazy.map {
+                CLLocation(latitude: $0.latitude, longitude: $0.longitude).distance(from: anchorLoc)
+            }.max()
+        }
+
+        // Need enough journeys to establish a pattern; otherwise fall back to default.
+        guard reaches.count >= 3 else { return cityFocusRadiusMeters }
+
+        let sorted = reaches.sorted()
+        let p75 = sorted[Int(Double(sorted.count - 1) * 0.75)]
+        return min(max(p75 * 1.3, 2_000), cityFocusRadiusMeters)
+    }
+
     private static func focusedJourneyCoords(
         journeys: [JourneyRoute],
         anchorWGS: CLLocationCoordinate2D?
     ) -> [CLLocationCoordinate2D] {
         guard let anchorWGS else { return journeys.flatMap { $0.allCLCoords } }
         let anchorLoc = CLLocation(latitude: anchorWGS.latitude, longitude: anchorWGS.longitude)
+        let focusRadius = adaptiveFocusRadius(journeys: journeys, anchorWGS: anchorWGS)
 
         func localWindow(_ coords: [CLLocationCoordinate2D]) -> [CLLocationCoordinate2D] {
             guard !coords.isEmpty else { return [] }
 
             let near = coords.filter {
-                CLLocation(latitude: $0.latitude, longitude: $0.longitude).distance(from: anchorLoc) < cityFocusRadiusMeters
+                CLLocation(latitude: $0.latitude, longitude: $0.longitude).distance(from: anchorLoc) < focusRadius
             }
             if near.count >= cityFocusMinPoints { return near }
 

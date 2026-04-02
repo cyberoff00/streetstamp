@@ -15,10 +15,14 @@ final class TrackingService: ObservableObject {
     @Published var isTracking: Bool = false
     
 
-    /// Raw recorded points (WGS84) used for storage & internal segment building.
-    @Published private(set) var coords: [CLLocationCoordinate2D] = []
+    /// Lightweight version counter incremented when coords change.
+    /// MapView subscribes to this instead of receiving full array copies.
+    @Published private(set) var coordVersion: Int = 0
+
+    /// Raw recorded points (WGS84). Read directly — not @Published to avoid full-array copy on every update.
+    private(set) var coords: [CLLocationCoordinate2D] = []
     /// GPS timestamps parallel to `coords`. Same count, same order.
-    @Published private(set) var coordTimestamps: [Date] = []
+    private(set) var coordTimestamps: [Date] = []
 
     @Published var totalDistance: Double = 0
     /// Total horizontal (2D) distance in meters.
@@ -69,8 +73,8 @@ final class TrackingService: ObservableObject {
         var coords: [CLLocationCoordinate2D] // WGS in internalSegments; map-ready in renderSegmentsForMap
     }
 
-    /// Legacy WGS snapshot (not used by MapView anymore)
-    @Published var segments: [RouteSegment] = []
+    /// Legacy WGS snapshot (not used by MapView anymore). Non-published to reduce objectWillChange noise.
+    private(set) var segments: [RouteSegment] = []
 
     /// Always maintained (WGS)
     private var internalSegments: [RouteSegment] = []
@@ -90,9 +94,14 @@ final class TrackingService: ObservableObject {
 
     // MARK: - ✅ Render cache output for MapView (map-ready coords)
 
-    @Published private(set) var renderSegmentsForMap: [RouteSegment] = []
-    @Published private(set) var renderUnifiedSegmentsForMap: [RenderRouteSegment] = []
-    @Published private(set) var renderLiveTailForMap: [CLLocationCoordinate2D] = []
+    struct RenderSnapshot: Equatable {
+        var segments: [RouteSegment] = []
+        var unifiedSegments: [RenderRouteSegment] = []
+        var liveTail: [CLLocationCoordinate2D] = []
+    }
+
+    /// Single published render output — replaces 3 separate @Published to cut objectWillChange emissions.
+    @Published private(set) var renderSnapshot = RenderSnapshot()
 
     // MARK: - Quality / UX
 
@@ -289,6 +298,32 @@ final class TrackingService: ObservableObject {
     private let longStationaryNotificationPermissionAskedKey = "streetstamps.long_stationary_reminder.notification_asked.v1"
     private var recentSignalInterruption: SignalInterruptionCandidate?
 
+    // MARK: - Background persist timer
+
+    /// Called by the app layer (StreetStampsApp) to flush coordinates to disk while in background.
+    /// Injected at startup. If nil, background periodic flush is silently skipped.
+    var onBackgroundPersistNeeded: (() -> Void)?
+
+    private var backgroundPersistTimer: DispatchSourceTimer?
+
+    private func startBackgroundPersistTimer() {
+        stopBackgroundPersistTimer()
+        let interval = max(60, modeConfig.deltaPersistInterval)
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.main)
+        timer.schedule(deadline: .now() + interval, repeating: interval, leeway: .seconds(10))
+        timer.setEventHandler { [weak self] in
+            guard let self, self.isTracking else { return }
+            self.onBackgroundPersistNeeded?()
+        }
+        timer.resume()
+        backgroundPersistTimer = timer
+    }
+
+    private func stopBackgroundPersistTimer() {
+        backgroundPersistTimer?.cancel()
+        backgroundPersistTimer = nil
+    }
+
     // MARK: - ✅ Render cache internals
 
     private let renderQueue = DispatchQueue(label: "ss.render.cache", qos: .userInitiated)
@@ -429,6 +464,8 @@ final class TrackingService: ObservableObject {
                 self.setRealtimeRenderingEnabled(false)
                 self.needsRefreshAfterBackground = false
                 self.enterLowPowerBackgroundMode()
+                // ✅ Start periodic background persist so GPS points survive a process kill.
+                self.startBackgroundPersistTimer()
             }
             .store(in: &bag)
 
@@ -437,6 +474,8 @@ final class TrackingService: ObservableObject {
             .sink { [weak self] _ in
                 guard let self else { return }
                 guard self.isTracking else { return }
+                // MapView's coordVersion sink takes over persist duty in foreground.
+                self.stopBackgroundPersistTimer()
                 self.startForegroundHighPower()
                 // ✅ Auto refresh route when returning to foreground (no "刷新路线" button)
                 self.needsRefreshAfterBackground = false
@@ -491,9 +530,7 @@ final class TrackingService: ObservableObject {
         latestRenderSegmentsForMap.removeAll()
         latestRenderUnifiedSegmentsForMap.removeAll()
         latestRenderLiveTailForMap.removeAll()
-        renderSegmentsForMap.removeAll()
-        renderUnifiedSegmentsForMap.removeAll()
-        renderLiveTailForMap.removeAll()
+        renderSnapshot = RenderSnapshot()
         lastRenderCoordCount = 0
         lastRenderSegPointCount = 0
         pendingRenderWork?.cancel()
@@ -644,6 +681,7 @@ final class TrackingService: ObservableObject {
     }
 
     func stopJourney() {
+        stopBackgroundPersistTimer()
         // ✅ 结束 Live Activity（锁屏追踪卡片）
         endLiveActivity()
         isTracking = false
@@ -876,10 +914,12 @@ final class TrackingService: ObservableObject {
             if var last = out.last, last.style == seg.style {
                 if let lastC = last.coords.last, let firstC = seg.coords.first, isEffectivelySame(lastC, firstC) {
                     last.coords.append(contentsOf: seg.coords.dropFirst())
+                    out[out.count - 1] = last
                 } else {
-                    last.coords.append(contentsOf: seg.coords)
+                    // Endpoints don't match (e.g. a skipped single-point segment in between).
+                    // Keep as separate polyline to avoid drawing a "ray" jump between them.
+                    out.append(seg)
                 }
-                out[out.count - 1] = last
             } else {
                 out.append(seg)
             }
@@ -1503,14 +1543,20 @@ final class TrackingService: ObservableObject {
         pendingPublishWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
+            // Non-@Published: direct assign without triggering objectWillChange
             self.coords = self.rawCoords
             self.coordTimestamps = self.rawTimestamps
             if self.isRealtimeRenderingEnabled {
                 self.segments = self.internalSegments
             }
-            self.renderSegmentsForMap = self.latestRenderSegmentsForMap
-            self.renderUnifiedSegmentsForMap = self.latestRenderUnifiedSegmentsForMap
-            self.renderLiveTailForMap = self.latestRenderLiveTailForMap
+            // Bump lightweight version counter (triggers onReceive in MapView)
+            self.coordVersion += 1
+            // Single @Published update for all render state
+            self.renderSnapshot = RenderSnapshot(
+                segments: self.latestRenderSegmentsForMap,
+                unifiedSegments: self.latestRenderUnifiedSegmentsForMap,
+                liveTail: self.latestRenderLiveTailForMap
+            )
         }
         pendingPublishWork = work
         if force {

@@ -20,6 +20,11 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
     private var passiveActive = false
     private var passiveAnchorLocation: CLLocation?
     private var passiveAnchorTimestamp: Date = .distantPast
+    private var passivePauseCount = 0
+    private var passiveResumeCount = 0
+    private var passiveSignificantChangeCount = 0
+    private var passiveVisitCount = 0
+    private var lastPauseDate: Date?
 
     var locationPublisher: AnyPublisher<CLLocation, Never> { subject.eraseToAnyPublisher() }
     var authorizationStatus: CLAuthorizationStatus { manager.authorizationStatus }
@@ -82,6 +87,11 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
     func start() { startHighPower() }
     
     func stop() {
+        #if DEBUG
+        if passiveActive {
+            print("📍 [Passive] stopping — stats: pauses=\(passivePauseCount) resumes=\(passiveResumeCount) sigChanges=\(passiveSignificantChangeCount) visits=\(passiveVisitCount)")
+        }
+        #endif
         manager.stopUpdatingLocation()
         manager.stopMonitoringSignificantLocationChanges()
         manager.stopMonitoringVisits()
@@ -109,8 +119,8 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         manager.pausesLocationUpdatesAutomatically = false
         manager.showsBackgroundLocationIndicator = true  // ✅ 显示蓝条提示用户
         
-        manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
-        manager.distanceFilter = kCLDistanceFilterNone
+        manager.desiredAccuracy = kCLLocationAccuracyBest
+        manager.distanceFilter = 2
         
         manager.startUpdatingLocation()
         requestImmediateLocationRefresh()
@@ -156,6 +166,8 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
     /// Starts in stationary profile; upgrades precision when movement is detected,
     /// then calms back down when the user stops. `pausesLocationUpdatesAutomatically`
     /// stays true so iOS can fully pause GPS during extended stillness.
+    /// Significant location changes + visit monitoring act as fallback wakeups
+    /// when iOS pauses regular updates.
     func startPassiveLifelog() {
         stop()
 
@@ -166,10 +178,20 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         passiveActive = true
         passiveAnchorLocation = nil
         passiveAnchorTimestamp = .distantPast
+        passivePauseCount = 0
+        passiveResumeCount = 0
+        passiveSignificantChangeCount = 0
+        passiveVisitCount = 0
+        lastPauseDate = nil
 
         applyPassiveProfile(for: .stationary)
         manager.startUpdatingLocation()
+        manager.startMonitoringSignificantLocationChanges()
+        manager.startMonitoringVisits()
         requestImmediateLocationRefresh()
+        #if DEBUG
+        print("📍 [Passive] started: updatingLocation + significantChange + visits")
+        #endif
     }
 
     private func applyPassiveProfile(for state: PassiveLocationState) {
@@ -300,6 +322,15 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
     
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         for loc in locations {
+            if passiveActive, let pauseDate = lastPauseDate {
+                // This update arrived after a pause — likely from significant-change fallback.
+                passiveSignificantChangeCount += 1
+                lastPauseDate = nil
+                #if DEBUG
+                let gap = loc.timestamp.timeIntervalSince(pauseDate)
+                print("📍 [Passive] post-pause didUpdateLocations: gap=\(String(format: "%.0f", gap))s acc=\(String(format: "%.0f", loc.horizontalAccuracy))m sigCount=\(passiveSignificantChangeCount)")
+                #endif
+            }
             adaptPassiveIfNeeded(for: loc)
             subject.send(loc)
         }
@@ -318,6 +349,14 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
             timestamp = Date()
         }
 
+        if passiveActive {
+            passiveVisitCount += 1
+            #if DEBUG
+            let kind = visit.departureDate != Date.distantFuture ? "departure" : "arrival"
+            print("📍 [Passive] didVisit #\(passiveVisitCount): \(kind) acc=\(String(format: "%.0f", visit.horizontalAccuracy))m coord=(\(String(format: "%.4f", coordinate.latitude)),\(String(format: "%.4f", coordinate.longitude)))")
+            #endif
+        }
+
         let synthesized = CLLocation(
             coordinate: coordinate,
             altitude: 0,
@@ -327,9 +366,35 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         )
         subject.send(synthesized)
     }
-    
+
+    func locationManagerDidPauseLocationUpdates(_ manager: CLLocationManager) {
+        passivePauseCount += 1
+        lastPauseDate = Date()
+        #if DEBUG
+        print("📍 [Passive] ⚠️ iOS PAUSED location updates (pause #\(passivePauseCount)). Restarting...")
+        #endif
+        guard passiveActive else { return }
+        manager.startUpdatingLocation()
+    }
+
+    func locationManagerDidResumeLocationUpdates(_ manager: CLLocationManager) {
+        passiveResumeCount += 1
+        #if DEBUG
+        let pauseGap: String
+        if let pd = lastPauseDate {
+            pauseGap = String(format: "%.0f", Date().timeIntervalSince(pd)) + "s"
+        } else {
+            pauseGap = "n/a"
+        }
+        print("📍 [Passive] ✅ iOS RESUMED location updates (resume #\(passiveResumeCount), pauseGap=\(pauseGap))")
+        #endif
+        lastPauseDate = nil
+    }
+
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        print("SystemLocationSource error: \(error)")
+        #if DEBUG
+        print("📍 [Passive] error: \(error)")
+        #endif
     }
     
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {

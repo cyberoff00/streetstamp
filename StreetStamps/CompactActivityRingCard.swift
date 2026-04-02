@@ -14,8 +14,8 @@ struct CompactActivityRingCard: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            activityPanel
             statsPanel
+            activityPanel
         }
         .frame(maxWidth: .infinity)
         .alert(
@@ -235,7 +235,7 @@ struct MiniJourneyHeatmap: View {
                 let journey = hasJourney(on: date)
                 let isToday = cal.isDate(date, inSameDayAs: today)
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(journey ? accentBlue : accentBlue.opacity(0.08))
+                    .fill(journey ? accentBlue.opacity(0.45) : accentBlue.opacity(0.08))
                     .overlay {
                         if isToday && !journey {
                             RoundedRectangle(cornerRadius: 5, style: .continuous)

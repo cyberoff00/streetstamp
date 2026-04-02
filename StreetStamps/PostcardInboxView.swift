@@ -71,7 +71,7 @@ struct PostcardInboxView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            Picker("Postcards", selection: $selectedBox) {
+            Picker(L10n.t("postcard_picker_title"), selection: $selectedBox) {
                 ForEach(Box.allCases) { box in
                     Text(box.title).tag(box)
                 }
@@ -119,7 +119,7 @@ struct PostcardInboxView: View {
                             .appMinTapTarget()
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("New postcard")
+                    .accessibilityLabel(L10n.t("postcard_new_accessibility_label"))
                 } else {
                     Color.clear
                 }
@@ -785,7 +785,7 @@ private struct FullImageViewer: View {
                             }
                         }
                     } label: {
-                        Text("保存原图")
+                        Text(L10n.t("postcard_save_original"))
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundColor(.white)
                             .padding(.horizontal, 24)
@@ -800,7 +800,7 @@ private struct FullImageViewer: View {
             if saveToast {
                 VStack {
                     Spacer()
-                    Text("已保存到相册")
+                    Text(L10n.t("postcard_saved_to_album"))
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.white)
                         .padding(.horizontal, 20)

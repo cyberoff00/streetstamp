@@ -482,6 +482,9 @@
 "settings_lifelog_bg_mode_title" = "BACKGROUND RECORDING MODE";
 "settings_language_title" = "LANGUAGE";
 "settings_language_follow_system" = "Follow System";
+"settings_language_option_simplified_chinese" = "Simplified Chinese";
+"settings_language_option_traditional_chinese" = "Traditional Chinese";
+"settings_language_option_english" = "English";
 "settings_name_placeholder" = "Nickname (duplicates allowed)";
 "settings_scan_cancel" = "Cancel";
 "settings_scan_failed_title" = "Scan Failed";
@@ -574,6 +577,10 @@
 "postcard_brand_stamps" = "STAMPS";
 "postcard_box_sent" = "Sent";
 "postcard_box_received" = "Received";
+"postcard_picker_title" = "Postcards";
+"postcard_new_accessibility_label" = "New postcard";
+"postcard_save_original" = "Save Original";
+"postcard_saved_to_album" = "Saved to Photos";
 "postcard_sent_empty" = "No sent postcards yet";
 "postcard_received_empty" = "No received postcards yet";
 "postcard_retry" = "Retry";
@@ -1021,6 +1028,7 @@
 "membership_compare_premium" = "Premium";
 "membership_compare_photos" = "Photos / journey";
 "membership_info_photos" = "Max photos per journey. Each memory can hold up to 2 photos. Free: 6 total, Premium: 12 total.";
+"journey_photo_limit_toast" = "This journey can hold up to %d photos";
 "membership_info_postcard" = "Per city: send up to 1 (Free) or 2 (Premium) postcards to each friend, to max 3 (Free) or 10 (Premium) friends. Each extra journey in that city gives +1 per friend and more recipients.";
 "membership_compare_friends" = "Friends";
 "membership_compare_unlimited" = "Unlimited";
@@ -1187,3 +1195,15 @@
 "settings_rate_app_title" = "RATE ON APP STORE";
 "feedback_email_subject" = "Worldo Feedback (v%@)";
 "feedback_email_body" = "\n\n---\nDevice: %@\niOS: %@\nApp: v%@";
+
+// MARK: - Privacy Options
+"privacy_toggle_title" = "Privacy Protection";
+"privacy_description" = "Privacy options apply to shared images and friend activity feeds.";
+"privacy_trim_endpoints" = "Hide start & end locations (300m)";
+"privacy_hide_landmarks" = "Hide landmarks & POI labels";
+
+// MARK: - Photo Editor
+"photo_editor_text" = "Text";
+"photo_editor_skip" = "Skip";
+"photo_editor_type_text" = "Type text...";
+"photo_editor_tap_to_place" = "Tap photo to place text";

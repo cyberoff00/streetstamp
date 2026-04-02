@@ -163,6 +163,32 @@ func endEditingGlobal() {
     responder.resignFirstResponder()
 }
 
+enum PhotoInputPresentationPolicy {
+    static let editorLaunchDelay: TimeInterval = 0.35
+
+    static func launchPicker(
+        dismissTextInput: () -> Void,
+        schedulePresentation: (@escaping () -> Void) -> Void = { action in
+            DispatchQueue.main.async(execute: action)
+        },
+        presentPicker: @escaping () -> Void
+    ) {
+        dismissTextInput()
+        schedulePresentation(presentPicker)
+    }
+
+    static func scheduleEditorPresentationIfNeeded(
+        pendingImages: [UIImage],
+        schedulePresentation: (TimeInterval, @escaping () -> Void) -> Void = { delay, action in
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: action)
+        },
+        presentEditor: @escaping () -> Void
+    ) {
+        guard !pendingImages.isEmpty else { return }
+        schedulePresentation(editorLaunchDelay, presentEditor)
+    }
+}
+
 private extension UIResponder {
     private static weak var _currentFirstResponder: UIResponder?
 

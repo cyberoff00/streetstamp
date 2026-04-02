@@ -148,6 +148,14 @@ struct CityDeepView: View {
         }
     }
 
+    /// Coordinates where memories exist, used for glow-dot overlays
+    private var memoryDotCoordinates: [CLLocationCoordinate2D] {
+        currentJourneys
+            .flatMap { $0.memories }
+            .filter { $0.locationStatus != .pending }
+            .map { JourneyMemoryMapCoordinateResolver.mapCoordinate(for: $0, fallbackCountryISO2: effectiveCountryISO2, fallbackCityKey: activeCityKey) }
+    }
+
     struct MemoryGroup: Identifiable {
         let id: String
         let key: String
@@ -307,6 +315,7 @@ struct CityDeepView: View {
             CityDeepMKMap(
                 segments: styledSegments(),
                 memoryGroups: showMemoriesOnMap && !isDataLoading ? groupedMemories : [],
+                memoryDots: showMemoriesOnMap && !isDataLoading ? memoryDotCoordinates : [],
                 initialRegion: fittedRegion,
                 onTapMemoryGroup: { group in
                     guard let latest = group.items.sorted(by: { $0.timestamp > $1.timestamp }).first else { return }
@@ -489,6 +498,7 @@ struct CityDeepView: View {
 private struct CityDeepMKMap: UIViewRepresentable {
     let segments: [AnySegment]
     let memoryGroups: [CityDeepView.MemoryGroup]
+    let memoryDots: [CLLocationCoordinate2D]
     let initialRegion: MKCoordinateRegion?
     let onTapMemoryGroup: (CityDeepView.MemoryGroup) -> Void
 
@@ -501,10 +511,12 @@ private struct CityDeepMKMap: UIViewRepresentable {
     init(
         segments: [CityDeepView.Segment],
         memoryGroups: [CityDeepView.MemoryGroup],
+        memoryDots: [CLLocationCoordinate2D],
         initialRegion: MKCoordinateRegion?,
         onTapMemoryGroup: @escaping (CityDeepView.MemoryGroup) -> Void
     ) {
         self.segments = segments.map { AnySegment(coords: $0.coords, isGap: $0.isGap, repeatWeight: $0.repeatWeight) }
+        self.memoryDots = memoryDots
         self.memoryGroups = memoryGroups
         self.initialRegion = initialRegion
         self.onTapMemoryGroup = onTapMemoryGroup
@@ -541,8 +553,9 @@ private struct CityDeepMKMap: UIViewRepresentable {
             map.setRegion(r, animated: false)
         }
 
-        // Only rebuild overlays when segment data actually changes
-        let segFP = segments.map { "\($0.coords.count)_\($0.isGap)_\($0.repeatWeight)" }.joined(separator: "|")
+        // Only rebuild overlays when segment or dot data actually changes
+        let dotFP = memoryDots.map { "\(Int($0.latitude * 10000))_\(Int($0.longitude * 10000))" }.joined(separator: ",")
+        let segFP = segments.map { "\($0.coords.count)_\($0.isGap)_\($0.repeatWeight)" }.joined(separator: "|") + "||" + dotFP
         if segFP != context.coordinator.lastSegmentFingerprint {
             context.coordinator.lastSegmentFingerprint = segFP
             map.removeOverlays(map.overlays)
@@ -552,6 +565,11 @@ private struct CityDeepMKMap: UIViewRepresentable {
                 poly.isGap = seg.isGap
                 poly.repeatWeight = max(0, min(1, seg.repeatWeight))
                 map.addOverlay(poly)
+            }
+            // Memory glow dots — rendered as small circles at memory locations
+            for coord in memoryDots {
+                let circle = MemoryDotCircle(center: coord, radius: 30) // 30m radius
+                map.addOverlay(circle, level: .aboveRoads)
             }
         }
 
@@ -572,12 +590,49 @@ private struct CityDeepMKMap: UIViewRepresentable {
         var didSetInitialRegion = false
         var lastSegmentFingerprint: String = ""
         var lastMemoryFingerprint: String = ""
+        private var pinsVisible = true
 
         init(_ parent: CityDeepMKMap) {
             self.parent = parent
         }
 
+        /// Latitude span threshold: pins hidden when region spans more than ~0.03° (~3.3km)
+        private let pinVisibilityThreshold: CLLocationDegrees = 0.03
+
+        func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
+            let shouldShowPins = mapView.region.span.latitudeDelta < pinVisibilityThreshold
+            guard shouldShowPins != pinsVisible else { return }
+            pinsVisible = shouldShowPins
+            // Pins: show when zoomed in
+            for ann in mapView.annotations {
+                guard ann is MemoryGroupAnnotation else { continue }
+                if let view = mapView.view(for: ann) {
+                    UIView.animate(withDuration: 0.25) {
+                        view.alpha = shouldShowPins ? 1.0 : 0.0
+                    }
+                }
+            }
+            // Dots: hide when zoomed in (inverse of pins)
+            for overlay in mapView.overlays {
+                guard overlay is MemoryDotCircle else { continue }
+                if let renderer = mapView.renderer(for: overlay) {
+                    renderer.alpha = shouldShowPins ? 0.0 : 1.0
+                }
+            }
+        }
+
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+            // Memory glow dot
+            if let dot = overlay as? MemoryDotCircle {
+                let r = MKCircleRenderer(circle: dot)
+                let isDark = MapAppearanceSettings.current == .dark
+                let green = UIColor(red: 0.30, green: 0.85, blue: 0.45, alpha: 1.0)
+                r.fillColor = green.withAlphaComponent(isDark ? 0.50 : 0.35)
+                r.strokeColor = green.withAlphaComponent(isDark ? 0.75 : 0.55)
+                r.lineWidth = 1.5
+                return r
+            }
+
             guard let poly = overlay as? StyledPolyline else { return MKOverlayRenderer(overlay: overlay) }
             let base = MapAppearanceSettings.routeBaseColor
             let glowTint = MapAppearanceSettings.routeGlowColor
@@ -637,6 +692,7 @@ private struct CityDeepMKMap: UIViewRepresentable {
             view.subviews.forEach { $0.removeFromSuperview() }
             view.addSubview(hosting.view)
 
+            view.alpha = pinsVisible ? 1.0 : 0.0
             return view
         }
 
@@ -661,6 +717,9 @@ private final class StyledPolyline: MKPolyline {
     var isGap: Bool = false
     var repeatWeight: Double = 0
 }
+
+/// Small circle overlay marking a memory location on the route
+private final class MemoryDotCircle: MKCircle {}
 
 private final class LayeredPolylineRenderer: MKOverlayRenderer {
     private let renderers: [MKPolylineRenderer]

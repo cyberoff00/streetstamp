@@ -81,6 +81,7 @@ struct StreetStampsApp: App {
     @StateObject private var publishStore = JourneyPublishStore()
     @StateObject private var notificationStore = SocialNotificationStore()
     @StateObject private var blockStore = UserBlockStore()
+    @StateObject private var languagePreference = LanguagePreference.shared
     @State private var journeyDeletionSyncFailureStore = JourneyDeletionSyncFailureStore()
     @State private var showAuthEntry = false
     @State private var showSplash = true
@@ -220,6 +221,13 @@ struct StreetStampsApp: App {
         }
     }
 
+    private func setupBackgroundPersistHandler() {
+        let store = journeyStore
+        TrackingService.shared.onBackgroundPersistNeeded = { [weak store] in
+            store?.flushPersist()
+        }
+    }
+
     @MainActor
     private func maybeShowFirstAuthPromptIfNeeded() {
         let firstPromptKey = "streetstamps.auth_entry_shown.v1"
@@ -284,6 +292,7 @@ struct StreetStampsApp: App {
 
     private var appContentWithEnvironment: some View {
         mainEntryContent
+            .environment(\.locale, languagePreference.displayLocale)
             .environmentObject(locationHub)
             .environmentObject(sessionStore)
             .environmentObject(journeyStore)
@@ -379,6 +388,7 @@ struct StreetStampsApp: App {
                     LiveActivityManager.shared.endAllStaleActivities()
                 }
                 setupAutoEndHandler()
+                setupBackgroundPersistHandler()
                 await lifelogMigrationThenLoad
 
                 // Ensure city cache decode finished before reading cachedCities

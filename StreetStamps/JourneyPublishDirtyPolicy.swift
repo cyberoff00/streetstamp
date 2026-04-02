@@ -16,7 +16,9 @@ enum JourneyPublishDirtyPolicy {
         snapshotOverallMemory: String,
         draftOverallMemory: String,
         snapshotOverallMemoryImagePaths: [String],
-        draftOverallMemoryImagePaths: [String]
+        draftOverallMemoryImagePaths: [String],
+        snapshotOverallMemoryRemoteImageURLs: [String] = [],
+        draftOverallMemoryRemoteImageURLs: [String] = []
     ) -> JourneyEditSaveAction {
         guard visibility == .public || visibility == .friendsOnly else {
             return .saveLocal
@@ -29,7 +31,9 @@ enum JourneyPublishDirtyPolicy {
             snapshotOverallMemory: snapshotOverallMemory,
             draftOverallMemory: draftOverallMemory,
             snapshotOverallMemoryImagePaths: snapshotOverallMemoryImagePaths,
-            draftOverallMemoryImagePaths: draftOverallMemoryImagePaths
+            draftOverallMemoryImagePaths: draftOverallMemoryImagePaths,
+            snapshotOverallMemoryRemoteImageURLs: snapshotOverallMemoryRemoteImageURLs,
+            draftOverallMemoryRemoteImageURLs: draftOverallMemoryRemoteImageURLs
         ) else {
             return .saveLocal
         }
@@ -44,7 +48,9 @@ enum JourneyPublishDirtyPolicy {
         snapshotOverallMemory: String,
         draftOverallMemory: String,
         snapshotOverallMemoryImagePaths: [String],
-        draftOverallMemoryImagePaths: [String]
+        draftOverallMemoryImagePaths: [String],
+        snapshotOverallMemoryRemoteImageURLs: [String] = [],
+        draftOverallMemoryRemoteImageURLs: [String] = []
     ) -> Bool {
         let normalizedSnapshotTitle = snapshotTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedDraftTitle = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -55,6 +61,7 @@ enum JourneyPublishDirtyPolicy {
         if normalizedSnapshotOverall != normalizedDraftOverall { return true }
 
         if snapshotOverallMemoryImagePaths != draftOverallMemoryImagePaths { return true }
+        if snapshotOverallMemoryRemoteImageURLs != draftOverallMemoryRemoteImageURLs { return true }
 
         if snapshotMemories != draftMemories { return true }
 

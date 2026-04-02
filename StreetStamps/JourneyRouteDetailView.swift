@@ -353,7 +353,8 @@ struct JourneyRouteDetailView: View {
         ShareCardGenerator.generate(
             journey: j,
             cachedCitiesByKey: cachedCitiesByKey,
-            privacy: .exact
+            privacy: .exact,
+            applyJourneyPrivacy: true
         ) { img in
             self.shareImage = img
             self.showShareSheet = true

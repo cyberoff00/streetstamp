@@ -4,7 +4,7 @@ import Combine
 import UIKit
 
 @MainActor
-final class VoiceBroadcastService {
+final class VoiceBroadcastService: NSObject {
     static let shared = VoiceBroadcastService()
 
     private let tracking = TrackingService.shared
@@ -16,7 +16,10 @@ final class VoiceBroadcastService {
     private var journeyStartAt: Date?
     private var lastAnnouncedStep: Int = 0
 
-    private init() {}
+    private override init() {
+        super.init()
+        synthesizer.delegate = self
+    }
 
     func start() {
         guard !isStarted else { return }
@@ -89,6 +92,17 @@ final class VoiceBroadcastService {
             try session.setActive(true, options: [])
         } catch {
             print("VoiceBroadcastService audio session activate failed: \(error.localizedDescription)")
+        }
+    }
+}
+
+extension VoiceBroadcastService: AVSpeechSynthesizerDelegate {
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        do {
+            // Deactivate and notify other audio apps (e.g. Music) to resume.
+            try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        } catch {
+            print("VoiceBroadcastService audio session deactivate failed: \(error.localizedDescription)")
         }
     }
 }

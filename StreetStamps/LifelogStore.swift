@@ -984,7 +984,7 @@ final class LifelogStore: ObservableObject {
         let journeyID = journey.id.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !journeyID.isEmpty else { return false }
         guard !archivedJourneyIDs.contains(journeyID) else { return false }
-        let coords = journey.coordinates
+        let coords = journey.displayRouteCoordinates
 
         if !coords.isEmpty {
             let timeline = timestampsForJourney(journey, count: coords.count)

@@ -88,6 +88,7 @@ struct BackendJourneyUploadDTO: Codable {
     var sharedAt: Date?
     var routeCoordinates: [CoordinateCodable]
     var memories: [BackendMemoryUploadDTO]
+    var privacyOptions: [String]?
 }
 
 struct BackendMigrationRequest: Codable {

@@ -472,6 +472,9 @@
 "settings_lifelog_bg_mode_title" = "后台记录模式";
 "settings_language_title" = "语言";
 "settings_language_follow_system" = "跟随系统";
+"settings_language_option_simplified_chinese" = "简体中文";
+"settings_language_option_traditional_chinese" = "繁體中文";
+"settings_language_option_english" = "英文";
 "settings_name_placeholder" = "昵称（可重复）";
 "settings_scan_cancel" = "取消";
 "settings_scan_failed_title" = "扫码失败";
@@ -563,6 +566,10 @@
 "postcard_brand_stamps" = "STAMPS";
 "postcard_box_sent" = "寄出";
 "postcard_box_received" = "收到";
+"postcard_picker_title" = "明信片";
+"postcard_new_accessibility_label" = "新建明信片";
+"postcard_save_original" = "保存原图";
+"postcard_saved_to_album" = "已保存到相册";
 "postcard_sent_empty" = "暂时还没有寄出明信片";
 "postcard_received_empty" = "暂时还没有收到明信片";
 "postcard_retry" = "重试";
@@ -1031,6 +1038,7 @@
 "membership_compare_premium" = "Premium";
 "membership_compare_photos" = "照片 / 旅程";
 "membership_info_photos" = "每段旅程最多可添加的照片数，每条记忆最多 2 张。免费 6 张，Premium 12 张。";
+"journey_photo_limit_toast" = "本段旅程最多可添加 %d 张照片";
 "membership_info_postcard" = "每个城市：可向每位好友发 1 张(免费)/2 张(Premium)明信片，最多 3 位(免费)/10 位(Premium)好友。该城市每多一段旅程，每位好友 +1 张，可发好友数也增加。";
 "membership_compare_friends" = "好友";
 "membership_compare_unlimited" = "无限";
@@ -1181,3 +1189,15 @@
 "settings_rate_app_title" = "去 APP STORE 评分";
 "feedback_email_subject" = "Worldo 反馈 (v%@)";
 "feedback_email_body" = "\n\n---\n设备: %@\niOS: %@\nApp: v%@";
+
+// MARK: - Privacy Options
+"privacy_toggle_title" = "隐私保护";
+"privacy_description" = "隐私选项将应用于分享的图片和好友动态。";
+"privacy_trim_endpoints" = "隐藏起终点附近位置（300米）";
+"privacy_hide_landmarks" = "隐藏地标与兴趣点标注";
+
+// MARK: - Photo Editor
+"photo_editor_text" = "文字";
+"photo_editor_skip" = "跳过";
+"photo_editor_type_text" = "输入文字…";
+"photo_editor_tap_to_place" = "点击图片放置文字";
