@@ -2672,8 +2672,17 @@ private struct EditableMemoryImagesView: View {
 
                     Button {
                         // Deferred: only remove from array. Actual file deletion happens on save.
+                        // Also remove the positionally-corresponding remoteImageURL so it doesn't
+                        // resurface after save (imagePaths and remoteImageURLs are parallel arrays).
                         withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
-                            imagePaths.removeAll(where: { $0 == path })
+                            if let idx = imagePaths.firstIndex(of: path) {
+                                imagePaths.remove(at: idx)
+                                if idx < remoteImageURLs.count {
+                                    remoteImageURLs.remove(at: idx)
+                                }
+                            } else {
+                                imagePaths.removeAll(where: { $0 == path })
+                            }
                         }
                     } label: {
                         editableImageDeleteButton
