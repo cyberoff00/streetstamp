@@ -359,8 +359,6 @@ struct FriendsHubView: View {
             if sessionStore.isLoggedIn {
                 tabSwitcher
 
-                Divider().overlay(Color.black.opacity(0.06))
-
                 TabView(selection: $tab) {
                     activityContent
                         .tag(FriendsTopTab.activity)
@@ -515,6 +513,11 @@ struct FriendsHubView: View {
                 async let b: Void = refreshFriendRequests()
                 _ = await (a, b)
                 await refreshRemoteFriends(showUnreadToast: false)
+            }
+        }
+        .onChange(of: publishStore.status) { _, newStatus in
+            if case .success = newStatus {
+                Task { await refreshRemoteFriends(force: true) }
             }
         }
         .task(id: feedLikeSignature) {

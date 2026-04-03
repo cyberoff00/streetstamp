@@ -164,9 +164,9 @@ final class LiveActivityManager: ObservableObject {
     /// 结束 Live Activity
     func endActivity() {
         stopUpdateTimer()
-        guard let activity = currentActivity else { return }
 
         // 同步清除引用，防止 startActivity() 创建新 activity 后被异步回调覆盖
+        let activityToEnd = currentActivity
         currentActivity = nil
         trackingStartTime = nil
         accumulatedPausedDuration = 0
@@ -181,11 +181,22 @@ final class LiveActivityManager: ObservableObject {
         )
 
         Task {
-            await activity.end(
-                ActivityContent(state: finalState, staleDate: nil),
-                dismissalPolicy: .immediate
-            )
-            print("[LiveActivity] Ended")
+            if let activity = activityToEnd {
+                await activity.end(
+                    ActivityContent(state: finalState, staleDate: nil),
+                    dismissalPolicy: .immediate
+                )
+                print("[LiveActivity] Ended")
+            } else {
+                // 兜底：currentActivity 已被竞态清除，但 OS 上可能仍有残留 activity
+                for stale in Activity<TrackingActivityAttributes>.activities {
+                    await stale.end(
+                        ActivityContent(state: finalState, staleDate: nil),
+                        dismissalPolicy: .immediate
+                    )
+                    print("[LiveActivity] Ended stale activity: \(stale.id)")
+                }
+            }
         }
     }
     

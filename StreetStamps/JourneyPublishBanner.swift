@@ -2,27 +2,56 @@ import SwiftUI
 
 struct JourneyPublishBanner: View {
     @EnvironmentObject private var publishStore: JourneyPublishStore
+    @State private var sendingProgress: Double = 0.0
+    // Local status lags behind the real status so we can animate to 100% before switching.
+    @State private var localStatus: JourneyPublishStatus = .idle
 
     var body: some View {
-        switch publishStore.status {
-        case .idle:
-            EmptyView()
-        case .sending(_, let title):
-            bannerContent(
-                icon: nil,
-                message: String(format: L10n.t("publish_banner_sending_format"), title),
-                style: .info,
-                showSpinner: true
-            )
-        case .success(_, let title):
-            bannerContent(
-                icon: "checkmark.circle.fill",
-                message: String(format: L10n.t("publish_banner_success_format"), title),
-                style: .success,
-                showSpinner: false
-            )
-        case .failed(_, let title, _):
-            failedBanner(title: title)
+        Group {
+            switch localStatus {
+            case .idle:
+                EmptyView()
+            case .sending(_, let title):
+                bannerContent(
+                    icon: nil,
+                    message: String(format: L10n.t("publish_banner_sending_format"), title),
+                    style: .info,
+                    showSpinner: true
+                )
+                .onAppear {
+                    sendingProgress = 0.0
+                    withAnimation(.easeOut(duration: 4.0)) {
+                        sendingProgress = 0.82
+                    }
+                }
+            case .success(_, let title):
+                bannerContent(
+                    icon: "checkmark.circle.fill",
+                    message: String(format: L10n.t("publish_banner_success_format"), title),
+                    style: .success,
+                    showSpinner: false
+                )
+            case .failed(_, let title, _):
+                failedBanner(title: title)
+            }
+        }
+        .onAppear {
+            localStatus = publishStore.status
+        }
+        .onChange(of: publishStore.status) { newStatus in
+            if case .success = newStatus, case .sending = localStatus {
+                // Animate progress to 100%, then reveal the success banner.
+                withAnimation(.easeIn(duration: 0.35)) {
+                    sendingProgress = 1.0
+                }
+                Task {
+                    try? await Task.sleep(nanoseconds: 450_000_000)
+                    guard !Task.isCancelled else { return }
+                    localStatus = newStatus
+                }
+            } else {
+                localStatus = newStatus
+            }
         }
     }
 
@@ -91,21 +120,23 @@ struct JourneyPublishBanner: View {
     }
 
     private func bannerContent(icon: String?, message: String, style: BannerStyle, showSpinner: Bool) -> some View {
-        HStack(spacing: 8) {
-            if showSpinner {
-                ProgressView()
-                    .scaleEffect(0.75)
-                    .frame(width: 16, height: 16)
-            } else if let icon {
-                Image(systemName: icon)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                if let icon, !showSpinner {
+                    Image(systemName: icon)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(style == .success ? .green : FigmaTheme.text)
+                }
+                Text(message)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(style == .success ? .green : FigmaTheme.text)
+                    .foregroundColor(FigmaTheme.text)
+                    .lineLimit(1)
+                Spacer()
             }
-            Text(message)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(FigmaTheme.text)
-                .lineLimit(1)
-            Spacer()
+            if showSpinner {
+                ProgressView(value: sendingProgress)
+                    .tint(Color.black.opacity(0.45))
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)

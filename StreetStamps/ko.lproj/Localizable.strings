@@ -641,10 +641,10 @@
 "settings_scan_camera_unavailable" = "카메라에 접근할 수 없습니다.";
 "settings_scan_camera_input_failed" = "카메라 입력 초기화에 실패했습니다.";
 "settings_scan_output_failed" = "스캔 출력 초기화에 실패했습니다.";
-"settings_daily_precision_desc" = "트래킹의 백그라운드 GPS 품질을 제어합니다. 고정밀은 경로가 더 정확하지만 배터리를 더 사용하고, 저정밀은 배터리를 우선합니다.";
+"settings_daily_precision_desc" = "Journey 일반 모드에서 배터리 절약 기록을 활성화하면 GPS 정밀도는 낮아지지만 배터리 소비를 크게 줄일 수 있습니다. 하루 종일 이동하는 여행에 적합합니다.";
 "settings_daily_precision_high" = "고정밀";
 "settings_daily_precision_low" = "저정밀";
-"settings_daily_precision_title" = "트랙 정밀도";
+"settings_daily_precision_title" = "배터리 절약 기록";
 "settings_live_activity_desc" = "Show current tracking progress on the Lock Screen and Dynamic Island.";
 "settings_live_activity_system_disabled_desc" = "설정 -> Worldo -> Live Activities에서 켜 주세요.";
 "settings_live_activity_title" = "Live Activity";

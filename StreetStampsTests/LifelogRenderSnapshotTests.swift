@@ -53,14 +53,11 @@ final class LifelogRenderSnapshotTests: XCTestCase {
             passiveCountryRuns: passiveCountryRuns
         )
 
-        XCTAssertEqual(snapshot.footprintGroups.count, 2)
         XCTAssertEqual(snapshot.farRouteGroups.count, 2)
 
-        let london = snapshot.footprintGroups[0]
         XCTAssertEqual(london.first?.latitude ?? 0, 51.5074, accuracy: 0.000_001)
         XCTAssertEqual(london.first?.longitude ?? 0, -0.1278, accuracy: 0.000_001)
 
-        let beijing = snapshot.footprintGroups[1]
         let expectedGCJ = CLLocationCoordinate2D(latitude: 39.9042, longitude: 116.4074).wgs2gcj
         XCTAssertEqual(beijing.first?.latitude ?? 0, expectedGCJ.latitude, accuracy: 0.000_8)
         XCTAssertEqual(beijing.first?.longitude ?? 0, expectedGCJ.longitude, accuracy: 0.000_8)
@@ -116,11 +113,6 @@ final class LifelogRenderSnapshotTests: XCTestCase {
             passiveCountryRuns: passiveCountryRuns
         )
 
-        XCTAssertEqual(snapshot.footprintGroups.count, 2)
-        XCTAssertEqual(snapshot.footprintGroups[0].first?.latitude ?? 0, 34.0522, accuracy: 0.000_001)
-        XCTAssertEqual(snapshot.footprintGroups[0].first?.longitude ?? 0, -118.2437, accuracy: 0.000_001)
-        XCTAssertEqual(snapshot.footprintGroups[1].first?.latitude ?? 0, 48.8566, accuracy: 0.000_001)
-        XCTAssertEqual(snapshot.footprintGroups[1].first?.longitude ?? 0, 2.3522, accuracy: 0.000_001)
     }
 
     func test_daySnapshot_requestLevelCountryDoesNotSplitPassivePathWithoutAttributedRuns() {
@@ -150,10 +142,9 @@ final class LifelogRenderSnapshotTests: XCTestCase {
             segments: segments
         )
 
-        XCTAssertEqual(snapshot.footprintGroups.count, 1)
     }
 
-    func test_daySnapshot_keepsSeparateRuns_forFarAndFootprint() {
+    func test_daySnapshot_keepsSeparateRuns_forFarRoutes() {
         let day = Date(timeIntervalSince1970: 1_700_000_000)
         let key = LifelogDaySnapshotKey(
             day: day,
@@ -189,8 +180,6 @@ final class LifelogRenderSnapshotTests: XCTestCase {
 
         XCTAssertEqual(snapshot.segments.count, 2)
         XCTAssertEqual(snapshot.farRouteGroups.count, 2)
-        XCTAssertEqual(snapshot.footprintGroups.count, 2)
-        XCTAssertEqual(snapshot.allDayRenderSnapshot.footprintRuns.count, 2)
         XCTAssertFalse(snapshot.allDayRenderSnapshot.farRouteSegments.isEmpty)
     }
 
@@ -243,7 +232,6 @@ final class LifelogRenderSnapshotTests: XCTestCase {
             viewport: viewport
         )
 
-        XCTAssertEqual(snapshot.footprintRuns.count, 1)
         XCTAssertEqual(snapshot.cachedPathCoordsWGS84.count, 3)
         XCTAssertEqual(snapshot.cachedPathCoordsWGS84.first?.latitude ?? 0, 37.7749, accuracy: 0.000_001)
     }

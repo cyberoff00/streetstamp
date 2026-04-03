@@ -51,7 +51,6 @@ struct LifelogRenderSnapshot: Sendable {
     let selectedDay: Date?
     let cachedPathCoordsWGS84: [CLLocationCoordinate2D]
     let farRouteSegments: [RenderRouteSegment]
-    let footprintRuns: [[CLLocationCoordinate2D]]
     let selectedDayCenterCoordinate: CLLocationCoordinate2D?
     let isHighQuality: Bool
 
@@ -59,7 +58,6 @@ struct LifelogRenderSnapshot: Sendable {
         selectedDay: nil,
         cachedPathCoordsWGS84: [],
         farRouteSegments: [],
-        footprintRuns: [],
         selectedDayCenterCoordinate: nil,
         isHighQuality: false
     )
@@ -130,7 +128,6 @@ struct LifelogSegmentedRenderGroup: Sendable {
     let startTimestamp: Date
     let endTimestamp: Date
     let farRouteSegments: [RenderRouteSegment]
-    let footprintRun: [CLLocationCoordinate2D]
 
     /// Precomputed bounding box — avoids re-scanning coordinates on every
     /// viewport intersection test.
@@ -144,15 +141,13 @@ struct LifelogSegmentedRenderGroup: Sendable {
         rawCoordsWGS84: [CLLocationCoordinate2D],
         startTimestamp: Date,
         endTimestamp: Date,
-        farRouteSegments: [RenderRouteSegment],
-        footprintRun: [CLLocationCoordinate2D]
+        farRouteSegments: [RenderRouteSegment]
     ) {
         self.sourceType = sourceType
         self.rawCoordsWGS84 = rawCoordsWGS84
         self.startTimestamp = startTimestamp
         self.endTimestamp = endTimestamp
         self.farRouteSegments = farRouteSegments
-        self.footprintRun = footprintRun
 
         var loLat = Double.greatestFiniteMagnitude
         var hiLat = -Double.greatestFiniteMagnitude
@@ -203,7 +198,6 @@ struct LifelogSegmentedDaySnapshot: Sendable {
             selectedDay: key.day,
             cachedPathCoordsWGS84: renderGroups.flatMap(\.rawCoordsWGS84),
             farRouteSegments: renderGroups.flatMap(\.farRouteSegments),
-            footprintRuns: renderGroups.compactMap { $0.footprintRun.isEmpty ? nil : $0.footprintRun },
             selectedDayCenterCoordinate: selectedDayCenterCoordinate,
             isHighQuality: true
         )
@@ -211,10 +205,6 @@ struct LifelogSegmentedDaySnapshot: Sendable {
 
     var farRouteGroups: [[RenderRouteSegment]] {
         renderGroups.map(\.farRouteSegments)
-    }
-
-    var footprintGroups: [[CLLocationCoordinate2D]] {
-        renderGroups.map(\.footprintRun)
     }
 
     func renderSnapshot(in viewport: TrackTileViewport?) -> LifelogRenderSnapshot {
@@ -230,10 +220,6 @@ struct LifelogSegmentedDaySnapshot: Sendable {
             selectedDay: key.day,
             cachedPathCoordsWGS84: visibleRuns.flatMap { $0 },
             farRouteSegments: visibleIndices.flatMap { renderGroups[$0].farRouteSegments },
-            footprintRuns: visibleIndices.compactMap { index in
-                let run = renderGroups[index].footprintRun
-                return run.isEmpty ? nil : run
-            },
             selectedDayCenterCoordinate: selectedDayCenterCoordinate,
             isHighQuality: true
         )
@@ -300,18 +286,12 @@ enum LifelogRenderSnapshotBuilder {
                 countryISO2: run.countryISO2,
                 cityKey: run.cityKey
             )
-            let footprintRun = buildFootprintGroup(
-                from: run.coordsWGS84,
-                countryISO2: run.countryISO2,
-                cityKey: run.cityKey
-            )
             return LifelogSegmentedRenderGroup(
                 sourceType: run.sourceType,
                 rawCoordsWGS84: run.coordsWGS84,
                 startTimestamp: run.startTimestamp,
                 endTimestamp: run.endTimestamp,
-                farRouteSegments: farRouteSegments,
-                footprintRun: footprintRun
+                farRouteSegments: farRouteSegments
             )
         }
         let center = renderRuns
@@ -470,23 +450,6 @@ enum LifelogRenderSnapshotBuilder {
             cityKey: cityKey
         )
         return RouteRenderingPipeline.buildSegments(input, surface: .mapKit).segments
-    }
-
-    private static func buildFootprintGroup(
-        from run: [CLLocationCoordinate2D],
-        countryISO2: String?,
-        cityKey: String?
-    ) -> [CLLocationCoordinate2D] {
-        guard run.count > 1 else {
-            return MapCoordAdapter.forMapKit(run, countryISO2: countryISO2, cityKey: cityKey)
-        }
-
-        let sampled = LifelogFootprintSampler.sample(
-            route: run,
-            stepMeters: LifelogRenderModeSelector.footprintStepMeters,
-            gapBreakMeters: 8_000
-        )
-        return MapCoordAdapter.forMapKit(sampled, countryISO2: countryISO2, cityKey: cityKey)
     }
 
     private static func uniformSampledCoords(

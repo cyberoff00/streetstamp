@@ -641,10 +641,10 @@
 "settings_scan_camera_unavailable" = "Impossible d'accéder à la caméra.";
 "settings_scan_camera_input_failed" = "Échec de l'initialisation de l'entrée caméra.";
 "settings_scan_output_failed" = "Échec de l'initialisation de la sortie de scan.";
-"settings_daily_precision_desc" = "Contrôle la qualité GPS en arrière-plan pour le suivi. Haute précision offre un meilleur tracé mais consomme plus de batterie ; basse précision privilégie la batterie.";
+"settings_daily_precision_desc" = "En mode Journey quotidien, activer l'économie de batterie réduit la précision GPS mais diminue significativement la consommation — idéal pour une journée entière de voyage.";
 "settings_daily_precision_high" = "Haute Précision";
 "settings_daily_precision_low" = "Basse Précision";
-"settings_daily_precision_title" = "Précision du Tracé";
+"settings_daily_precision_title" = "Économie de Batterie";
 "settings_live_activity_desc" = "Show current tracking progress on the Lock Screen and Dynamic Island.";
 "settings_live_activity_system_disabled_desc" = "Activez Live Activities dans Reglages -> Worldo -> Live Activities.";
 "settings_live_activity_title" = "Live Activity";

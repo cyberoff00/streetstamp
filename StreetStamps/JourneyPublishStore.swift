@@ -35,17 +35,21 @@ final class JourneyPublishStore: ObservableObject {
     private var lastFailedCityCache: CityCache?
     private var lastFailedJourneyStore: JourneyStore?
 
+    /// `isExplicitVisibilityChange` must be `true` when the user has explicitly changed
+    /// visibility (including to `.private`). Pass `false` for implicit publishes like
+    /// journey completion, where private journeys should not be synced to the backend.
     func publish(
         journey: JourneyRoute,
         sessionStore: UserSessionStore,
         cityCache: CityCache,
-        journeyStore: JourneyStore
+        journeyStore: JourneyStore,
+        isExplicitVisibilityChange: Bool = false
     ) {
         let title = journey.customTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             ? (journey.customTitle ?? journey.displayCityName)
             : journey.displayCityName
 
-        guard journey.visibility == .public || journey.visibility == .friendsOnly else { return }
+        guard journey.visibility == .public || journey.visibility == .friendsOnly || isExplicitVisibilityChange else { return }
         guard BackendConfig.isEnabled,
               sessionStore.currentAccessToken?.isEmpty == false else { return }
 
@@ -78,6 +82,10 @@ final class JourneyPublishStore: ObservableObject {
                 if let cache = urlCache[journey.id] {
                     Self.applyRemoteURLCache(cache, journeyID: journey.id, journeyStore: journeyStore)
                 }
+                // Stamp sharedAt on first successful publish (visibility was friendsOnly/public).
+                if journey.visibility == .public || journey.visibility == .friendsOnly {
+                    Self.applySharedAtIfNeeded(journeyID: journey.id, journeyStore: journeyStore)
+                }
                 status = .success(journeyID: journey.id, title: title)
                 lastFailedJourney = nil
                 scheduleDismiss()
@@ -99,11 +107,13 @@ final class JourneyPublishStore: ObservableObject {
               let journeyStore = lastFailedJourneyStore else { return }
         // Use the latest version from store instead of the stale snapshot.
         let journey = journeyStore.journeys.first(where: { $0.id == failed.id }) ?? failed
+        // Treat all retries as explicit visibility changes (the original was user-initiated).
         publish(
             journey: journey,
             sessionStore: sessionStore,
             cityCache: cityCache,
-            journeyStore: journeyStore
+            journeyStore: journeyStore,
+            isExplicitVisibilityChange: true
         )
     }
 
@@ -138,6 +148,14 @@ final class JourneyPublishStore: ObservableObject {
             guard !Task.isCancelled else { return }
             status = .idle
         }
+    }
+
+    private static func applySharedAtIfNeeded(journeyID: String, journeyStore: JourneyStore) {
+        guard let idx = journeyStore.journeys.firstIndex(where: { $0.id == journeyID }),
+              journeyStore.journeys[idx].sharedAt == nil else { return }
+        var j = journeyStore.journeys[idx]
+        j.sharedAt = Date()
+        journeyStore.applyBulkCompletedUpdates([j])
     }
 
     private static func applyRemoteURLCache(

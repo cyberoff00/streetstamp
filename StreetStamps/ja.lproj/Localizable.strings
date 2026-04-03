@@ -641,10 +641,10 @@
 "settings_scan_camera_unavailable" = "カメラにアクセスできません。";
 "settings_scan_camera_input_failed" = "カメラ入力の初期化に失敗しました。";
 "settings_scan_output_failed" = "スキャン出力の初期化に失敗しました。";
-"settings_daily_precision_desc" = "トラッキングのバックグラウンドGPS精度を制御します。高精度はルートが正確ですがバッテリー消費が増えます。低精度はバッテリーを優先します。";
+"settings_daily_precision_desc" = "Journeyの日常モードで省電力記録を有効にすると、GPS精度は下がりますがバッテリーの消費を大幅に抑えられます。一日中外出する旅行に最適です。";
 "settings_daily_precision_high" = "高精度";
 "settings_daily_precision_low" = "低精度";
-"settings_daily_precision_title" = "トラック精度";
+"settings_daily_precision_title" = "省電力記録";
 "settings_live_activity_desc" = "Show current tracking progress on the Lock Screen and Dynamic Island.";
 "settings_live_activity_system_disabled_desc" = "設定 -> Worldo -> Live Activities でオンにしてください。";
 "settings_live_activity_title" = "Live Activity";

@@ -484,10 +484,10 @@
 "settings_scan_camera_unavailable" = "无法访问摄像头。";
 "settings_scan_camera_input_failed" = "相机输入初始化失败。";
 "settings_scan_output_failed" = "扫码输出初始化失败。";
-"settings_daily_precision_desc" = "控制轨迹记录的后台 GPS 质量。高精度路线更准确但更耗电，低精度优先节省电量。";
+"settings_daily_precision_desc" = "在 Journey 日常模式下，开启省电记录有利于长时间记录，出门旅行一天，轨迹精度降低，但显著减少耗电。";
 "settings_daily_precision_high" = "高精度";
 "settings_daily_precision_low" = "低精度";
-"settings_daily_precision_title" = "轨迹精度";
+"settings_daily_precision_title" = "省电记录";
 "settings_stationary_reminder_desc" = "当 90 分钟内移动范围小于 100 米时提醒。";
 "settings_stationary_reminder_title" = "静止提醒";
 "settings_title" = "设置";

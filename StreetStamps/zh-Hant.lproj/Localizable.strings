@@ -653,10 +653,10 @@
 "settings_scan_camera_unavailable" = "無法存取攝影機。";
 "settings_scan_camera_input_failed" = "相機輸入初始化失敗。";
 "settings_scan_output_failed" = "掃碼輸出初始化失敗。";
-"settings_daily_precision_desc" = "控制軌跡記錄的後台 GPS 品質。高精度路線更準確但更耗電，低精度優先節省電量。";
+"settings_daily_precision_desc" = "在 Journey 日常模式下，開啟省電記錄有利於長時間記錄，出門旅行一天，軌跡精度降低，但顯著減少耗電。";
 "settings_daily_precision_high" = "高精度";
 "settings_daily_precision_low" = "低精度";
-"settings_daily_precision_title" = "軌跡精度";
+"settings_daily_precision_title" = "省電記錄";
 "settings_live_activity_desc" = "在锁屏和灵动岛顯示当前追蹤进度。";
 "settings_live_activity_system_disabled_desc" = "请前往 設置 -> Worldo -> 实时活動 開啟。";
 "settings_live_activity_title" = "实时活動";

@@ -160,7 +160,7 @@ final class LifelogRenderCacheCoordinator: ObservableObject {
         guard let snapshot else { return nil }
         debugLog(
             "viewport snapshot ready day=\(debugDayString(key.day)) " +
-            "far=\(snapshot.farRouteSegments.count) footprints=\(snapshot.footprintRuns.count)"
+            "far=\(snapshot.farRouteSegments.count)"
         )
         viewportSnapshots[viewportKey] = snapshot
         touchViewportKey(viewportKey)
@@ -302,7 +302,7 @@ final class LifelogRenderCacheCoordinator: ObservableObject {
         guard let snapshot else { return nil }
         debugLog(
             "day snapshot ready day=\(debugDayString(key.day)) " +
-            "groups=\(snapshot.farRouteGroups.count)/\(snapshot.footprintGroups.count)"
+            "groups=\(snapshot.farRouteGroups.count)"
         )
         pruneOlderDaySnapshots(for: key)
         daySnapshots[key] = snapshot
@@ -484,7 +484,7 @@ final class LifelogRenderCacheCoordinator: ObservableObject {
                 return
             }
             restoredDiskSnapshot = snapshot
-            debugLog("disk cache restored day=\(debugDayString(day)) far=\(snapshot.farRouteSegments.count) footprints=\(snapshot.footprintRuns.count)")
+            debugLog("disk cache restored day=\(debugDayString(day)) far=\(snapshot.farRouteSegments.count)")
         } catch {
             debugLog("disk cache restore failed: \(error)")
             try? FileManager.default.removeItem(at: url)
@@ -520,7 +520,6 @@ private struct LifelogRenderSnapshotDiskCache: Codable {
 
     let selectedDay: Date?
     let farRouteSegments: [Segment]
-    let footprintRuns: [[Coord]]
     let centerLat: Double?
     let centerLon: Double?
 
@@ -532,9 +531,6 @@ private struct LifelogRenderSnapshotDiskCache: Codable {
                 style: seg.style.rawValue,
                 coords: seg.coords.map { Coord(lat: $0.latitude, lon: $0.longitude) }
             )
-        }
-        self.footprintRuns = snapshot.footprintRuns.map { run in
-            run.map { Coord(lat: $0.latitude, lon: $0.longitude) }
         }
         self.centerLat = snapshot.selectedDayCenterCoordinate?.latitude
         self.centerLon = snapshot.selectedDayCenterCoordinate?.longitude
@@ -558,9 +554,6 @@ private struct LifelogRenderSnapshotDiskCache: Codable {
                         CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon)
                     }
                 )
-            },
-            footprintRuns: footprintRuns.map { run in
-                run.map { CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon) }
             },
             selectedDayCenterCoordinate: center,
             isHighQuality: false

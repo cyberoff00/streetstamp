@@ -7,6 +7,22 @@ private enum CityDeepPalette {
     static let headerBg = Color(red: 251.0 / 255.0, green: 251.0 / 255.0, blue: 249.0 / 255.0)
 }
 
+enum CityDeepMemoryVisibility {
+    static let pinVisibilityThreshold: CLLocationDegrees = 0.03
+
+    static func shouldShowPins(latitudeDelta: CLLocationDegrees) -> Bool {
+        latitudeDelta < pinVisibilityThreshold
+    }
+
+    static func pinAlpha(shouldShowPins: Bool) -> CGFloat {
+        shouldShowPins ? 1.0 : 0.0
+    }
+
+    static func dotAlpha(shouldShowPins: Bool) -> CGFloat {
+        shouldShowPins ? 0.0 : 1.0
+    }
+}
+
 struct CityDeepView: View {
     @AppStorage(MapAppearanceSettings.storageKey) private var mapAppearanceRaw = MapAppearanceStyle.dark.rawValue
     private let cityFocusRadiusMeters: CLLocationDistance = 80_000
@@ -561,7 +577,7 @@ private struct CityDeepMKMap: UIViewRepresentable {
             map.removeOverlays(map.overlays)
             for seg in segments {
                 guard seg.coords.count >= 2 else { continue }
-                let poly = StyledPolyline(coordinates: seg.coords, count: seg.coords.count)
+                let poly = CityDeepStyledPolyline(coordinates: seg.coords, count: seg.coords.count)
                 poly.isGap = seg.isGap
                 poly.repeatWeight = max(0, min(1, seg.repeatWeight))
                 map.addOverlay(poly)
@@ -583,6 +599,8 @@ private struct CityDeepMKMap: UIViewRepresentable {
                 map.addAnnotation(ann)
             }
         }
+
+        context.coordinator.syncMemoryPresentation(on: map, animated: false)
     }
 
     final class Coordinator: NSObject, MKMapViewDelegate {
@@ -596,29 +614,35 @@ private struct CityDeepMKMap: UIViewRepresentable {
             self.parent = parent
         }
 
-        /// Latitude span threshold: pins hidden when region spans more than ~0.03° (~3.3km)
-        private let pinVisibilityThreshold: CLLocationDegrees = 0.03
-
-        func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
-            let shouldShowPins = mapView.region.span.latitudeDelta < pinVisibilityThreshold
-            guard shouldShowPins != pinsVisible else { return }
+        func syncMemoryPresentation(on mapView: MKMapView, animated: Bool) {
+            let shouldShowPins = CityDeepMemoryVisibility.shouldShowPins(latitudeDelta: mapView.region.span.latitudeDelta)
             pinsVisible = shouldShowPins
-            // Pins: show when zoomed in
-            for ann in mapView.annotations {
-                guard ann is MemoryGroupAnnotation else { continue }
-                if let view = mapView.view(for: ann) {
-                    UIView.animate(withDuration: 0.25) {
-                        view.alpha = shouldShowPins ? 1.0 : 0.0
-                    }
+
+            let applyPinAlpha = {
+                for ann in mapView.annotations {
+                    guard ann is MemoryGroupAnnotation else { continue }
+                    mapView.view(for: ann)?.alpha = CityDeepMemoryVisibility.pinAlpha(shouldShowPins: shouldShowPins)
                 }
             }
-            // Dots: hide when zoomed in (inverse of pins)
+
+            if animated {
+                UIView.animate(withDuration: 0.25) {
+                    applyPinAlpha()
+                }
+            } else {
+                applyPinAlpha()
+            }
+
             for overlay in mapView.overlays {
                 guard overlay is MemoryDotCircle else { continue }
-                if let renderer = mapView.renderer(for: overlay) {
-                    renderer.alpha = shouldShowPins ? 0.0 : 1.0
-                }
+                mapView.renderer(for: overlay)?.alpha = CityDeepMemoryVisibility.dotAlpha(shouldShowPins: shouldShowPins)
             }
+        }
+
+        func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
+            let shouldShowPins = CityDeepMemoryVisibility.shouldShowPins(latitudeDelta: mapView.region.span.latitudeDelta)
+            guard shouldShowPins != pinsVisible else { return }
+            syncMemoryPresentation(on: mapView, animated: true)
         }
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
@@ -630,10 +654,12 @@ private struct CityDeepMKMap: UIViewRepresentable {
                 r.fillColor = green.withAlphaComponent(isDark ? 0.50 : 0.35)
                 r.strokeColor = green.withAlphaComponent(isDark ? 0.75 : 0.55)
                 r.lineWidth = 1.5
+                let shouldShowPins = CityDeepMemoryVisibility.shouldShowPins(latitudeDelta: mapView.region.span.latitudeDelta)
+                r.alpha = CityDeepMemoryVisibility.dotAlpha(shouldShowPins: shouldShowPins)
                 return r
             }
 
-            guard let poly = overlay as? StyledPolyline else { return MKOverlayRenderer(overlay: overlay) }
+            guard let poly = overlay as? CityDeepStyledPolyline else { return MKOverlayRenderer(overlay: overlay) }
             let base = MapAppearanceSettings.routeBaseColor
             let glowTint = MapAppearanceSettings.routeGlowColor
             let isDark = MapAppearanceSettings.current == .dark
@@ -664,7 +690,7 @@ private struct CityDeepMKMap: UIViewRepresentable {
             highlightLayer.lineJoin = .round
             highlightLayer.strokeColor = isGap ? .clear : UIColor.white.withAlphaComponent(isDark ? 0.45 : 0.25)
 
-            let lr = LayeredPolylineRenderer(renderers: [glowLayer, mainLayer, highlightLayer])
+            let lr = CityDeepLayeredPolylineRenderer(renderers: [glowLayer, mainLayer, highlightLayer])
             if isDark {
                 lr.glowBlur = 6.0
                 lr.glowColor = glowTint.withAlphaComponent(0.50).cgColor
@@ -692,7 +718,8 @@ private struct CityDeepMKMap: UIViewRepresentable {
             view.subviews.forEach { $0.removeFromSuperview() }
             view.addSubview(hosting.view)
 
-            view.alpha = pinsVisible ? 1.0 : 0.0
+            let shouldShowPins = CityDeepMemoryVisibility.shouldShowPins(latitudeDelta: mapView.region.span.latitudeDelta)
+            view.alpha = CityDeepMemoryVisibility.pinAlpha(shouldShowPins: shouldShowPins)
             return view
         }
 
@@ -713,7 +740,7 @@ private final class MemoryGroupAnnotation: NSObject, MKAnnotation {
     }
 }
 
-private final class StyledPolyline: MKPolyline {
+private final class CityDeepStyledPolyline: MKPolyline {
     var isGap: Bool = false
     var repeatWeight: Double = 0
 }
@@ -721,7 +748,7 @@ private final class StyledPolyline: MKPolyline {
 /// Small circle overlay marking a memory location on the route
 private final class MemoryDotCircle: MKCircle {}
 
-private final class LayeredPolylineRenderer: MKOverlayRenderer {
+private final class CityDeepLayeredPolylineRenderer: MKOverlayRenderer {
     private let renderers: [MKPolylineRenderer]
     var glowBlur: CGFloat = 0
     var glowColor: CGColor?
@@ -733,11 +760,10 @@ private final class LayeredPolylineRenderer: MKOverlayRenderer {
     }
 
     override func draw(_ mapRect: MKMapRect, zoomScale: MKZoomScale, in context: CGContext) {
-        for (i, renderer) in renderers.enumerated() {
-            if i == 0 && glowBlur > 0, let color = glowColor {
+        for (index, renderer) in renderers.enumerated() {
+            if index == 0 && glowBlur > 0, let color = glowColor {
                 context.saveGState()
-                let scaledBlur = glowBlur / zoomScale
-                context.setShadow(offset: .zero, blur: scaledBlur, color: color)
+                context.setShadow(offset: .zero, blur: glowBlur / zoomScale, color: color)
                 renderer.draw(mapRect, zoomScale: zoomScale, in: context)
                 context.restoreGState()
             } else {

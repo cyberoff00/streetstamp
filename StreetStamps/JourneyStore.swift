@@ -189,6 +189,14 @@ final class JourneyStore: ObservableObject {
                 for id in ids {
                     if let j = try? fStore.loadJourney(id: id) { result.append(j) }
                 }
+
+                // MIGRATION: stamp sharedAt on friendsOnly journeys that pre-date this field.
+                // These journeys were successfully published before sharedAt tracking was introduced.
+                for i in result.indices where result[i].visibility == .friendsOnly && result[i].sharedAt == nil {
+                    result[i].sharedAt = result[i].endTime ?? result[i].startTime ?? Date()
+                    try? fStore.finalizeJourney(result[i])
+                }
+
                 cont.resume(returning: result)
             }
         }

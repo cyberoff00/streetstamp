@@ -14,6 +14,7 @@ actor LifelogCountryAttributionCoordinator {
     private let resolveCanonical: CanonicalResolver
 
     private var snapshot: LifelogCountryAttributionSnapshot
+    private var snapshotRevision: Int = 0
     private var pendingCells: [String: CoordinateCodable] = [:]
     private var unresolvedCellIDs = Set<String>()
     private var processingTask: Task<Void, Never>?
@@ -66,6 +67,7 @@ actor LifelogCountryAttributionCoordinator {
 
         if didChange, let earliestChangedPointIndex {
             rebuildRuns(fromPointIndex: earliestChangedPointIndex)
+            snapshotRevision &+= 1
             persistSnapshot()
         }
 
@@ -74,6 +76,10 @@ actor LifelogCountryAttributionCoordinator {
 
     func loadSnapshot() -> LifelogCountryAttributionSnapshot {
         snapshot
+    }
+
+    func currentRevision() -> Int {
+        snapshotRevision
     }
 
     private func startProcessingIfNeeded() {
@@ -129,6 +135,7 @@ actor LifelogCountryAttributionCoordinator {
             return LifelogPointCountryRecord(pointID: point.pointID, cellID: point.cellID, iso2: iso2)
         }
         rebuildRuns(fromPointIndex: firstPointIndex(forCellID: cellID) ?? 0)
+        snapshotRevision &+= 1
         persistSnapshot()
         NotificationCenter.default.post(
             name: .lifelogCountryAttributionDidChange,

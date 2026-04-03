@@ -1026,6 +1026,74 @@ final class LifelogStoreBehaviorTests: XCTestCase {
     }
 
     @MainActor
+    func test_passiveCountryRuns_usesCachedResult_untilDataChanges() async throws {
+        let userID = "lifelog-country-runs-cache-\(UUID().uuidString)"
+        let paths = StoragePath(userID: userID)
+        try? FileManager.default.removeItem(at: paths.userRoot)
+        try paths.ensureBaseDirectoriesExist()
+
+        let coordinator = LifelogCountryAttributionCoordinator(
+            paths: paths,
+            resolveCanonical: { location in
+                if location.coordinate.longitude > 100 {
+                    return ReverseGeocodeService.CanonicalResult(
+                        cityName: "Beijing",
+                        iso2: "CN",
+                        cityKey: "Beijing|CN",
+                        level: .locality,
+                        parentRegionKey: "Beijing Municipality|CN",
+                        availableLevels: [.locality: "Beijing"]
+                    )
+                }
+                return ReverseGeocodeService.CanonicalResult(
+                    cityName: "San Francisco",
+                    iso2: "US",
+                    cityKey: "San Francisco|US",
+                    level: .locality,
+                    parentRegionKey: "California|US",
+                    availableLevels: [.locality: "San Francisco"]
+                )
+            }
+        )
+
+        let store = LifelogStore(paths: paths, trackTileRevisionDebounce: 0) { _ in coordinator }
+        store.load()
+        let loaded = await waitUntil(timeout: 1.0) { store.hasLoaded }
+        XCTAssertTrue(loaded)
+
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
+        store.importExternalTrack(points: [
+            (coord: CoordinateCodable(lat: 39.90420, lon: 116.40740), timestamp: timestamp),
+            (coord: CoordinateCodable(lat: 39.90425, lon: 116.40745), timestamp: timestamp.addingTimeInterval(5))
+        ])
+
+        _ = try await waitForAttributionSnapshot(at: paths, timeout: 1.5) { snapshot in
+            snapshot.runs == [
+                LifelogCountryRunRecord(startPointID: snapshot.points.first?.pointID ?? "", endPointID: snapshot.points.last?.pointID ?? "", iso2: "CN")
+            ]
+        }
+
+        let first = await store.passiveCountryRuns()
+        let second = await store.passiveCountryRuns()
+
+        XCTAssertEqual(first, second)
+        XCTAssertEqual(first.count, 1)
+        XCTAssertEqual(first.first?.countryISO2, "CN")
+
+        store.importExternalTrack(points: [
+            (coord: CoordinateCodable(lat: 37.77490, lon: -122.41940), timestamp: timestamp.addingTimeInterval(10)),
+            (coord: CoordinateCodable(lat: 37.77520, lon: -122.41890), timestamp: timestamp.addingTimeInterval(15))
+        ])
+
+        _ = try await waitForAttributionSnapshot(at: paths, timeout: 1.5) { $0.points.count == 4 && $0.runs.count == 2 }
+
+        let refreshed = await store.passiveCountryRuns()
+        XCTAssertEqual(refreshed.count, 2)
+        XCTAssertEqual(Set(refreshed.compactMap(\.countryISO2)), Set(["CN", "US"]))
+        XCTAssertEqual(refreshed.map(\.coordsWGS84.count), [2, 2])
+    }
+
+    @MainActor
     private func waitUntil(
         timeout: TimeInterval,
         check: @escaping @MainActor () -> Bool

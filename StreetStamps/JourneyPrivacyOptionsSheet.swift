@@ -18,55 +18,48 @@ struct JourneyPrivacyOptionsSheet: View {
     private var hasAny: Bool { trimEndpoints || hideLandmarks }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text(L10n.t("privacy_toggle_title"))
-                    .font(.system(size: 17, weight: .semibold))
-                Spacer()
-                Button(L10n.t("save")) {
-                    applyAndDismiss()
-                }
-                .font(.system(size: 15, weight: .medium))
-                .foregroundColor(.black)
+        JourneySheetScaffold(
+            title: L10n.t("privacy_toggle_title"),
+            subtitle: L10n.t("privacy_description")
+        ) {
+            VStack(spacing: 8) {
+                toggleRow(title: L10n.t("privacy_trim_endpoints"), isOn: $trimEndpoints)
+                toggleRow(title: L10n.t("privacy_hide_landmarks"), isOn: $hideLandmarks)
             }
-            .padding(.top, 8)
 
-            Text(L10n.t("privacy_description"))
-                .font(.system(size: 13))
-                .foregroundColor(.secondary)
-
-            VStack(alignment: .leading, spacing: 10) {
-                checkRow(
-                    title: L10n.t("privacy_trim_endpoints"),
-                    isOn: $trimEndpoints
-                )
-                checkRow(
-                    title: L10n.t("privacy_hide_landmarks"),
-                    isOn: $hideLandmarks
-                )
+            Button(action: applyAndDismiss) {
+                Text(L10n.t("save"))
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                    .background(UITheme.softBlack)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .appFullSurfaceTapTarget(.roundedRect(16))
             }
-            .padding(.top, 4)
-
-            Spacer()
+            .buttonStyle(.plain)
         }
-        .padding(.horizontal, 20)
     }
 
-    private func checkRow(title: String, isOn: Binding<Bool>) -> some View {
-        Button {
-            isOn.wrappedValue.toggle()
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: isOn.wrappedValue ? "checkmark.square.fill" : "square")
-                    .font(.system(size: 20))
-                    .foregroundColor(isOn.wrappedValue ? .black : .black.opacity(0.3))
-                Text(title)
-                    .font(.system(size: 15))
-                    .foregroundColor(.black.opacity(0.8))
-                Spacer()
-            }
+    private func toggleRow(title: String, isOn: Binding<Bool>) -> some View {
+        HStack(spacing: 12) {
+            Text(title)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(UITheme.softBlack)
+            Spacer(minLength: 12)
+            Toggle("", isOn: isOn)
+                .labelsHidden()
+                .tint(UITheme.accent)
+                .scaleEffect(0.88)
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.black.opacity(0.02), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.black.opacity(0.05), lineWidth: 1)
+        )
     }
 
     private func applyAndDismiss() {

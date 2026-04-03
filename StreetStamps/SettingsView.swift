@@ -778,41 +778,32 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
 
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(alignment: .center, spacing: 10) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(L10n.t("settings_daily_precision_title"))
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(FigmaTheme.text)
-                        }
+                HStack(alignment: .center, spacing: 10) {
+                    Image(systemName: "leaf")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(FigmaTheme.primary)
+                        .frame(width: 20)
 
-                        Spacer(minLength: 8)
+                    Text(L10n.t("settings_daily_precision_title"))
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(FigmaTheme.text)
 
-                        Button {
-                            showBackgroundModeInfo = true
-                        } label: {
-                            Image(systemName: "questionmark.circle")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(FigmaTheme.subtext)
-                                .appMinTapTarget()
-                        }
-                        .buttonStyle(.plain)
+                    Spacer(minLength: 8)
+
+                    Button {
+                        showBackgroundModeInfo = true
+                    } label: {
+                        Image(systemName: "questionmark.circle")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(FigmaTheme.subtext)
+                            .appMinTapTarget()
                     }
+                    .buttonStyle(.plain)
 
-                    segmentedContainer {
-                        segmentButton(
-                            title: L10n.t(DailyTrackingPrecision.highPrecision.titleKey),
-                            isSelected: dailyTrackingPrecision == .highPrecision
-                        ) {
-                            dailyTrackingPrecision = .highPrecision
-                        }
-                        segmentButton(
-                            title: L10n.t(DailyTrackingPrecision.lowPrecision.titleKey),
-                            isSelected: dailyTrackingPrecision == .lowPrecision
-                        ) {
-                            dailyTrackingPrecision = .lowPrecision
-                        }
-                    }
+                    figmaToggle(isOn: Binding(
+                        get: { dailyTrackingPrecision == .lowPrecision },
+                        set: { dailyTrackingPrecision = $0 ? .lowPrecision : .highPrecision }
+                    ))
                 }
                 .padding(.horizontal, 18)
                 .padding(.vertical, 18)

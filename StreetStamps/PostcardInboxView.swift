@@ -20,6 +20,7 @@ struct PostcardInboxView: View {
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var postcardCenter: PostcardCenter
     @EnvironmentObject private var socialStore: SocialGraphStore
+    @EnvironmentObject private var publishStore: JourneyPublishStore
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
 
     @State private var selectedBox: Box
@@ -144,6 +145,11 @@ struct PostcardInboxView: View {
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
             await refreshInbox()
+        }
+        .onChange(of: publishStore.status) { _, newStatus in
+            if case .success = newStatus {
+                Task { await refreshInbox() }
+            }
         }
         .refreshable {
             await refreshInbox()

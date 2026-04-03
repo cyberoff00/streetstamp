@@ -200,6 +200,11 @@ enum TrackRenderAdapter {
         globeSegments(from: events, zoom: zoom, sourceFilter: [.passive])
     }
 
+    /// Globe-level maximum coordinate count. At world zoom the fog reveal
+    /// corridor is wide, so sub-100m precision is invisible. Keeping the
+    /// total under this cap ensures draw() stays under 16ms per frame.
+    private static let globeMaxTotalCoords = 30_000
+
     static func globeJourneys(
         from segments: [TrackTileSegment],
         passiveCountryRuns: [LifelogAttributedCoordinateRun] = [],
@@ -210,51 +215,71 @@ enum TrackRenderAdapter {
         let validCountryRuns = passiveCountryRuns.filter { $0.coordsWGS84.count >= 2 }
         let tilePassiveSegments = segments.filter { $0.sourceType == .passive && $0.coordinates.count >= 2 }
 
-        // Use country-attributed runs only when they carry at least as many
-        // renderable entries as the tile-based passive segments. Otherwise the
-        // attribution data is still incomplete and we'd lose visible tracks.
         let useCountryRuns = !validCountryRuns.isEmpty
             && validCountryRuns.count >= tilePassiveSegments.count
 
         if !useCountryRuns {
             let filtered = segments.filter { $0.coordinates.count >= 2 }
             guard !filtered.isEmpty else { return [] }
-            return filtered.enumerated().map { index, segment in
+            let capped = globeDownsample(filtered.map(\.coordinates))
+            return capped.enumerated().map { index, coords in
                 makeGlobeJourney(
-                    id: "track.tile.segment.\(segment.sourceType.rawValue).\(index)",
+                    id: "track.tile.segment.all.\(index)",
                     lifelogName: lifelogName,
                     countryISO2: countryISO2,
-                    coordinates: segment.coordinates
+                    coordinates: coords
                 )
             }
         }
 
-        let nonPassiveRoutes = segments
+        let nonPassiveFiltered = segments
             .filter { $0.sourceType != .passive && $0.coordinates.count >= 2 }
-            .enumerated()
-            .map { index, segment in
-                makeGlobeJourney(
-                    id: "track.tile.segment.\(segment.sourceType.rawValue).\(index)",
-                    lifelogName: lifelogName,
-                    countryISO2: countryISO2,
-                    coordinates: segment.coordinates
-                )
-            }
+        let nonPassiveCoords = globeDownsample(nonPassiveFiltered.map(\.coordinates))
+        let nonPassiveRoutes = nonPassiveCoords.enumerated().map { index, coords in
+            makeGlobeJourney(
+                id: "track.tile.segment.journey.\(index)",
+                lifelogName: lifelogName,
+                countryISO2: countryISO2,
+                coordinates: coords
+            )
+        }
 
-        let passiveRoutes = validCountryRuns
-            .enumerated()
-            .map { index, run in
-                makeGlobeJourney(
-                    id: "track.tile.segment.passive.\(index)",
-                    lifelogName: lifelogName,
-                    countryISO2: run.countryISO2,
-                    coordinates: run.coordsWGS84.map {
-                        CoordinateCodable(lat: $0.latitude, lon: $0.longitude)
-                    }
-                )
-            }
+        let passiveCoordArrays: [[CoordinateCodable]] = validCountryRuns.map { run in
+            run.coordsWGS84.map { CoordinateCodable(lat: $0.latitude, lon: $0.longitude) }
+        }
+        let passiveCapped = globeDownsample(passiveCoordArrays)
+        let passiveRoutes = passiveCapped.enumerated().map { index, coords in
+            makeGlobeJourney(
+                id: "track.tile.segment.passive.\(index)",
+                lifelogName: lifelogName,
+                countryISO2: validCountryRuns.indices.contains(index) ? validCountryRuns[index].countryISO2 : countryISO2,
+                coordinates: coords
+            )
+        }
 
         return nonPassiveRoutes + passiveRoutes
+    }
+
+    /// Downsamples coordinate arrays so total points stay under globeMaxTotalCoords.
+    /// Each array keeps at least 2 points (start + end). Evenly thins when over budget.
+    private static func globeDownsample(_ arrays: [[CoordinateCodable]]) -> [[CoordinateCodable]] {
+        let total = arrays.reduce(0) { $0 + $1.count }
+        guard total > globeMaxTotalCoords else { return arrays }
+        // Every-N sampling: keep 1 in every `step` points.
+        let step = max(2, Int(ceil(Double(total) / Double(globeMaxTotalCoords))))
+        return arrays.map { coords in
+            guard coords.count > step else { return coords }
+            var out: [CoordinateCodable] = []
+            out.reserveCapacity(coords.count / step + 2)
+            for i in stride(from: 0, to: coords.count, by: step) {
+                out.append(coords[i])
+            }
+            // Always keep the last point for continuity
+            if let last = coords.last, out.last != last {
+                out.append(last)
+            }
+            return out
+        }
     }
 
     static func polylineCoordinates(
@@ -437,7 +462,10 @@ enum TrackRenderAdapter {
         route.countryISO2 = countryISO2
         route.coordinates = coordinates
         route.thumbnailCoordinates = coordinates
-        route.distance = totalDistanceMeters(for: coordinates)
+        // Skip totalDistanceMeters — Globe fog rendering doesn't display
+        // distance. Computing it for 25K+ segments with 240K+ coords was
+        // taking minutes (CLLocation creation + Haversine per pair).
+        route.distance = 0
         return route
     }
 

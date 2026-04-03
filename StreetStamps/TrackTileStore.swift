@@ -3,7 +3,7 @@ import CoreLocation
 import Combine
 
 final class TrackTileStore: ObservableObject {
-    private static let currentSchemaVersion = 5
+    private static let currentSchemaVersion = 6
     private var paths: StoragePath
     private let fm: FileManager
     private let encoder: JSONEncoder

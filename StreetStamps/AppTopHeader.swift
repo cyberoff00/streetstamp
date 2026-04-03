@@ -147,48 +147,6 @@ struct UnifiedNavigationHeader<Trailing: View>: View {
     }
 }
 
-/// Unified header for primary tab pages (Home/Friends/Profile/Lifelog).
-/// Keeps title centered with symmetric left/right slots.
-struct MainTabHeader: View {
-    let title: String
-    var rightAccessory: (() -> AnyView)? = nil
-    var topPadding: CGFloat = 8
-    var horizontalPadding: CGFloat = 18
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Color.clear
-                .frame(width: 44, height: 44)
-
-            Spacer()
-
-            Text(title)
-                .navigationTitleStyle(level: .primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
-
-            Spacer()
-
-            if let rightAccessory {
-                rightAccessory()
-                    .frame(width: 44, height: 44)
-            } else {
-                Color.clear
-                    .frame(width: 44, height: 44)
-            }
-        }
-        .padding(.horizontal, horizontalPadding)
-        .padding(.top, topPadding)
-        .padding(.bottom, 12)
-        .background(FigmaTheme.card.opacity(0.92))
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(FigmaTheme.border)
-                .frame(height: 1)
-        }
-    }
-}
-
 /// Unified top header used across pages.
 /// - Left: hamburger entry (aligned & sized consistently)
 /// - Title: single line, uppercase, same font, auto-scales to fit on all devices
@@ -215,7 +173,7 @@ struct AppTopHeader: View {
         }
         .padding(.horizontal, 20)
         .padding(.top, 14)
-        .padding(.bottom, 14)
+        .padding(.bottom, 12)
         .background(FigmaTheme.card.opacity(0.9))
         .overlay(alignment: .bottom) {
             Rectangle()

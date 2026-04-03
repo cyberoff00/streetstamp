@@ -494,10 +494,10 @@
 "settings_scan_camera_unavailable" = "Unable to access camera.";
 "settings_scan_camera_input_failed" = "Camera input initialization failed.";
 "settings_scan_output_failed" = "Scan output initialization failed.";
-"settings_daily_precision_desc" = "Controls background GPS quality during journey tracking. High precision keeps better route quality but uses more battery; low precision prioritizes battery life.";
+"settings_daily_precision_desc" = "In Daily journey mode, enabling battery saving reduces GPS accuracy but significantly lowers battery usage — ideal for all-day travel.";
 "settings_daily_precision_high" = "HIGH PRECISION";
 "settings_daily_precision_low" = "LOW PRECISION";
-"settings_daily_precision_title" = "TRACK PRECISION";
+"settings_daily_precision_title" = "BATTERY SAVING";
 "settings_map_appearance_desc" = "Apply to all maps and route rendering";
 "settings_stationary_reminder_desc" = "Alert when movement stays within 100 m for 90 minutes.";
 "settings_stationary_reminder_title" = "STILLNESS REMINDER";

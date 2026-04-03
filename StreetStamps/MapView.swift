@@ -735,8 +735,8 @@ struct MapViewRouteRenderStyle {
 struct SystemCameraPicker: UIViewControllerRepresentable {
     var preferredDevice: UIImagePickerController.CameraDevice = .rear
     var mirrorOnCapture: Bool
+    var skipDismiss: Bool = false
     var onImage: (UIImage) -> Void
-    var onEdit: ((UIImage) -> Void)? = nil
     var onCancel: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
@@ -784,8 +784,12 @@ struct SystemCameraPicker: UIViewControllerRepresentable {
         init(parent: SystemCameraPicker) { self.parent = parent }
 
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            picker.dismiss(animated: true) {
-                self.parent.onCancel()
+            if parent.skipDismiss {
+                parent.onCancel()
+            } else {
+                picker.dismiss(animated: true) {
+                    self.parent.onCancel()
+                }
             }
         }
 
@@ -793,7 +797,11 @@ struct SystemCameraPicker: UIViewControllerRepresentable {
                                    didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
             let img = info[.originalImage] as? UIImage
             guard let image = img else {
-                picker.dismiss(animated: true) { self.parent.onCancel() }
+                if parent.skipDismiss {
+                    parent.onCancel()
+                } else {
+                    picker.dismiss(animated: true) { self.parent.onCancel() }
+                }
                 return
             }
 
@@ -807,8 +815,12 @@ struct SystemCameraPicker: UIViewControllerRepresentable {
                 return
             }
 
-            picker.dismiss(animated: true) {
-                self.parent.onImage(finalImage)
+            if parent.skipDismiss {
+                parent.onImage(finalImage)
+            } else {
+                picker.dismiss(animated: true) {
+                    self.parent.onImage(finalImage)
+                }
             }
         }
     }
@@ -832,7 +844,6 @@ final class CameraOverlayController: UIViewController {
     private var reviewImageView: UIImageView?
     private var retakeButton: UIButton?
     private var usePhotoButton: UIButton?
-    private var editButton: UIButton?
 
     init(picker: UIImagePickerController, coordinator: SystemCameraPicker.Coordinator) {
         self.picker = picker
@@ -995,19 +1006,6 @@ final class CameraOverlayController: UIViewController {
         view.addSubview(retake)
         self.retakeButton = retake
 
-        // Edit button (bottom-center)
-        let edit = UIButton(type: .system)
-        let editConfig = UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
-        let editIcon = UIImage(systemName: "slider.horizontal.3", withConfiguration: editConfig)
-        edit.setImage(editIcon, for: .normal)
-        edit.setTitle(" " + NSLocalizedString("Edit", comment: ""), for: .normal)
-        edit.titleLabel?.font = .systemFont(ofSize: 18, weight: .semibold)
-        edit.tintColor = .white
-        edit.addTarget(self, action: #selector(editTapped), for: .touchUpInside)
-        edit.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(edit)
-        self.editButton = edit
-
         // Use Photo button (bottom-right)
         let usePhoto = UIButton(type: .system)
         usePhoto.setTitle(NSLocalizedString("Use Photo", comment: ""), for: .normal)
@@ -1027,9 +1025,6 @@ final class CameraOverlayController: UIViewController {
             retake.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             retake.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -30),
 
-            edit.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            edit.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -30),
-
             usePhoto.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
             usePhoto.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -30),
         ])
@@ -1040,8 +1035,6 @@ final class CameraOverlayController: UIViewController {
         reviewImageView = nil
         retakeButton?.removeFromSuperview()
         retakeButton = nil
-        editButton?.removeFromSuperview()
-        editButton = nil
         usePhotoButton?.removeFromSuperview()
         usePhotoButton = nil
         reviewImage = nil
@@ -1110,17 +1103,15 @@ final class CameraOverlayController: UIViewController {
         dismissReview()
     }
 
-    @objc private func editTapped() {
-        guard let image = reviewImage, let picker else { return }
-        picker.dismiss(animated: true) { [weak self] in
-            self?.coordinator?.parent.onEdit?(image)
-        }
-    }
 
     @objc private func usePhotoTapped() {
         guard let image = reviewImage, let picker else { return }
-        picker.dismiss(animated: true) { [weak self] in
-            self?.coordinator?.parent.onImage(image)
+        if coordinator?.parent.skipDismiss == true {
+            coordinator?.parent.onImage(image)
+        } else {
+            picker.dismiss(animated: true) { [weak self] in
+                self?.coordinator?.parent.onImage(image)
+            }
         }
     }
 }
@@ -1131,6 +1122,7 @@ final class CameraOverlayController: UIViewController {
 
 struct PhotoLibraryPicker: UIViewControllerRepresentable {
     let selectionLimit: Int
+    var skipDismiss: Bool = false
     var onImages: ([UIImage]) -> Void
     var onCancel: () -> Void
 
@@ -1155,8 +1147,12 @@ struct PhotoLibraryPicker: UIViewControllerRepresentable {
 
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
             if results.isEmpty {
-                picker.dismiss(animated: true) {
-                    self.parent.onCancel()
+                if parent.skipDismiss {
+                    parent.onCancel()
+                } else {
+                    picker.dismiss(animated: true) {
+                        self.parent.onCancel()
+                    }
                 }
                 return
             }
@@ -1188,8 +1184,12 @@ struct PhotoLibraryPicker: UIViewControllerRepresentable {
 
             group.notify(queue: .main) {
                 let sorted = images.sorted { $0.0 < $1.0 }.map { $0.1 }
-                picker.dismiss(animated: true) {
+                if self.parent.skipDismiss {
                     self.parent.onImages(sorted)
+                } else {
+                    picker.dismiss(animated: true) {
+                        self.parent.onImages(sorted)
+                    }
                 }
             }
         }
@@ -2917,27 +2917,30 @@ struct MemoryDetailPage: View {
                                             showViewer = true
                                         }
                                     }
-                                    ForEach(Array(memory.remoteImageURLs.enumerated()), id: \.offset) { idx, rawURL in
-                                        if let url = URL(string: rawURL) {
-                                            CachedRemoteImage(url: url) { $0.resizable() } placeholder: {
-                                                ProgressView()
-                                                    .frame(width: 88, height: 88)
-                                            } failure: {
-                                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                    .fill(Color(UIColor(white: 0.92, alpha: 1)))
-                                                    .frame(width: 88, height: 88)
-                                                    .overlay {
-                                                        Image(systemName: "exclamationmark.triangle")
-                                                            .foregroundColor(.secondary)
-                                                    }
-                                            }
-                                            .scaledToFill()
-                                            .frame(width: 88, height: 88)
-                                            .clipped()
-                                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                            .onTapGesture {
-                                                viewerIndex = memory.imagePaths.count + idx
-                                                showViewer = true
+                                    // Show remote URLs only when no local files exist (social fallback for own device or friend view).
+                                    if memory.imagePaths.isEmpty {
+                                        ForEach(Array(memory.remoteImageURLs.enumerated()), id: \.offset) { idx, rawURL in
+                                            if let url = URL(string: rawURL) {
+                                                CachedRemoteImage(url: url) { $0.resizable() } placeholder: {
+                                                    ProgressView()
+                                                        .frame(width: 88, height: 88)
+                                                } failure: {
+                                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                        .fill(Color(UIColor(white: 0.92, alpha: 1)))
+                                                        .frame(width: 88, height: 88)
+                                                        .overlay {
+                                                            Image(systemName: "exclamationmark.triangle")
+                                                                .foregroundColor(.secondary)
+                                                        }
+                                                }
+                                                .scaledToFill()
+                                                .frame(width: 88, height: 88)
+                                                .clipped()
+                                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                                .onTapGesture {
+                                                    viewerIndex = idx
+                                                    showViewer = true
+                                                }
                                             }
                                         }
                                     }
@@ -3156,13 +3159,10 @@ struct MemoryEditorSheet: View {
     @State private var remoteImageURLs: [String]
     @State private var notesFocused: Bool = false
 
-    @State private var showCamera = false
-    @State private var showPhotoLibrary = false
+    @State private var activePhotoFlow: PhotoInputMode? = nil
     @State private var showPhotoViewer = false
     @State private var viewerIndex = 0
     @State private var showExpanded = false
-    @State private var showPhotoEditor = false
-    @State private var pendingEditorImages: [UIImage] = []
     @State private var showDiscardAlert = false
     @State private var showDeleteAlert = false
     // ✅ Used to decide whether we should auto-resume the editor when user returns
@@ -3251,7 +3251,7 @@ private var hasUnsavedChanges: Bool {
             notesFocused = false
             hideKeyboard()
         }) {
-            showCamera = true
+            activePhotoFlow = .camera(mirrorSelfie: mirrorSelfie)
         }
     }
 
@@ -3260,7 +3260,7 @@ private var hasUnsavedChanges: Bool {
             notesFocused = false
             hideKeyboard()
         }) {
-            showPhotoLibrary = true
+            activePhotoFlow = .library(selectionLimit: max(1, remainingPhotoSlots))
         }
     }
 
@@ -3320,47 +3320,15 @@ private var hasUnsavedChanges: Bool {
                 MemoryDraftResumeStore.set(true, userID: userID, memoryID: draftMemoryID)
             }
         }
-        .fullScreenCover(isPresented: $showCamera) {
-            SystemCameraPicker(
-                preferredDevice: .rear,
-                mirrorOnCapture: mirrorSelfie,
-                onImage: { image in
-                    pendingEditorImages = [image]
-                },
-                onCancel: {
-                    showCamera = false
-                }
-            )
-            .ignoresSafeArea()
-        }
-        .fullScreenCover(isPresented: $showPhotoLibrary) {
-            PhotoLibraryPicker(
-                selectionLimit: max(1, remainingPhotoSlots),
-                onImages: { images in
-                    pendingEditorImages = images
-                },
-                onCancel: {
-                    showPhotoLibrary = false
-                }
-            )
-            .ignoresSafeArea()
-        }
-        .onChange(of: pendingEditorImages.count) { count in
-            if count > 0 && !showCamera && !showPhotoEditor {
-                showPhotoEditor = true
-            }
-        }
-        .fullScreenCover(isPresented: $showPhotoEditor) {
-            PhotoEditorView(
-                images: pendingEditorImages,
+        .fullScreenCover(item: $activePhotoFlow) { mode in
+            PhotoInputFlowView(
+                mode: mode,
                 onComplete: { edited in
-                    showPhotoEditor = false
-                    pendingEditorImages = []
+                    activePhotoFlow = nil
                     storeEditedImages(edited, writesToPhotoLibrary: false)
                 },
                 onCancel: {
-                    showPhotoEditor = false
-                    pendingEditorImages = []
+                    activePhotoFlow = nil
                 }
             )
         }
@@ -3445,7 +3413,7 @@ private var hasUnsavedChanges: Bool {
                 if !imagePaths.isEmpty || !remoteImageURLs.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 10) {
-                            ForEach(Array(imagePaths.enumerated()), id: \.offset) { idx, p in
+                            ForEach(Array(imagePaths.enumerated()), id: \.element) { idx, p in
                                 ZStack(alignment: .topTrailing) {
                                     PhotoThumb(path: p, userID: userID)
                                         .onTapGesture {
@@ -3455,6 +3423,10 @@ private var hasUnsavedChanges: Bool {
 
                                     Button {
                                         // Deferred: only remove from array. File deletion on save.
+                                        // Also remove the corresponding remote URL (parallel arrays by index).
+                                        if idx < remoteImageURLs.count {
+                                            remoteImageURLs.remove(at: idx)
+                                        }
                                         imagePaths.remove(at: idx)
                                     } label: {
                                         Image(systemName: "xmark.circle.fill")
@@ -3466,7 +3438,9 @@ private var hasUnsavedChanges: Bool {
                                     .buttonStyle(.plain)
                                 }
                             }
-                            ForEach(Array(remoteImageURLs.enumerated()), id: \.offset) { idx, rawURL in
+                            // Show remote URLs only when no local files exist (social fallback for own device or friend view).
+                            if imagePaths.isEmpty {
+                            ForEach(Array(remoteImageURLs.enumerated()), id: \.element) { idx, rawURL in
                                 if let url = URL(string: rawURL) {
                                     ZStack(alignment: .topTrailing) {
                                         CachedRemoteImage(url: url) { $0.resizable() } placeholder: {
@@ -3495,6 +3469,7 @@ private var hasUnsavedChanges: Bool {
                                     }
                                 }
                             }
+                            } // end if imagePaths.isEmpty
                         }
                         .padding(.horizontal, 4)
                         .padding(.bottom, 8)
@@ -3706,13 +3681,10 @@ struct MemoryEditorPage: View {
     let onSave: () -> Void
 
     @State private var notesFocused: Bool = false
-    @State private var showCamera: Bool = false
-    @State private var showPhotoLibrary: Bool = false
+    @State private var activePhotoFlow: PhotoInputMode? = nil
     @State private var showPhotoViewer: Bool = false
     @State private var viewerIndex: Int = 0
     @State private var showDeleteConfirm: Bool = false
-    @State private var showPhotoEditor: Bool = false
-    @State private var pendingEditorImages: [UIImage] = []
     private var canAddPhoto: Bool { imagePaths.count < maxPhotos }
     private var remainingPhotoSlots: Int { max(0, maxPhotos - imagePaths.count) }
 
@@ -3721,7 +3693,7 @@ struct MemoryEditorPage: View {
             notesFocused = false
             endEditingGlobal()
         }) {
-            showCamera = true
+            activePhotoFlow = .camera(mirrorSelfie: mirrorSelfie)
         }
     }
 
@@ -3730,7 +3702,7 @@ struct MemoryEditorPage: View {
             notesFocused = false
             endEditingGlobal()
         }) {
-            showPhotoLibrary = true
+            activePhotoFlow = .library(selectionLimit: max(1, remainingPhotoSlots))
         }
     }
 
@@ -3749,43 +3721,15 @@ struct MemoryEditorPage: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .fullScreenCover(isPresented: $showCamera) {
-            SystemCameraPicker(
-                preferredDevice: .rear,
-                mirrorOnCapture: mirrorSelfie,
-                onImage: { image in
-                    pendingEditorImages = [image]
-                },
-                onCancel: { showCamera = false }
-            )
-            .ignoresSafeArea()
-        }
-        .fullScreenCover(isPresented: $showPhotoLibrary) {
-            PhotoLibraryPicker(
-                selectionLimit: max(1, remainingPhotoSlots),
-                onImages: { images in
-                    pendingEditorImages = images
-                },
-                onCancel: { showPhotoLibrary = false }
-            )
-            .ignoresSafeArea()
-        }
-        .onChange(of: pendingEditorImages.count) { count in
-            if count > 0 && !showCamera && !showPhotoEditor {
-                showPhotoEditor = true
-            }
-        }
-        .fullScreenCover(isPresented: $showPhotoEditor) {
-            PhotoEditorView(
-                images: pendingEditorImages,
+        .fullScreenCover(item: $activePhotoFlow) { mode in
+            PhotoInputFlowView(
+                mode: mode,
                 onComplete: { edited in
-                    showPhotoEditor = false
-                    pendingEditorImages = []
+                    activePhotoFlow = nil
                     storeEditedImages(edited, writesToPhotoLibrary: false)
                 },
                 onCancel: {
-                    showPhotoEditor = false
-                    pendingEditorImages = []
+                    activePhotoFlow = nil
                 }
             )
         }
@@ -3824,7 +3768,7 @@ struct MemoryEditorPage: View {
 
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 10) {
-                            ForEach(Array(imagePaths.enumerated()), id: \.offset) { idx, p in
+                            ForEach(Array(imagePaths.enumerated()), id: \.element) { idx, p in
                                 ZStack(alignment: .topTrailing) {
                                     PhotoThumb(path: p, userID: userID)
                                         .onTapGesture {
@@ -4354,6 +4298,7 @@ private struct JourneyMKMapView: UIViewRepresentable {
 
         private var robotAnnotation: RobotAnnotation? = nil
         private var memoryAnnotationsByKey: [String: MemoryGroupAnnotation] = [:]
+        private var memoryHostingsByKey: [String: UIHostingController<MemoryPin>] = [:]
 
         private var lastSegmentsSignature: String = ""
         private var lastTailSignature: String = ""
@@ -4467,6 +4412,7 @@ private struct JourneyMKMapView: UIViewRepresentable {
                 if let ann = memoryAnnotationsByKey.removeValue(forKey: k) {
                     map.removeAnnotation(ann)
                 }
+                memoryHostingsByKey.removeValue(forKey: k)
             }
 
             // Add / update
@@ -4477,6 +4423,7 @@ private struct JourneyMKMapView: UIViewRepresentable {
                     // Otherwise tapping the pin may show stale notes/title until app relaunch.
                     if ann.items.count != g.items.count || itemsSignature(ann.items) != itemsSignature(g.items) {
                         map.removeAnnotation(ann)
+                        memoryHostingsByKey.removeValue(forKey: g.key)
                         let newAnn = MemoryGroupAnnotation(key: g.key, coordinate: g.coordinate, items: g.items)
                         memoryAnnotationsByKey[g.key] = newAnn
                         map.addAnnotation(newAnn)
@@ -4612,6 +4559,14 @@ private struct JourneyMKMapView: UIViewRepresentable {
             syncOverlays(on: map, segments: parent.segments, liveTail: parent.liveTail)
         }
 
+        private func refreshMemoryPinModes(on map: MKMapView) {
+            let isCompact = map.camera.altitude >= 2400
+            for (key, hosting) in memoryHostingsByKey {
+                guard let ann = memoryAnnotationsByKey[key] else { continue }
+                hosting.rootView = MemoryPin(cluster: ann.items, isCompact: isCompact)
+            }
+        }
+
         private func sharedPrefixCount(lhs: [RenderRouteSegment], rhs: [RenderRouteSegment]) -> Int {
             let limit = min(lhs.count, rhs.count)
             var index = 0
@@ -4728,12 +4683,14 @@ private struct JourneyMKMapView: UIViewRepresentable {
                     view.zPriority = .max
                 }
 
-                let hosting = UIHostingController(rootView: MemoryPin(cluster: ann.items))
+                let isCompact = mapView.camera.altitude >= 2400
+                let hosting = UIHostingController(rootView: MemoryPin(cluster: ann.items, isCompact: isCompact))
                 hosting.view.backgroundColor = .clear
                 hosting.view.frame = view.bounds
 
                 view.subviews.forEach { $0.removeFromSuperview() }
                 view.addSubview(hosting.view)
+                memoryHostingsByKey[ann.key] = hosting
                 return view
             }
 
@@ -4770,6 +4727,7 @@ private struct JourneyMKMapView: UIViewRepresentable {
             let currentBucket = MapViewRouteRenderStyle.altitudeBucket(for: mapView.camera.altitude)
             if lastAltitudeBucket != currentBucket {
                 refreshOverlayStyles(on: mapView)
+                refreshMemoryPinModes(on: mapView)
                 lastAltitudeBucket = currentBucket
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {

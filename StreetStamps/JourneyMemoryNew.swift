@@ -256,7 +256,7 @@ struct JourneyMemoryMainView: View {
             }
         }
         .navigationBarBackButtonHidden(true)
-        .fullScreenCover(item: $activeJourneyDetail) { destination in
+        .navigationDestination(item: $activeJourneyDetail) { destination in
             JourneyMemoryDetailView(
                 journey: destination.journey,
                 memories: destination.memories,
@@ -906,7 +906,8 @@ enum JourneyEntryAccessoryPresentation {
     static func items(journey: JourneyRoute, memories: [JourneyMemory]) -> [Item] {
         var items: [Item] = []
 
-        if journey.visibility == .friendsOnly {
+        // Only show the "好友可见" badge once the backend publish has been confirmed (sharedAt set).
+        if journey.visibility == .friendsOnly, journey.sharedAt != nil {
             items.append(
                 Item(
                 id: "visibility",
@@ -1054,10 +1055,7 @@ struct JourneyMemoryDetailView: View {
     @State private var showDeleteJourneyConfirm = false
     @State private var showPrivacySheet = false
     // Photo / Camera (edit mode)
-    @State private var showCamera: Bool = false
-    @State private var showPhotoLibrary: Bool = false
-    @State private var showPhotoEditor: Bool = false
-    @State private var pendingEditorImages: [UIImage] = []
+    @State private var activePhotoFlow: PhotoInputMode? = nil
     @State private var activePhotoTarget: ActivePhotoTarget? = nil
     @State private var mirrorSelfie: Bool = false
     @State private var showJourneyPhotoLimitToast = false
@@ -1404,43 +1402,15 @@ struct JourneyMemoryDetailView: View {
             .presentationDetents([.height(280)])
             .presentationDragIndicator(.visible)
         }
-        .fullScreenCover(isPresented: $showCamera) {
-            SystemCameraPicker(
-                preferredDevice: .rear,
-                mirrorOnCapture: mirrorSelfie,
-                onImage: { image in
-                    pendingEditorImages = [image]
-                },
-                onCancel: { showCamera = false }
-            )
-            .ignoresSafeArea()
-        }
-        .fullScreenCover(isPresented: $showPhotoLibrary) {
-            PhotoLibraryPicker(
-                selectionLimit: max(1, remainingPhotoSlotsForActiveTarget()),
-                onImages: { images in
-                    pendingEditorImages = images
-                },
-                onCancel: { showPhotoLibrary = false }
-            )
-            .ignoresSafeArea()
-        }
-        .onChange(of: pendingEditorImages.count) { count in
-            if count > 0 && !showCamera && !showPhotoEditor {
-                showPhotoEditor = true
-            }
-        }
-        .fullScreenCover(isPresented: $showPhotoEditor) {
-            PhotoEditorView(
-                images: pendingEditorImages,
+        .fullScreenCover(item: $activePhotoFlow) { mode in
+            PhotoInputFlowView(
+                mode: mode,
                 onComplete: { edited in
-                    showPhotoEditor = false
-                    pendingEditorImages = []
+                    activePhotoFlow = nil
                     appendImagesToActiveMemory(edited, writesToPhotoLibrary: false)
                 },
                 onCancel: {
-                    showPhotoEditor = false
-                    pendingEditorImages = []
+                    activePhotoFlow = nil
                 }
             )
         }
@@ -1752,7 +1722,7 @@ struct JourneyMemoryDetailView: View {
                 if !draftOverallMemoryImagePaths.isEmpty || !draftOverallMemoryRemoteImageURLs.isEmpty {
                     EditableMemoryImagesView(
                         imagePaths: $draftOverallMemoryImagePaths,
-                        remoteImageURLs: draftOverallMemoryImagePaths.isEmpty ? $draftOverallMemoryRemoteImageURLs : .constant([]),
+                        remoteImageURLs: $draftOverallMemoryRemoteImageURLs,
                         userID: sessionStore.currentUserID
                     )
                 }
@@ -1781,7 +1751,9 @@ struct JourneyMemoryDetailView: View {
     // MARK: - Edit controls
 
     private var overallMemoryTotalPhotoCount: Int {
-        draftOverallMemoryImagePaths.count + draftOverallMemoryRemoteImageURLs.count
+        draftOverallMemoryImagePaths.isEmpty
+            ? draftOverallMemoryRemoteImageURLs.count
+            : draftOverallMemoryImagePaths.count
     }
 
     private func beginEditing() {
@@ -1994,7 +1966,7 @@ struct JourneyMemoryDetailView: View {
         PhotoInputPresentationPolicy.launchPicker(dismissTextInput: {
             endEditing()
         }) {
-            showCamera = true
+            activePhotoFlow = .camera(mirrorSelfie: mirrorSelfie)
         }
     }
 
@@ -2003,7 +1975,7 @@ struct JourneyMemoryDetailView: View {
         PhotoInputPresentationPolicy.launchPicker(dismissTextInput: {
             endEditing()
         }) {
-            showPhotoLibrary = true
+            activePhotoFlow = .library(selectionLimit: max(1, remainingPhotoSlotsForActiveTarget()))
         }
     }
 
@@ -2012,7 +1984,7 @@ struct JourneyMemoryDetailView: View {
         PhotoInputPresentationPolicy.launchPicker(dismissTextInput: {
             endEditing()
         }) {
-            showCamera = true
+            activePhotoFlow = .camera(mirrorSelfie: mirrorSelfie)
         }
     }
 
@@ -2021,7 +1993,7 @@ struct JourneyMemoryDetailView: View {
         PhotoInputPresentationPolicy.launchPicker(dismissTextInput: {
             endEditing()
         }) {
-            showPhotoLibrary = true
+            activePhotoFlow = .library(selectionLimit: max(1, remainingPhotoSlotsForActiveTarget()))
         }
     }
 
@@ -2277,14 +2249,20 @@ struct JourneyMemoryDetailView: View {
         }
     }
 
+    /// True only when the journey has been confirmed published to friends (sharedAt set after backend success).
+    private var isConfirmedFriendVisible: Bool {
+        guard currentJourney.visibility == .friendsOnly else { return false }
+        return currentJourney.sharedAt != nil
+    }
+
     private var visibilityStatusButton: some View {
         Button {
             presentPrimaryJourneySheet()
         } label: {
             HStack(spacing: 6) {
-                Image(systemName: currentJourney.visibility == .friendsOnly ? "person.2.fill" : "lock.fill")
+                Image(systemName: isConfirmedFriendVisible ? "person.2.fill" : "lock.fill")
                     .font(.system(size: 11, weight: .semibold))
-                Text(currentJourney.visibility.localizedTitle)
+                Text(isConfirmedFriendVisible ? currentJourney.visibility.localizedTitle : JourneyVisibility.private.localizedTitle)
                     .font(.system(size: 12, weight: .medium))
                 if likesCount > 0 {
                     Text("•")
@@ -2294,10 +2272,10 @@ struct JourneyMemoryDetailView: View {
                         .font(.system(size: 12, weight: .semibold))
                 }
             }
-            .foregroundColor(currentJourney.visibility == .friendsOnly ? UITheme.accent : FigmaTheme.subtext)
+            .foregroundColor(isConfirmedFriendVisible ? UITheme.accent : FigmaTheme.subtext)
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .background(currentJourney.visibility == .friendsOnly ? UITheme.accent.opacity(0.12) : Color.black.opacity(0.05))
+            .background(isConfirmedFriendVisible ? UITheme.accent.opacity(0.12) : Color.black.opacity(0.05))
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -2326,10 +2304,10 @@ struct JourneyMemoryDetailView: View {
             return
         }
         var updated = journey
-        if journey.visibility == .private, target != .private {
-            updated.sharedAt = Date()
-        }
         updated.visibility = target
+        // Clear sharedAt when going private so the button doesn't show green
+        // if the user later switches back to friends-only before a new publish confirms.
+        if target == .private { updated.sharedAt = nil }
         store.applyBulkCompletedUpdates([updated])
         activeJourneySheet = nil
 
@@ -2337,7 +2315,8 @@ struct JourneyMemoryDetailView: View {
             journey: updated,
             sessionStore: sessionStore,
             cityCache: cityCache,
-            journeyStore: store
+            journeyStore: store,
+            isExplicitVisibilityChange: true
         )
     }
 
@@ -2453,6 +2432,7 @@ struct JourneyMemoryDetailView: View {
 private struct ExportMemoryTimelineItem: View {
     let memory: JourneyMemory
     let userID: String
+    let contentWidth: CGFloat
 
     private var timeText: String {
         let formatter = DateFormatter()
@@ -2477,7 +2457,8 @@ private struct ExportMemoryTimelineItem: View {
             if !memory.imagePaths.isEmpty {
                 SyncMemoryImagesView(
                     imagePaths: memory.imagePaths,
-                    userID: userID
+                    userID: userID,
+                    contentWidth: contentWidth
                 )
             }
 
@@ -2487,25 +2468,30 @@ private struct ExportMemoryTimelineItem: View {
                     .foregroundColor(Color(red: 0.21, green: 0.26, blue: 0.32))
                     .lineSpacing(8.75)
                     .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
 }
 
 /// Synchronous image loading for ImageRenderer export (async .task won't fire in ImageRenderer).
+/// contentWidth must be passed explicitly — ImageRenderer's layout engine does not reliably
+/// propagate frame(maxWidth: .infinity) proposals, so we bypass it with concrete dimensions.
 private struct SyncMemoryImagesView: View {
     let imagePaths: [String]
     let userID: String
+    let contentWidth: CGFloat
 
     var body: some View {
         VStack(spacing: 12) {
             ForEach(imagePaths, id: \.self) { path in
                 if let img = PhotoStore.loadImage(named: path, userID: userID) {
+                    let ratio = img.size.height > 0 ? img.size.width / img.size.height : 4.0/3.0
+                    let imgHeight = contentWidth / ratio
                     Image(uiImage: img)
                         .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: .infinity)
+                        .scaledToFill()
+                        .frame(width: contentWidth, height: imgHeight)
+                        .clipped()
                         .overlay(
                             Rectangle()
                                 .inset(by: 0.5)
@@ -2516,8 +2502,7 @@ private struct SyncMemoryImagesView: View {
                         )
                 } else {
                     Color(red: 0.95, green: 0.95, blue: 0.95)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 140)
+                        .frame(width: contentWidth, height: 140)
                 }
             }
         }
@@ -2675,6 +2660,10 @@ private struct EditableMemoryImagesView: View {
     @Binding var remoteImageURLs: [String]
     let userID: String
 
+    // Locked on appear: only show remote photos if there were no local photos when editing started.
+    // Prevents remote photos from "popping in" when the last local photo is deleted.
+    @State private var showRemote = false
+
     var body: some View {
         VStack(spacing: 12) {
             ForEach(imagePaths, id: \.self) { path in
@@ -2692,6 +2681,7 @@ private struct EditableMemoryImagesView: View {
                     .buttonStyle(.plain)
                 }
             }
+            if showRemote {
             ForEach(remoteImageURLs, id: \.self) { rawURL in
                 if let url = URL(string: rawURL) {
                     ZStack(alignment: .topTrailing) {
@@ -2723,6 +2713,10 @@ private struct EditableMemoryImagesView: View {
                     }
                 }
             }
+            } // end if showRemote
+        }
+        .onAppear {
+            showRemote = imagePaths.isEmpty && !remoteImageURLs.isEmpty
         }
     }
 
@@ -2755,7 +2749,9 @@ private struct EditableMemoryTimelineItem: View {
     }
 
     private var totalPhotoCount: Int {
-        memory.imagePaths.count + memory.remoteImageURLs.count
+        memory.imagePaths.isEmpty
+            ? memory.remoteImageURLs.count
+            : memory.imagePaths.count
     }
 
     var body: some View {
@@ -2799,7 +2795,7 @@ private struct EditableMemoryTimelineItem: View {
             if !memory.imagePaths.isEmpty || !memory.remoteImageURLs.isEmpty {
                 EditableMemoryImagesView(
                     imagePaths: $memory.imagePaths,
-                    remoteImageURLs: memory.imagePaths.isEmpty ? $memory.remoteImageURLs : .constant([]),
+                    remoteImageURLs: $memory.remoteImageURLs,
                     userID: userID
                 )
             }
@@ -2946,11 +2942,14 @@ private struct JourneyMemoryDetailExportSnapshotView: View {
         )
     }
 
+    // exportWidth = 360 (set in exportLongImage), horizontal padding = 32 each side
+    private let imageContentWidth: CGFloat = 360 - 32 * 2
+
     var body: some View {
         ZStack {
             FigmaTheme.background
 
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .center, spacing: 24) {
                 headerCard
                 if let thumb = routeThumbnail {
                     Image(uiImage: thumb)
@@ -3057,17 +3056,17 @@ private struct JourneyMemoryDetailExportSnapshotView: View {
                     .foregroundColor(Color(red: 0.21, green: 0.26, blue: 0.32))
                     .lineSpacing(8.75)
                     .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             if !presentation.overallMemoryImagePaths.isEmpty {
                 SyncMemoryImagesView(
                     imagePaths: presentation.overallMemoryImagePaths,
-                    userID: userID
+                    userID: userID,
+                    contentWidth: imageContentWidth
                 )
             }
         }
-        .padding(.horizontal, 32)
+        .frame(width: imageContentWidth, alignment: .leading)
         .padding(.top, -8)
     }
 
@@ -3078,7 +3077,8 @@ private struct JourneyMemoryDetailExportSnapshotView: View {
             ForEach(Array(sortedMemories.enumerated()), id: \.element.id) { index, mem in
                 ExportMemoryTimelineItem(
                     memory: mem,
-                    userID: userID
+                    userID: userID,
+                    contentWidth: imageContentWidth
                 )
 
                 if index < sortedMemories.count - 1 {
@@ -3086,7 +3086,7 @@ private struct JourneyMemoryDetailExportSnapshotView: View {
                 }
             }
         }
-        .padding(.horizontal, 32)
+        .frame(width: imageContentWidth, alignment: .leading)
         .padding(.top, 4)
     }
 

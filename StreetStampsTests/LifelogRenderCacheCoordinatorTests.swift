@@ -9,7 +9,6 @@ final class LifelogRenderCacheCoordinatorTests: XCTestCase {
             selectedDay: currentDay,
             cachedPathCoordsWGS84: [CoordinateCodable(lat: 37.7749, lon: -122.4194)],
             farRouteSegments: [],
-            footprintRuns: [[CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194)]],
             selectedDayCenterCoordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
             isHighQuality: true
         )
@@ -22,7 +21,6 @@ final class LifelogRenderCacheCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(placeholder.selectedDay, currentDay)
         XCTAssertEqual(placeholder.cachedPathCoordsWGS84.count, 1)
-        XCTAssertEqual(placeholder.footprintRuns.count, 1)
         XCTAssertTrue(placeholder.isHighQuality)
     }
 

@@ -49,6 +49,7 @@ struct PopSharingCard: View {
     // privacy + image generation
     @State private var privacyMode: ShareMapPrivacyMode = .exact
     @State private var isGenerating = false
+    @State private var generatingProgress: Double = 0.0
     @State private var finalCardImage: UIImage?
 
     // ✅ Title resolved for sharing (display, localized)
@@ -62,10 +63,7 @@ struct PopSharingCard: View {
     @State private var privacyEnabled = false
     @State private var privacyTrimEndpoints = true
     @State private var privacyHideLandmarks = true
-    @State private var showCamera = false
-    @State private var showPhotoLibrary = false
-    @State private var showPhotoEditor = false
-    @State private var pendingEditorImages: [UIImage] = []
+    @State private var activePhotoFlow: PhotoInputMode? = nil
     @State private var showVisibilityRestrictionAlert = false
     @State private var visibilityRestrictionMessage = ""
     private var canRenderCard: Bool { journey.coordinates.count >= 1 && !journey.isTooShort }
@@ -114,30 +112,17 @@ struct PopSharingCard: View {
                     ShareSheet(activityItems: [img])
                 }
             }
-            .fullScreenCover(isPresented: $showCamera) {
-                SystemCameraPicker(
-                    preferredDevice: .rear,
-                    mirrorOnCapture: false,
-                    onImage: { image in
-                        pendingEditorImages = [image]
+            .fullScreenCover(item: $activePhotoFlow) { mode in
+                PhotoInputFlowView(
+                    mode: mode,
+                    onComplete: { edited in
+                        activePhotoFlow = nil
+                        appendOverallMemoryPhotos(edited, writesToPhotoLibrary: false)
                     },
                     onCancel: {
-                        showCamera = false
+                        activePhotoFlow = nil
                     }
                 )
-                .ignoresSafeArea()
-            }
-            .fullScreenCover(isPresented: $showPhotoLibrary) {
-                PhotoLibraryPicker(
-                    selectionLimit: max(1, remainingOverallMemoryPhotoSlots),
-                    onImages: { images in
-                        pendingEditorImages = images
-                    },
-                    onCancel: {
-                        showPhotoLibrary = false
-                    }
-                )
-                .ignoresSafeArea()
             }
 
             .sheet(isPresented: $showUnlock, onDismiss: {
@@ -174,25 +159,6 @@ struct PopSharingCard: View {
                         generateShareCard()
                     }
                 }
-            }
-            .onChange(of: pendingEditorImages.count) { count in
-                if count > 0 && !showCamera && !showPhotoEditor {
-                    showPhotoEditor = true
-                }
-            }
-            .fullScreenCover(isPresented: $showPhotoEditor) {
-                PhotoEditorView(
-                    images: pendingEditorImages,
-                    onComplete: { edited in
-                        showPhotoEditor = false
-                        pendingEditorImages = []
-                        appendOverallMemoryPhotos(edited, writesToPhotoLibrary: false)
-                    },
-                    onCancel: {
-                        showPhotoEditor = false
-                        pendingEditorImages = []
-                    }
-                )
             }
 
             .overlay(alignment: .top) {
@@ -337,19 +303,32 @@ struct PopSharingCard: View {
                             .appMinTapTarget()
                     }
                     .padding(10)
-                }
-            } else if canRenderCard && isGenerating {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color(UIColor(red: 0.92, green: 0.92, blue: 0.92, alpha: 1)))
-                    .frame(height: 300)
-                    .overlay(
-                        VStack(spacing: 8) {
-                            ProgressView()
-                            Text(L10n.t("share_generating"))
-                                .font(.system(size: 12))
-                                .foregroundColor(.gray)
+
+                    if isGenerating {
+                        VStack {
+                            Spacer()
+                            VStack(spacing: 6) {
+                                ProgressView(value: generatingProgress)
+                                    .tint(.white)
+                                Text(L10n.t("share_generating"))
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundColor(.white.opacity(0.85))
+                            }
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 18)
                         }
-                    )
+                        .frame(maxWidth: .infinity)
+                        .background(
+                            LinearGradient(
+                                colors: [.clear, .black.opacity(0.45)],
+                                startPoint: .center,
+                                endPoint: .bottom
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
+                        )
+                        .allowsHitTesting(false)
+                    }
+                }
             } else {
                 emptyJourneyPlaceholder
             }
@@ -433,7 +412,7 @@ struct PopSharingCard: View {
                         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
 
                     HStack(spacing: 12) {
-                        Button(action: { showCamera = true }) {
+                        Button(action: { activePhotoFlow = .camera(mirrorSelfie: false) }) {
                             Image(systemName: "camera.fill")
                                 .font(.system(size: 15, weight: .semibold))
                                 .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
@@ -445,7 +424,7 @@ struct PopSharingCard: View {
                         .disabled(!canAddOverallMemoryPhoto)
                         .opacity(canAddOverallMemoryPhoto ? 1 : 0.35)
 
-                        Button(action: { showPhotoLibrary = true }) {
+                        Button(action: { activePhotoFlow = .library(selectionLimit: max(1, remainingOverallMemoryPhotoSlots)) }) {
                             Image(systemName: "photo.on.rectangle.angled")
                                 .font(.system(size: 15, weight: .semibold))
                                 .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
@@ -467,7 +446,7 @@ struct PopSharingCard: View {
                     if !overallMemoryImagePaths.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 10) {
-                                ForEach(Array(overallMemoryImagePaths.enumerated()), id: \.offset) { idx, path in
+                                ForEach(Array(overallMemoryImagePaths.enumerated()), id: \.element) { idx, path in
                                     ZStack(alignment: .topTrailing) {
                                         PhotoThumb(path: path, userID: sessionStore.currentUserID)
 
@@ -701,7 +680,11 @@ struct PopSharingCard: View {
 
     private func generateShareCard() {
         guard !isGenerating else { return }
+        generatingProgress = 0.0
         isGenerating = true
+        withAnimation(.easeInOut(duration: 1.8)) {
+            generatingProgress = 0.85
+        }
 
         let raw = journey.displayRouteCoordinates.clCoords
         let safeCoords = raw.filter { CLLocationCoordinate2DIsValid($0) && abs($0.latitude) <= 90 && abs($0.longitude) <= 180 }
@@ -742,6 +725,9 @@ struct PopSharingCard: View {
             , countryISO2: journey.countryISO2
             , cityKey: journey.cityKey
         ) { img in
+            withAnimation(.easeIn(duration: 0.15)) {
+                self.generatingProgress = 1.0
+            }
             self.finalCardImage = img
             self.isGenerating = false
         }

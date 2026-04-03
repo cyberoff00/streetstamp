@@ -9,6 +9,72 @@
 import SwiftUI
 import UIKit
 
+// MARK: - PhotoInputFlow
+
+enum PhotoInputMode: Identifiable {
+    case camera(mirrorSelfie: Bool)
+    case library(selectionLimit: Int)
+
+    var id: String {
+        switch self {
+        case .camera: return "camera"
+        case .library: return "library"
+        }
+    }
+}
+
+/// Single fullScreenCover that transitions picker → crop editor in-place.
+struct PhotoInputFlowView: View {
+    let mode: PhotoInputMode
+    let onComplete: ([UIImage]) -> Void
+    let onCancel: () -> Void
+
+    @State private var pickedImages: [UIImage]? = nil
+
+    var body: some View {
+        if let images = pickedImages {
+            PhotoEditorView(
+                images: images,
+                onComplete: onComplete,
+                onCancel: onCancel
+            )
+            .transition(.opacity)
+        } else {
+            switch mode {
+            case .camera(let mirror):
+                SystemCameraPicker(
+                    preferredDevice: .rear,
+                    mirrorOnCapture: mirror,
+                    skipDismiss: true,
+                    onImage: { image in
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            pickedImages = [image]
+                        }
+                    },
+                    onCancel: onCancel
+                )
+                .ignoresSafeArea()
+            case .library(let limit):
+                PhotoLibraryPicker(
+                    selectionLimit: limit,
+                    skipDismiss: true,
+                    onImages: { images in
+                        guard !images.isEmpty else {
+                            onCancel()
+                            return
+                        }
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            pickedImages = images
+                        }
+                    },
+                    onCancel: onCancel
+                )
+                .ignoresSafeArea()
+            }
+        }
+    }
+}
+
 // MARK: - PhotoEditorView (Queue Entry Point)
 
 struct PhotoEditorView: View {

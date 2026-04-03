@@ -176,10 +176,19 @@ final class LifelogStore: ObservableObject {
     private var passiveMotionAnchorTimestamp: Date = .distantPast
     private let attributionCoordinatorFactory: (StoragePath) -> LifelogCountryAttributionCoordinator
     private var attributionCoordinator: LifelogCountryAttributionCoordinator
+    private var passiveCountryRunsCache: [PassiveCountryRunsCacheKey: [LifelogAttributedCoordinateRun]] = [:]
+    private var passiveCountryRunsCacheOrder: [PassiveCountryRunsCacheKey] = []
+    private let maxPassiveCountryRunsCacheEntries = 12
 
     private struct IndexedCoord {
         let idx: Int
         let coord: CoordinateCodable
+    }
+
+    private struct PassiveCountryRunsCacheKey: Hashable {
+        let dayKey: String?
+        let trackTileRevision: Int
+        let attributionRevision: Int
     }
 
     private enum PassiveMotionState {
@@ -232,6 +241,8 @@ final class LifelogStore: ObservableObject {
         dayTileIndexSourceCount = -1
         previewPolylineCache = [:]
         previewCacheSourceCount = -1
+        passiveCountryRunsCache = [:]
+        passiveCountryRunsCacheOrder = []
         shardIndex = .empty
         todayShard = .empty
         loadedShards = [:]
@@ -268,6 +279,7 @@ final class LifelogStore: ObservableObject {
         dirtyPointDayKeys = []
         dirtyMoodDayKeys = []
         deletedMoodDayKeys = []
+        invalidatePassiveCountryRunsCache()
         scheduleBackgroundDayIndexBuild()
         hasLoaded = true
         if let hub = pendingBindHub {
@@ -1034,17 +1046,20 @@ final class LifelogStore: ObservableObject {
 
         // Append to appropriate shards
         var allAppended: [LifelogTrackPoint] = []
+        var todayAppended: [LifelogTrackPoint] = []
         let todayKey = todayShard.dayKey
         for (key, dayPoints) in groupedByDay {
             if key == todayKey {
                 todayShard.points.append(contentsOf: dayPoints)
+                todayAppended.append(contentsOf: dayPoints)
             } else {
                 // Load, append, persist historical shard
                 var shard = shardForDay(key)
                 shard.points.append(contentsOf: dayPoints)
                 shard.points.sort { $0.timestamp < $1.timestamp }
                 insertIntoShardLRU(dayKey: key, shard: shard)
-                // Write immediately
+                // Write immediately — historical shards are NOT written to the
+                // today-delta file (see below), so they must be flushed here.
                 let daysDir = paths.lifelogDaysDir
                 let shardCopy = shard
                 fileIOQueue.async {
@@ -1068,7 +1083,12 @@ final class LifelogStore: ObservableObject {
                 didInsertDay: didInsertDay
             )
         }
-        appendDelta(points: allAppended)
+        // Only write points that belong to today's shard into the crash-recovery
+        // delta file. Historical-day points are already flushed via writeShardToDisk
+        // above. Writing them here would pollute tomorrow's delta replay with
+        // yesterday's coordinates, causing stale routes to appear in today's
+        // lifelog view after a crash or force-quit.
+        appendDelta(points: todayAppended)
         persistAsync()
         scheduleBackgroundDayIndexBuild()
         scheduleTrackTileRevisionBump()
@@ -1869,13 +1889,23 @@ final class LifelogStore: ObservableObject {
     }
 
     func passiveCountryRuns(day: Date? = nil) async -> [LifelogAttributedCoordinateRun] {
+        let cacheKey = PassiveCountryRunsCacheKey(
+            dayKey: day.map(dayKey),
+            trackTileRevision: trackTileRevision,
+            attributionRevision: await attributionCoordinator.currentRevision()
+        )
+        if let cached = passiveCountryRunsCache[cacheKey] {
+            touchPassiveCountryRunsCacheKey(cacheKey)
+            return cached
+        }
+
         // Load all points streaming for attribution
         let dayKeys = shardIndex.cachedAvailableDayKeys.sorted()
         let todayKey = todayShard.dayKey
         let todayPoints = todayShard.points
         let daysDir = paths.lifelogDaysDir
         let attributionSnapshot = await attributionCoordinator.loadSnapshot()
-        return await Task.detached(priority: .utility) {
+        let runs = await Task.detached(priority: .utility) {
             var allPoints: [LifelogTrackPoint] = []
             for key in dayKeys {
                 if key == todayKey {
@@ -1890,6 +1920,16 @@ final class LifelogStore: ObservableObject {
                 day: day
             )
         }.value
+        let latestKey = PassiveCountryRunsCacheKey(
+            dayKey: day.map(dayKey),
+            trackTileRevision: trackTileRevision,
+            attributionRevision: await attributionCoordinator.currentRevision()
+        )
+        guard latestKey == cacheKey else {
+            return await passiveCountryRuns(day: day)
+        }
+        storePassiveCountryRunsCache(runs, for: cacheKey)
+        return runs
     }
 
     private nonisolated static func makeTrackRenderEvents(from points: [LifelogTrackPoint]) -> [TrackRenderEvent] {
@@ -1940,6 +1980,7 @@ final class LifelogStore: ObservableObject {
     }
 
     private func bumpTrackTileRevision() {
+        invalidatePassiveCountryRunsCache()
         trackTileRevision &+= 1
         NotificationCenter.default.post(
             name: .lifelogStoreTrackTilesDidChange,
@@ -1949,6 +1990,7 @@ final class LifelogStore: ObservableObject {
     }
 
     private func scheduleTrackTileRevisionBump() {
+        invalidatePassiveCountryRunsCache()
         if trackTileRevisionDebounce <= 0 {
             bumpTrackTileRevision()
             return
@@ -1959,5 +2001,27 @@ final class LifelogStore: ObservableObject {
         }
         pendingTrackTileRevisionBump = work
         DispatchQueue.main.asyncAfter(deadline: .now() + trackTileRevisionDebounce, execute: work)
+    }
+
+    private func invalidatePassiveCountryRunsCache() {
+        passiveCountryRunsCache.removeAll(keepingCapacity: true)
+        passiveCountryRunsCacheOrder.removeAll(keepingCapacity: true)
+    }
+
+    private func touchPassiveCountryRunsCacheKey(_ key: PassiveCountryRunsCacheKey) {
+        passiveCountryRunsCacheOrder.removeAll { $0 == key }
+        passiveCountryRunsCacheOrder.append(key)
+    }
+
+    private func storePassiveCountryRunsCache(
+        _ runs: [LifelogAttributedCoordinateRun],
+        for key: PassiveCountryRunsCacheKey
+    ) {
+        passiveCountryRunsCache[key] = runs
+        touchPassiveCountryRunsCacheKey(key)
+        while passiveCountryRunsCacheOrder.count > maxPassiveCountryRunsCacheEntries {
+            let evicted = passiveCountryRunsCacheOrder.removeFirst()
+            passiveCountryRunsCache.removeValue(forKey: evicted)
+        }
     }
 }

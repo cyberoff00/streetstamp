@@ -121,6 +121,30 @@ final class GlobeRefreshCoordinatorTests: XCTestCase {
         XCTAssertEqual(resolved.first?.id, "summary-route")
     }
 
+    func test_previewSnapshot_usesImmediateRoutesWithoutPassiveCountryRuns() {
+        let segments = [
+            TrackTileSegment(
+                sourceType: .passive,
+                coordinates: [
+                    CoordinateCodable(lat: 35.6762, lon: 139.6503),
+                    CoordinateCodable(lat: 35.6768, lon: 139.6510)
+                ]
+            )
+        ]
+
+        let preview = GlobeRouteResolver.previewSnapshot(
+            externalJourneys: nil,
+            summaryJourneys: [],
+            segments: segments,
+            countryISO2: "JP",
+            cityISO2: ["JP", "US"]
+        )
+
+        XCTAssertEqual(preview.routes.count, 1)
+        XCTAssertEqual(preview.routes.first?.countryISO2, "JP")
+        XCTAssertEqual(Set(preview.visitedCountries), Set(["JP", "US"]))
+    }
+
     func test_shouldFetchUnifiedSegments_whenTileSegmentsEmpty() {
         XCTAssertTrue(GlobeRouteResolver.shouldFetchUnifiedSegments(tileSegments: []))
 

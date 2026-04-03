@@ -6,6 +6,7 @@ struct CompactActivityRingCard: View {
     let journeyDates: [Date]
     var onCardsTap: (() -> Void)? = nil
     var onMemoriesTap: (() -> Void)? = nil
+    var showStatsPanel: Bool = true
 
     @State private var showRingHelp = false
 
@@ -14,7 +15,9 @@ struct CompactActivityRingCard: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            statsPanel
+            if showStatsPanel {
+                statsPanel
+            }
             activityPanel
         }
         .frame(maxWidth: .infinity)

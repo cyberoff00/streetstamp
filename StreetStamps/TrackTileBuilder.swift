@@ -126,6 +126,13 @@ enum TrackTileBuilder {
         if next.timestamp.timeIntervalSince(previous.timestamp) > maxSegmentTimeGap {
             return true
         }
+        // Cut at calendar day boundaries so each segment belongs to exactly one
+        // day. Without this, a cross-midnight move (e.g. 23:50 → 00:05) forms
+        // one segment indexed under both days, causing yesterday's full route to
+        // appear in today's lifelog view.
+        if !Calendar.current.isDate(previous.timestamp, inSameDayAs: next.timestamp) {
+            return true
+        }
 
         let previousLocation = CLLocation(latitude: previous.coordinate.lat, longitude: previous.coordinate.lon)
         let nextLocation = CLLocation(latitude: next.coordinate.lat, longitude: next.coordinate.lon)
