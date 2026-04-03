@@ -1037,38 +1037,47 @@ final class BackendAPIClient {
         guard let url = URL(string: presignedURL) else { throw BackendAPIError.invalidResponse }
         var req = URLRequest(url: url)
         req.httpMethod = "PUT"
-        req.httpBody = data
         req.setValue(mimeType, forHTTPHeaderField: "Content-Type")
-        req.timeoutInterval = 120
-        let (_, resp) = try await transport(req)
-        guard let http = resp as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            throw BackendAPIError.invalidResponse
-        }
+        let (respData, resp) = try await BackendAPIClient.backgroundUpload(request: req, data: data)
+        guard let http = resp as? HTTPURLResponse else { throw BackendAPIError.invalidResponse }
+        _ = try validateResponse(data: respData, http: http, path: "/r2/put", usedAuthorizationToken: false)
     }
 
     private func uploadMediaViaServer(token: String, data: Data, fileName: String, mimeType: String) async throws -> BackendMediaUploadResponse {
         let boundary = "Boundary-\(UUID().uuidString)"
         var body = Data()
-
-        func append(_ str: String) {
-            body.append(Data(str.utf8))
-        }
-
+        func append(_ str: String) { body.append(Data(str.utf8)) }
         append("--\(boundary)\r\n")
         append("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\r\n")
         append("Content-Type: \(mimeType)\r\n\r\n")
         body.append(data)
         append("\r\n--\(boundary)--\r\n")
 
-        let (respData, _) = try await request(
-            path: "/v1/media/upload",
-            method: "POST",
-            token: token,
-            jsonBody: body,
-            contentType: "multipart/form-data; boundary=\(boundary)",
-            timeout: 120
-        )
-        return try decoder.decode(BackendMediaUploadResponse.self, from: respData)
+        let url = try makeURL(path: "/v1/media/upload")
+
+        func makeRequest(withToken t: String) -> URLRequest {
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization")
+            req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+            return req
+        }
+
+        let (respData, resp) = try await BackendAPIClient.backgroundUpload(request: makeRequest(withToken: token), data: body)
+        guard let http = resp as? HTTPURLResponse else { throw BackendAPIError.invalidResponse }
+
+        // Mirror request()'s 401 auto-refresh: refresh once and retry.
+        if http.statusCode == 401,
+           let refreshedToken = await tokenRefreshGate.refresh(client: self, failedAccessToken: token),
+           refreshedToken != token {
+            let (retryData, retryResp) = try await BackendAPIClient.backgroundUpload(request: makeRequest(withToken: refreshedToken), data: body)
+            guard let retryHTTP = retryResp as? HTTPURLResponse else { throw BackendAPIError.invalidResponse }
+            let (validData, _) = try validateResponse(data: retryData, http: retryHTTP, path: "/v1/media/upload", usedAuthorizationToken: true)
+            return try decoder.decode(BackendMediaUploadResponse.self, from: validData)
+        }
+
+        let (validData, _) = try validateResponse(data: respData, http: http, path: "/v1/media/upload", usedAuthorizationToken: true)
+        return try decoder.decode(BackendMediaUploadResponse.self, from: validData)
     }
 
     func fetchJourneyLikeCounts(token: String, journeyIDs: [String]) async throws -> [String: Int] {
@@ -1220,6 +1229,81 @@ struct BlockedUserDTO: Codable, Identifiable {
 
 private struct BlockedUsersResponse: Codable {
     let blocks: [BlockedUserDTO]
+}
+
+// MARK: - Background Media Upload
+
+private final class MediaUploadSessionDelegate: NSObject, URLSessionDataDelegate, URLSessionTaskDelegate {
+    private struct Pending {
+        var continuation: CheckedContinuation<(Data, URLResponse), Error>
+        var responseData = Data()
+        let tempFileURL: URL
+    }
+    private var pending: [Int: Pending] = [:]
+    private let lock = NSLock()
+
+    func register(taskID: Int, continuation: CheckedContinuation<(Data, URLResponse), Error>, tempFileURL: URL) {
+        lock.lock(); defer { lock.unlock() }
+        pending[taskID] = Pending(continuation: continuation, tempFileURL: tempFileURL)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        lock.lock(); defer { lock.unlock() }
+        pending[dataTask.taskIdentifier]?.responseData.append(data)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        lock.lock()
+        let entry = pending[task.taskIdentifier]
+        pending[task.taskIdentifier] = nil
+        lock.unlock()
+        guard let entry else { return }
+        try? FileManager.default.removeItem(at: entry.tempFileURL)
+        if let error {
+            entry.continuation.resume(throwing: error)
+        } else if let response = task.response {
+            entry.continuation.resume(returning: (entry.responseData, response))
+        } else {
+            entry.continuation.resume(throwing: URLError(.badServerResponse))
+        }
+    }
+
+    func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
+        DispatchQueue.main.async {
+            BackendAPIClient.backgroundSessionCompletionHandler?()
+            BackendAPIClient.backgroundSessionCompletionHandler = nil
+        }
+    }
+}
+
+extension BackendAPIClient {
+    private static let _uploadDelegate = MediaUploadSessionDelegate()
+
+    static let backgroundUploadSession: URLSession = {
+        let config = URLSessionConfiguration.background(withIdentifier: "com.streetstamps.media-upload.v1")
+        config.isDiscretionary = false
+        config.timeoutIntervalForRequest = 60   // idle timeout per request
+        config.timeoutIntervalForResource = 90  // hard cap per file upload
+        return URLSession(configuration: config, delegate: _uploadDelegate, delegateQueue: nil)
+    }()
+
+    static var backgroundSessionCompletionHandler: (() -> Void)?
+
+    static func backgroundUpload(request: URLRequest, data: Data) async throws -> (Data, URLResponse) {
+        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let tempURL = cacheDir.appendingPathComponent("media-upload-\(UUID().uuidString)")
+        do {
+            try data.write(to: tempURL)
+        } catch {
+            try? FileManager.default.removeItem(at: tempURL)
+            throw error
+        }
+        return try await withCheckedThrowingContinuation { continuation in
+            let task = backgroundUploadSession.uploadTask(with: request, fromFile: tempURL)
+            _uploadDelegate.register(taskID: task.taskIdentifier, continuation: continuation, tempFileURL: tempURL)
+            task.resume()
+        }
+    }
 }
 
 private extension ISO8601DateFormatter {

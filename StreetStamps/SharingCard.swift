@@ -540,6 +540,9 @@ struct PopSharingCard: View {
         out.activityTag = trimmedTag.isEmpty ? nil : trimmedTag
         out.overallMemory = trimmedOverall.isEmpty ? nil : trimmedOverall
         out.overallMemoryImagePaths = overallMemoryImagePaths
+        if overallMemoryImagePaths.count < out.overallMemoryRemoteImageURLs.count {
+            out.overallMemoryRemoteImageURLs = Array(out.overallMemoryRemoteImageURLs.prefix(overallMemoryImagePaths.count))
+        }
         out.privacyOptions = buildPrivacyOptions()
         return out
     }

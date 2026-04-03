@@ -843,11 +843,17 @@ private func makeRoutesFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
 
             for seg in built.segments where seg.coords.count >= 2 {
                 let isDashed = seg.style == .dashed
-                let isFlight = built.isFlightLike && isDashed
-                // On globe, keep dashed rendering only for intentional flight-like routes.
-                if isDashed && !isFlight { continue }
+                // Flight: dashed segment spanning >= 120km → render as great-circle arc.
+                // Short gap (tunnel, brief GPS loss): dashed segment < 120km → render as straight line.
+                // Both are rendered; only tiny noise gaps (< gapDistanceMeters) never reach here.
+                let spanMeters: Double = {
+                    guard let a = seg.coords.first, let b = seg.coords.last else { return 0 }
+                    return CLLocation(latitude: a.latitude, longitude: a.longitude)
+                        .distance(from: CLLocation(latitude: b.latitude, longitude: b.longitude))
+                }()
+                let isFlight = isDashed && spanMeters >= 120_000
                 let lineCoords: [CLLocationCoordinate2D]
-                if built.isFlightLike, isDashed, let a = seg.coords.first, let b = seg.coords.last {
+                if isFlight, let a = seg.coords.first, let b = seg.coords.last {
                     lineCoords = greatCircleArc(a, b)
                 } else {
                     lineCoords = seg.coords

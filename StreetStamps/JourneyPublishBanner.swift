@@ -21,8 +21,8 @@ struct JourneyPublishBanner: View {
                 message: String(format: L10n.t("publish_banner_success_format"), title),
                 style: .success
             )
-        case .failed(_, let title, _):
-            failedBanner(title: title)
+        case .failed(_, let title, let errorMessage):
+            failedBanner(title: title, errorMessage: errorMessage)
         }
     }
 
@@ -52,16 +52,24 @@ struct JourneyPublishBanner: View {
         .padding(.horizontal, 14)
     }
 
-    private func failedBanner(title: String) -> some View {
+    private func failedBanner(title: String, errorMessage: String) -> some View {
         VStack(spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.red)
-                Text(String(format: L10n.t("publish_banner_failed_format"), title))
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(FigmaTheme.text)
-                    .lineLimit(2)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(format: L10n.t("publish_banner_failed_format"), title))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(FigmaTheme.text)
+                        .lineLimit(1)
+                    if !errorMessage.isEmpty {
+                        Text(errorMessage)
+                            .font(.system(size: 11))
+                            .foregroundColor(FigmaTheme.subtext)
+                            .lineLimit(2)
+                    }
+                }
                 Spacer(minLength: 4)
                 Button {
                     publishStore.dismiss()

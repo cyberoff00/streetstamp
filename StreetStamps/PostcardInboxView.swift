@@ -130,9 +130,13 @@ struct PostcardInboxView: View {
         .background(SwipeBackEnabler())
         .navigationDestination(isPresented: $showComposer) {
             if let friendID, let friendName {
-                PostcardComposerView(friendID: friendID, friendName: friendName)
+                PostcardComposerView(friendID: friendID, friendName: friendName, onSent: {
+                    Task { await refreshInbox() }
+                })
             } else {
-                PostcardComposerView()
+                PostcardComposerView(onSent: {
+                    Task { await refreshInbox() }
+                })
             }
         }
         .task {

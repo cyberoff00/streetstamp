@@ -12,14 +12,7 @@ enum BackendConfig {
     private static let globalBaseURL = "https://worldo-api.cyberkkk.cn"
 
     static var isChineseMainlandDevice: Bool {
-        if let region = Locale.current.region?.identifier, region == "CN" {
-            return true
-        }
-        // Chinese users with non-CN locale still have Asia/Shanghai timezone
-        if TimeZone.current.identifier == "Asia/Shanghai" {
-            return true
-        }
-        return false
+        return TimeZone.current.identifier == "Asia/Shanghai"
     }
 
     static var defaultBaseURL: String {

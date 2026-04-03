@@ -1,8 +1,8 @@
 import SwiftUI
 
 enum FigmaTheme {
-    static let background = Color(red: 247.0 / 255.0, green: 248.0 / 255.0, blue: 250.0 / 255.0) // #F7F8FA
-    static let mutedBackground = Color(red: 245.0 / 255.0, green: 245.0 / 255.0, blue: 243.0 / 255.0) // #F5F5F3
+    static let background = Color(red: 249.0 / 255.0, green: 251.0 / 255.0, blue: 249.0 / 255.0) // #F9FBF9
+    static let mutedBackground = Color(red: 249.0 / 255.0, green: 251.0 / 255.0, blue: 249.0 / 255.0) // #F9FBF9
     static let card = Color.white
     static let primary = Color(red: 82.0 / 255.0, green: 183.0 / 255.0, blue: 136.0 / 255.0) // #52B788
     static let accent = Color(red: 116.0 / 255.0, green: 198.0 / 255.0, blue: 157.0 / 255.0) // #74C69D

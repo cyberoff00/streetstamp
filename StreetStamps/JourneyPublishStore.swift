@@ -29,6 +29,8 @@ enum JourneyPublishStatus: Equatable {
 final class JourneyPublishStore: ObservableObject {
     @Published private(set) var status: JourneyPublishStatus = .idle
 
+    private var publishTask: Task<Void, Never>?
+    private var publishStartedAt: Date?
     private var dismissTask: Task<Void, Never>?
     private var lastFailedJourney: JourneyRoute?
     private var lastFailedSessionStore: UserSessionStore?
@@ -64,15 +66,18 @@ final class JourneyPublishStore: ObservableObject {
             journeyStore.applyBulkCompletedUpdates([journey])
         }
 
+        publishTask?.cancel()
+        publishTask = nil
         dismissTask?.cancel()
         status = .sending(journeyID: journey.id, title: title)
+        publishStartedAt = Date()
         lastFailedJourney = journey
         lastFailedSessionStore = sessionStore
         lastFailedCityCache = cityCache
         lastFailedJourneyStore = journeyStore
 
         let journeyID = journey.id
-        Task {
+        publishTask = Task {
             do {
                 let urlCache = try await JourneyCloudMigrationService.syncJourneyVisibilityChange(
                     journey: journey,
@@ -102,14 +107,27 @@ final class JourneyPublishStore: ObservableObject {
                 lastFailedJourney = nil
                 scheduleDismiss()
             } catch {
+                let message = LocalizedErrorHelper.message(for: error)
                 status = .failed(
                     journeyID: journeyID,
                     title: title,
-                    errorMessage: error.localizedDescription
+                    errorMessage: message
                 )
                 lastFailedJourney = journey
             }
         }
+    }
+
+    /// Call when the app returns to foreground. If publishing has been stuck for over
+    /// 60 seconds (e.g. app was suspended mid-upload and background session failed),
+    /// cancels and retries automatically.
+    func handleSceneActivation() {
+        guard status.isSending,
+              let startedAt = publishStartedAt,
+              Date().timeIntervalSince(startedAt) > 60 else { return }
+        publishTask?.cancel()
+        publishTask = nil
+        retry()
     }
 
     func retry() {
@@ -148,6 +166,9 @@ final class JourneyPublishStore: ObservableObject {
     }
 
     func dismiss() {
+        publishTask?.cancel()
+        publishTask = nil
+        publishStartedAt = nil
         dismissTask?.cancel()
         status = .idle
         lastFailedJourney = nil

@@ -1210,10 +1210,6 @@ final class TrackingService: ObservableObject {
         if d2d  >= gapDist { isGapLike = true }
         if isSignalRecoveryGap { isGapLike = true }
 
-        // Weak accuracy alone should NOT create dashed "confetti" in cities.
-        // Only treat as gap if it's also temporally/spatially suspicious.
-        if accuracyWeak && (dt >= 8.0 || d2d >= 200.0) { isGapLike = true }
-
         // Drift-like turns: keep solid for small hops; only dashed when it's a larger uncertain move.
         if isDriftLike && (dt >= 6.0 || d2d >= 80.0) { isGapLike = true }
 

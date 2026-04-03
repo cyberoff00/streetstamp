@@ -8,7 +8,7 @@
 import SwiftUI
 
 enum UITheme {
-    // Figma base background #FBFBF9
+    // Figma base background #F9FBF9
     static let bg = FigmaTheme.background
     static let pageTop = FigmaTheme.background
     static let pageMid = FigmaTheme.background

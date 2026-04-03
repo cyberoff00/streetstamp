@@ -105,6 +105,18 @@ final class AppNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         return true
     }
 
+    func application(
+        _ application: UIApplication,
+        handleEventsForBackgroundURLSession identifier: String,
+        completionHandler: @escaping () -> Void
+    ) {
+        if identifier == "com.streetstamps.media-upload.v1" {
+            BackendAPIClient.backgroundSessionCompletionHandler = completionHandler
+        } else {
+            completionHandler()
+        }
+    }
+
     // MARK: - Remote Notification Registration
 
     /// Call this after the user logs in or the app becomes active with a valid session.

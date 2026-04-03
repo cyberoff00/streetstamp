@@ -572,6 +572,7 @@ struct StreetStampsApp: App {
                     }
                 }
                 if phase == .active {
+                    publishStore.handleSceneActivation()
                     applyIdleLocationPolicy(requestSingleRefreshWhenIdle: true)
                     syncMotionActivityPolicy()
                     scheduleTrackTileRebuild(delay: 0.10, force: false)

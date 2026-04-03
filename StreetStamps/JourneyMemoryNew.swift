@@ -1203,6 +1203,9 @@ struct JourneyMemoryDetailView: View {
                     }
                     .padding(.bottom, 40)
                 }
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    navBar
+                }
             }
             .onChange(of: focusedMemoryID) { id in
                 guard let id else { return }
@@ -1418,149 +1421,140 @@ struct JourneyMemoryDetailView: View {
     
     // MARK: - Header Card
     
-    private var headerCard: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            // Back
+    private var navBar: some View {
+        HStack(spacing: 0) {
             AppBackButton(foreground: Color(red: 0.04, green: 0.04, blue: 0.04)) {
-                if isEditing {
-                    cancelEditing()
-                }
+                if isEditing { cancelEditing() }
                 dismiss()
             }
-            .padding(.top, 4)
-            
-            // Title + actions
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
+            Spacer()
+            if !readOnly {
+                HStack(spacing: 6) {
                     if isEditing {
-                        TextField(
-                            cityName,
-                            text: $draftJourneyTitle,
-                            prompt: Text(cityName)
-                                .foregroundColor(Color(red: 0.42, green: 0.45, blue: 0.51).opacity(0.72))
-                        )
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 30, weight: .bold))
-                        .textInputAutocapitalization(.words)
-                        .disableAutocorrection(true)
-                        .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
-                        .submitLabel(.done)
+                        Button {
+                            cancelEditing()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.black)
+                                .appMinTapTarget()
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            handleSaveTap()
+                        } label: {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.black)
+                                .appMinTapTarget()
+                        }
+                        .buttonStyle(.plain)
                     } else {
-                        Text(journeyDisplayTitle.uppercased())
-                            .font(.system(size: 30, weight: .bold))
-                            .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
-                            .lineLimit(2)
-                            .minimumScaleFactor(0.7)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    HStack(spacing: 8) {
-                        Text(journeyMetaSubtitle)
-                            .font(.system(size: 12, weight: .medium))
-                            .tracking(1.2)
-                            .foregroundColor(Color(red: 0.42, green: 0.45, blue: 0.51))
-
-                        if !journeyActivityTag.isEmpty {
-                            Text(journeyActivityTag.uppercased())
-                                .font(.system(size: 10, weight: .bold))
-                                .tracking(0.8)
-                                .foregroundColor(FigmaTheme.secondary)
-                                .padding(.horizontal, 8)
-                                .frame(height: 20)
-                                .background(FigmaTheme.secondary.opacity(0.12))
-                                .clipShape(Capsule(style: .continuous))
+                        Button {
+                            beginEditing()
+                        } label: {
+                            Image(systemName: "square.and.pencil")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.black)
+                                .appMinTapTarget()
                         }
-                    }
+                        .buttonStyle(.plain)
 
-                    if !readOnly && FeatureFlagStore.shared.socialEnabled {
-                        visibilityStatusButton
+                        Menu {
+                            Button {
+                                UIPasteboard.general.string = fullText
+                            } label: {
+                                Label(L10n.t("copy_all"), systemImage: "doc.on.doc")
+                            }
+
+                            Button {
+                                exportLongImage()
+                            } label: {
+                                Label(L10n.t("export_long_image"), systemImage: "square.and.arrow.up")
+                            }
+
+                            Button {
+                                showPrivacySheet = true
+                            } label: {
+                                Label(L10n.t("privacy_toggle_title"), systemImage: "hand.raised.fill")
+                            }
+
+                            Divider()
+
+                            Button(role: .destructive) {
+                                showDeleteAllConfirm = true
+                            } label: {
+                                Label(L10n.t("delete_all_notes"), systemImage: "trash")
+                            }
+
+                            Button(role: .destructive) {
+                                showDeleteJourneyConfirm = true
+                            } label: {
+                                Label(L10n.t("delete_journey_confirm_title"), systemImage: "trash.fill")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundColor(.black)
+                                .appMinTapTarget()
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
-                
-                Spacer()
+                .padding(.trailing, 16)
+            }
+        }
+        .background(FigmaTheme.background)
+    }
 
-                // Right-side actions
-                if !readOnly {
-                    HStack(spacing: 6) {
-                        if isEditing {
-                            Button {
-                                cancelEditing()
-                            } label: {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundColor(.black)
-                                    .appMinTapTarget()
-                            }
-                            .buttonStyle(.plain)
-
-                            Button {
-                                handleSaveTap()
-                            } label: {
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundColor(.black)
-                                    .appMinTapTarget()
-                            }
-                            .buttonStyle(.plain)
-                        } else {
-                            Button {
-                                beginEditing()
-                            } label: {
-                                Image(systemName: "square.and.pencil")
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundColor(.black)
-                                    .appMinTapTarget()
-                            }
-                            .buttonStyle(.plain)
-
-                            Menu {
-                                Button {
-                                    UIPasteboard.general.string = fullText
-                                } label: {
-                                    Label(L10n.t("copy_all"), systemImage: "doc.on.doc")
-                                }
-
-                                Button {
-                                    exportLongImage()
-                                } label: {
-                                    Label(L10n.t("export_long_image"), systemImage: "square.and.arrow.up")
-                                }
-
-                                if !readOnly {
-                                    Button {
-                                        showPrivacySheet = true
-                                    } label: {
-                                        Label(L10n.t("privacy_toggle_title"), systemImage: "hand.raised.fill")
-                                    }
-                                }
-
-                                Divider()
-
-                                Button(role: .destructive) {
-                                    showDeleteAllConfirm = true
-                                } label: {
-                                    Label(L10n.t("delete_all_notes"), systemImage: "trash")
-                                }
-
-                                Button(role: .destructive) {
-                                    showDeleteJourneyConfirm = true
-                                } label: {
-                                    Label(L10n.t("delete_journey_confirm_title"), systemImage: "trash.fill")
-                                }
-                            } label: {
-                                Image(systemName: "ellipsis")
-                                    .font(.system(size: 18, weight: .medium))
-                                    .foregroundColor(.black)
-                                    .appMinTapTarget()
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
+    private var headerCard: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            // Title
+            VStack(alignment: .leading, spacing: 4) {
+                if isEditing {
+                    TextField(
+                        cityName,
+                        text: $draftJourneyTitle,
+                        prompt: Text(cityName)
+                            .foregroundColor(Color(red: 0.42, green: 0.45, blue: 0.51).opacity(0.72))
+                    )
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 30, weight: .bold))
+                    .textInputAutocapitalization(.words)
+                    .disableAutocorrection(true)
+                    .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
+                    .submitLabel(.done)
                 } else {
-                    Color.clear.frame(width: 88, height: 44)
+                    Text(journeyDisplayTitle.uppercased())
+                        .font(.system(size: 30, weight: .bold))
+                        .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.7)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                
-                
+
+                HStack(spacing: 8) {
+                    Text(journeyMetaSubtitle)
+                        .font(.system(size: 12, weight: .medium))
+                        .tracking(1.2)
+                        .foregroundColor(Color(red: 0.42, green: 0.45, blue: 0.51))
+
+                    if !journeyActivityTag.isEmpty {
+                        Text(journeyActivityTag.uppercased())
+                            .font(.system(size: 10, weight: .bold))
+                            .tracking(0.8)
+                            .foregroundColor(FigmaTheme.secondary)
+                            .padding(.horizontal, 8)
+                            .frame(height: 20)
+                            .background(FigmaTheme.secondary.opacity(0.12))
+                            .clipShape(Capsule(style: .continuous))
+                    }
+                }
+
+                if !readOnly && FeatureFlagStore.shared.socialEnabled {
+                    visibilityStatusButton
+                }
             }
             
             // Stats

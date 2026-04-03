@@ -1996,21 +1996,21 @@ private struct LifelogMKMapView: UIViewRepresentable {
             let gapDash = RouteRenderStyleTokens.dashLengths.map { NSNumber(value: Double($0)) }
             let isGap = poly.isGap
 
-            let mainWidth: CGFloat = isGap ? 1.4 : 2.2
+            let mainWidth: CGFloat = isGap ? 1.8 : 2.2
             let glowWidth: CGFloat = mainWidth * (isGap ? 2.2 : 2.5)
 
             let glowLayer = MKPolylineRenderer(polyline: poly)
             glowLayer.lineWidth = glowWidth
             glowLayer.lineCap = .round
             glowLayer.lineJoin = .round
-            glowLayer.strokeColor = glowTint.withAlphaComponent(isGap ? 0.06 : (isDark ? 0.25 : 0.12))
+            glowLayer.strokeColor = glowTint.withAlphaComponent(isGap ? 0.10 : (isDark ? 0.25 : 0.12))
             if isGap { glowLayer.lineDashPattern = gapDash }
 
             let mainLayer = MKPolylineRenderer(polyline: poly)
             mainLayer.lineWidth = mainWidth
             mainLayer.lineCap = .round
             mainLayer.lineJoin = .round
-            mainLayer.strokeColor = base.withAlphaComponent(isGap ? 0.50 : 1.0)
+            mainLayer.strokeColor = base.withAlphaComponent(isGap ? 0.70 : 1.0)
             if isGap { mainLayer.lineDashPattern = gapDash }
 
             let highlightLayer = MKPolylineRenderer(polyline: poly)

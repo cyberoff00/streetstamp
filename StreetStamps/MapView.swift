@@ -1331,6 +1331,9 @@ struct MapView: View {
                     userID: sessionStore.currentUserID,
                     existing: editingMemory,
                     preloadedImagePaths: cameraPreloadedPaths,
+                    journeyOtherPhotosCount: journeyRoute.memories
+                        .filter { $0.id != editingMemory?.id }
+                        .reduce(0) { $0 + $1.imagePaths.count + $1.remoteImageURLs.count },
                     onSave: { draft in
                         if draft == nil {
                             if let existingID = editingMemory?.id,
@@ -3151,6 +3154,8 @@ struct MemoryEditorSheet: View {
     let userID: String
     let existing: JourneyMemory?
     let preloadedImagePaths: [String]
+    /// Total photo count across all OTHER memories in the same journey (not this one).
+    let journeyOtherPhotosCount: Int
     let onSave: (JourneyMemory?) -> Void
 
     @State private var title: String
@@ -3165,6 +3170,8 @@ struct MemoryEditorSheet: View {
     @State private var showExpanded = false
     @State private var showDiscardAlert = false
     @State private var showDeleteAlert = false
+    @State private var showMembershipGate: MembershipGatedFeature? = nil
+    @State private var showJourneyPhotoLimitToast = false
     // ✅ Used to decide whether we should auto-resume the editor when user returns
     // (Back gesture / swipe-dismiss). Save & Cancel will set this to true.
     @State private var didExitExplicitly: Bool = false
@@ -3178,6 +3185,8 @@ struct MemoryEditorSheet: View {
     @State private var initialRemoteImageURLs: [String]
     @State private var initialMirrorSelfie: Bool
     private var maxPhotos: Int { MembershipStore.shared.maxPhotosPerMemory }
+    private var journeyPhotoLimit: Int { MembershipStore.shared.maxJourneyPhotos }
+    private var journeyTotalPhotoCount: Int { journeyOtherPhotosCount + totalPhotoCount }
 
     private func hideKeyboard() {
         endEditingGlobal()
@@ -3188,12 +3197,14 @@ struct MemoryEditorSheet: View {
         userID: String,
         existing: JourneyMemory?,
         preloadedImagePaths: [String] = [],
+        journeyOtherPhotosCount: Int = 0,
         onSave: @escaping (JourneyMemory?) -> Void
     ) {
         self._isPresented = isPresented
         self.userID = userID
         self.existing = existing
         self.preloadedImagePaths = preloadedImagePaths
+        self.journeyOtherPhotosCount = journeyOtherPhotosCount
         self.onSave = onSave
 
         let memoryID = existing?.id ?? "new"
@@ -3243,10 +3254,17 @@ private var hasUnsavedChanges: Bool {
         mirrorSelfie != initialMirrorSelfie
     }
     private var totalPhotoCount: Int { imagePaths.count + remoteImageURLs.count }
-    private var canAddPhoto: Bool { totalPhotoCount < maxPhotos }
-    private var remainingPhotoSlots: Int { max(0, maxPhotos - totalPhotoCount) }
+    private var canAddPhoto: Bool {
+        totalPhotoCount < maxPhotos && journeyTotalPhotoCount < journeyPhotoLimit
+    }
+    private var remainingPhotoSlots: Int {
+        max(0, min(maxPhotos - totalPhotoCount, journeyPhotoLimit - journeyTotalPhotoCount))
+    }
 
     private func launchCameraPicker() {
+        if journeyTotalPhotoCount >= journeyPhotoLimit {
+            triggerJourneyPhotoLimitFeedback(); return
+        }
         PhotoInputPresentationPolicy.launchPicker(dismissTextInput: {
             notesFocused = false
             hideKeyboard()
@@ -3256,11 +3274,22 @@ private var hasUnsavedChanges: Bool {
     }
 
     private func launchPhotoLibraryPicker() {
+        if journeyTotalPhotoCount >= journeyPhotoLimit {
+            triggerJourneyPhotoLimitFeedback(); return
+        }
         PhotoInputPresentationPolicy.launchPicker(dismissTextInput: {
             notesFocused = false
             hideKeyboard()
         }) {
             activePhotoFlow = .library(selectionLimit: max(1, remainingPhotoSlots))
+        }
+    }
+
+    private func triggerJourneyPhotoLimitFeedback() {
+        if MembershipStore.shared.tier == .free {
+            showMembershipGate = .journeyPhotos
+        } else {
+            showJourneyPhotoLimitToast = true
         }
     }
 
@@ -3340,7 +3369,7 @@ private var hasUnsavedChanges: Bool {
                     imagePaths: $imagePaths,
                     userID: userID,
                     mirrorSelfie: $mirrorSelfie,
-                    maxPhotos: maxPhotos,
+                    maxPhotos: min(maxPhotos, max(0, journeyPhotoLimit - journeyOtherPhotosCount)),
                     isNew: existing == nil,
                     onDelete: existing == nil ? nil : { deleteExistingMemory() },
                     onClose: { showExpanded = false },
@@ -3348,6 +3377,28 @@ private var hasUnsavedChanges: Bool {
                 )
             }
         }
+        .sheet(item: $showMembershipGate) { feature in
+            MembershipGateView(feature: feature)
+        }
+        .overlay(alignment: .bottom) {
+            if showJourneyPhotoLimitToast {
+                Text(String(format: L10n.t("journey_photo_limit_toast"), journeyPhotoLimit))
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Color.black.opacity(0.8))
+                    .clipShape(Capsule())
+                    .padding(.bottom, 32)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                            withAnimation { showJourneyPhotoLimitToast = false }
+                        }
+                    }
+            }
+        }
+        .animation(.easeInOut(duration: 0.3), value: showJourneyPhotoLimitToast)
         .fullScreenCover(isPresented: $showPhotoViewer) {
             PhotoViewer(
                 imagePaths: imagePaths,
@@ -3609,18 +3660,26 @@ private var hasUnsavedChanges: Bool {
     }
 
     private func storeEditedImages(_ images: [UIImage], writesToPhotoLibrary: Bool) {
+        let journeyRemaining = max(0, journeyPhotoLimit - journeyTotalPhotoCount)
+        if journeyRemaining <= 0 {
+            triggerJourneyPhotoLimitFeedback(); return
+        }
         guard canAddPhoto else { return }
-        for image in images {
+        let trimmed = Array(images.prefix(remainingPhotoSlots))
+        for image in trimmed {
             if !canAddPhoto { break }
             if let filename = try? PhotoStore.saveJPEG(image, userID: userID) {
                 imagePaths.append(filename)
             }
         }
+        if journeyTotalPhotoCount >= journeyPhotoLimit {
+            triggerJourneyPhotoLimitFeedback()
+        }
 
         guard writesToPhotoLibrary else { return }
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
             guard status == .authorized || status == .limited else { return }
-            for image in images {
+            for image in trimmed {
                 PHPhotoLibrary.shared().performChanges({
                     PHAssetChangeRequest.creationRequestForAsset(from: image)
                 }, completionHandler: nil)
