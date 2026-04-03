@@ -355,6 +355,7 @@ struct FriendsHubView: View {
                 JourneyPublishBanner()
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .padding(.top, 8)
+                    .animation(.easeInOut(duration: 0.25), value: publishStore.status != .idle)
             }
             if sessionStore.isLoggedIn {
                 tabSwitcher

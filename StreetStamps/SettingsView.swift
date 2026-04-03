@@ -796,7 +796,7 @@ struct SettingsView: View {
                         Image(systemName: "questionmark.circle")
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundColor(FigmaTheme.subtext)
-                            .appMinTapTarget()
+                            .padding(.horizontal, 6)
                     }
                     .buttonStyle(.plain)
 
@@ -805,9 +805,9 @@ struct SettingsView: View {
                         set: { dailyTrackingPrecision = $0 ? .lowPrecision : .highPrecision }
                     ))
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 18)
-                .figmaSurfaceCard(radius: 30)
+                .padding(.horizontal, 20)
+                .frame(minHeight: 68)
+                .figmaSurfaceCard(radius: 34)
             }
         }
     }
@@ -1439,10 +1439,10 @@ struct SettingsView: View {
                 .disabled(!isEnabled)
                 .opacity(isEnabled ? 1 : 0.45)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 18)
+        .padding(.horizontal, 20)
+        .frame(minHeight: 68)
         .opacity(isEnabled ? 1 : 0.58)
-        .figmaSurfaceCard(radius: 30)
+        .figmaSurfaceCard(radius: 34)
     }
 
     private func figmaToggle(isOn: Binding<Bool>) -> some View {

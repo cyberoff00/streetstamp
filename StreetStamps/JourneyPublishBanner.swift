@@ -2,57 +2,54 @@ import SwiftUI
 
 struct JourneyPublishBanner: View {
     @EnvironmentObject private var publishStore: JourneyPublishStore
-    @State private var sendingProgress: Double = 0.0
-    // Local status lags behind the real status so we can animate to 100% before switching.
-    @State private var localStatus: JourneyPublishStatus = .idle
 
     var body: some View {
-        Group {
-            switch localStatus {
-            case .idle:
-                EmptyView()
-            case .sending(_, let title):
-                bannerContent(
-                    icon: nil,
-                    message: String(format: L10n.t("publish_banner_sending_format"), title),
-                    style: .info,
-                    showSpinner: true
-                )
-                .onAppear {
-                    sendingProgress = 0.0
-                    withAnimation(.easeOut(duration: 4.0)) {
-                        sendingProgress = 0.82
-                    }
-                }
-            case .success(_, let title):
-                bannerContent(
-                    icon: "checkmark.circle.fill",
-                    message: String(format: L10n.t("publish_banner_success_format"), title),
-                    style: .success,
-                    showSpinner: false
-                )
-            case .failed(_, let title, _):
-                failedBanner(title: title)
-            }
+        switch publishStore.status {
+        case .idle:
+            EmptyView()
+        case .sending(_, let title):
+            bannerContent(
+                leading: { AnyView(ProgressView().tint(FigmaTheme.subtext).scaleEffect(0.8)) },
+                message: String(format: L10n.t("publish_banner_sending_format"), title),
+                style: .info
+            )
+        case .success(_, let title):
+            bannerContent(
+                leading: { AnyView(Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.green)) },
+                message: String(format: L10n.t("publish_banner_success_format"), title),
+                style: .success
+            )
+        case .failed(_, let title, _):
+            failedBanner(title: title)
         }
-        .onAppear {
-            localStatus = publishStore.status
+    }
+
+    private enum BannerStyle { case info, success }
+
+    private func bannerContent(
+        leading: () -> AnyView,
+        message: String,
+        style: BannerStyle
+    ) -> some View {
+        HStack(spacing: 8) {
+            leading()
+            Text(message)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(FigmaTheme.text)
+                .lineLimit(1)
+            Spacer()
         }
-        .onChange(of: publishStore.status) { newStatus in
-            if case .success = newStatus, case .sending = localStatus {
-                // Animate progress to 100%, then reveal the success banner.
-                withAnimation(.easeIn(duration: 0.35)) {
-                    sendingProgress = 1.0
-                }
-                Task {
-                    try? await Task.sleep(nanoseconds: 450_000_000)
-                    guard !Task.isCancelled else { return }
-                    localStatus = newStatus
-                }
-            } else {
-                localStatus = newStatus
-            }
-        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(style == .success ? Color(red: 0.93, green: 0.98, blue: 0.94) : Color.white)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(style == .success ? Color.green.opacity(0.2) : FigmaTheme.border, lineWidth: 1)
+        )
+        .padding(.horizontal, 14)
     }
 
     private func failedBanner(title: String) -> some View {
@@ -111,40 +108,6 @@ struct JourneyPublishBanner: View {
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Color.red.opacity(0.2), lineWidth: 1)
-        )
-        .padding(.horizontal, 14)
-    }
-
-    private enum BannerStyle {
-        case info, success
-    }
-
-    private func bannerContent(icon: String?, message: String, style: BannerStyle, showSpinner: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                if let icon, !showSpinner {
-                    Image(systemName: icon)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(style == .success ? .green : FigmaTheme.text)
-                }
-                Text(message)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(FigmaTheme.text)
-                    .lineLimit(1)
-                Spacer()
-            }
-            if showSpinner {
-                ProgressView(value: sendingProgress)
-                    .tint(Color.black.opacity(0.45))
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(style == .success ? Color(red: 0.93, green: 0.98, blue: 0.94) : Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(style == .success ? Color.green.opacity(0.2) : FigmaTheme.border, lineWidth: 1)
         )
         .padding(.horizontal, 14)
     }

@@ -9,7 +9,7 @@ enum AboutUsContent {
     static let title = L10n.t("about_us_title")
     static let location = L10n.t("about_us_location")
 
-    static let sections: [Section] = [
+    static var sections: [Section] {[
         Section(
             title: "",
             paragraphs: [
@@ -37,7 +37,7 @@ enum AboutUsContent {
                 L10n.t("about_us_cyber_dog_content")
             ]
         )
-    ]
+    ]}
 }
 
 struct AboutUsView: View {

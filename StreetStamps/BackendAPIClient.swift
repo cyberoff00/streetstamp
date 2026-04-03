@@ -103,6 +103,13 @@ struct BackendMediaUploadResponse: Codable {
     var url: String
 }
 
+struct BackendMediaPresignResponse: Codable {
+    var strategy: String       // "server" or "r2"
+    var presignedURL: String?
+    var objectKey: String?
+    var publicURL: String?
+}
+
 struct JourneyLikesBatchRequest: Codable {
     var journeyIDs: [String]
 }
@@ -940,7 +947,7 @@ final class BackendAPIClient {
 
     func migrateJourneys(token: String, payload: BackendMigrationRequest) async throws {
         let body = try encoder.encode(payload)
-        _ = try await request(path: "/v1/journeys/migrate", method: "POST", token: token, jsonBody: body)
+        _ = try await request(path: "/v1/journeys/migrate", method: "POST", token: token, jsonBody: body, timeout: 60)
     }
 
     func fetchMyProfile(token: String) async throws -> BackendProfileDTO {
@@ -999,6 +1006,47 @@ final class BackendAPIClient {
     }
 
     func uploadMedia(token: String, data: Data, fileName: String, mimeType: String) async throws -> BackendMediaUploadResponse {
+        // CN devices always upload via server — skip presign round trip.
+        if BackendConfig.isChineseMainlandDevice {
+            return try await uploadMediaViaServer(token: token, data: data, fileName: fileName, mimeType: mimeType)
+        }
+        // International: ask server whether to upload directly to R2 or via server (fallback).
+        let hash = data.md5HexString
+        let rawExt = (fileName as NSString).pathExtension
+        let ext = rawExt.isEmpty ? ".jpg" : ".\(rawExt)"
+        if let presign = try? await presignMedia(token: token, hash: hash, ext: ext, mimeType: mimeType),
+           presign.strategy == "r2",
+           let presignedURL = presign.presignedURL, !presignedURL.isEmpty,
+           let publicURL = presign.publicURL, !publicURL.isEmpty,
+           let objectKey = presign.objectKey, !objectKey.isEmpty {
+            try await putDirectToR2(presignedURL: presignedURL, data: data, mimeType: mimeType)
+            return BackendMediaUploadResponse(objectKey: objectKey, url: publicURL)
+        }
+        // Fallback: upload through server.
+        return try await uploadMediaViaServer(token: token, data: data, fileName: fileName, mimeType: mimeType)
+    }
+
+    private func presignMedia(token: String, hash: String, ext: String, mimeType: String) async throws -> BackendMediaPresignResponse {
+        let region = BackendConfig.isChineseMainlandDevice ? "CN" : "global"
+        let body = try encoder.encode(["hash": hash, "ext": ext, "contentType": mimeType, "region": region])
+        let (data, _) = try await request(path: "/v1/media/presign", method: "POST", token: token, jsonBody: body, timeout: 10)
+        return try decoder.decode(BackendMediaPresignResponse.self, from: data)
+    }
+
+    private func putDirectToR2(presignedURL: String, data: Data, mimeType: String) async throws {
+        guard let url = URL(string: presignedURL) else { throw BackendAPIError.invalidResponse }
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        req.httpBody = data
+        req.setValue(mimeType, forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 120
+        let (_, resp) = try await transport(req)
+        guard let http = resp as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw BackendAPIError.invalidResponse
+        }
+    }
+
+    private func uploadMediaViaServer(token: String, data: Data, fileName: String, mimeType: String) async throws -> BackendMediaUploadResponse {
         let boundary = "Boundary-\(UUID().uuidString)"
         var body = Data()
 
@@ -1018,7 +1066,7 @@ final class BackendAPIClient {
             token: token,
             jsonBody: body,
             contentType: "multipart/form-data; boundary=\(boundary)",
-            timeout: 60
+            timeout: 120
         )
         return try decoder.decode(BackendMediaUploadResponse.self, from: respData)
     }

@@ -14,6 +14,7 @@ try {
   Pool = null;
 }
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { OAuth2Client } = require("google-auth-library");
 const { createRemoteJWKSet, jwtVerify } = require("jose");
 const { canSendPostcard } = require("./postcard-rules");
@@ -61,6 +62,7 @@ const R2_SECRET_ACCESS_KEY = (process.env.R2_SECRET_ACCESS_KEY || "").trim();
 const R2_BUCKET = (process.env.R2_BUCKET || "").trim();
 const R2_ENDPOINT = (process.env.R2_ENDPOINT || (R2_ACCOUNT_ID ? `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com` : "")).trim();
 const R2_REGION = (process.env.R2_REGION || "auto").trim();
+const R2_PUBLIC_BASE = (process.env.R2_PUBLIC_BASE || "").trim();
 const GOOGLE_CLIENT_ID = (process.env.GOOGLE_CLIENT_ID || "").trim();
 const APPLE_AUDIENCES = (process.env.APPLE_AUDIENCES || process.env.APPLE_BUNDLE_ID || "").trim();
 const APPSTORE_FALLBACK_URL = (process.env.APPSTORE_FALLBACK_URL || "https://apps.apple.com/us/search?term=StreetStamps").trim();
@@ -2502,6 +2504,9 @@ async function main() {
             await DB.updateAuthIdentity(pgPool, existingEmailIdentity.id, { passwordHash, updatedAt: now });
             await DB.updateUser(pgPool, existingEmailIdentity.userID, { displayName: updatedDisplayName });
           });
+          if (!existingUser.handle) {
+            await setUserHandleAsync(existingEmailIdentity.userID, null, { strict: false });
+          }
           await deliverVerificationEmail(email, verificationToken);
 
           return res.status(200).json({
@@ -3491,7 +3496,7 @@ async function main() {
         const existingCards = await DB.getCityCardsByUser(pgPool, uid);
         const mergedCards = mergeCityCardPayloads(existingCards, unlockedCityCards, snapshotComplete);
         await DB.replaceCityCards(pgPool, uid, mergedCards);
-        finalJourneyCount = (await DB.getJourneysByUser(pgPool, uid)).length;
+        finalJourneyCount = await DB.countJourneysByUser(pgPool, uid);
         finalCityCardCount = mergedCards.length;
       } else {
         await persistPG(async () => {
@@ -4428,6 +4433,46 @@ async function main() {
     } catch (err) {
       if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  // Returns upload strategy based on client region:
+  // - CN or Cloudflare header absent → { strategy: "server" } (client POSTs to /v1/media/upload)
+  // - elsewhere + R2 configured      → { strategy: "r2", presignedURL, objectKey, publicURL }
+  app.post("/v1/media/presign", rejectWhenWriteFrozen, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const user = await getUser(uid);
+      if (!user) return res.status(404).json({ message: "user not found" });
+
+      const hash = String(req.body?.hash || "").replace(/[^a-f0-9]/gi, "").slice(0, 32);
+      const ext  = String(req.body?.ext  || "").replace(/[^a-zA-Z0-9.]/g, "").slice(0, 10);
+      const contentType = String(req.body?.contentType || "application/octet-stream").slice(0, 64);
+      if (hash.length < 8) return res.status(400).json({ message: "invalid hash" });
+
+      // Prefer CF-IPCountry (set by Cloudflare for orange-cloud domains) over client-declared region.
+      // This correctly handles Chinese users abroad (device locale = CN but physical location ≠ CN).
+      // Gray-cloud (China domestic) requests have no CF-IPCountry; they fall back to client-declared region.
+      const cfCountry = String(req.headers["cf-ipcountry"] || "").toUpperCase().trim();
+      const clientRegion = String(req.body?.region || "").toUpperCase();
+      const region = cfCountry || clientRegion;
+      const useServer = region === "CN" || !r2Client || !R2_PUBLIC_BASE;
+      if (useServer) return res.status(200).json({ strategy: "server" });
+
+      const objectKey = `${uid}/${hash}${ext}`;
+      const presignedURL = await getSignedUrl(
+        r2Client,
+        new PutObjectCommand({ Bucket: R2_BUCKET, Key: objectKey, ContentType: contentType }),
+        { expiresIn: 600 }
+      );
+      const publicURL = `${R2_PUBLIC_BASE.replace(/\/$/, "")}/${objectKey}`;
+      return res.status(200).json({ strategy: "r2", presignedURL, objectKey, publicURL });
+    } catch (err) {
+      if (err?.message === "missing bearer" || err?.message === "invalid token") {
+        return res.status(401).json({ message: "unauthorized" });
+      }
+      console.error("[ERROR] /v1/media/presign:", err?.message || err);
+      return res.status(500).json({ message: "internal error" });
     }
   });
 

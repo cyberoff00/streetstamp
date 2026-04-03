@@ -24,6 +24,7 @@ struct ProfileView: View {
     @EnvironmentObject private var socialStore: SocialGraphStore
     @EnvironmentObject private var notificationStore: SocialNotificationStore
     @EnvironmentObject private var flow: AppFlowCoordinator
+    @ObservedObject private var languagePreference = LanguagePreference.shared
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
 
     @State private var loadout: RobotLoadout

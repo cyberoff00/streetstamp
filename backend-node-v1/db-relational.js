@@ -505,6 +505,14 @@ async function getJourneysByUser(pool, uid) {
   return rows.map((r) => r.data);
 }
 
+async function countJourneysByUser(pool, uid) {
+  const { rows } = await pool.query(
+    "SELECT COUNT(*) AS cnt FROM journeys WHERE user_id = $1",
+    [uid]
+  );
+  return parseInt(rows[0].cnt, 10);
+}
+
 async function getJourney(pool, uid, journeyID) {
   const { rows } = await pool.query(
     "SELECT data FROM journeys WHERE user_id = $1 AND id = $2",
@@ -1105,6 +1113,7 @@ module.exports = {
 
   // Journeys
   getJourneysByUser,
+  countJourneysByUser,
   getJourney,
   upsertJourney,
   deleteJourneys,

@@ -22,8 +22,9 @@ enum L10n {
         localizedValue(for: key, preferredLanguages: [locale.identifier], currentLocale: locale)
     }
 
-    static func upper(_ key: String, locale: Locale = .current) -> String {
-        uppercasedValue(t(key, locale: locale), locale: locale)
+    static func upper(_ key: String, locale: Locale? = nil) -> String {
+        let effectiveLocale = locale ?? LanguagePreference.shared.displayLocale
+        return uppercasedValue(t(key, locale: effectiveLocale), locale: effectiveLocale)
     }
 
     /// Convenience for `Text`.

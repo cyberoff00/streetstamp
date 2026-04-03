@@ -71,27 +71,39 @@ final class JourneyPublishStore: ObservableObject {
         lastFailedCityCache = cityCache
         lastFailedJourneyStore = journeyStore
 
+        let journeyID = journey.id
         Task {
             do {
                 let urlCache = try await JourneyCloudMigrationService.syncJourneyVisibilityChange(
                     journey: journey,
                     sessionStore: sessionStore,
-                    cityCache: cityCache
+                    cityCache: cityCache,
+                    urlCacheObserver: { [weak journeyStore] jid, cache in
+                        // Apply URL cache as soon as photos are uploaded, before the
+                        // migration payload is sent. If migrateJourneys times out, the
+                        // next retry will see populated remoteImageURLs and skip re-uploads.
+                        guard let journeyStore else { return }
+                        Task { @MainActor [journeyStore] in
+                            JourneyPublishStore.applyRemoteURLCache(
+                                cache, journeyID: jid, journeyStore: journeyStore
+                            )
+                        }
+                    }
                 )
-                // Cache remote URLs locally so future republish can skip missing local files.
-                if let cache = urlCache[journey.id] {
-                    Self.applyRemoteURLCache(cache, journeyID: journey.id, journeyStore: journeyStore)
+                // Also apply on success (idempotent — ensures any racing update is complete).
+                if let cache = urlCache[journeyID] {
+                    Self.applyRemoteURLCache(cache, journeyID: journeyID, journeyStore: journeyStore)
                 }
                 // Stamp sharedAt on first successful publish (visibility was friendsOnly/public).
                 if journey.visibility == .public || journey.visibility == .friendsOnly {
-                    Self.applySharedAtIfNeeded(journeyID: journey.id, journeyStore: journeyStore)
+                    Self.applySharedAtIfNeeded(journeyID: journeyID, journeyStore: journeyStore)
                 }
-                status = .success(journeyID: journey.id, title: title)
+                status = .success(journeyID: journeyID, title: title)
                 lastFailedJourney = nil
                 scheduleDismiss()
             } catch {
                 status = .failed(
-                    journeyID: journey.id,
+                    journeyID: journeyID,
                     title: title,
                     errorMessage: error.localizedDescription
                 )

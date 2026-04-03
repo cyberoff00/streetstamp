@@ -20,6 +20,9 @@ enum JourneyCloudMigrationService {
     typealias MediaUploader = @Sendable (_ token: String, _ data: Data, _ fileName: String, _ mimeType: String) async throws -> BackendMediaUploadResponse
     typealias MigrationSender = @Sendable (_ token: String, _ payload: BackendMigrationRequest) async throws -> Void
     typealias PayloadBuildObserver = @Sendable () -> Void
+    /// Called after photos are uploaded but BEFORE the migration payload is sent.
+    /// Use this to persist remote URLs early so retries can skip re-uploading if migrate times out.
+    typealias URLCacheObserver = @Sendable (_ journeyID: String, _ cache: JourneyRemoteURLCache) -> Void
 
     private static let liveMediaUploader: MediaUploader = { token, data, fileName, mimeType in
         try await BackendAPIClient.shared.uploadMedia(
@@ -107,7 +110,7 @@ enum JourneyCloudMigrationService {
         cachedCities: [CachedCity],
         userID: String,
         token: String,
-        mediaUploader: MediaUploader = liveMediaUploader
+        mediaUploader: @escaping MediaUploader = liveMediaUploader
     ) async throws -> JourneyIncrementalSyncPlan {
         let payloadResult = try await buildJourneyPayloads(
             journeys: [journey],
@@ -152,7 +155,8 @@ enum JourneyCloudMigrationService {
         cityCache: CityCache,
         migrationSender: @escaping MigrationSender = liveMigrationSender,
         mediaUploader: @escaping MediaUploader = liveMediaUploader,
-        payloadBuildObserver: PayloadBuildObserver? = nil
+        payloadBuildObserver: PayloadBuildObserver? = nil,
+        urlCacheObserver: URLCacheObserver? = nil
     ) async throws -> [String: JourneyRemoteURLCache] {
         guard BackendConfig.isEnabled else { return [:] }
 
@@ -187,6 +191,11 @@ enum JourneyCloudMigrationService {
             }.value
             payload = plan.payload
             urlCache = plan.remoteURLCache
+            // Notify early so the caller can persist remote URLs before the migration
+            // payload is sent. If migrationSender times out, retries can skip re-uploads.
+            if let cache = urlCache[journey.id] {
+                urlCacheObserver?(journey.id, cache)
+            }
         } else {
             payload = makeJourneyRemovalPayload(
                 journeyID: journey.id,
@@ -255,7 +264,7 @@ enum JourneyCloudMigrationService {
         journeys: [JourneyRoute],
         userID: String,
         token: String,
-        mediaUploader: MediaUploader = liveMediaUploader
+        mediaUploader: @escaping MediaUploader = liveMediaUploader
     ) async throws -> (journeys: [BackendJourneyUploadDTO], memoriesCount: Int, uploadedMediaCount: Int, remoteURLCache: [String: JourneyRemoteURLCache]) {
         var out: [BackendJourneyUploadDTO] = []
         var memoriesCount = 0
@@ -268,16 +277,36 @@ enum JourneyCloudMigrationService {
             let rawRouteCoordinates = route.coordinates.isEmpty ? route.thumbnailCoordinates : route.coordinates
             let routeCoordinates = route.privacyFilteredCoordinates(rawRouteCoordinates)
 
+            // Collect all images from every memory + overall into one flat pool so they
+            // can all be uploaded concurrently instead of one memory-batch at a time.
+            var flatImages: [(name: String, fallbackURL: String?)] = []
+            var slotRanges: [Range<Int>] = [] // one range per memory, then one for overall
+
+            for memory in route.memories {
+                let start = flatImages.count
+                for (i, path) in memory.imagePaths.enumerated() {
+                    let fallback = i < memory.remoteImageURLs.count ? memory.remoteImageURLs[i] : nil
+                    flatImages.append((name: path, fallbackURL: fallback?.isEmpty == false ? fallback : nil))
+                }
+                slotRanges.append(start..<flatImages.count)
+            }
+
+            let overallStart = flatImages.count
+            for (i, path) in route.overallMemoryImagePaths.enumerated() {
+                let fallback = i < route.overallMemoryRemoteImageURLs.count ? route.overallMemoryRemoteImageURLs[i] : nil
+                flatImages.append((name: path, fallbackURL: fallback?.isEmpty == false ? fallback : nil))
+            }
+            slotRanges.append(overallStart..<flatImages.count)
+
+            // Upload all images in one parallel batch (max maxConcurrentUploads at once).
+            let flatURLs = try await uploadFlatImages(flatImages, userID: userID, token: token, mediaUploader: mediaUploader)
+
+            // Distribute results back to each memory.
             var memories: [BackendMemoryUploadDTO] = []
             var memoryURLs: [String: [String]] = [:]
-            for memory in route.memories {
-                let uploadedURLs = try await uploadMemoryImagesIfNeeded(
-                    imagePaths: memory.imagePaths,
-                    fallbackRemoteURLs: memory.remoteImageURLs,
-                    userID: userID,
-                    token: token,
-                    mediaUploader: mediaUploader
-                )
+            for (memIdx, memory) in route.memories.enumerated() {
+                let range = slotRanges[memIdx]
+                let uploadedURLs = range.isEmpty ? [] : Array(flatURLs[range])
                 memoryURLs[memory.id] = uploadedURLs
                 memories.append(
                     BackendMemoryUploadDTO(
@@ -295,13 +324,8 @@ enum JourneyCloudMigrationService {
                 uploadedMediaCount += uploadedURLs.count
             }
 
-            let overallImageURLs = try await uploadMemoryImagesIfNeeded(
-                imagePaths: route.overallMemoryImagePaths,
-                fallbackRemoteURLs: route.overallMemoryRemoteImageURLs,
-                userID: userID,
-                token: token,
-                mediaUploader: mediaUploader
-            )
+            let overallRange = slotRanges[route.memories.count]
+            let overallImageURLs = overallRange.isEmpty ? [] : Array(flatURLs[overallRange])
             uploadedMediaCount += overallImageURLs.count
 
             remoteURLCache[route.id] = JourneyRemoteURLCache(
@@ -338,57 +362,79 @@ enum JourneyCloudMigrationService {
     }
 
     private static let maxRetryPerImage = 2
+    private static let maxConcurrentUploads = 3
 
-    private static func uploadMemoryImagesIfNeeded(
-        imagePaths: [String],
-        fallbackRemoteURLs: [String] = [],
+    /// Uploads a flat list of (localFileName, fallbackRemoteURL?) in parallel,
+    /// capped at maxConcurrentUploads. Returns URLs in the same order as input.
+    private static func uploadFlatImages(
+        _ images: [(name: String, fallbackURL: String?)],
         userID: String,
         token: String,
-        mediaUploader: MediaUploader = liveMediaUploader
+        mediaUploader: @escaping MediaUploader
     ) async throws -> [String] {
-        guard !imagePaths.isEmpty else { return fallbackRemoteURLs.isEmpty ? [] : fallbackRemoteURLs }
+        guard !images.isEmpty else { return [] }
 
         let paths = StoragePath(userID: userID)
-        var uploaded: [String] = []
+        var results = [String?](repeating: nil, count: images.count)
 
-        for (idx, name) in imagePaths.enumerated() {
-            let fileURL = paths.photosDir.appendingPathComponent(name)
-            guard FileManager.default.fileExists(atPath: fileURL.path) else {
-                // Local file missing — fall back to previously uploaded remote URL if available.
-                if idx < fallbackRemoteURLs.count, !fallbackRemoteURLs[idx].isEmpty {
-                    uploaded.append(fallbackRemoteURLs[idx])
-                    continue
-                }
-                throw PublishError.localFileMissing(name)
-            }
+        try await withThrowingTaskGroup(of: (Int, String).self) { group in
+            var activeCount = 0
+            var pendingIdx = 0
 
-            let data = try Data(contentsOf: fileURL)
-            let mime = mimeType(for: fileURL.pathExtension)
-            // Use content hash as filename so server can dedup on retry.
-            let hash = data.md5HexString
-            let ext = (fileURL.pathExtension.isEmpty) ? ".jpg" : ".\(fileURL.pathExtension)"
-            let hashFileName = "\(hash)\(ext)"
+            func addNextTask() throws {
+                while activeCount < maxConcurrentUploads && pendingIdx < images.count {
+                    let idx = pendingIdx
+                    let (name, fallbackURL) = images[idx]
+                    pendingIdx += 1
 
-            var lastError: Error?
-            for attempt in 0...maxRetryPerImage {
-                do {
-                    let result = try await mediaUploader(token, data, hashFileName, mime)
-                    uploaded.append(result.url)
-                    lastError = nil
-                    break
-                } catch {
-                    lastError = error
-                    if attempt < maxRetryPerImage {
-                        try await Task.sleep(nanoseconds: UInt64((attempt + 1)) * 1_000_000_000)
+                    // Photos are content-hash-named and immutable — if a remote URL already
+                    // exists the file is already on the server, no need to re-upload.
+                    if let fallback = fallbackURL, !fallback.isEmpty {
+                        results[idx] = fallback
+                        continue
                     }
+
+                    let fileURL = paths.photosDir.appendingPathComponent(name)
+                    guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                        throw PublishError.localFileMissing(name)
+                    }
+
+                    let data = try Data(contentsOf: fileURL)
+                    let mime = mimeType(for: fileURL.pathExtension)
+                    // Use content hash as filename so server can dedup on retry.
+                    let hash = data.md5HexString
+                    let ext = (fileURL.pathExtension.isEmpty) ? ".jpg" : ".\(fileURL.pathExtension)"
+                    let hashFileName = "\(hash)\(ext)"
+
+                    group.addTask {
+                        var lastError: Error?
+                        for attempt in 0...maxRetryPerImage {
+                            do {
+                                let result = try await mediaUploader(token, data, hashFileName, mime)
+                                return (idx, result.url)
+                            } catch {
+                                lastError = error
+                                if attempt < maxRetryPerImage {
+                                    try await Task.sleep(nanoseconds: UInt64((attempt + 1)) * 1_000_000_000)
+                                }
+                            }
+                        }
+                        throw lastError!
+                    }
+                    activeCount += 1
                 }
             }
-            if let error = lastError {
-                throw error
+
+            try addNextTask()
+
+            for try await (idx, url) in group {
+                results[idx] = url
+                activeCount -= 1
+                try addNextTask()
             }
         }
 
-        return uploaded
+        return results.compactMap { $0 }
     }
 
     enum PublishError: LocalizedError {
