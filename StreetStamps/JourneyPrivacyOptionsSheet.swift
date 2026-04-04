@@ -20,8 +20,10 @@ struct JourneyPrivacyOptionsSheet: View {
     var body: some View {
         JourneySheetScaffold(
             title: L10n.t("privacy_toggle_title"),
-            subtitle: L10n.t("privacy_description")
+            subtitle: nil
         ) {
+            Spacer().frame(height: 4)
+
             VStack(spacing: 8) {
                 toggleRow(title: L10n.t("privacy_trim_endpoints"), isOn: $trimEndpoints)
                 toggleRow(title: L10n.t("privacy_hide_landmarks"), isOn: $hideLandmarks)

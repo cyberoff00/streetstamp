@@ -669,7 +669,7 @@
 "settings_migration_device_section" = "DEVICE TRANSFER";
 "settings_migration_device_desc" = "Transfer journeys, photos and lifelog from your old device to a new one via local network. Both devices must be on the same Wi-Fi.";
 "settings_migration_icloud_section" = "ICLOUD SYNC";
-"settings_migration_icloud_desc" = "Automatically sync data to your other Apple devices via iCloud. Journeys, lifelog and settings stay in sync across devices.";
+"settings_migration_icloud_desc" = "Back up data via iCloud. Restore directly when switching to a new device.";
 "settings_subscription_row" = "SUBSCRIPTION";
 "settings_sign_in_title" = "SIGN IN TO WORLDO";
 "settings_sign_in_subtitle" = "Sync your travel data and unlock social features";
@@ -1199,8 +1199,8 @@
 // MARK: - Privacy Options
 "privacy_toggle_title" = "Privacy Protection";
 "privacy_description" = "Privacy options apply to shared images and friend activity feeds.";
-"privacy_trim_endpoints" = "Hide start & end locations (300m)";
-"privacy_hide_landmarks" = "Hide landmarks & POI labels";
+"privacy_trim_endpoints" = "Hide route ends 300m";
+"privacy_hide_landmarks" = "Hide landmarks, blur map";
 
 // MARK: - Photo Editor
 "photo_editor_text" = "Text";

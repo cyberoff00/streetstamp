@@ -18,6 +18,9 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
 
     private var pendingSingleLocationRequest = false
     private var passiveActive = false
+    /// True while the app is actively tracking a journey (sport or daily).
+    /// Used to force-restart location when iOS pauses updates in background.
+    private(set) var activeTrackingActive = false
     private var passiveAnchorLocation: CLLocation?
     private var passiveAnchorTimestamp: Date = .distantPast
     private var passivePauseCount = 0
@@ -97,6 +100,7 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         manager.stopMonitoringVisits()
         manager.allowsBackgroundLocationUpdates = false
         passiveActive = false
+        activeTrackingActive = false
         passiveAnchorLocation = nil
         passiveAnchorTimestamp = .distantPast
     }
@@ -113,7 +117,8 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
     /// ✅ 高功耗前台追踪（运动模式专用）
     func startHighPower() {
         stop()
-        
+        activeTrackingActive = true
+
         // ✅ 关键修改：前台追踪时也允许后台更新，这样进入后台不会中断
         manager.allowsBackgroundLocationUpdates = true
         manager.pausesLocationUpdatesAutomatically = false
@@ -129,7 +134,8 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
     /// ✅ 高功耗前台追踪（日常模式专用，稍低精度）
     func startHighPowerDaily() {
         stop()
-        
+        activeTrackingActive = true
+
         manager.allowsBackgroundLocationUpdates = true
         manager.pausesLocationUpdatesAutomatically = false
         manager.showsBackgroundLocationIndicator = true
@@ -245,7 +251,8 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
     /// ✅ 后台平衡模式（运动模式进入后台）
     func startBackgroundBalanced() {
         stop()
-        
+        activeTrackingActive = true
+
         manager.allowsBackgroundLocationUpdates = true
         manager.pausesLocationUpdatesAutomatically = false
         manager.showsBackgroundLocationIndicator = true
@@ -261,7 +268,8 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
     /// ✅ 后台高保真模式（确保后台追踪不中断）
     func startBackgroundHighFidelity() {
         stop()
-        
+        activeTrackingActive = true
+
         manager.allowsBackgroundLocationUpdates = true
         manager.pausesLocationUpdatesAutomatically = false
         manager.showsBackgroundLocationIndicator = true
@@ -277,6 +285,7 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
     /// Daily high-precision background: better route quality, GPS stays active.
     func startBackgroundDailyHighPrecision() {
         stop()
+        activeTrackingActive = true
 
         manager.allowsBackgroundLocationUpdates = true
         manager.pausesLocationUpdatesAutomatically = false
@@ -293,6 +302,7 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
     /// ✅ 后台省电模式（日常低精度进入后台）
     func startBackgroundPowerSaving() {
         stop()
+        activeTrackingActive = true
 
         manager.allowsBackgroundLocationUpdates = true
         manager.pausesLocationUpdatesAutomatically = true
@@ -304,6 +314,20 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
 
         manager.startUpdatingLocation()
         requestImmediateLocationRefresh()
+    }
+
+    /// In-place transition to minimal power while keeping the location session alive.
+    /// Used during journey pause — GPS chip can sleep most of the time.
+    func transitionToPausedPowerSaving() {
+        manager.desiredAccuracy = kCLLocationAccuracyThreeKilometers
+        manager.distanceFilter = CLLocationDistanceMax  // virtually no updates
+    }
+
+    /// Restore tracking-grade parameters after pause ends.
+    /// Caller is responsible for choosing the right accuracy for the current mode.
+    func transitionFromPausedPowerSaving(accuracy: CLLocationAccuracy, distanceFilter: CLLocationDistance) {
+        manager.desiredAccuracy = accuracy
+        manager.distanceFilter = distanceFilter
     }
 
     /// In-place transition to power-saving parameters WITHOUT calling stop().
@@ -371,9 +395,17 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         passivePauseCount += 1
         lastPauseDate = Date()
         #if DEBUG
-        print("📍 [Passive] ⚠️ iOS PAUSED location updates (pause #\(passivePauseCount)). Restarting...")
+        print("📍 ⚠️ iOS PAUSED location updates (pause #\(passivePauseCount), active=\(activeTrackingActive), passive=\(passiveActive)). Restarting...")
         #endif
-        guard passiveActive else { return }
+        // Restart for active tracking: daily-mode background sets
+        // pausesLocationUpdatesAutomatically = true to save power; if iOS
+        // pauses during a brief stop (red light, rest), not restarting loses
+        // the location session and downgrades jetsam priority → process kill.
+        //
+        // Restart for passive lifelog: existing behavior, keeps coverage alive.
+        //
+        // Idle (neither active nor passive): do not restart — honour iOS power savings.
+        guard activeTrackingActive || passiveActive else { return }
         manager.startUpdatingLocation()
     }
 

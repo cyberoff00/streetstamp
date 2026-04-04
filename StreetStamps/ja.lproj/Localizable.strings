@@ -667,7 +667,7 @@
 "settings_migration_device_section" = "デバイス間転送";
 "settings_migration_device_desc" = "ローカルネットワーク経由で旧デバイスから新デバイスへ旅・写真・ライフログを転送します。両方のデバイスを同じWi-Fiに接続してください。";
 "settings_migration_icloud_section" = "iCloud 同期";
-"settings_migration_icloud_desc" = "iCloud経由で他のAppleデバイスにデータを自動同期します。旅・ライフログ・設定がデバイス間で同期されます。";
+"settings_migration_icloud_desc" = "iCloudでデータをバックアップ。新しいデバイスに切り替えた際にすぐ復元できます。";
 "settings_private_transfer_title" = "プライベートデータ転送";
 "settings_profile_visibility_friends" = "プロフィールは友達に表示";
 "settings_profile_visibility_private" = "プロフィールは自分のみ表示";

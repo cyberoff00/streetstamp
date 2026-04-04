@@ -1269,8 +1269,8 @@ private struct ProfileInviteScannerSheet: View {
     private func completeScan(with code: String) {
         guard !didResolveCode else { return }
         didResolveCode = true
-        dismiss()
         onScanned(code)
+        dismiss()
     }
 }
 

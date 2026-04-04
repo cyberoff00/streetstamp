@@ -1,22 +1,19 @@
 import UIKit
-import CoreImage
+import Vision
 
 enum QRCodeImageDecoder {
     static func decode(image: UIImage) -> String? {
-        guard let ciImage = ciImage(from: image) else { return nil }
+        guard let cgImage = image.cgImage ?? ciImageToCGImage(image.ciImage) else { return nil }
 
-        let options = [CIDetectorAccuracy: CIDetectorAccuracyHigh]
-        guard let detector = CIDetector(
-            ofType: CIDetectorTypeQRCode,
-            context: CIContext(options: nil),
-            options: options
-        ) else {
-            return nil
-        }
+        let request = VNDetectBarcodesRequest()
+        request.symbologies = [.qr]
 
-        let features = detector.features(in: ciImage)
-        for case let qr as CIQRCodeFeature in features {
-            let payload = qr.messageString?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        try? handler.perform([request])
+
+        guard let results = request.results else { return nil }
+        for observation in results {
+            let payload = observation.payloadStringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
             if let payload, !payload.isEmpty {
                 return payload
             }
@@ -24,13 +21,8 @@ enum QRCodeImageDecoder {
         return nil
     }
 
-    private static func ciImage(from image: UIImage) -> CIImage? {
-        if let ciImage = image.ciImage {
-            return ciImage
-        }
-        if let cgImage = image.cgImage {
-            return CIImage(cgImage: cgImage)
-        }
-        return nil
+    private static func ciImageToCGImage(_ ciImage: CIImage?) -> CGImage? {
+        guard let ciImage else { return nil }
+        return CIContext(options: nil).createCGImage(ciImage, from: ciImage.extent)
     }
 }

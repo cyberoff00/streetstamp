@@ -303,6 +303,9 @@ struct SettingsView: View {
     @State private var showLogoutConfirmation = false
     @State private var showLinkEmailSheet = false
     @State private var showBackgroundModeInfo = false
+    @State private var showVoiceBroadcastInfo = false
+    @State private var showLiveActivityInfo = false
+    @State private var showStillnessReminderInfo = false
     @State private var iCloudAvailable = false
     @State private var isRestoringFromICloud = false
     @State private var showRestoreConfirmation = false
@@ -574,18 +577,19 @@ struct SettingsView: View {
 
                     systemNotificationRow
 
+                    // Voice Broadcast
                     VStack(alignment: .leading, spacing: 14) {
-                        HStack(alignment: .top, spacing: 10) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(L10n.t("settings_voice_broadcast_title"))
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(FigmaTheme.text)
+                        HStack(spacing: 10) {
+                            Image(systemName: "speaker.wave.2")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundColor(FigmaTheme.primary)
+                                .frame(width: 20)
 
-                                Text(L10n.t("settings_voice_broadcast_desc"))
-                                    .font(.system(size: 12, weight: .regular))
-                                    .foregroundColor(FigmaTheme.subtext)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
+                            Text(L10n.t("settings_voice_broadcast_title"))
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(FigmaTheme.text)
+
+                            infoButton(isPresented: $showVoiceBroadcastInfo)
 
                             Spacer(minLength: 8)
 
@@ -610,31 +614,32 @@ struct SettingsView: View {
                     .padding(.vertical, 18)
                     .figmaSurfaceCard(radius: 30)
 
-                    ForEach(SettingsNotificationsPresentation.toggleRows(
-                        isLiveActivityAvailable: LiveActivityManager.shared.isLiveActivitySupported
-                    ), id: \.title) { row in
-                        switch row.title {
-                        case SettingsRowPresentation.liveActivity.title:
-                            toggleRowCard(
-                                presentation: row,
-                                isOn: Binding(
-                                    get: { liveActivityEnabled },
-                                    set: { newValue in
-                                        liveActivityEnabled = newValue
-                                        if !newValue {
-                                            LiveActivityManager.shared.endActivity()
-                                        }
-                                    }
-                                ),
-                                isEnabled: LiveActivityManager.shared.isLiveActivitySupported
-                            )
-                        default:
-                            toggleRowCard(
-                                presentation: row,
-                                isOn: $longStationaryReminderEnabled
-                            )
-                        }
-                    }
+                    // Live Activity
+                    compactToggleRowCard(
+                        icon: "rectangle.badge.person.crop",
+                        iconColor: FigmaTheme.primary,
+                        title: L10n.t("settings_live_activity_title"),
+                        infoPresented: $showLiveActivityInfo,
+                        isOn: Binding(
+                            get: { liveActivityEnabled },
+                            set: { newValue in
+                                liveActivityEnabled = newValue
+                                if !newValue {
+                                    LiveActivityManager.shared.endActivity()
+                                }
+                            }
+                        ),
+                        isEnabled: LiveActivityManager.shared.isLiveActivitySupported
+                    )
+
+                    // Stillness Reminder
+                    compactToggleRowCard(
+                        icon: "bell.badge",
+                        iconColor: FigmaTheme.secondary,
+                        title: L10n.t("settings_stationary_reminder_title"),
+                        infoPresented: $showStillnessReminderInfo,
+                        isOn: $longStationaryReminderEnabled
+                    )
                 }
             }
             .padding(.horizontal, 18)
@@ -643,6 +648,21 @@ struct SettingsView: View {
             .onAppear { refreshSystemNotificationStatus() }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
                 refreshSystemNotificationStatus()
+            }
+            .alert(L10n.t("settings_voice_broadcast_title"), isPresented: $showVoiceBroadcastInfo) {
+                Button(L10n.t("got_it"), role: .cancel) {}
+            } message: {
+                Text(L10n.t("settings_voice_broadcast_desc"))
+            }
+            .alert(L10n.t("settings_live_activity_title"), isPresented: $showLiveActivityInfo) {
+                Button(L10n.t("got_it"), role: .cancel) {}
+            } message: {
+                Text(L10n.t("settings_live_activity_desc"))
+            }
+            .alert(L10n.t("settings_stationary_reminder_title"), isPresented: $showStillnessReminderInfo) {
+                Button(L10n.t("got_it"), role: .cancel) {}
+            } message: {
+                Text(L10n.t("settings_stationary_reminder_desc"))
             }
         }
     }
@@ -940,10 +960,10 @@ struct SettingsView: View {
                         toggleRowCard(
                             presentation: SettingsRowPresentation(
                                 title: L10n.t("settings_icloud_sync_title"),
-                                subtitle: iCloudSyncSubtitle,
+                                subtitle: nil,
                                 icon: "icloud",
                                 iconColor: FigmaTheme.primary,
-                                textStyle: .supporting
+                                textStyle: .singleLine
                             ),
                             isOn: $iCloudSyncEnabled
                         )
@@ -1441,6 +1461,48 @@ struct SettingsView: View {
         }
         .padding(.horizontal, 20)
         .frame(minHeight: 68)
+        .opacity(isEnabled ? 1 : 0.58)
+        .figmaSurfaceCard(radius: 34)
+    }
+
+    private func infoButton(isPresented: Binding<Bool>) -> some View {
+        Button { isPresented.wrappedValue = true } label: {
+            Image(systemName: "questionmark.circle")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(FigmaTheme.subtext.opacity(0.6))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func compactToggleRowCard(
+        icon: String,
+        iconColor: Color,
+        title: String,
+        infoPresented: Binding<Bool>,
+        isOn: Binding<Bool>,
+        isEnabled: Bool = true
+    ) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundColor(iconColor)
+                .frame(width: 20)
+
+            Text(title)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(FigmaTheme.text)
+                .lineLimit(1)
+
+            infoButton(isPresented: infoPresented)
+
+            Spacer(minLength: 8)
+
+            figmaToggle(isOn: isOn)
+                .disabled(!isEnabled)
+                .opacity(isEnabled ? 1 : 0.45)
+        }
+        .padding(.horizontal, 20)
+        .frame(minHeight: 58)
         .opacity(isEnabled ? 1 : 0.58)
         .figmaSurfaceCard(radius: 34)
     }

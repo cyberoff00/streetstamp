@@ -1746,8 +1746,6 @@ private struct AddFriendSheet: View {
     @State private var message = ""
     @State private var showMessage = false
     @State private var showScannerSheet = false
-    @State private var pendingScanResult: ScannedFriendTarget?
-    @State private var scanResultInvalid = false
 
     init(
         prefillInviteCode: String? = nil,
@@ -1826,25 +1824,20 @@ private struct AddFriendSheet: View {
             } message: {
                 Text(message)
             }
-            .sheet(isPresented: $showScannerSheet, onDismiss: {
-                if let result = pendingScanResult {
-                    pendingScanResult = nil
-                    Task { await submitScannedResult(result) }
-                } else if scanResultInvalid {
-                    scanResultInvalid = false
-                    message = L10n.t("friends_qr_invalid_content")
-                    showMessage = true
-                }
-            }) {
+            .sheet(isPresented: $showScannerSheet) {
                 FriendInviteScannerSheet { text in
                     guard let parsed = AppDeepLinkStore.parseInvite(from: text), !parsed.isEmpty else {
-                        scanResultInvalid = true
+                        message = L10n.t("friends_qr_invalid_content")
+                        showMessage = true
                         return
                     }
                     if let code = parsed.inviteCode, !code.isEmpty {
-                        pendingScanResult = ScannedFriendTarget(inviteCode: code, handle: nil)
+                        Task { await submitScannedResult(ScannedFriendTarget(inviteCode: code, handle: nil)) }
                     } else if let handle = parsed.handle, !handle.isEmpty {
-                        pendingScanResult = ScannedFriendTarget(inviteCode: nil, handle: handle)
+                        Task { await submitScannedResult(ScannedFriendTarget(inviteCode: nil, handle: handle)) }
+                    } else {
+                        message = L10n.t("friends_qr_invalid_content")
+                        showMessage = true
                     }
                 }
             }

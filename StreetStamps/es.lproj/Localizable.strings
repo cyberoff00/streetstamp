@@ -667,7 +667,7 @@
 "settings_migration_device_section" = "Transferencia entre dispositivos";
 "settings_migration_device_desc" = "Transfiere viajes, fotos y lifelog de tu dispositivo antiguo al nuevo a través de la red local. Ambos dispositivos deben estar en la misma red Wi-Fi.";
 "settings_migration_icloud_section" = "Sincronización iCloud";
-"settings_migration_icloud_desc" = "Sincroniza automáticamente los datos con tus otros dispositivos Apple a través de iCloud. Los viajes, lifelog y ajustes se mantienen sincronizados.";
+"settings_migration_icloud_desc" = "Haz copia de seguridad de tus datos en iCloud. Restaura directamente al cambiar a un nuevo dispositivo.";
 "settings_private_transfer_title" = "Transferencia de datos privados";
 "settings_profile_visibility_friends" = "Perfil visible para amigos";
 "settings_profile_visibility_private" = "Perfil visible solo para mi";

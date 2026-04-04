@@ -722,6 +722,9 @@ final class TrackingService: ObservableObject {
         if currentPauseStartedAt == nil {
             currentPauseStartedAt = Date()
         }
+        // Drop GPS to minimum power while paused — keeps the background
+        // location session alive but lets the GPS chip sleep.
+        hub.transitionToPausedPowerSaving()
         refreshDurations()
         updateLiveActivity(memoriesCount: 0)
     }
@@ -741,6 +744,12 @@ final class TrackingService: ObservableObject {
             accumulatedPausedDuration += max(0, Date().timeIntervalSince(pauseStart))
             currentPauseStartedAt = nil
         }
+        // Restore tracking-grade GPS parameters.
+        let cfg = modeConfig
+        hub.transitionFromPausedPowerSaving(
+            accuracy: trackingMode == .sport ? kCLLocationAccuracyBest : kCLLocationAccuracyNearestTenMeters,
+            distanceFilter: cfg.foregroundMinDistance
+        )
         refreshDurations()
         updateLiveActivity(memoriesCount: 0)
     }

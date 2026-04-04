@@ -667,7 +667,7 @@
 "settings_migration_device_section" = "기기 간 전송";
 "settings_migration_device_desc" = "로컬 네트워크를 통해 이전 기기에서 새 기기로 여정, 사진, 라이프로그를 전송합니다. 두 기기를 같은 Wi-Fi에 연결하세요.";
 "settings_migration_icloud_section" = "iCloud 동기화";
-"settings_migration_icloud_desc" = "iCloud를 통해 다른 Apple 기기에 데이터를 자동 동기화합니다. 여정, 라이프로그, 설정이 기기 간에 동기화됩니다.";
+"settings_migration_icloud_desc" = "iCloud로 데이터를 백업합니다. 새 기기로 전환 시 바로 복원할 수 있습니다.";
 "settings_private_transfer_title" = "비공개 데이터 전송";
 "settings_profile_visibility_friends" = "프로필 친구에게만 공개";
 "settings_profile_visibility_private" = "프로필 나만 보기";

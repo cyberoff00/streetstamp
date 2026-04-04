@@ -65,7 +65,7 @@ const R2_REGION = (process.env.R2_REGION || "auto").trim();
 const R2_PUBLIC_BASE = (process.env.R2_PUBLIC_BASE || "").trim();
 const GOOGLE_CLIENT_ID = (process.env.GOOGLE_CLIENT_ID || "").trim();
 const APPLE_AUDIENCES = (process.env.APPLE_AUDIENCES || process.env.APPLE_BUNDLE_ID || "").trim();
-const APPSTORE_FALLBACK_URL = (process.env.APPSTORE_FALLBACK_URL || "https://apps.apple.com/us/search?term=StreetStamps").trim();
+const APPSTORE_FALLBACK_URL = (process.env.APPSTORE_FALLBACK_URL || "https://apps.apple.com/us/search?term=Worldo").trim();
 const WRITE_FREEZE_ENABLED = String(process.env.WRITE_FREEZE_ENABLED || "").trim().toLowerCase();
 const SOCIAL_DISABLED_REGIONS = (process.env.SOCIAL_DISABLED_REGIONS || "CN").trim().toUpperCase().split(",").map(s => s.trim()).filter(Boolean);
 const LEGACY_EMAIL_REVERIFY_EMAIL = normalizeEmail(process.env.LEGACY_EMAIL_REVERIFY_EMAIL || "yinterestingy@163.com");
@@ -422,7 +422,7 @@ async function deliverVerificationEmail(email, token) {
     });
     return;
   }
-  const subject = "Verify your StreetStamps email";
+  const subject = "Verify your Worldo email";
   const text = `Verify your email by opening this link: ${verificationURL}`;
   if (await deliverEmailViaResend({ to: email, subject, text })) {
     return;
@@ -440,7 +440,7 @@ async function deliverPasswordResetEmail(email, token) {
     });
     return;
   }
-  const subject = "Reset your StreetStamps password";
+  const subject = "Reset your Worldo password";
   const text = `Reset your password by opening this link: ${resetURL}`;
   if (await deliverEmailViaResend({ to: email, subject, text })) {
     return;
@@ -538,7 +538,7 @@ function renderEmailVerificationHTML({ ok, title, body }) {
   <main>
     <h1>${safeTitle}</h1>
     <p>${safeBody}</p>
-    <p class="hint">Return to the StreetStamps app. If this link failed, request a new verification email and try again.</p>
+    <p class="hint">Return to the Worldo app. If this link failed, request a new verification email and try again.</p>
   </main>
 </body>
 </html>`;
@@ -549,7 +549,7 @@ function renderPasswordResetHTML({ ok, title, body, deepLink = "" }) {
   const safeBody = escapeHTML(body);
   const safeDeepLink = escapeHTML(deepLink);
   const accent = ok ? "#136f63" : "#9f2d2d";
-  const launchMarkup = ok ? `<p><a href="${safeDeepLink}">Open StreetStamps</a></p>` : "";
+  const launchMarkup = ok ? `<p><a href="${safeDeepLink}">Open Worldo</a></p>` : "";
   const scriptMarkup = ok ? `<script>
     const target = ${JSON.stringify(deepLink)};
     window.setTimeout(() => { window.location.href = target; }, 120);
@@ -607,7 +607,7 @@ function renderPasswordResetHTML({ ok, title, body, deepLink = "" }) {
     <h1>${safeTitle}</h1>
     <p>${safeBody}</p>
     ${launchMarkup}
-    <p class="hint">If the app does not open, return to StreetStamps and request another password reset email.</p>
+    <p class="hint">If the app does not open, return to Worldo and request another password reset email.</p>
   </main>
   ${scriptMarkup}
 </body>
@@ -2391,7 +2391,7 @@ async function main() {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>StreetStamps 邀请</title>
+  <title>Worldo 邀请</title>
   <style>
     body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Helvetica Neue",Arial,sans-serif;background:#f5f6fb;margin:0;padding:0}
     .card{max-width:520px;margin:36px auto;padding:24px;background:#fff;border-radius:18px;box-shadow:0 10px 28px rgba(0,0,0,.08)}
@@ -2405,7 +2405,7 @@ async function main() {
 </head>
 <body>
   <div class="card">
-    <h1>StreetStamps 好友邀请</h1>
+    <h1>Worldo 好友邀请</h1>
     <p>正在打开 App 并跳转到“加好友”页面。</p>
     <div class="meta">
       <p>邀请码：${safeInviteCode || "（未提供）"}</p>
@@ -2616,7 +2616,7 @@ async function main() {
       return res.send(renderEmailVerificationHTML({
         ok: true,
         title: "Email verified",
-        body: "Your StreetStamps email has been verified. You can return to the app and sign in."
+        body: "Your Worldo email has been verified. You can return to the app and sign in."
       }));
     } catch (err) {
       console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
@@ -2650,8 +2650,8 @@ async function main() {
       res.type("html");
       return res.send(renderPasswordResetHTML({
         ok: true,
-        title: "Open StreetStamps",
-        body: "Continue in the StreetStamps app to choose a new password.",
+        title: "Open Worldo",
+        body: "Continue in the Worldo app to choose a new password.",
         deepLink
       }));
     } catch (err) {
@@ -3072,6 +3072,7 @@ async function main() {
         }
       }
 
+      if (!pgPool) await saveDB();
       const refreshToken = await issueStoredRefreshTokenAsync(uid, u.provider);
       u = await getUser(uid);
       return res.status(200).json(await authSuccessPayloadAsync(
@@ -3238,7 +3239,7 @@ async function main() {
         read: false
       };
       await pushNotificationAndPersist(target.id, notif, {
-        title: "StreetStamps",
+        title: "Worldo",
         body: `${me.displayName} 向你发送了好友申请`
       });
 
@@ -3321,7 +3322,7 @@ async function main() {
         fromUser.notifications.unshift(notif);
       }
       fireRemotePush(fromUser.id, {
-        title: "StreetStamps",
+        title: "Worldo",
         body: `${me.displayName} 通过了你的好友申请`
       });
 
@@ -3693,7 +3694,7 @@ async function main() {
           read: false
         };
         await pushNotificationAndPersist(ownerUserID, notif, {
-          title: "StreetStamps",
+          title: "Worldo",
           body: `${viewer.displayName} 赞了你的旅程`
         });
       }
@@ -3893,7 +3894,7 @@ async function main() {
         target.notifications.unshift(notif);
       }
       fireRemotePush(target.id, {
-        title: "StreetStamps",
+        title: "Worldo",
         body: `${me.displayName} 给你寄了一张明信片`
       });
       const saveDurationMs = elapsedMs(saveStartedAt);
@@ -4096,7 +4097,7 @@ async function main() {
         await DB.upsertPostcardReaction(pgPool, reactionObj);
       });
       await pushNotificationAndPersist(sender.id, notif, {
-        title: "StreetStamps",
+        title: "Worldo",
         body: notifBody
       });
 
@@ -4232,7 +4233,7 @@ async function main() {
         read: false
       };
       await pushNotificationAndPersist(targetID, notification, {
-        title: "StreetStamps",
+        title: "Worldo",
         body: `${viewer.displayName}在你的沙发上坐了一坐`
       });
       return res.status(200).json({ ok: true, message: `已踩一踩 ${target.displayName} 的主页` });

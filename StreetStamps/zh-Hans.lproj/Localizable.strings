@@ -658,7 +658,7 @@
 "settings_migration_device_section" = "设备间迁移";
 "settings_migration_device_desc" = "更换设备时，通过局域网将旅程、照片和足迹从旧设备直接传输到新设备。两台设备需在同一 Wi-Fi 下。";
 "settings_migration_icloud_section" = "iCloud 云同步";
-"settings_migration_icloud_desc" = "通过 iCloud 自动同步数据到你的其他苹果设备。开启后旅程、足迹和设置会在多台设备间保持同步。";
+"settings_migration_icloud_desc" = "通过 iCloud 备份数据，切换新设备后可直接恢复。";
 "settings_subscription_row" = "订阅";
 "settings_sign_in_title" = "登录 Worldo";
 "settings_sign_in_subtitle" = "同步旅行数据，解锁好友功能";
@@ -1193,8 +1193,8 @@
 // MARK: - Privacy Options
 "privacy_toggle_title" = "隐私保护";
 "privacy_description" = "隐私选项将应用于分享的图片和好友动态。";
-"privacy_trim_endpoints" = "隐藏起终点附近位置（300米）";
-"privacy_hide_landmarks" = "隐藏地标与兴趣点标注";
+"privacy_trim_endpoints" = "隐藏首尾路线 300m";
+"privacy_hide_landmarks" = "隐藏地标，模糊地图背景";
 
 // MARK: - Photo Editor
 "photo_editor_text" = "文字";

@@ -381,6 +381,28 @@ final class LocationHub: ObservableObject {
         }
     }
 
+    /// In-place transition to minimal power while paused — keeps session alive but GPS sleeps.
+    func transitionToPausedPowerSaving() {
+        #if DEBUG
+        if mode == .mock { return }
+        #endif
+
+        if current === systemSource {
+            systemSource.transitionToPausedPowerSaving()
+        }
+    }
+
+    /// Restore tracking-grade GPS after pause ends.
+    func transitionFromPausedPowerSaving(accuracy: CLLocationAccuracy, distanceFilter: CLLocationDistance) {
+        #if DEBUG
+        if mode == .mock { return }
+        #endif
+
+        if current === systemSource {
+            systemSource.transitionFromPausedPowerSaving(accuracy: accuracy, distanceFilter: distanceFilter)
+        }
+    }
+
     /// In-place transition to power-saving parameters without stopping location updates.
     /// Preserves the background session under WhenInUse authorization.
     func transitionToBackgroundPowerSaving() {
