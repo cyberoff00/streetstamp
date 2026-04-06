@@ -73,16 +73,6 @@ struct SettingsRowPresentation {
     let iconColor: Color
     let textStyle: SettingsRowTextStyle
 
-    static var mapDarkMode: SettingsRowPresentation {
-        SettingsRowPresentation(
-            title: L10n.t("settings_map_dark_mode"),
-            subtitle: nil,
-            icon: "map",
-            iconColor: FigmaTheme.primary,
-            textStyle: .singleLine
-        )
-    }
-
     static var stationaryReminder: SettingsRowPresentation {
         SettingsRowPresentation(
             title: L10n.t("settings_stationary_reminder_title"),
@@ -269,7 +259,7 @@ struct SettingsView: View {
     @EnvironmentObject private var blockStore: UserBlockStore
     @ObservedObject private var languagePreference = LanguagePreference.shared
 
-    @AppStorage(MapAppearanceSettings.storageKey) private var mapAppearanceRaw = MapAppearanceSettings.current.rawValue
+    @AppStorage(MapLayerStyle.storageKey) private var mapLayerRaw = MapLayerStyle.current.rawValue
     @AppStorage(AppSettings.voiceBroadcastEnabledKey) private var voiceBroadcastEnabled = true
     @AppStorage(AppSettings.voiceBroadcastIntervalKMKey) private var voiceBroadcastIntervalKM = 1
     @AppStorage(AppSettings.longStationaryReminderEnabledKey) private var longStationaryReminderEnabled = true
@@ -311,9 +301,34 @@ struct SettingsView: View {
     @State private var showRestoreConfirmation = false
     @State private var showMembershipGate: MembershipGatedFeature? = nil
 
-    private var appearance: MapAppearanceStyle {
-        get { MapAppearanceStyle(rawValue: mapAppearanceRaw) ?? .dark }
-        nonmutating set { mapAppearanceRaw = newValue.rawValue }
+    private enum SettingsNavDest: String, Identifiable {
+        case subscription, dataMigration, gpxImport
+        case notifications, language, debugTools
+        case aboutUs, faq, blockedUsers
+        var id: String { rawValue }
+    }
+    @State private var activeNavDest: SettingsNavDest? = nil
+
+    @State private var showMapLayerPicker = false
+
+    private var mapEnginePickerRow: some View {
+        Button {
+            showMapLayerPicker = true
+        } label: {
+            settingsRowLabel(
+                title: L10n.t("settings_map_engine"),
+                icon: "square.3.layers.3d",
+                iconColor: FigmaTheme.primary,
+                badgeText: MapLayerStyle(rawValue: mapLayerRaw)?.title
+            )
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $showMapLayerPicker) {
+            MapLayerPickerView(isPresented: $showMapLayerPicker)
+                .presentationDetents([.height(340)])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(UITheme.bg)
+        }
     }
 
     private var accountValue: String {
@@ -442,6 +457,11 @@ struct SettingsView: View {
                     .environmentObject(sessionStore)
             }
         }
+        .fullScreenCover(item: $activeNavDest) { dest in
+            NavigationStack {
+                settingsNavDestView(for: dest)
+            }
+        }
     }
 
     private var settingsHeader: some View {
@@ -469,9 +489,7 @@ struct SettingsView: View {
 
             VStack(spacing: 10) {
                 ForEach(SettingsGeneralPresentation.rows(), id: \.destination) { row in
-                    NavigationLink {
-                        settingsDestinationView(for: row.destination)
-                    } label: {
+                    Button { activeNavDest = settingsNavDest(for: row.destination) } label: {
                         settingsRowLabel(
                             title: row.title,
                             icon: row.icon,
@@ -490,9 +508,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             sectionTitle(L10n.t("settings_blocked_users_title"))
 
-            NavigationLink {
-                BlockedUsersListView()
-            } label: {
+            Button { activeNavDest = .blockedUsers } label: {
                 settingsRowLabel(
                     title: L10n.t("settings_blocked_users_row"),
                     icon: "hand.raised",
@@ -505,10 +521,24 @@ struct SettingsView: View {
         }
     }
 
-    @ViewBuilder
-    private func settingsDestinationView(for destination: SettingsGeneralRowPresentation.Destination) -> some View {
+    private func settingsNavDest(for destination: SettingsGeneralRowPresentation.Destination) -> SettingsNavDest {
         switch destination {
-        case .importGPX:
+        case .importGPX: return .gpxImport
+        case .notifications: return .notifications
+        case .language: return .language
+        case .debugTools: return .debugTools
+        }
+    }
+
+    @ViewBuilder
+    private func settingsNavDestView(for dest: SettingsNavDest) -> some View {
+        switch dest {
+        case .subscription:
+            MembershipSubscriptionView()
+                .environmentObject(MembershipStore.shared)
+        case .dataMigration:
+            dataMigrationView
+        case .gpxImport:
             gpxImportEntryView
         case .notifications:
             notificationsView
@@ -520,6 +550,12 @@ struct SettingsView: View {
             #else
             EmptyView()
             #endif
+        case .aboutUs:
+            AboutUsView()
+        case .faq:
+            FAQView()
+        case .blockedUsers:
+            BlockedUsersListView()
         }
     }
 
@@ -745,10 +781,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             sectionTitle(L10n.t("settings_subscription_row"))
 
-            NavigationLink {
-                MembershipSubscriptionView()
-                    .environmentObject(MembershipStore.shared)
-            } label: {
+            Button { activeNavDest = .subscription } label: {
                 settingsRowLabel(title: L10n.t("settings_subscription_row"), icon: "creditcard", iconColor: FigmaTheme.primary)
             }
             .buttonStyle(.plain)
@@ -760,34 +793,14 @@ struct SettingsView: View {
             sectionTitle(L10n.t("settings_section_utilities"))
 
             VStack(spacing: 10) {
-                NavigationLink {
-                    dataMigrationView
-                } label: {
+                Button { activeNavDest = .dataMigration } label: {
                     settingsRowLabel(title: L10n.t("settings_data_migration_row"), icon: "externaldrive.badge.icloud", iconColor: FigmaTheme.primary)
                 }
                 .buttonStyle(.plain)
 
-                toggleRowCard(
-                    presentation: .mapDarkMode,
-                    isOn: Binding(
-                        get: { appearance == .dark },
-                        set: { newValue in
-                            let targetStyle: MapAppearanceStyle = newValue ? .dark : .light
-                            if MembershipStore.shared.isMapAppearanceLocked(targetStyle) {
-                                showMembershipGate = .mapAppearance
-                                return
-                            }
-                            appearance = targetStyle
-                            MapAppearanceSettings.apply(targetStyle)
-                            CityImageMemoryCache.shared.removeAll()
-                            StartupWarmupService.shared.invalidateWarmedKeys()
-                        }
-                    )
-                )
+                mapEnginePickerRow
 
-                NavigationLink {
-                    gpxImportEntryView
-                } label: {
+                Button { activeNavDest = .gpxImport } label: {
                     settingsRowLabel(
                         title: L10n.t("settings_import_gpx_row"),
                         icon: "map",
@@ -1187,9 +1200,7 @@ struct SettingsView: View {
                 ForEach(SettingsInformationPresentation.rows(appVersionText: appVersionText), id: \.destination) { row in
                     switch row.destination {
                     case .aboutUs:
-                        NavigationLink {
-                            AboutUsView()
-                        } label: {
+                        Button { activeNavDest = .aboutUs } label: {
                             settingsRowLabel(
                                 title: row.title,
                                 icon: row.icon,
@@ -1200,9 +1211,7 @@ struct SettingsView: View {
                         }
                         .buttonStyle(.plain)
                     case .faq:
-                        NavigationLink {
-                            FAQView()
-                        } label: {
+                        Button { activeNavDest = .faq } label: {
                             settingsRowLabel(
                                 title: row.title,
                                 icon: row.icon,
@@ -1239,9 +1248,7 @@ struct SettingsView: View {
                 }
 
                 if sessionStore.isLoggedIn && FeatureFlagStore.shared.socialEnabled {
-                    NavigationLink {
-                        BlockedUsersListView()
-                    } label: {
+                    Button { activeNavDest = .blockedUsers } label: {
                         settingsRowLabel(
                             title: L10n.t("settings_blocked_users_row"),
                             icon: "hand.raised",
@@ -1584,6 +1591,7 @@ struct SettingsView: View {
             if let badgeText {
                 Text(badgeText)
                     .font(.system(size: 10, weight: .semibold))
+                    .textCase(.uppercase)
                     .tracking(0.6)
                     .foregroundColor(FigmaTheme.text)
                     .padding(.horizontal, 12)

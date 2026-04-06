@@ -35,6 +35,7 @@ struct ProfileView: View {
     @State private var toastText = ""
     @State private var showToast = false
     @ObservedObject private var featureFlags = FeatureFlagStore.shared
+    @State private var showSettings = false
     @State private var showNotificationsSheet = false
     @State private var showPostcardInboxFromNotification = false
     @State private var notifSheetJourneyPush: NotifJourneyPush? = nil
@@ -71,39 +72,40 @@ struct ProfileView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack(alignment: .top) {
-                FigmaTheme.background.ignoresSafeArea()
-                
-                VStack(spacing: 0) {
-                    headerView
-                    
-                    ScrollView(showsIndicators: false) {
-                        VStack(spacing: 20) {
-                            avatarHeaderCard
-                            topActionRow
-                        }
-                        .frame(maxWidth: 430)
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal, 20)
-                        .padding(.top, 4)
-                        .padding(.bottom, 56)
+        ZStack(alignment: .top) {
+            FigmaTheme.background.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                headerView
+
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 20) {
+                        avatarHeaderCard
+                        topActionRow
                     }
+                    .frame(maxWidth: 430)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 4)
+                    .padding(.bottom, 56)
                 }
             }
-            .toolbar(.hidden, for: .navigationBar)
-            .overlay(alignment: .top) {
-                if showToast {
-                    Text(toastText)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color.black.opacity(0.85))
-                        .clipShape(Capsule())
-                        .padding(.top, 8)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
+        }
+        .toolbar(.hidden, for: .navigationBar)
+        .navigationDestination(isPresented: $showSettings) {
+            SettingsView(showsBackButton: true)
+        }
+        .overlay(alignment: .top) {
+            if showToast {
+                Text(toastText)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.black.opacity(0.85))
+                    .clipShape(Capsule())
+                    .padding(.top, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .onChange(of: loadout) { _, newValue in
@@ -197,8 +199,8 @@ struct ProfileView: View {
 
             Spacer()
 
-            NavigationLink {
-                SettingsView(showsBackButton: true)
+            Button {
+                showSettings = true
             } label: {
                 Image(systemName: "gearshape")
                     .font(.system(size: 18, weight: .semibold))
@@ -859,6 +861,7 @@ struct InviteFriendSheet: View {
                             .foregroundColor(FigmaTheme.primary)
                             .frame(maxWidth: .infinity)
                             .frame(height: 48)
+                            .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 24, style: .continuous)
                                     .stroke(FigmaTheme.primary, lineWidth: 2)
@@ -962,19 +965,15 @@ struct InviteFriendSheet: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
-            .task {
-                if qrImage == nil {
-                    qrImage = InviteQRCodeGenerator.generate(from: inviteDeepLink)
-                }
-                if shareCardImage == nil {
-                    shareCardImage = InviteShareCardRenderer.render(
-                        displayName: displayName,
-                        exclusiveID: exclusiveID,
-                        inviteCode: inviteCode,
-                        loadout: loadout,
-                        qrImage: qrImage
-                    )
-                }
+            .task(id: inviteCode) {
+                qrImage = InviteQRCodeGenerator.generate(from: inviteDeepLink)
+                shareCardImage = InviteShareCardRenderer.render(
+                    displayName: displayName,
+                    exclusiveID: exclusiveID,
+                    inviteCode: inviteCode,
+                    loadout: loadout,
+                    qrImage: qrImage
+                )
             }
             .sheet(isPresented: $showShare) {
                 if let card = shareCardImage {
@@ -1057,9 +1056,22 @@ private enum InviteQRCodeGenerator {
         guard let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
         filter.setValue(data, forKey: "inputMessage")
         filter.setValue("Q", forKey: "inputCorrectionLevel")
-        guard let output = filter.outputImage else { return nil }
-        let transform = CGAffineTransform(scaleX: 10, y: 10)
-        let scaled = output.transformed(by: transform)
+        guard let qrOutput = filter.outputImage else { return nil }
+
+        // Tint QR code to brand green (#2D6A4F dark green for good contrast)
+        guard let colorFilter = CIFilter(name: "CIFalseColor") else {
+            // Fallback: return black QR
+            let scaled = qrOutput.transformed(by: CGAffineTransform(scaleX: 10, y: 10))
+            let ctx = CIContext(options: nil)
+            guard let cg = ctx.createCGImage(scaled, from: scaled.extent) else { return nil }
+            return UIImage(cgImage: cg)
+        }
+        colorFilter.setValue(qrOutput, forKey: "inputImage")
+        colorFilter.setValue(CIColor(red: 0.18, green: 0.42, blue: 0.31), forKey: "inputColor0") // foreground
+        colorFilter.setValue(CIColor.white, forKey: "inputColor1")                                // background
+        guard let tinted = colorFilter.outputImage else { return nil }
+
+        let scaled = tinted.transformed(by: CGAffineTransform(scaleX: 10, y: 10))
         let context = CIContext(options: nil)
         guard let cgImage = context.createCGImage(scaled, from: scaled.extent) else { return nil }
         return UIImage(cgImage: cgImage)
@@ -1104,61 +1116,78 @@ private struct InviteShareCardView: View {
         )
     }
 
+    private let brandGreen = Color(red: 0.0, green: 182.0/255, blue: 122.0/255)     // #00B67A
+    private let bgTint = Color(red: 240.0/255, green: 248.0/255, blue: 244.0/255)  // very subtle green-white
+
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [Color(red: 0.94, green: 0.95, blue: 0.99), Color.white],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+        VStack(spacing: 0) {
+            Spacer(minLength: 24)
 
-            VStack(spacing: 14) {
-                Text(L10n.t("app_name"))
-                    .font(.system(size: 28, weight: .black))
-                    .foregroundColor(FigmaTheme.text)
+            // Brand wordmark
+            Text(L10n.t("app_name"))
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .foregroundColor(brandGreen.opacity(0.45))
+                .tracking(6)
 
-                HStack(spacing: 10) {
-                    RobotRendererView(size: 62, face: .front, loadout: loadout)
-                        .frame(width: 62, height: 62)
-                        .background(Color.black.opacity(0.05))
-                        .clipShape(Circle())
+            Spacer(minLength: 20)
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(presentation.titleText)
-                            .font(.system(size: 20, weight: .bold))
-                            .foregroundColor(FigmaTheme.text)
+            // Avatar
+            RobotRendererView(size: 72, face: .front, loadout: loadout)
+                .frame(width: 72, height: 72)
+                .background(brandGreen.opacity(0.1))
+                .clipShape(Circle())
 
-                        if let visibleExclusiveIDText = presentation.visibleExclusiveIDText {
-                            Text(visibleExclusiveIDText)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(FigmaTheme.subtext)
-                        }
-                    }
-                    Spacer()
+            // Display name
+            Text(presentation.titleText)
+                .font(.system(size: 22, weight: .bold))
+                .foregroundColor(Color(red: 0.13, green: 0.13, blue: 0.13))
+                .padding(.top, 10)
+
+            Spacer(minLength: 24)
+
+            // QR code
+            Image(uiImage: qrImage)
+                .interpolation(.none)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 240, height: 240)
+
+            Spacer(minLength: 24)
+
+            // Invite code — individual boxed characters
+            HStack(spacing: 8) {
+                ForEach(Array(presentation.codeText.enumerated()), id: \.offset) { _, ch in
+                    Text(String(ch))
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .foregroundColor(Color(red: 0.13, green: 0.13, blue: 0.13))
+                        .frame(width: 40, height: 46)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(Color.black.opacity(0.1), lineWidth: 1)
+                        )
                 }
-
-                Image(uiImage: qrImage)
-                    .interpolation(.none)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 220, height: 220)
-                    .padding(12)
-                    .background(Color.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-
-                Text(presentation.codeText)
-                    .font(.system(size: 38, weight: .black, design: .rounded))
-                    .foregroundColor(FigmaTheme.text)
-                    .tracking(1.8)
-
-                Text(L10n.t("profile_open_app_to_scan"))
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(FigmaTheme.subtext)
             }
-            .padding(24)
+
+            Spacer(minLength: 20)
+
+            // Breadcrumb hint
+            HStack(spacing: 6) {
+                Image(systemName: "qrcode.viewfinder")
+                    .font(.system(size: 12, weight: .medium))
+                Text(L10n.t("profile_open_app_to_scan"))
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .foregroundColor(Color.black.opacity(0.3))
+            .padding(.horizontal, 18)
+            .padding(.vertical, 10)
+            .background(Color.black.opacity(0.04))
+            .clipShape(Capsule())
+
+            Spacer(minLength: 24)
         }
-        .frame(width: 680, height: 1020)
+        .frame(width: 560, height: 860)
+        .background(bgTint)
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
     }
 }
 
@@ -1557,385 +1586,6 @@ struct StatNavRow: View {
                 .padding(.leading, 4)
         }
         .appFullSurfaceTapTarget(.rectangle)
-    }
-}
-
-// MARK: - Recent Journeys
-
-struct RecentJourneysView: View {
-    @EnvironmentObject private var store: JourneyStore
-    @EnvironmentObject private var cityCache: CityCache
-    @ObservedObject private var languagePreference = LanguagePreference.shared
-    @Environment(\.dismiss) private var dismiss
-    @State private var localizedCityNameByKey: [String: String] = [:]
-
-    private var cutoffDate: Date {
-        // "过去一个月"：这里按最近 30 天计算
-        Date().addingTimeInterval(-30 * 24 * 60 * 60)
-    }
-
-    private var recentJourneys: [JourneyRoute] {
-        store.journeys
-            .filter { j in
-                guard let start = j.startTime, let end = j.endTime else { return false }
-                guard end >= cutoffDate else { return false }
-                guard !j.isTooShort else { return false }
-                return end >= start
-            }
-            .sorted { (a, b) in
-                (a.endTime ?? .distantPast) > (b.endTime ?? .distantPast)
-            }
-    }
-
-    var body: some View {
-        ZStack(alignment: .top) {
-            UITheme.bg.ignoresSafeArea()
-
-            VStack(spacing: 0) {
-                header
-
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        if recentJourneys.isEmpty {
-                            emptyState
-                        } else {
-                            ForEach(recentJourneys, id: \.id) { j in
-                                RecentJourneyCard(journey: j, cityName: resolvedDisplayCityName(for: j))
-                                    .scrollTransition(.animated(.spring(response: 0.4, dampingFraction: 0.85))) { content, phase in
-                                        content
-                                            .opacity(phase.isIdentity ? 1 : 0.3)
-                                            .scaleEffect(phase.isIdentity ? 1 : 0.96)
-                                    }
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                    .padding(.bottom, 28)
-                }
-            }
-        }
-        .navigationBarHidden(true)
-        .task(id: cityLocalizationTaskKey) {
-            await refreshCityLocalizations()
-        }
-    }
-
-    private var cityLocalizationTaskKey: String {
-        let lang = languagePreference.currentLanguage ?? "sys"
-        let journeyPart = recentJourneys
-            .map { "\($0.id)|\($0.startCityKey ?? $0.cityKey)" }
-            .joined(separator: ",")
-        return "\(lang)|\(journeyPart)"
-    }
-
-    private var cachedCitiesByKey: [String: CachedCity] {
-        cityCache.cachedCitiesByKey
-    }
-
-    private func refreshCityLocalizations() async {
-        await MainActor.run { localizedCityNameByKey = [:] }
-        var coordByKey: [String: CLLocationCoordinate2D] = [:]
-        for journey in recentJourneys {
-            let key = journey.stableCityKey ?? ""
-            guard !key.isEmpty, key != "Unknown|", coordByKey[key] == nil else { continue }
-            if let start = journey.startCoordinate, start.isValid {
-                coordByKey[key] = start
-            }
-        }
-
-        for (key, coord) in coordByKey {
-            let displayLocale = LanguagePreference.shared.displayLocale
-
-            if let cachedCity = cachedCitiesByKey[key] {
-                let title = cachedCity.displayTitle
-                if !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    await MainActor.run { localizedCityNameByKey[key] = title }
-                    continue
-                }
-            }
-
-            let parentRegionKey = cachedCitiesByKey[key]?.parentScopeKey
-
-            if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key, parentRegionKey: parentRegionKey),
-               !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                await MainActor.run { localizedCityNameByKey[key] = cached }
-                continue
-            }
-
-            let loc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
-            if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key, parentRegionKey: parentRegionKey),
-               !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                await MainActor.run { localizedCityNameByKey[key] = title }
-            }
-        }
-    }
-
-    private func resolvedDisplayCityName(for journey: JourneyRoute) -> String {
-        let fallbackTitle = JourneyCityNamePresentation.title(
-            for: journey,
-            localizedCityNameByKey: localizedCityNameByKey,
-            cachedCitiesByKey: cachedCitiesByKey
-        )
-        let cityKey = (journey.startCityKey ?? journey.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
-        return CityDisplayResolver.title(
-            for: cityKey,
-            fallbackTitle: fallbackTitle
-        )
-    }
-
-    private var header: some View {
-        VStack(spacing: 10) {
-            HStack {
-                AppBackButton(foreground: FigmaTheme.text.opacity(0.6))
-
-                Spacer()
-            }
-            .padding(.horizontal, 24)
-            .padding(.top, 4)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(L10n.t("recent_journeys_title"))
-                    .navigationTitleStyle(level: .secondary)
-                    .foregroundColor(FigmaTheme.text)
-
-                Text(String(format: L10n.t("recent_journeys_last_30_days"), locale: Locale.current, recentJourneys.count))
-                    .font(.system(size: 11, weight: .medium))
-                    .tracking(1)
-                    .foregroundColor(FigmaTheme.text.opacity(0.5))
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 32)
-            .padding(.bottom, 10)
-        }
-        .background(UITheme.bg)
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 10) {
-            Text(L10n.key("recent_journeys_empty_title"))
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(FigmaTheme.text.opacity(0.6))
-
-            Text(L10n.key("recent_journeys_empty_desc"))
-                .font(.system(size: 12))
-                .foregroundColor(FigmaTheme.text.opacity(0.45))
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 60)
-        .padding(.horizontal, 18)
-    }
-}
-
-struct RecentJourneyCard: View {
-    var journey: JourneyRoute
-    var cityName: String
-
-    @EnvironmentObject private var cityCache: CityCache
-    @EnvironmentObject private var store: JourneyStore
-    @EnvironmentObject private var sessionStore: UserSessionStore
-    @State private var image: UIImage? = nil
-    @State private var isGenerating = false
-    @State private var showSaveToast = false
-    @State private var saveToastText = L10n.t("share_saved_to_photos")
-    @State private var imageSaver: ImageSaver? = nil
-    @State private var activeJourneyDetail: JourneyMemoryDetailDestination? = nil
-
-    private var durationText: String {
-        guard let start = journey.startTime else {
-            return String(format: L10n.t("share_duration_min"), locale: Locale.current, 0)
-        }
-        let end = journey.endTime ?? Date()
-        let minutes = max(0, Int(end.timeIntervalSince(start) / 60))
-        return String(format: L10n.t("share_duration_min"), locale: Locale.current, minutes)
-    }
-
-    private var dateText: String {
-        guard let end = journey.endTime else { return "" }
-        let df = DateFormatter()
-        df.locale = Locale.current
-        df.dateStyle = .medium
-        df.timeStyle = .short
-        return df.string(from: end)
-    }
-
-    private var localizedCountryName: String {
-        let iso = (journey.countryISO2 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard iso.count == 2 else {
-            return L10n.t("unknown_country")
-        }
-        return LanguagePreference.shared.displayLocale.localizedString(forRegionCode: iso) ?? iso
-    }
-
-    private var detailButtonText: String {
-        L10n.t("view_journey_memories")
-    }
-
-    private var cachedCitiesByKey: [String: CachedCity] {
-        cityCache.cachedCitiesByKey
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ZStack {
-                if let img = image {
-                    Image(uiImage: img)
-                        .resizable()
-                        .scaledToFit()
-                        .contentShape(Rectangle())
-                        .onLongPressGesture(minimumDuration: 0.6) {
-                            saveToPhotos(img)
-                        }
-                        .contextMenu {
-                            Button {
-                                saveToPhotos(img)
-                            } label: {
-                                Label(L10n.t("save_image"), systemImage: "square.and.arrow.down")
-                            }
-                        }
-                } else {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color.black.opacity(0.06))
-                        .frame(height: 320)
-                        .overlay(
-                            VStack(spacing: 10) {
-                                ProgressView()
-                                Text(L10n.key("share_generating"))
-                                    .font(.system(size: 12))
-                                    .foregroundColor(FigmaTheme.text.opacity(0.45))
-                            }
-                        )
-                }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(alignment: .top) {
-                if showSaveToast {
-                    Text(saveToastText)
-                        .font(.system(size: 11, weight: .semibold))
-                        .tracking(0.6)
-                        .foregroundColor(FigmaTheme.text.opacity(0.75))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.white.opacity(0.92))
-                        .clipShape(Capsule())
-                        .padding(.top, 10)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text(cityName)
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(FigmaTheme.text)
-
-                Text(dateText)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(FigmaTheme.text.opacity(0.5))
-
-                HStack(spacing: 10) {
-                    Text(String(format: "%.2f km", max(0, journey.distance / 1000.0)))
-                    Text("·")
-                    Text(durationText)
-                    Text("·")
-                    Text(String(format: L10n.t("mem_short"), locale: Locale.current, journey.memories.count))
-                }
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(FigmaTheme.text.opacity(0.45))
-            }
-            .padding(.horizontal, 2)
-
-            Button {
-                activeJourneyDetail = JourneyMemoryDetailDestination(
-                    journey: journey,
-                    memories: journey.memories.sorted(by: { $0.timestamp < $1.timestamp }),
-                    cityName: cityName,
-                    countryName: localizedCountryName,
-                    readOnly: false,
-                    friendLoadout: nil
-                )
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "book.pages")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text(detailButtonText)
-                        .font(.system(size: 12, weight: .semibold))
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
-                }
-                .foregroundColor(FigmaTheme.text.opacity(0.78))
-                .padding(.horizontal, 10)
-                .frame(height: 34)
-                .background(Color.black.opacity(0.05))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(14)
-        .background(Color.white)
-        .cornerRadius(18)
-        .fullScreenCover(item: $activeJourneyDetail) { destination in
-            JourneyMemoryDetailView(
-                journey: destination.journey,
-                memories: destination.memories,
-                cityName: destination.cityName,
-                countryName: destination.countryName,
-                readOnly: destination.readOnly,
-                friendLoadout: destination.friendLoadout
-            )
-            .environmentObject(store)
-            .environmentObject(sessionStore)
-        }
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.black.opacity(0.08), lineWidth: 1)
-        )
-        .onAppear {
-            generateIfNeeded()
-        }
-    }
-
-    private func generateIfNeeded() {
-        guard image == nil, !isGenerating else { return }
-
-        // too short / empty journey -> show placeholder card
-        if journey.coordinates.count < 1 || journey.isTooShort {
-            image = ShareCardGenerator.placeholderCard()
-            return
-        }
-
-        isGenerating = true
-        ShareCardGenerator.generate(
-            journey: journey,
-            cachedCitiesByKey: cachedCitiesByKey,
-            privacy: .exact
-        ) { img in
-            self.image = img
-            self.isGenerating = false
-        }
-    }
-
-    private func saveToPhotos(_ img: UIImage) {
-        Haptics.light()
-
-        // Hold a strong reference until completion callback
-        let saver = ImageSaver { err in
-            DispatchQueue.main.async {
-                self.imageSaver = nil
-                self.saveToastText = (err == nil) ? L10n.t("share_saved_to_photos") : L10n.t("save_failed")
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
-                    self.showSaveToast = true
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                        self.showSaveToast = false
-                    }
-                }
-            }
-        }
-        self.imageSaver = saver
-        saver.writeToPhotoAlbum(img)
     }
 }
 

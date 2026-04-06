@@ -36,23 +36,21 @@ struct MainTabLayout {
     }
 }
 
-enum MainSidebarDestination: String, Identifiable, CaseIterable {
+enum ModalNavDestination: String, Identifiable, CaseIterable {
     case profile
     case settings
     case equipment
-    case postcards
     case inviteFriend
 
     var id: String { rawValue }
 
-    static let primaryDestinations: [MainSidebarDestination] = [
+    static let primaryDestinations: [ModalNavDestination] = [
         .profile,
         .equipment,
         .settings
     ]
 
-    static let quickActions: [MainSidebarDestination] = [
-        .postcards,
+    static let quickActions: [ModalNavDestination] = [
         .inviteFriend
     ]
 
@@ -64,18 +62,16 @@ enum MainSidebarDestination: String, Identifiable, CaseIterable {
             return NavigationChrome(title: L10n.t("settings_title"), leadingAccessory: .none, titleLevel: .secondary)
         case .equipment:
             return NavigationChrome(title: L10n.upper("equipment_title"), leadingAccessory: .none, titleLevel: .secondary)
-        case .postcards:
-            return NavigationChrome(title: L10n.upper("postcard_nav_title"), leadingAccessory: .back, titleLevel: .secondary)
         case .inviteFriend:
             return NavigationChrome(title: L10n.upper("profile_invite_friends"), leadingAccessory: .back, titleLevel: .secondary)
         }
     }
 }
 
-struct MainSidebarPresentationState {
-    var activeDestination: MainSidebarDestination?
+struct ModalNavPresentationState {
+    var activeDestination: ModalNavDestination?
 
-    mutating func handleOpenDestinationSignal(pendingDestination: MainSidebarDestination?) {
+    mutating func handleOpenDestinationSignal(pendingDestination: ModalNavDestination?) {
         guard let pendingDestination else { return }
         activeDestination = pendingDestination
     }
@@ -89,7 +85,7 @@ struct MainSidebarPresentationState {
 struct MainTabView: View {
     @State private var selectedTab: NavigationTab = .start
     @State private var loadedTabs: Set<NavigationTab> = [.start]
-    @State private var sidebarPresentation = MainSidebarPresentationState()
+    @State private var modalNavPresentation = ModalNavPresentationState()
 
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var flow: AppFlowCoordinator
@@ -163,16 +159,16 @@ struct MainTabView: View {
             selectedTab = .start
             flow.requestWidgetCapture()
         }
-        .onReceive(flow.$openSidebarDestinationSignal) { _ in
-            sidebarPresentation.handleOpenDestinationSignal(
-                pendingDestination: flow.pendingSidebarDestination
+        .onReceive(flow.$openModalDestinationSignal) { _ in
+            modalNavPresentation.handleOpenDestinationSignal(
+                pendingDestination: flow.pendingModalDestination
             )
-            flow.consumePendingSidebarDestination()
+            flow.consumePendingModalDestination()
         }
-        .fullScreenCover(item: $sidebarPresentation.activeDestination, onDismiss: {
-            sidebarPresentation.dismiss()
+        .fullScreenCover(item: $modalNavPresentation.activeDestination, onDismiss: {
+            modalNavPresentation.dismiss()
         }) { destination in
-            sidebarDestinationView(for: destination)
+            modalDestinationView(for: destination)
         }
         .alert(L10n.t("resume_prompt_title"), isPresented: Binding(
             get: { pendingResumeJourney != nil },
@@ -290,20 +286,9 @@ struct MainTabView: View {
     }
 
     @ViewBuilder
-    private func sidebarDestinationView(for destination: MainSidebarDestination) -> some View {
-        NavigationStack {
-            switch destination {
-            case .profile:
-                ProfileView()
-            case .settings:
-                SettingsView()
-            case .equipment:
-                SidebarEquipmentEntryView()
-            case .postcards:
-                SidebarPostcardsEntryView(initialBox: .received, focusMessageID: nil)
-            case .inviteFriend:
-                SidebarInviteFriendEntryView()
-            }
+    private func modalDestinationView(for destination: ModalNavDestination) -> some View {
+        ModalNavigationWrapper(destination: destination) {
+            modalNavPresentation.dismiss()
         }
     }
 
@@ -343,7 +328,7 @@ enum TabRenderPolicy {
     }
 }
 
-private struct SidebarEquipmentEntryView: View {
+private struct ModalEquipmentEntryView: View {
     @EnvironmentObject private var sessionStore: UserSessionStore
     @State private var loadout = AvatarLoadoutStore.load()
 
@@ -360,194 +345,7 @@ private struct SidebarEquipmentEntryView: View {
     }
 }
 
-private struct MainSidebarMenuView: View {
-    @EnvironmentObject private var store: JourneyStore
-    @EnvironmentObject private var sessionStore: UserSessionStore
-    @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
-
-    @Binding var isPresented: Bool
-    let onSelectDestination: (MainSidebarDestination) -> Void
-    
-    private var sidebarItems: [(title: String, icon: String, destination: MainSidebarDestination)] {
-        var items: [(title: String, icon: String, destination: MainSidebarDestination)] = [
-            (L10n.t("profile_title"), "person", .profile),
-            (L10n.upper("equipment_title"), "tshirt", .equipment),
-            (L10n.t("settings_title"), "gearshape", .settings),
-        ]
-        if FeatureFlagStore.shared.socialEnabled {
-            items.append((L10n.upper("postcard_nav_title"), "envelope", .postcards))
-            items.append((L10n.upper("profile_invite_friends"), "person.badge.plus", .inviteFriend))
-        }
-        return items
-    }
-
-    private var displayName: String {
-        let profile = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !profile.isEmpty { return profile.uppercased() }
-        if let uid = sessionStore.accountUserID, !uid.isEmpty { return uid.uppercased() }
-        return L10n.t("explorer_fallback")
-    }
-
-    var body: some View {
-        GeometryReader { proxy in
-            let drawerWidth = min(320, proxy.size.width * 0.86)
-
-            ZStack(alignment: .leading) {
-                Color.black.opacity(0.30)
-                    .ignoresSafeArea()
-                    .onTapGesture {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
-                            isPresented = false
-                        }
-                    }
-
-                HStack(spacing: 0) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        header
-
-                        Divider()
-                            .overlay(Color.black.opacity(0.06))
-
-                        VStack(spacing: 8) {
-                            ForEach(sidebarItems, id: \.title) { item in
-                                drawerItem(title: item.title, icon: item.icon) {
-                                    onSelectDestination(item.destination)
-                                }
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 16)
-
-                        Spacer(minLength: 0)
-
-                        Divider()
-                            .overlay(Color.black.opacity(0.06))
-
-                        Text(L10n.t("app_name"))
-                            .font(.system(size: 10, weight: .semibold))
-                            .tracking(0.6)
-                            .foregroundColor(FigmaTheme.text.opacity(0.5))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 18)
-                    }
-                    .frame(width: drawerWidth)
-                    .background(Color.white)
-                    .shadow(color: .black.opacity(0.08), radius: 40, x: 8, y: 0)
-
-                    Spacer(minLength: 0)
-                }
-            }
-            .gesture(
-                DragGesture(minimumDistance: 10)
-                    .onEnded { v in
-                        if v.translation.width < -80 {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
-                                isPresented = false
-                            }
-                        }
-                    }
-            )
-        }
-        .transition(.move(edge: .leading).combined(with: .opacity))
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            HStack(spacing: 8) {
-                Spacer(minLength: 0)
-                AppCloseButton(style: .plain) {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
-                        isPresented = false
-                    }
-                }
-            }
-
-            Button {
-                onSelectDestination(.profile)
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
-                    isPresented = false
-                }
-            } label: {
-                HStack(spacing: 12) {
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color(red: 82 / 255, green: 183 / 255, blue: 136 / 255).opacity(0.10),
-                                    Color(red: 116 / 255, green: 198 / 255, blue: 157 / 255).opacity(0.20)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 48, height: 48)
-                        .overlay {
-                            RobotRendererView(size: 30, face: .front, loadout: AvatarLoadoutStore.load())
-                        }
-                        .shadow(color: .black.opacity(0.08), radius: 3, x: 0, y: 1)
-
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(displayName)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(FigmaTheme.text)
-                            .lineLimit(1)
-                    }
-
-                    Spacer(minLength: 0)
-                }
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 24)
-        .padding(.top, 24)
-        .padding(.bottom, 24)
-    }
-
-    private func drawerItem(title: String, icon: String, action: @escaping () -> Void) -> some View {
-        Button {
-            action()
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
-                isPresented = false
-            }
-        } label: {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .font(.system(size: 19, weight: .medium))
-                    .foregroundColor(FigmaTheme.text)
-                    .frame(width: 30)
-
-                Text(title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .tracking(0.3)
-                    .foregroundColor(FigmaTheme.text)
-
-                Spacer(minLength: 0)
-            }
-            .padding(.leading, 20)
-            .padding(.trailing, 18)
-            .frame(height: 52)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(Color(red: 0.984, green: 0.984, blue: 0.976))
-            )
-            .shadow(color: .clear, radius: 12, x: 0, y: 7)
-            .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-private struct SidebarPostcardsEntryView: View {
-    let initialBox: PostcardInboxView.Box
-    let focusMessageID: String?
-
-    var body: some View {
-        PostcardInboxView(initialBox: initialBox, focusMessageID: focusMessageID)
-    }
-}
-
-private struct SidebarInviteFriendEntryView: View {
+private struct ModalInviteFriendEntryView: View {
     @EnvironmentObject private var socialStore: SocialGraphStore
     @EnvironmentObject private var sessionStore: UserSessionStore
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
@@ -606,6 +404,50 @@ private struct SidebarInviteFriendEntryView: View {
             }
         } catch {
             // Keep local fallback values when backend data cannot be fetched.
+        }
+    }
+}
+
+/// Wraps modal destinations in a NavigationStack with an initial push,
+/// so the user can swipe back to dismiss using the system gesture.
+/// When the stack pops back to root, it auto-dismisses the fullScreenCover.
+private struct ModalNavigationWrapper: View {
+    let destination: ModalNavDestination
+    let onDismiss: () -> Void
+
+    @State private var path: [ModalNavDestination] = []
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            Color.clear
+                .navigationBarHidden(true)
+                .navigationDestination(for: ModalNavDestination.self) { dest in
+                    modalContent(for: dest)
+                }
+        }
+        .onAppear {
+            if path.isEmpty {
+                path = [destination]
+            }
+        }
+        .onChange(of: path) { _, newPath in
+            if newPath.isEmpty {
+                onDismiss()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func modalContent(for dest: ModalNavDestination) -> some View {
+        switch dest {
+        case .profile:
+            ProfileView()
+        case .settings:
+            SettingsView(showsBackButton: true)
+        case .equipment:
+            ModalEquipmentEntryView()
+        case .inviteFriend:
+            ModalInviteFriendEntryView()
         }
     }
 }

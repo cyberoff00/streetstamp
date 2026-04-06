@@ -32,9 +32,9 @@ final class AppFlowCoordinator: ObservableObject {
     @Published private(set) var endOngoingSignal: Int = 0
     @Published private(set) var pendingWidgetCaptureSignal: Int = 0
     @Published private(set) var openPostcardSidebarSignal: Int = 0
-    @Published private(set) var openSidebarDestinationSignal: Int = 0
+    @Published private(set) var openModalDestinationSignal: Int = 0
     @Published private(set) var pendingPostcardSidebarIntent: PostcardInboxIntent?
-    @Published private(set) var pendingSidebarDestination: MainSidebarDestination?
+    @Published private(set) var pendingModalDestination: ModalNavDestination?
     @Published private(set) var sidebarHiddenTokens: Set<String> = []
     @Published private(set) var requestedTab: NavigationTab?
     @Published private(set) var requestedCollectionPage: Int?
@@ -61,17 +61,17 @@ final class AppFlowCoordinator: ObservableObject {
         openPostcardSidebarSignal += 1
     }
 
-    func requestOpenSidebarDestination(_ destination: MainSidebarDestination) {
-        pendingSidebarDestination = destination
-        openSidebarDestinationSignal += 1
+    func requestModalPush(_ destination: ModalNavDestination) {
+        pendingModalDestination = destination
+        openModalDestinationSignal += 1
     }
 
     func consumePendingPostcardSidebarIntent() {
         pendingPostcardSidebarIntent = nil
     }
 
-    func consumePendingSidebarDestination() {
-        pendingSidebarDestination = nil
+    func consumePendingModalDestination() {
+        pendingModalDestination = nil
     }
 
     func requestSelectTab(_ tab: NavigationTab) {

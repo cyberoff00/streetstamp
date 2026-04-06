@@ -278,7 +278,7 @@ enum AppJourneySyncCoordinator {
     ) async {
         let journeysSnapshot = journeyStore.journeys
         let cachedCitiesSnapshot = cityCache.cachedCities
-        let appearanceRaw = MapAppearanceSettings.current.rawValue
+        let appearanceRaw = MapLayerStyle.current.rawValue
         let renderCache = cityRenderCache
         let cities = await Task.detached(priority: .userInitiated) {
             CityLibraryVM.buildCities(journeys: journeysSnapshot, cachedCities: cachedCitiesSnapshot)

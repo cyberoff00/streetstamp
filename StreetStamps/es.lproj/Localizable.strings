@@ -1046,3 +1046,12 @@
 "about_us_ai_era" = "最后，AI时代app已死，这是我在整个开发过程中时常刷到的，每次都激起我的一阵恐慌，那我做的事情还有意义吗，我所消耗的精力值得吗？也许在科技巨头眼里都是没有意义的，我也思考如果什么都被ai化了，我们到底可以留下什么。我想到了我很喜欢的一些物件，ccd，胶片机，cd机，ipod，因为音乐，照片的永恒实现了古早载体的迷人，而我同时喜欢着作品和创造作品的工具，worldo会是一个开始。";
 "about_us_traveler_needs_content" = "Worldo里我最喜欢的板块是很简单的Journey Memory，也就是最后旅程被归档的图文所呈现的形态。我认为做APP会时常感到气馁的点是它并没有那么像创作，也并不像是一个人的游戏，决定成功的因素绝不仅仅是产品本身，同时一款产品的产生却会有成千上万的竞品随之而来，那为什么是我。想到最后我觉得可以回到我为什么依然喜欢一个最简单的记录功能。我觉得新其实更多时候只是既有东西的组合，组合好了就会达成某种和谐，这种和谐会产生一些能量。也就是说它实现了我个人最核心的需求，旅行者的需求，后来在火车上飞机上我都自然开始写点东西，拍点东西，就像是一种图文和时空和谐的归位，我觉得什么都对了。初版Worldo被测试的时候我在济州岛，爬汉拿山那天我用它记录了一路的旅程，后来我也经常和朋友炫耀导出的游记，这世界还存在游记吗？";
 "about_us_cyber_dog_content" = "一个朋友打算在装备里画了一只小狗，因为她想到她的小狗安迪以后死了，她散步的时候可以看到地图里自己带着赛博小狗一起，然后还没画她就痛哭一场。很萌，我想要做的就是这种很萌的东西。又有一天我在为生活的一切，为这款app焦虑的时候，骑着车记录着轨迹，我突然觉得没关系，即使最后是自娱自乐也没关系。我为朋友们建造了一个赛博空间，这个空间只有30个人也是另一种伟大的故事。";
+
+// MARK: - Mapbox Trial
+"mapbox_trial_free_hint" = "Prueba gratis 24h";
+"mapbox_trial_remaining_hours" = "%dh %dmin restantes";
+"mapbox_trial_remaining_minutes" = "%dmin restantes";
+"mapbox_trial_expired_title" = "Prueba del estilo de mapa finalizada";
+"mapbox_trial_expired_message" = "Tu prueba gratuita de 24h para los estilos Mapbox ha finalizado. Suscríbete para seguir usando los estilos de mapa premium.";
+"mapbox_trial_expired_subscribe" = "Suscribirse";
+"mapbox_trial_expired_dismiss" = "Volver al predeterminado";

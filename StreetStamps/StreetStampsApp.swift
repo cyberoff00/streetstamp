@@ -405,7 +405,7 @@ struct StreetStampsApp: App {
                 )
                 let journeysSnapshot = journeyStore.journeys
                 let cachedCitiesSnapshot = cityCache.cachedCities
-                let appearanceRaw = MapAppearanceSettings.current.rawValue
+                let appearanceRaw = MapLayerStyle.current.rawValue
                 let renderCache = cityRenderCache
                 let cities = await withTaskGroup(of: [City].self) { group in
                     group.addTask(priority: .userInitiated) {
@@ -446,7 +446,7 @@ struct StreetStampsApp: App {
                     try? await Task.sleep(nanoseconds: 3_000_000_000)
                     let js = journeyStore.journeys
                     let cc = cityCache.cachedCities
-                    let ar = MapAppearanceSettings.current.rawValue
+                    let ar = MapLayerStyle.current.rawValue
                     let rc = cityRenderCache
                     let c = await withTaskGroup(of: [City].self) { group in
                         group.addTask(priority: .utility) {
@@ -507,7 +507,7 @@ struct StreetStampsApp: App {
                     )
                     let journeysSnapshot = journeyStore.journeys
                     let cachedCitiesSnapshot = cityCache.cachedCities
-                    let appearanceRaw = MapAppearanceSettings.current.rawValue
+                    let appearanceRaw = MapLayerStyle.current.rawValue
                     let renderCache = cityRenderCache
                     let cities = await withTaskGroup(of: [City].self) { group in
                         group.addTask(priority: .userInitiated) {
@@ -537,7 +537,7 @@ struct StreetStampsApp: App {
                     guard !Task.isCancelled else { return }
                     let deferredJS = journeyStore.journeys
                     let deferredCC = cityCache.cachedCities
-                    let deferredAR = MapAppearanceSettings.current.rawValue
+                    let deferredAR = MapLayerStyle.current.rawValue
                     let deferredRC = cityRenderCache
                     let deferredCities = await withTaskGroup(of: [City].self) { group in
                         group.addTask(priority: .utility) {
@@ -653,6 +653,12 @@ struct StreetStampsApp: App {
     }
 
     private func handleIncomingAppURL(_ url: URL) {
+        // Live Activity: 拍照/记忆入口
+        if url.scheme == "streetstamps" && url.host == "capture" {
+            NotificationCenter.default.post(name: .openCaptureFromWidget, object: nil)
+            return
+        }
+
         if let postcardIntent = AppDeepLinkStore.parsePostcardInbox(from: url) {
             guard FeatureFlagStore.shared.socialEnabled else { return }
             flow.requestOpenPostcardSidebar(postcardIntent)

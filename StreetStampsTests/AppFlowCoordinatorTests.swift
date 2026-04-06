@@ -31,23 +31,23 @@ final class AppFlowCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testRequestOpenSidebarDestinationStoresDestinationAndIncrementsSignal() {
+    func testRequestModalPushStoresDestinationAndIncrementsSignal() {
         let coordinator = AppFlowCoordinator()
 
-        coordinator.requestOpenSidebarDestination(.equipment)
+        coordinator.requestModalPush(.equipment)
 
-        XCTAssertEqual(coordinator.openSidebarDestinationSignal, 1)
-        XCTAssertEqual(coordinator.pendingSidebarDestination, .equipment)
+        XCTAssertEqual(coordinator.openModalDestinationSignal, 1)
+        XCTAssertEqual(coordinator.pendingModalDestination, .equipment)
     }
 
     @MainActor
-    func testConsumePendingSidebarDestinationClearsDestination() {
+    func testConsumePendingModalDestinationClearsDestination() {
         let coordinator = AppFlowCoordinator()
-        coordinator.requestOpenSidebarDestination(.equipment)
+        coordinator.requestModalPush(.equipment)
 
-        coordinator.consumePendingSidebarDestination()
+        coordinator.consumePendingModalDestination()
 
-        XCTAssertNil(coordinator.pendingSidebarDestination)
-        XCTAssertEqual(coordinator.openSidebarDestinationSignal, 1)
+        XCTAssertNil(coordinator.pendingModalDestination)
+        XCTAssertEqual(coordinator.openModalDestinationSignal, 1)
     }
 }

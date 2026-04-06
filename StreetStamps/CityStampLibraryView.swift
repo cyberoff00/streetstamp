@@ -1,6 +1,8 @@
 import Foundation
 import SwiftUI
 import MapKit
+import MapboxMaps
+import Turf
 import Combine
 import CoreLocation
 import UIKit
@@ -52,11 +54,14 @@ struct CityStampLibraryView: View {
     @State private var showPublicDetailUnavailableAlert = false
     @State private var activeCityDetail: City? = nil
 
+    @AppStorage(MapLayerStyle.storageKey) private var layerStyleRaw = MapLayerStyle.current.rawValue
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var languagePreference = LanguagePreference.shared
-    @Binding var showSidebar: Bool
+
+    private var effectiveAppearanceRaw: String {
+        layerStyleRaw
+    }
     private let autoRebuildFromJourneyStore: Bool
-    private let usesSidebarHeader: Bool
     private let showHeader: Bool
     private let allowCityDetailNavigation: Bool
     private let headerTitle: String?
@@ -64,18 +69,14 @@ struct CityStampLibraryView: View {
     private let emptySubtitleKey: String
 
     init(
-        showSidebar: Binding<Bool>,
         autoRebuildFromJourneyStore: Bool = false,
-        usesSidebarHeader: Bool = true,
         showHeader: Bool = true,
         allowCityDetailNavigation: Bool = true,
         headerTitle: String? = nil,
         emptyTitleKey: String = "library_empty_title",
         emptySubtitleKey: String = "library_empty_subtitle"
     ) {
-        self._showSidebar = showSidebar
         self.autoRebuildFromJourneyStore = autoRebuildFromJourneyStore
-        self.usesSidebarHeader = usesSidebarHeader
         self.showHeader = showHeader
         self.allowCityDetailNavigation = allowCityDetailNavigation
         self.headerTitle = headerTitle
@@ -122,14 +123,14 @@ struct CityStampLibraryView: View {
             if store.hasLoaded {
                 vm.load(journeyStore: store, cityCache: cache)
                 digestByCityID = makeDigestMap(from: cache.cachedCities)
-                StartupWarmupService.shared.start(cities: displayCities, appearanceRaw: MapAppearanceSettings.current.rawValue, renderCacheStore: renderCacheStore, limit: 16)
+                StartupWarmupService.shared.start(cities: displayCities, appearanceRaw: effectiveAppearanceRaw, renderCacheStore: renderCacheStore, limit: 16)
             }
         }
         .onChange(of: store.hasLoaded) { loaded in
             if loaded {
                 vm.load(journeyStore: store, cityCache: cache)
                 digestByCityID = makeDigestMap(from: cache.cachedCities)
-                StartupWarmupService.shared.start(cities: displayCities, appearanceRaw: MapAppearanceSettings.current.rawValue, renderCacheStore: renderCacheStore, limit: 16)
+                StartupWarmupService.shared.start(cities: displayCities, appearanceRaw: effectiveAppearanceRaw, renderCacheStore: renderCacheStore, limit: 16)
             }
         }
         .onChange(of: languagePreference.currentLanguage) { _ in
@@ -161,7 +162,7 @@ struct CityStampLibraryView: View {
             }
 
             digestByCityID = nextDigests
-            StartupWarmupService.shared.start(cities: displayCities, appearanceRaw: MapAppearanceSettings.current.rawValue, renderCacheStore: renderCacheStore, limit: 16)
+            StartupWarmupService.shared.start(cities: displayCities, appearanceRaw: effectiveAppearanceRaw, renderCacheStore: renderCacheStore, limit: 16)
         }
         .alert(L10n.t("delete_city_alert_title"), isPresented: $showDeleteCityAlert, presenting: cityToDelete) { city in
             Button(L10n.t("delete"), role: .destructive) {
@@ -198,29 +199,25 @@ struct CityStampLibraryView: View {
             ? (headerTitle ?? "")
             : L10n.t("collection_segment_cities")
         return Group {
-            if usesSidebarHeader {
-                AppTopHeader(title: titleText, showSidebar: $showSidebar)
-            } else {
-                HStack(spacing: 10) {
-                    AppBackButton(foreground: .black)
+            HStack(spacing: 10) {
+                AppBackButton(foreground: .black)
 
-                    Spacer()
+                Spacer()
 
-                    Text(titleText)
-                        .appHeaderStyle()
+                Text(titleText)
+                    .appHeaderStyle()
 
-                    Spacer()
+                Spacer()
 
-                    Color.clear.frame(width: 42, height: 42)
-                }
-                .padding(.horizontal, 18)
-                .padding(.top, 8)
-                .padding(.bottom, 12)
-                .overlay(alignment: .bottom) {
-                    Rectangle()
-                        .fill(FigmaTheme.border)
-                        .frame(height: 1)
-                }
+                Color.clear.frame(width: 42, height: 42)
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 8)
+            .padding(.bottom, 12)
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(FigmaTheme.border)
+                    .frame(height: 1)
             }
         }
     }
@@ -566,7 +563,7 @@ struct CityThumbnailView: View {
     let basePath: String?
     let routePath: String?
 
-    @AppStorage(MapAppearanceSettings.storageKey) private var mapAppearanceRaw = MapAppearanceSettings.current.rawValue
+    @AppStorage(MapLayerStyle.storageKey) private var layerStyleRaw = MapLayerStyle.current.rawValue
     @EnvironmentObject private var renderCacheStore: CityRenderCacheStore
     @StateObject private var loader = CityThumbnailLoader()
 
@@ -576,8 +573,18 @@ struct CityThumbnailView: View {
         self.routePath = routePath
     }
 
+    /// Use the full layer style raw value as cache key so thumbnails update on every style switch.
+    private var effectiveAppearanceRaw: String {
+        layerStyleRaw
+    }
+
     private var loadKey: String {
-        "\(city?.id ?? "")||\(routePath ?? "")||\(basePath ?? "")||\(mapAppearanceRaw)"
+        // For city-mode rendering, use the full render key so any journey data change
+        // (new journey added, distance updated, etc.) triggers a reload.
+        if let city {
+            return CityThumbnailLoader.renderCacheKey(for: city, appearanceRaw: effectiveAppearanceRaw)
+        }
+        return "\(routePath ?? "")||\(basePath ?? "")||\(effectiveAppearanceRaw)"
     }
 
     var body: some View {
@@ -585,7 +592,7 @@ struct CityThumbnailView: View {
             city: city,
             routePath: routePath,
             basePath: basePath,
-            appearanceRaw: mapAppearanceRaw,
+            appearanceRaw: effectiveAppearanceRaw,
             renderCacheStore: renderCacheStore
         )
 
@@ -619,7 +626,7 @@ struct CityThumbnailView: View {
             }
         }
         .task(id: loadKey) {
-            loader.load(city: city, routePath: routePath, basePath: basePath, appearanceRaw: mapAppearanceRaw, renderCacheStore: renderCacheStore)
+            loader.load(city: city, routePath: routePath, basePath: basePath, appearanceRaw: effectiveAppearanceRaw, renderCacheStore: renderCacheStore)
         }
         .onDisappear {
             loader.cancel()
@@ -770,7 +777,7 @@ final class CityThumbnailLoader: ObservableObject {
             .joined(separator: "~")
         let boundarySignature = "ignored-for-cache"
         let anchorSignature = "ignored-for-cache"
-        let styleVersion = 3
+        let styleVersion = 5
         let fullKey = "render|v\(styleVersion)|\(city.id)|\(appearanceRaw)|\(journeySignature)"
         return CityThumbnailDebugLogger.RenderKeyParts(
             fullKey: fullKey,
@@ -898,7 +905,7 @@ final class CityThumbnailLoader: ObservableObject {
             anchor: city.anchor ?? city.journeys.first?.allCLCoords.first
         )
         let img: UIImage
-        if let primary = Self.makeSnapshot(city: city, appearanceRaw: appearanceRaw, fetchedBoundary: fetchedBoundary) {
+        if let primary = await Self.makeSnapshot(city: city, appearanceRaw: appearanceRaw, fetchedBoundary: fetchedBoundary) {
             img = primary
         } else if let fallback = await Self.makeFallbackSnapshot(city: city, appearanceRaw: appearanceRaw) {
             img = fallback
@@ -1008,15 +1015,15 @@ final class CityThumbnailLoader: ObservableObject {
     }
 
     nonisolated private static func mapType(for appearanceRaw: String) -> MKMapType {
-        MapAppearanceSettings.mapType(for: appearanceRaw)
+        (MapLayerStyle(rawValue: appearanceRaw) ?? .mutedDark).mapKitType
     }
 
     nonisolated private static func interfaceStyle(for appearanceRaw: String) -> UIUserInterfaceStyle {
-        MapAppearanceSettings.interfaceStyle(for: appearanceRaw)
+        (MapLayerStyle(rawValue: appearanceRaw) ?? .mutedDark).mapKitInterfaceStyle
     }
 
     nonisolated private static func routeColor(for appearanceRaw: String) -> UIColor {
-        MapAppearanceSettings.routeBaseColor(for: appearanceRaw)
+        (MapLayerStyle(rawValue: appearanceRaw) ?? .mutedDark).routeBaseColor
     }
 
     nonisolated private static func clampedRegion(_ region: MKCoordinateRegion) -> MKCoordinateRegion? {
@@ -1144,6 +1151,71 @@ final class CityThumbnailLoader: ObservableObject {
         city: City,
         appearanceRaw: String,
         fetchedBoundary: [CLLocationCoordinate2D]?
+    ) async -> UIImage? {
+        let style = MapLayerStyle(rawValue: appearanceRaw) ?? .mutedDark
+        if style.engine == .mapbox {
+            return await makeMapboxSnapshot(city: city, style: style, fetchedBoundary: fetchedBoundary)
+        }
+        return makeMapKitSnapshot(city: city, appearanceRaw: appearanceRaw, fetchedBoundary: fetchedBoundary)
+    }
+
+    /// Fallback: forward-geocode the city name from the city key to get a center,
+    /// then render a plain map tile without routes.
+    private static func makeFallbackSnapshot(city: City, appearanceRaw: String) async -> UIImage? {
+        let parts = city.id.split(separator: "|")
+        guard parts.count >= 2 else { return nil }
+        let cityName = String(parts[0])
+        let countryISO2 = String(parts[1])
+
+        let center: CLLocationCoordinate2D? = await withCheckedContinuation { cont in
+            let geocoder = CLGeocoder()
+            geocoder.geocodeAddressString("\(cityName), \(countryISO2)") { placemarks, _ in
+                cont.resume(returning: placemarks?.first?.location?.coordinate)
+            }
+        }
+
+        guard let center, CLLocationCoordinate2DIsValid(center) else { return nil }
+        let style = MapLayerStyle(rawValue: appearanceRaw) ?? .mutedDark
+
+        if style.engine == .mapbox {
+            return await makeMapboxFallbackSnapshot(center: center, style: style)
+        }
+
+        let mappedCenter = MapCoordAdapter.forMapKit(center, countryISO2: countryISO2, cityKey: city.id)
+        let region = MKCoordinateRegion(center: mappedCenter, span: MKCoordinateSpan(latitudeDelta: 0.18, longitudeDelta: 0.18))
+        guard let clamped = clampedRegion(region) else { return nil }
+
+        let options = MKMapSnapshotter.Options()
+        options.region = clamped
+        options.size = CGSize(width: 480, height: 320)
+        options.scale = 2
+        options.mapType = mapType(for: appearanceRaw)
+        options.traitCollection = UITraitCollection(traitsFrom: [
+            UITraitCollection(userInterfaceStyle: interfaceStyle(for: appearanceRaw)),
+            UITraitCollection(displayScale: options.scale),
+            UITraitCollection(activeAppearance: .active),
+            UITraitCollection(userInterfaceLevel: .base)
+        ])
+        options.showsBuildings = false
+        options.showsPointsOfInterest = false
+
+        let sem = DispatchSemaphore(value: 0)
+        var out: UIImage?
+        MKMapSnapshotter(options: options).start(with: .global(qos: .userInitiated)) { snapshot, _ in
+            defer { sem.signal() }
+            guard let snapshot else { return }
+            out = snapshot.image
+        }
+        _ = sem.wait(timeout: .now() + 15)
+        return out
+    }
+
+    // MARK: - MapKit snapshot (Apple Maps styles)
+
+    nonisolated private static func makeMapKitSnapshot(
+        city: City,
+        appearanceRaw: String,
+        fetchedBoundary: [CLLocationCoordinate2D]?
     ) -> UIImage? {
         guard let rawRegion = CityDeepRenderEngine.fittedRegion(
             cityKey: city.id,
@@ -1165,7 +1237,12 @@ final class CityThumbnailLoader: ObservableObject {
         options.size = CGSize(width: 480, height: 320)
         options.scale = 2
         options.mapType = mapType(for: appearanceRaw)
-        options.traitCollection = UITraitCollection(userInterfaceStyle: interfaceStyle(for: appearanceRaw))
+        options.traitCollection = UITraitCollection(traitsFrom: [
+            UITraitCollection(userInterfaceStyle: interfaceStyle(for: appearanceRaw)),
+            UITraitCollection(displayScale: options.scale),
+            UITraitCollection(activeAppearance: .active),
+            UITraitCollection(userInterfaceLevel: .base)
+        ])
         options.showsBuildings = false
         options.showsPointsOfInterest = false
 
@@ -1183,44 +1260,168 @@ final class CityThumbnailLoader: ObservableObject {
         return out
     }
 
-    /// Fallback: forward-geocode the city name from the city key to get a center,
-    /// then render a plain map tile without routes.
-    private static func makeFallbackSnapshot(city: City, appearanceRaw: String) async -> UIImage? {
-        let parts = city.id.split(separator: "|")
-        guard parts.count >= 2 else { return nil }
-        let cityName = String(parts[0])
-        let countryISO2 = String(parts[1])
+    // MARK: - Mapbox snapshot (Mapbox styles)
 
-        let center: CLLocationCoordinate2D? = await withCheckedContinuation { cont in
-            let geocoder = CLGeocoder()
-            geocoder.geocodeAddressString("\(cityName), \(countryISO2)") { placemarks, _ in
-                cont.resume(returning: placemarks?.first?.location?.coordinate)
+    nonisolated private static func makeMapboxSnapshot(
+        city: City,
+        style: MapLayerStyle,
+        fetchedBoundary: [CLLocationCoordinate2D]?
+    ) async -> UIImage? {
+        // Use the same fittedRegion logic as MapKit, but with applyGCJ: false
+        // so the output region is in WGS84 — correct for Mapbox.
+        guard let wgs84Region = CityDeepRenderEngine.fittedRegion(
+            cityKey: city.id,
+            countryISO2: city.countryISO2,
+            journeys: city.journeys,
+            anchorWGS: city.anchor,
+            effectiveBoundaryWGS: city.boundaryPolygon,
+            fetchedBoundaryWGS: fetchedBoundary,
+            applyGCJ: false
+        ),
+              let region = clampedRegion(wgs84Region) else { return nil }
+
+        // Build segments in WGS84 for Mapbox.
+        let styledSegments: [CityDeepStyledSegment] = city.journeys.flatMap { journey in
+            RouteRenderingPipeline
+                .buildSegments(
+                    .init(
+                        coordsWGS84: journey.allCLCoords,
+                        applyGCJForChina: false,
+                        gapDistanceMeters: 2_200,
+                        countryISO2: city.countryISO2,
+                        cityKey: city.id
+                    ),
+                    surface: .mapbox
+                )
+                .segments
+                .map { seg in CityDeepStyledSegment(coords: seg.coords, isGap: seg.style == .dashed, repeatWeight: 0) }
+        }
+
+        let snapshotSize = CGSize(width: 480, height: 320)
+        let styleURI = StyleURI(rawValue: style.mapboxStyleURI) ?? .dark
+        let isDark = style.isDarkStyle
+        let baseColor = style.routeBaseColor
+        let glowColor = style.routeGlowColor
+
+        // Camera bounds from the WGS84 fittedRegion — same focus/boundary logic as MapKit.
+        let sw = CLLocationCoordinate2D(
+            latitude: region.center.latitude - region.span.latitudeDelta / 2,
+            longitude: region.center.longitude - region.span.longitudeDelta / 2
+        )
+        let ne = CLLocationCoordinate2D(
+            latitude: region.center.latitude + region.span.latitudeDelta / 2,
+            longitude: region.center.longitude + region.span.longitudeDelta / 2
+        )
+
+        print("[CityThumbnail] ▶ Mapbox snapshot START city=\(city.id) style=\(style.rawValue) segments=\(styledSegments.count) sw=\(sw.latitude),\(sw.longitude) ne=\(ne.latitude),\(ne.longitude)")
+        return await withCheckedContinuation { cont in
+            // Mapbox Snapshotter must be created and driven from the main thread.
+            DispatchQueue.main.async {
+                let snapOptions = MapSnapshotOptions(size: snapshotSize, pixelRatio: 2, showsLogo: false, showsAttribution: false)
+                let snapshotter = MapboxMaps.Snapshotter(options: snapOptions)
+
+                // onNext uses MapboxObservable which holds a strong reference to the handler;
+                // the returned Cancelable does not need to be retained.
+                snapshotter.onNext(event: .styleLoaded) { [snapshotter] _ in
+                    print("[CityThumbnail] ▶ styleLoaded fired, adding layers")
+                    // Add route source + layers directly on Snapshotter (it IS a StyleManager).
+                    let routeSourceId = "thumb-routes"
+                    var src = GeoJSONSource(id: routeSourceId)
+                    var feats: [Turf.Feature] = []
+                    for seg in styledSegments where seg.coords.count >= 2 {
+                        var f = Turf.Feature(geometry: .lineString(Turf.LineString(seg.coords)))
+                        f.properties = [
+                            "isGap": .init(booleanLiteral: seg.isGap),
+                            "repeatWeight": .init(floatLiteral: seg.repeatWeight)
+                        ]
+                        feats.append(f)
+                    }
+                    src.data = .featureCollection(Turf.FeatureCollection(features: feats))
+                    try? snapshotter.addSource(src)
+
+                    var glow = LineLayer(id: "thumb-glow", source: routeSourceId)
+                    glow.filter = Exp(.eq) { Exp(.get) { "isGap" }; false }
+                    glow.lineColor = .constant(StyleColor(glowColor))
+                    glow.lineCap = .constant(.round)
+                    glow.lineJoin = .constant(.round)
+                    glow.lineOpacity = .constant(isDark ? 0.25 : 0.22)
+                    glow.lineWidth = .constant(6.0)
+                    glow.lineBlur = .constant(3.0)
+                    try? snapshotter.addLayer(glow)
+
+                    var main = LineLayer(id: "thumb-main", source: routeSourceId)
+                    main.filter = Exp(.eq) { Exp(.get) { "isGap" }; false }
+                    main.lineColor = .constant(StyleColor(baseColor))
+                    main.lineCap = .constant(.round)
+                    main.lineJoin = .constant(.round)
+                    main.lineOpacity = .constant(1.0)
+                    main.lineWidth = .constant(2.5)
+                    try? snapshotter.addLayer(main)
+
+                    var dash = LineLayer(id: "thumb-dash", source: routeSourceId)
+                    dash.filter = Exp(.eq) { Exp(.get) { "isGap" }; true }
+                    dash.lineColor = .constant(StyleColor(baseColor))
+                    dash.lineCap = .constant(.round)
+                    dash.lineJoin = .constant(.round)
+                    dash.lineOpacity = .constant(0.5)
+                    dash.lineDasharray = .constant([10, 10])
+                    dash.lineWidth = .constant(1.5)
+                    try? snapshotter.addLayer(dash)
+
+                    let cam = snapshotter.camera(for: [sw, ne], padding: UIEdgeInsets(top: 20, left: 20, bottom: 20, right: 20), bearing: 0, pitch: 0)
+                    snapshotter.setCamera(to: cam)
+
+                    snapshotter.start(overlayHandler: nil) { [snapshotter] result in
+                        _ = snapshotter // retain until rendering completes
+                        switch result {
+                        case .success(let image):
+                            print("[CityThumbnail] ▶ Mapbox snapshot SUCCESS city=\(city.id)")
+                            cont.resume(returning: image)
+                        case .failure(let error):
+                            print("[CityThumbnail] ▶ Mapbox snapshot FAILED city=\(city.id) error=\(error)")
+                            cont.resume(returning: nil)
+                        }
+                    }
+                }
+
+                // Setting styleURI triggers async style load → fires .styleLoaded when ready.
+                snapshotter.styleURI = styleURI
             }
         }
+    }
 
-        guard let center, CLLocationCoordinate2DIsValid(center) else { return nil }
+    nonisolated private static func makeMapboxFallbackSnapshot(
+        center: CLLocationCoordinate2D,
+        style: MapLayerStyle
+    ) async -> UIImage? {
+        let snapshotSize = CGSize(width: 480, height: 320)
+        let styleURI = StyleURI(rawValue: style.mapboxStyleURI) ?? .dark
+        let zoom = MapboxEngineView.Coordinator.altitudeToZoom(80_000, latitude: center.latitude)
 
-        let mappedCenter = MapCoordAdapter.forMapKit(center, countryISO2: countryISO2, cityKey: city.id)
-        let region = MKCoordinateRegion(center: mappedCenter, span: MKCoordinateSpan(latitudeDelta: 0.18, longitudeDelta: 0.18))
-        guard let clamped = clampedRegion(region) else { return nil }
+        return await withCheckedContinuation { cont in
+            DispatchQueue.main.async {
+                let snapOptions = MapSnapshotOptions(size: snapshotSize, pixelRatio: 2, showsLogo: false, showsAttribution: false)
+                let snapshotter = MapboxMaps.Snapshotter(options: snapOptions)
 
-        let options = MKMapSnapshotter.Options()
-        options.region = clamped
-        options.size = CGSize(width: 480, height: 320)
-        options.scale = 2
-        options.mapType = mapType(for: appearanceRaw)
-        options.traitCollection = UITraitCollection(userInterfaceStyle: interfaceStyle(for: appearanceRaw))
-        options.showsBuildings = false
-        options.showsPointsOfInterest = false
+                snapshotter.onNext(event: .styleLoaded) { [snapshotter] _ in
+                    print("[CityThumbnail] ▶ fallback styleLoaded fired")
+                    snapshotter.setCamera(to: CameraOptions(center: center, zoom: zoom))
 
-        let sem = DispatchSemaphore(value: 0)
-        var out: UIImage?
-        MKMapSnapshotter(options: options).start(with: .global(qos: .userInitiated)) { snapshot, _ in
-            defer { sem.signal() }
-            guard let snapshot else { return }
-            out = snapshot.image
+                    snapshotter.start(overlayHandler: nil) { [snapshotter] result in
+                        _ = snapshotter // retain until rendering completes
+                        switch result {
+                        case .success(let image):
+                            print("[CityThumbnail] ▶ Mapbox fallback snapshot SUCCESS")
+                            cont.resume(returning: image)
+                        case .failure(let error):
+                            print("[CityThumbnail] ▶ Mapbox fallback snapshot FAILED error=\(error)")
+                            cont.resume(returning: nil)
+                        }
+                    }
+                }
+
+                snapshotter.styleURI = styleURI
+            }
         }
-        _ = sem.wait(timeout: .now() + 15)
-        return out
     }
 }

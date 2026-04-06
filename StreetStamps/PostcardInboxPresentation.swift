@@ -76,6 +76,7 @@ enum PostcardInboxPresentation {
 
     static func draftStatusPresentation(
         for status: PostcardDraftStatus,
+        lastError: String? = nil,
         localize: (String) -> String = L10n.t
     ) -> DraftStatusPresentation? {
         switch status {
@@ -88,9 +89,11 @@ enum PostcardInboxPresentation {
                 showsRetry: false
             )
         case .failed:
+            let trimmed = lastError?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let detail = trimmed.isEmpty ? localize("postcard_failed_retry_detail") : trimmed
             return DraftStatusPresentation(
                 badgeText: localize("postcard_failed_status"),
-                detailText: localize("postcard_failed_retry_detail"),
+                detailText: detail,
                 showsRetry: true
             )
         case .sent:

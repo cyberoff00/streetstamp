@@ -872,23 +872,27 @@ final class TrackingService: ObservableObject {
         pendingRenderWork?.cancel()
 
         let segsForMapSnapshot = internalSegmentsForMap
+        // WGS84 snapshot for engine-agnostic unifiedSegments (Mapbox needs WGS84; MapKit callers apply GCJ-02 themselves)
+        let segsWGS84Snapshot = internalSegments
         let lastWGS = rawCoords.last
         let userWGS = userLocation?.coordinate
-        let convert = self.convertForMap
 
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
 
             let segsForMap: [RouteSegment] = self.mergeRenderableSegments(segsForMapSnapshot)
-            let unifiedSegsForMap: [RenderRouteSegment] = self.asRenderRouteSegments(segsForMap)
+            // Build unified segments from WGS84 so both engines can use them directly.
+            let segsWGS84: [RouteSegment] = self.mergeRenderableSegments(segsWGS84Snapshot)
+            let unifiedSegsForMap: [RenderRouteSegment] = self.asRenderRouteSegments(segsWGS84)
 
+            // liveTail is WGS84; MapKit callers apply GCJ-02 via MapView.mapCoord() if needed.
             let tailForMap: [CLLocationCoordinate2D] = {
                 guard let last = lastWGS else { return [] }
                 guard let u = userWGS else { return [] }
                 let d = CLLocation(latitude: u.latitude, longitude: u.longitude)
                     .distance(from: CLLocation(latitude: last.latitude, longitude: last.longitude))
                 guard d >= 12 else { return [] }
-                return [convert(last), convert(u)]
+                return [last, u]
             }()
 
             Task { @MainActor in
@@ -997,15 +1001,27 @@ final class TrackingService: ObservableObject {
         // =========================================================
         // 0) GPS lock stage: require stable accuracy before recording
         // =========================================================
+
+        // High-speed pre-check: loc.speed is Doppler-based and reliable even when
+        // positional accuracy is poor (tunnels, weak satellite coverage on train).
+        // If iOS confirms we are moving fast, relax accuracy gates so the lock can
+        // be acquired despite degraded GPS — drift is not a concern at high speed.
+        // Threshold: 5 m/s ≈ 18 km/h, safely above cycling but below any transit.
+        // effectiveMaxAccuracy / effectiveLockAccuracy are LOCAL; they do not mutate
+        // the stored config and reset to the normal values on the next stationary trip.
+        let highSpeedConfirmed = loc.speed >= 5.0
+        let effectiveMaxAccuracy = highSpeedConfirmed ? max(maxAcceptableAccuracy, 150.0) : maxAcceptableAccuracy
+        let effectiveLockAccuracy = highSpeedConfirmed ? max(lockAccuracy, 80.0) : lockAccuracy
+
         if !isLocationLocked {
             // If accuracy is terrible, don't progress lock streak
-            if acc > maxAcceptableAccuracy {
+            if acc > effectiveMaxAccuracy {
                 lockStreak = 0
                 droppedByAccuracyCount += 1
                 return
             }
 
-            if acc <= lockAccuracy { lockStreak += 1 } else { lockStreak = 0 }
+            if acc <= effectiveLockAccuracy { lockStreak += 1 } else { lockStreak = 0 }
             if lockStreak < lockConsecutiveCount { return }
 
             isLocationLocked = true
@@ -1194,7 +1210,8 @@ final class TrackingService: ObservableObject {
 
         // Accuracy hard gate:
         // if too bad and not turning -> drop
-        if acc > maxAcceptableAccuracy && !keepBecauseTurn {
+        // effectiveMaxAccuracy is already speed-adjusted above (150m when high-speed confirmed).
+        if acc > effectiveMaxAccuracy && !keepBecauseTurn {
             noteSignalInterruptionCandidate(anchor: last, droppedAt: loc.timestamp)
             droppedByAccuracyCount += 1
             return

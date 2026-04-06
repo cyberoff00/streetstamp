@@ -128,15 +128,13 @@ struct PostcardInboxView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
-        .navigationDestination(isPresented: $showComposer) {
-            if let friendID, let friendName {
-                PostcardComposerView(friendID: friendID, friendName: friendName, onSent: {
-                    Task { await refreshInbox() }
-                })
-            } else {
-                PostcardComposerView(onSent: {
-                    Task { await refreshInbox() }
-                })
+        .fullScreenCover(isPresented: $showComposer) {
+            NavigationStack {
+                PostcardComposerView(
+                    friendID: friendID,
+                    friendName: friendName,
+                    onSent: { Task { await refreshInbox() } }
+                )
             }
         }
         .task {
@@ -201,7 +199,7 @@ struct PostcardInboxView: View {
                     toUserID: draft.toUserID,
                     fallbackDisplayName: fallbackDisplayName(for: draft.toUserID)
                 )
-                let statusPresentation = PostcardInboxPresentation.draftStatusPresentation(for: draft.status)
+                let statusPresentation = PostcardInboxPresentation.draftStatusPresentation(for: draft.status, lastError: draft.lastError)
                 PostcardCardRow(
                     cityName: displayCityName(for: draft),
                     nickname: myDisplayName.uppercased(),

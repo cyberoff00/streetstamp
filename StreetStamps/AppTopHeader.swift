@@ -131,7 +131,7 @@ struct UnifiedNavigationHeader<Trailing: View>: View {
                     .frame(width: 44, height: 44)
                     .appFullSurfaceTapTarget(.circle)
             }
-            .buttonStyle(SidebarHamburgerPressStyle())
+            .buttonStyle(HeaderButtonPressStyle())
             .disabled(onLeadingTap == nil)
         case .back:
             Button(action: { onLeadingTap?() }) {
@@ -141,73 +141,13 @@ struct UnifiedNavigationHeader<Trailing: View>: View {
                     .frame(width: 44, height: 44)
                     .appFullSurfaceTapTarget(.circle)
             }
-            .buttonStyle(SidebarHamburgerPressStyle())
+            .buttonStyle(HeaderButtonPressStyle())
             .disabled(onLeadingTap == nil)
         }
     }
 }
 
-/// Unified top header used across pages.
-/// - Left: hamburger entry (aligned & sized consistently)
-/// - Title: single line, uppercase, same font, auto-scales to fit on all devices
-struct AppTopHeader: View {
-    let title: String
-    @Binding var showSidebar: Bool
-    private let buttonSize: CGFloat = 44
-
-    var body: some View {
-        ZStack {
-            Text(title.uppercased())
-                .navigationTitleStyle(level: .primary)
-                .multilineTextAlignment(.center)
-                .allowsTightening(true)
-
-            HStack(spacing: 12) {
-                SidebarHamburgerButton(showSidebar: $showSidebar, size: buttonSize, iconSize: 20)
-
-                Spacer(minLength: 0)
-
-                Color.clear
-                    .frame(width: buttonSize, height: buttonSize)
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 14)
-        .padding(.bottom, 12)
-        .background(FigmaTheme.card.opacity(0.9))
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(FigmaTheme.border)
-                .frame(height: 1)
-        }
-    }
-}
-
-struct SidebarHamburgerButton: View {
-    @Binding var showSidebar: Bool
-    var size: CGFloat = 44
-    var iconSize: CGFloat = 20
-    var iconWeight: Font.Weight = .semibold
-    var foreground: Color = FigmaTheme.text
-
-    var body: some View {
-        Button {
-            Haptics.light()
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
-                showSidebar = true
-            }
-        } label: {
-            Image(systemName: "line.3.horizontal")
-                .font(.system(size: iconSize, weight: iconWeight))
-                .foregroundColor(foreground)
-                .frame(width: size, height: size)
-                .appFullSurfaceTapTarget(.circle)
-        }
-        .buttonStyle(SidebarHamburgerPressStyle())
-    }
-}
-
-private struct SidebarHamburgerPressStyle: ButtonStyle {
+private struct HeaderButtonPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background(

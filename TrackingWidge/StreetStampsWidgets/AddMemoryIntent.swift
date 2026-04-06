@@ -32,7 +32,7 @@ struct OpenCaptureIntent: AppIntent {
     static var openAppWhenRun: Bool = true
     static var isDiscoverable: Bool = false
 
-    func perform() async throws -> some IntentResult & OpensIntent {
+    func perform() async throws -> some IntentResult {
         if let defaults = UserDefaults(suiteName: "group.com.streetstamps.shared") {
             defaults.set(true, forKey: "pendingOpenCapture")
             defaults.set(Date(), forKey: "pendingOpenCaptureTimestamp")
@@ -46,14 +46,22 @@ struct OpenCaptureIntent: AppIntent {
 struct TogglePauseIntent: AppIntent {
     static var title: LocalizedStringResource = "Toggle Pause"
     static var description = IntentDescription("Pause or resume tracking")
-    
+
     static var openAppWhenRun: Bool = false
-    
+
     func perform() async throws -> some IntentResult {
         if let defaults = UserDefaults(suiteName: "group.com.streetstamps.shared") {
             defaults.set(true, forKey: "pendingTogglePause")
         }
-        
+
+        // Signal main app process immediately via Darwin notification
+        // (app is alive in background during location tracking)
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName("com.streetstamps.widgetAction" as CFString),
+            nil, nil, true
+        )
+
         return .result()
     }
 }

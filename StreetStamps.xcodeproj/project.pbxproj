@@ -905,7 +905,7 @@
 			repositoryURL = "https://github.com/mapbox/mapbox-maps-ios.git";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 10.0.0;
+				minimumVersion = 11.0.0;
 			};
 		};
 		CD3F63BD2F47C725003DACD7 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {

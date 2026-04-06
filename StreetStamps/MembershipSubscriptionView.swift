@@ -29,15 +29,17 @@ struct MembershipSubscriptionView: View {
             VStack(spacing: 0) {
                 headerSection
                 if membership.isPremium {
-                    activeStatusCard
+                    activeBenefitsCard
+                        .padding(.bottom, 24)
                 } else {
-                    comparisonTable
                     planSelector
-                    purchaseButton
+                    compareFeaturesHeading
+                    comparisonTable
                 }
                 restoreAndTerms
+                indieNote
             }
-            .padding(.bottom, 40)
+            .padding(.bottom, membership.isPremium ? 40 : 110)
         }
         .background(FigmaTheme.mutedBackground.ignoresSafeArea())
         .onTapGesture {
@@ -45,7 +47,20 @@ struct MembershipSubscriptionView: View {
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) { activeInfoKey = nil }
             }
         }
-        .safeAreaInset(edge: .top, spacing: 0) { topBar }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            HStack {
+                AppBackButton()
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(FigmaTheme.mutedBackground)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !membership.isPremium {
+                stickyPurchaseBar
+            }
+        }
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
         .task {
@@ -64,76 +79,193 @@ struct MembershipSubscriptionView: View {
         }
     }
 
-    // MARK: - Top Bar
-
-    private var topBar: some View {
-        HStack {
-            AppBackButton()
-            Spacer()
-            Text(L10n.t("membership_page_title"))
-                .font(.system(size: 17, weight: .bold))
-                .foregroundColor(FigmaTheme.text)
-            Spacer()
-            Color.clear.frame(width: 36, height: 36)
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 10)
-        .background(FigmaTheme.mutedBackground)
-    }
-
     // MARK: - Header
 
     private var headerSection: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 12) {
             ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [FigmaTheme.primary.opacity(0.3), FigmaTheme.accent.opacity(0.12)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 88, height: 88)
-
-                Image(systemName: membership.isPremium ? "crown.fill" : "star.fill")
-                    .font(.system(size: 36, weight: .bold))
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(membership.isPremium
+                          ? FigmaTheme.secondary.opacity(0.15)
+                          : FigmaTheme.primary.opacity(0.15))
+                    .frame(width: 80, height: 80)
+                Image(systemName: "crown.fill")
+                    .font(.system(size: 32, weight: .bold))
                     .foregroundColor(membership.isPremium ? FigmaTheme.secondary : FigmaTheme.primary)
             }
+            .padding(.top, 28)
 
             Text(membership.isPremium
                  ? L10n.t("membership_status_active")
-                 : L10n.t("membership_status_free"))
+                 : L10n.t("membership_hero_title"))
                 .font(.system(size: 24, weight: .black, design: .rounded))
                 .foregroundColor(FigmaTheme.text)
+                .multilineTextAlignment(.center)
 
             if !membership.isPremium {
                 Text(L10n.t("membership_upgrade_subtitle"))
-                    .font(.system(size: 15))
+                    .font(.system(size: 14))
                     .foregroundColor(FigmaTheme.subtext)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
+                    .padding(.horizontal, 36)
             }
         }
-        .padding(.top, 20)
         .padding(.bottom, 24)
     }
 
-    // MARK: - Active Status (for premium users)
+    // MARK: - Compare Features Heading
 
-    private var activeStatusCard: some View {
-        VStack(spacing: 16) {
-            statusRow(icon: "checkmark.seal.fill", text: L10n.t("membership_active_all_features"))
+    private var compareFeaturesHeading: some View {
+        Text(L10n.t("membership_compare_features_title"))
+            .font(.system(size: 17, weight: .bold))
+            .foregroundColor(FigmaTheme.text)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 18)
+            .padding(.top, 28)
+            .padding(.bottom, 12)
+    }
 
-            if let exp = membership.expirationDate {
-                let formatter = DateFormatter()
-                let _ = formatter.dateStyle = .medium
-                statusRow(
-                    icon: "calendar",
-                    text: String(format: L10n.t("membership_expires_format"), formatter.string(from: exp))
-                )
+    // MARK: - Sticky Purchase Bar
+
+    private var stickyPurchaseBar: some View {
+        VStack(spacing: 4) {
+            if let error = errorMessage {
+                Text(error)
+                    .font(.system(size: 12))
+                    .foregroundColor(.red)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 8)
+            }
+            Button {
+                Task { await performPurchase() }
+            } label: {
+                HStack(spacing: 8) {
+                    if isPurchasing {
+                        ProgressView().tint(.white)
+                    }
+                    Text(stickyButtonLabel)
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundColor(.white)
+                    if !isPurchasing {
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.white)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(FigmaTheme.primary)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .disabled(isPurchasing || selectedProductID == nil)
+            .opacity(isPurchasing ? 0.7 : 1.0)
+            .padding(.horizontal, 18)
+            .padding(.top, 10)
+            .padding(.bottom, 8)
+        }
+        .background(
+            FigmaTheme.mutedBackground
+                .shadow(color: .black.opacity(0.06), radius: 12, y: -4)
+        )
+    }
+
+    private var stickyButtonLabel: String {
+        guard let id = selectedProductID else {
+            return L10n.t("membership_subscribe_button")
+        }
+        if id == MembershipStore.yearlyProductID {
+            return L10n.t("membership_cta_yearly")
+        }
+        return L10n.t("membership_cta_monthly")
+    }
+
+    // MARK: - Indie Note
+
+    private var indieNote: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "heart.fill")
+                .font(.system(size: 12))
+                .foregroundColor(FigmaTheme.primary.opacity(0.6))
+                .padding(.top, 1)
+            Text(L10n.t("membership_indie_note"))
+                .font(.system(size: 12))
+                .foregroundColor(FigmaTheme.subtext)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 16)
+        .padding(.bottom, 4)
+    }
+
+    // MARK: - Active Benefits Card (premium users)
+
+    private struct BenefitRow {
+        let icon: String
+        let key: String
+    }
+
+    private let benefitRows: [BenefitRow] = [
+        BenefitRow(icon: "camera.fill",               key: "membership_benefit_photos"),
+        BenefitRow(icon: "person.2.fill",             key: "membership_benefit_friends"),
+        BenefitRow(icon: "globe",                     key: "membership_benefit_globe"),
+        BenefitRow(icon: "icloud.fill",               key: "membership_benefit_icloud"),
+        BenefitRow(icon: "square.and.arrow.up",       key: "membership_benefit_gpx"),
+        BenefitRow(icon: "envelope.fill",             key: "membership_benefit_postcard"),
+        BenefitRow(icon: "map.fill",                  key: "membership_benefit_map"),
+        BenefitRow(icon: "star.fill",                 key: "membership_benefit_coins"),
+    ]
+
+    private var activeBenefitsCard: some View {
+        VStack(spacing: 0) {
+            // Header row
+            HStack {
+                Text(L10n.t("membership_your_benefits"))
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(FigmaTheme.subtext)
+                Spacer()
+                if let exp = membership.expirationDate {
+                    let formatter: DateFormatter = {
+                        let f = DateFormatter()
+                        f.dateStyle = .medium
+                        return f
+                    }()
+                    Text(String(format: L10n.t("membership_expires_format"), formatter.string(from: exp)))
+                        .font(.system(size: 12))
+                        .foregroundColor(FigmaTheme.subtext)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(FigmaTheme.mutedBackground)
+
+            // Benefits list
+            ForEach(Array(benefitRows.enumerated()), id: \.offset) { index, row in
+                HStack(spacing: 12) {
+                    Image(systemName: row.icon)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(FigmaTheme.primary)
+                        .frame(width: 22)
+                    Text(L10n.t(row.key))
+                        .font(.system(size: 14))
+                        .foregroundColor(FigmaTheme.text)
+                    Spacer()
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(FigmaTheme.primary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .overlay(alignment: .bottom) {
+                    if index < benefitRows.count - 1 {
+                        FigmaTheme.border.frame(height: 1)
+                    }
+                }
             }
 
+            // Manage subscription link
+            FigmaTheme.border.frame(height: 1)
             Button {
                 Task {
                     if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
@@ -142,42 +274,39 @@ struct MembershipSubscriptionView: View {
                 }
             } label: {
                 Text(L10n.t("membership_manage_subscription"))
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(FigmaTheme.primary)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(FigmaTheme.subtext)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(FigmaTheme.primary.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(.vertical, 13)
             }
         }
-        .padding(20)
         .background(FigmaTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(FigmaTheme.primary.opacity(0.3), lineWidth: 1.5)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(FigmaTheme.border, lineWidth: 1)
         )
         .padding(.horizontal, 18)
     }
 
-    private func statusRow(icon: String, text: String) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(FigmaTheme.primary)
-                .frame(width: 24)
-            Text(text)
-                .font(.system(size: 14))
-                .foregroundColor(FigmaTheme.text)
-            Spacer()
-        }
-    }
-
-    // MARK: - Comparison Table (for free users)
+    // MARK: - Comparison Table (free users)
 
     private var comparisonTable: some View {
         VStack(spacing: 0) {
             comparisonHeader
+            // — Unlimited upgrades first —
+            comparisonRow(
+                feature: L10n.t("membership_compare_friends"),
+                freeValue: "5",
+                premiumValue: L10n.t("membership_compare_unlimited")
+            )
+            comparisonRow(
+                feature: L10n.t("membership_compare_postcard"),
+                freeValue: "1/3",
+                premiumValue: L10n.t("membership_compare_unlimited"),
+                infoKey: "postcard"
+            )
+            // — Other numeric limits —
             comparisonRow(
                 feature: L10n.t("membership_compare_photos"),
                 freeValue: "6",
@@ -185,10 +314,25 @@ struct MembershipSubscriptionView: View {
                 infoKey: "photos"
             )
             comparisonRow(
-                feature: L10n.t("membership_compare_friends"),
-                freeValue: "5",
-                premiumValue: L10n.t("membership_compare_unlimited")
+                feature: L10n.t("membership_compare_coins"),
+                freeValue: "10",
+                premiumValue: "50"
             )
+            // — Premium-only section divider —
+            HStack {
+                Text(L10n.t("membership_compare_premium_only"))
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(FigmaTheme.primary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(FigmaTheme.primary.opacity(0.1))
+                    .clipShape(Capsule())
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(FigmaTheme.mutedBackground)
+            // — Premium-only features —
             comparisonRow(
                 feature: L10n.t("membership_compare_globe"),
                 freeValue: nil,
@@ -210,20 +354,9 @@ struct MembershipSubscriptionView: View {
                 premiumValue: "check"
             )
             comparisonRow(
-                feature: L10n.t("membership_compare_postcard"),
-                freeValue: "1/3",
-                premiumValue: "2/10",
-                infoKey: "postcard"
-            )
-            comparisonRow(
                 feature: L10n.t("membership_compare_map_theme"),
                 freeValue: nil,
-                premiumValue: "check"
-            )
-            comparisonRow(
-                feature: L10n.t("membership_compare_coins"),
-                freeValue: "10",
-                premiumValue: "50",
+                premiumValue: "check",
                 isLast: true
             )
         }
@@ -294,7 +427,7 @@ struct MembershipSubscriptionView: View {
                 .frame(width: 60, alignment: .center)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.vertical, 11)
         .overlay(alignment: .bottom) {
             if !isLast {
                 FigmaTheme.border.frame(height: 1)
@@ -324,17 +457,19 @@ struct MembershipSubscriptionView: View {
         if let value {
             if value == "check" {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 14))
+                    .font(.system(size: 15))
                     .foregroundColor(isPremium ? FigmaTheme.primary : FigmaTheme.subtext)
             } else {
                 Text(value)
                     .font(.system(size: 13, weight: isPremium ? .bold : .regular))
                     .foregroundColor(isPremium ? FigmaTheme.primary : FigmaTheme.text)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
             }
         } else {
-            Image(systemName: "minus")
-                .font(.system(size: 12))
-                .foregroundColor(FigmaTheme.subtext.opacity(0.4))
+            Image(systemName: "xmark")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(FigmaTheme.subtext.opacity(0.35))
         }
     }
 
@@ -488,41 +623,6 @@ struct MembershipSubscriptionView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Purchase Button
-
-    private var purchaseButton: some View {
-        VStack(spacing: 10) {
-            Button {
-                Task { await performPurchase() }
-            } label: {
-                HStack(spacing: 8) {
-                    if isPurchasing {
-                        ProgressView()
-                            .tint(.white)
-                    }
-                    Text(L10n.t("membership_subscribe_button"))
-                        .font(.system(size: 17, weight: .bold))
-                        .foregroundColor(.white)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 15)
-                .background(FigmaTheme.primary)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            }
-            .disabled(isPurchasing || selectedProductID == nil)
-            .opacity(isPurchasing ? 0.7 : 1.0)
-
-            if let error = errorMessage {
-                Text(error)
-                    .font(.system(size: 13))
-                    .foregroundColor(.red)
-                    .multilineTextAlignment(.center)
-            }
-        }
-        .padding(.horizontal, 18)
-        .padding(.bottom, 8)
-    }
-
     // MARK: - Restore & Terms
 
     private var restoreAndTerms: some View {
@@ -564,7 +664,6 @@ struct MembershipSubscriptionView: View {
             errorMessage = error.localizedDescription
         }
         productsLoadFinished = true
-        // If StoreKit returned nothing, pre-select monthly so the button is enabled
         if selectedProductID == nil {
             selectedProductID = MembershipStore.subscriptionProductID
         }
@@ -575,7 +674,6 @@ struct MembershipSubscriptionView: View {
         isPurchasing = true
         errorMessage = nil
 
-        // If products weren't loaded yet (fallback cards), try loading now
         if products.isEmpty {
             await loadProducts()
         }

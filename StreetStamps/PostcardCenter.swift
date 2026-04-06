@@ -69,7 +69,23 @@ final class PostcardCenter: ObservableObject {
 
     init(userID: String) {
         self.activeUserID = userID
-        self.drafts = PostcardDraftStore.load(userID: userID)
+        var loaded = PostcardDraftStore.load(userID: userID)
+        // Recover drafts that were left in .sending due to app kill / crash.
+        // They will never complete on their own — reset to .failed so the retry button appears.
+        let stuckThreshold: TimeInterval = 10 * 60
+        let now = Date()
+        var didRecover = false
+        for i in loaded.indices where loaded[i].status == .sending {
+            guard now.timeIntervalSince(loaded[i].updatedAt) > stuckThreshold else { continue }
+            loaded[i].status = .failed
+            loaded[i].lastError = L10n.t("postcard_send_failed")
+            loaded[i].updatedAt = now
+            didRecover = true
+        }
+        self.drafts = loaded
+        if didRecover {
+            PostcardDraftStore.save(loaded, userID: userID)
+        }
     }
 
     func switchUser(_ userID: String) {

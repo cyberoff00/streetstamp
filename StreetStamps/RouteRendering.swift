@@ -20,6 +20,8 @@ enum RouteRenderSurface {
     case mapKit
     /// Canvas surfaces in app UI (deep views) — we still return WGS/GCJ adapted coords; drawing happens elsewhere.
     case canvas
+    /// Mapbox surfaces — always WGS84, no GCJ-02 offset (Mapbox handles its own China tile offsets).
+    case mapbox
 }
 
 /// Centralized style tokens so every surface uses the same dash cadence.
@@ -122,6 +124,9 @@ enum RouteRenderingPipeline {
             case .canvas:
                 let shouldApply = input.applyGCJForChina || ChinaCoordinateTransform.shouldApplyGCJ(countryISO2: input.countryISO2, cityKey: input.cityKey)
                 adaptedCoords = shouldApply ? seg.coords.map { $0.wgs2gcj } : seg.coords
+            case .mapbox:
+                // Mapbox uses WGS84 natively — no coordinate adaptation needed.
+                adaptedCoords = seg.coords
             }
             return RenderRouteSegment(id: seg.id, style: seg.style, coords: adaptedCoords)
         }
@@ -195,6 +200,69 @@ enum RouteSnapshotDrawer {
             ctx.strokePath()
 
             // 3) Highlight
+            if !isGap {
+                ctx.setLineDash(phase: 0, lengths: [])
+                ctx.setStrokeColor(UIColor.white.withAlphaComponent(isDarkMap ? 0.45 : 0.25).cgColor)
+                ctx.setLineWidth(mainWidth * 0.35)
+                ctx.addPath(path.cgPath)
+                ctx.strokePath()
+            }
+        }
+
+        ctx.restoreGState()
+    }
+
+    /// Overload accepting a generic coordinate-to-point mapper (used by Mapbox overlay drawing).
+    static func draw(
+        segments: [RenderRouteSegment],
+        isFlightLike: Bool,
+        pointForCoordinate: (CLLocationCoordinate2D) -> CGPoint,
+        ctx: CGContext,
+        coreColor: UIColor,
+        stroke: Stroke,
+        glowColor: UIColor? = nil,
+        isDarkMap: Bool = false
+    ) {
+        guard segments.count > 0 else { return }
+
+        let glowTint = glowColor ?? coreColor
+        ctx.saveGState()
+        ctx.setLineCap(.round)
+        ctx.setLineJoin(.round)
+
+        for seg in segments {
+            guard seg.coords.count >= 2 else { continue }
+            let path = UIBezierPath()
+            for (i, c) in seg.coords.enumerated() {
+                let p = pointForCoordinate(c)
+                if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
+            }
+
+            let isGap = seg.style == .dashed
+            let mainWidth: CGFloat = isGap ? max(1.0, stroke.coreWidth * 0.45) : stroke.coreWidth
+            let glowWidth: CGFloat = mainWidth * (isGap ? 2.2 : 2.5)
+
+            let dashPattern: [CGFloat]? = isGap ? RouteRenderStyleTokens.dashLengths : nil
+
+            ctx.saveGState()
+            if let dp = dashPattern { ctx.setLineDash(phase: 0, lengths: dp) } else { ctx.setLineDash(phase: 0, lengths: []) }
+            ctx.setShadow(
+                offset: .zero,
+                blur: isDarkMap ? 5.0 : 2.0,
+                color: glowTint.withAlphaComponent(isDarkMap ? 0.50 : 0.30).cgColor
+            )
+            ctx.setStrokeColor(glowTint.withAlphaComponent(isGap ? 0.08 : (isDarkMap ? 0.30 : 0.15)).cgColor)
+            ctx.setLineWidth(glowWidth)
+            ctx.addPath(path.cgPath)
+            ctx.strokePath()
+            ctx.restoreGState()
+
+            if let dp = dashPattern { ctx.setLineDash(phase: 0, lengths: dp) } else { ctx.setLineDash(phase: 0, lengths: []) }
+            ctx.setStrokeColor(coreColor.withAlphaComponent(isGap ? 0.50 : 1.0).cgColor)
+            ctx.setLineWidth(mainWidth)
+            ctx.addPath(path.cgPath)
+            ctx.strokePath()
+
             if !isGap {
                 ctx.setLineDash(phase: 0, lengths: [])
                 ctx.setStrokeColor(UIColor.white.withAlphaComponent(isDarkMap ? 0.45 : 0.25).cgColor)

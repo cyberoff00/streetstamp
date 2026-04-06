@@ -39,6 +39,9 @@ struct MainView: View {
     @StateObject private var cityLoc = CityLocationManager()
     @AppStorage("streetstamps.hint.journey_just_saved") private var journeyJustSaved = false
     @State private var showLinkEmailPrompt = false
+    @State private var showSubscription = false
+    @State private var showMapboxTrialExpiredGate = false
+    @ObservedObject private var membership = MembershipStore.shared
 
 #if DEBUG
     @State private var showDebugPanel = false
@@ -90,9 +93,35 @@ struct MainView: View {
                     showDebugPanel = true
                 }
 #endif
+
+                // Subscription entry — top right (hidden for premium users)
+                if !membership.isPremium {
+                    HStack {
+                        Spacer()
+                        Button {
+                            showSubscription = true
+                        } label: {
+                            Image(systemName: "crown")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(Color.black.opacity(0.45))
+                                .frame(width: 36, height: 36)
+                                .background(Color.white.opacity(0.88))
+                                .clipShape(Circle())
+                                .shadow(color: .black.opacity(0.07), radius: 6, y: 2)
+                        }
+                        .padding(.trailing, 20)
+                    }
+                    .padding(.top, proxy.safeAreaInsets.top - 4)
+                }
             }
         }
        
+        .fullScreenCover(isPresented: $showSubscription) {
+            NavigationStack {
+                MembershipSubscriptionView()
+                    .environmentObject(MembershipStore.shared)
+            }
+        }
         .fullScreenCover(isPresented: $showMapView) {
             MapView(
                 cityName: resolvedCanonicalCityForNewJourney,
@@ -175,6 +204,8 @@ struct MainView: View {
             if tracking.isTracking && ongoingJourney.endTime == nil {
                 hasOngoingJourney = true
             }
+            // Check Mapbox trial expiry
+            checkMapboxTrialExpiry()
         }
         .onChange(of: showMapView) { isShowing in
             if !isShowing {
@@ -228,6 +259,16 @@ struct MainView: View {
             }
         }
         .onAppear { checkLinkEmailPrompt() }
+        .alert(L10n.t("mapbox_trial_expired_title"), isPresented: $showMapboxTrialExpiredGate) {
+            Button(L10n.t("mapbox_trial_expired_subscribe")) {
+                showSubscription = true
+            }
+            Button(L10n.t("mapbox_trial_expired_dismiss"), role: .cancel) {
+                MapLayerStyle.revertToDefaultIfNeeded()
+            }
+        } message: {
+            Text(L10n.t("mapbox_trial_expired_message"))
+        }
 #if DEBUG
         .sheet(isPresented: $showDebugPanel) {
             DebugLocationPanel(
@@ -256,6 +297,19 @@ struct MainView: View {
             guard sessionStore.isLoggedIn, !sessionStore.hasEmailPassword else { return }
             showLinkEmailPrompt = true
             LinkEmailPromptPolicy.recordDismissal()
+        }
+    }
+
+    // MARK: - Mapbox Trial Expiry
+
+    private func checkMapboxTrialExpiry() {
+        let current = MapLayerStyle.current
+        guard current.isMapbox, !membership.isPremium else { return }
+        if !MapLayerStyle.isMapboxTrialActive && MapLayerStyle.hasStartedMapboxTrial {
+            // Trial expired with Mapbox still selected — prompt user
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                showMapboxTrialExpiredGate = true
+            }
         }
     }
 

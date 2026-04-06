@@ -10,6 +10,19 @@ import ActivityKit
 import UIKit
 import Combine
 
+// C function pointer for Darwin notification — must be file-level (no captures)
+private func darwinWidgetActionCallback(
+    _ center: CFNotificationCenter?,
+    _ observer: UnsafeMutableRawPointer?,
+    _ name: CFNotificationName?,
+    _ object: UnsafeRawPointer?,
+    _ userInfo: CFDictionary?
+) {
+    DispatchQueue.main.async {
+        LiveActivityManager.shared.checkPendingWidgetActions()
+    }
+}
+
 @MainActor
 final class LiveActivityManager: ObservableObject {
     
@@ -224,7 +237,10 @@ final class LiveActivityManager: ObservableObject {
     }
     private func timerFired() {
         guard currentActivity != nil else { return }
-        
+
+        // Fallback: 定时检查 Widget 操作（防止 Darwin 通知丢失）
+        checkPendingWidgetActions()
+
         // 使用缓存的距离和记忆数，但更新时间
         let elapsed = getElapsedSeconds()
         updateActivity(
@@ -250,9 +266,19 @@ final class LiveActivityManager: ObservableObject {
             name: UIApplication.didBecomeActiveNotification,
             object: nil
         )
+
+        // 监听 Widget Extension 的 Darwin 通知（后台即时响应，不用打开 app）
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            nil,
+            darwinWidgetActionCallback,
+            "com.streetstamps.widgetAction" as CFString,
+            nil,
+            .deliverImmediately
+        )
     }
     
-    @objc private func checkPendingWidgetActions() {
+    @objc func checkPendingWidgetActions() {
         guard let defaults = sharedDefaults else { return }
 
         if defaults.bool(forKey: "pendingOpenCapture") {

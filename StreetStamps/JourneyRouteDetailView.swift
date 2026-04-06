@@ -22,10 +22,12 @@ struct JourneyRouteDetailView: View {
     @State private var showShareSheet = false
     @State private var showDeleteConfirm = false
     @State private var fittedRegion: MKCoordinateRegion? = nil
+    @State private var initialCameraCommand: MapCameraCommand? = nil
     @State private var editingMemory: JourneyMemory? = nil
     @State private var viewingMemory: JourneyMemory? = nil
     @State private var sidebarHideToken = UUID().uuidString
     @State private var localizedCityTitle: String? = nil
+    @AppStorage(MapLayerStyle.storageKey) private var layerStyleRaw = MapLayerStyle.current.rawValue
 
     init(
         journeyID: String,
@@ -93,18 +95,20 @@ struct JourneyRouteDetailView: View {
         return "\(m)m"
     }
 
-    private var segments: [JourneyDetailMap.AnySegment] {
+    private var mapSegments: [MapRouteSegment] {
         guard let j = journey else { return [] }
+        let surface: RouteRenderSurface = (MapLayerStyle(rawValue: layerStyleRaw) ?? .mutedDark).engine == .mapbox ? .mapbox : .mapKit
         return CityDeepRenderEngine.styledSegments(
             journeys: [j],
             countryISO2: j.countryISO2,
-            cityKey: j.cityKey
-        ).map {
-            JourneyDetailMap.AnySegment(coords: $0.coords, isGap: $0.isGap, repeatWeight: $0.repeatWeight)
+            cityKey: j.cityKey,
+            surface: surface
+        ).enumerated().map { (i, seg) in
+            MapRouteSegment(id: "jd-\(i)", coordinates: seg.coords, isGap: seg.isGap, repeatWeight: seg.repeatWeight)
         }
     }
 
-    private var memoryGroups: [JourneyDetailMap.MemoryGroup] {
+    private var mapAnnotations: [MapAnnotationItem] {
         guard let j = journey else { return [] }
         return j.memories.filter { $0.locationStatus != .pending }.map { memory in
             let mapped = JourneyMemoryMapCoordinateResolver.mapCoordinate(
@@ -112,32 +116,30 @@ struct JourneyRouteDetailView: View {
                 fallbackCountryISO2: j.countryISO2,
                 fallbackCityKey: j.cityKey
             )
-            return JourneyDetailMap.MemoryGroup(id: memory.id, coordinate: mapped, memory: memory)
+            return MapAnnotationItem(id: memory.id, coordinate: mapped, kind: .memoryGroup(key: memory.id, items: [memory]))
         }
     }
 
     var body: some View {
         ZStack(alignment: .top) {
-            JourneyDetailMap(
-                segments: segments,
-                memoryGroups: memoryGroups,
-                initialRegion: fittedRegion,
-                onTapMemory: { memory in
-                    switch JourneyRouteDetailInteractionPolicy.destinationForMemoryTap(isReadOnly: isReadOnly) {
-                    case .editMemory:
-                        editingMemory = memory
-                    case .viewMemory:
-                        viewingMemory = memory
+            UnifiedMapView(
+                segments: mapSegments,
+                annotations: mapAnnotations,
+                cameraCommand: initialCameraCommand,
+                config: .journeyDetail(),
+                callbacks: MapCallbacks(
+                    onSelectMemories: { memories in
+                        guard let memory = memories.first else { return }
+                        switch JourneyRouteDetailInteractionPolicy.destinationForMemoryTap(isReadOnly: isReadOnly) {
+                        case .editMemory:
+                            editingMemory = memory
+                        case .viewMemory:
+                            viewingMemory = memory
+                        }
                     }
-                }
+                )
             )
             .ignoresSafeArea()
-            .onAppear {
-                refreshRegion()
-            }
-            .onChange(of: journey?.id) { _ in
-                refreshRegion()
-            }
 
             VStack(spacing: 0) {
                 routeHeader
@@ -227,6 +229,10 @@ struct JourneyRouteDetailView: View {
         }
         .onAppear {
             flow.pushSidebarButtonHidden(token: sidebarHideToken)
+            refreshRegion()
+        }
+        .onChange(of: journey?.id) { _ in
+            refreshRegion()
         }
         .task(id: "\(journey?.id ?? "")|\(languagePreference.currentLanguage ?? "sys")") {
             await refreshLocalizedCityTitle()
@@ -304,10 +310,11 @@ struct JourneyRouteDetailView: View {
     private func refreshRegion() {
         guard let j = journey else {
             fittedRegion = nil
+            initialCameraCommand = nil
             return
         }
 
-        fittedRegion = CityDeepRenderEngine.fittedRegion(
+        let region = CityDeepRenderEngine.fittedRegion(
             cityKey: j.cityKey,
             countryISO2: j.countryISO2,
             journeys: [j],
@@ -315,6 +322,10 @@ struct JourneyRouteDetailView: View {
             effectiveBoundaryWGS: nil,
             fetchedBoundaryWGS: nil
         )
+        fittedRegion = region
+        if let region {
+            initialCameraCommand = .setRegion(region, animated: false)
+        }
     }
 
     private func refreshLocalizedCityTitle() async {
@@ -362,185 +373,4 @@ struct JourneyRouteDetailView: View {
     }
 }
 
-private struct JourneyDetailMap: UIViewRepresentable {
-    struct AnySegment {
-        let coords: [CLLocationCoordinate2D]
-        let isGap: Bool
-        let repeatWeight: Double
-    }
-
-    struct MemoryGroup: Identifiable {
-        let id: String
-        let coordinate: CLLocationCoordinate2D
-        let memory: JourneyMemory
-    }
-
-    let segments: [AnySegment]
-    let memoryGroups: [MemoryGroup]
-    let initialRegion: MKCoordinateRegion?
-    let onTapMemory: (JourneyMemory) -> Void
-
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    func makeUIView(context: Context) -> MKMapView {
-        let map = MKMapView(frame: .zero)
-        map.delegate = context.coordinator
-        map.overrideUserInterfaceStyle = MapAppearanceSettings.interfaceStyle
-        map.showsCompass = false
-        map.showsScale = false
-        map.showsTraffic = false
-        map.pointOfInterestFilter = .excludingAll
-        map.mapType = MapAppearanceSettings.mapType
-        map.isRotateEnabled = false
-        map.isPitchEnabled = false
-
-        if let r = initialRegion {
-            map.setRegion(r, animated: false)
-            context.coordinator.didSetInitialRegion = true
-        }
-        return map
-    }
-
-    func updateUIView(_ map: MKMapView, context: Context) {
-        map.overrideUserInterfaceStyle = MapAppearanceSettings.interfaceStyle
-        map.mapType = MapAppearanceSettings.mapType
-
-        if let r = initialRegion, !context.coordinator.didSetInitialRegion {
-            context.coordinator.didSetInitialRegion = true
-            map.setRegion(r, animated: false)
-        }
-
-        map.removeOverlays(map.overlays)
-        for seg in segments where seg.coords.count >= 2 {
-            let poly = JourneyStyledPolyline(coordinates: seg.coords, count: seg.coords.count)
-            poly.isGap = seg.isGap
-            poly.repeatWeight = max(0, min(1, seg.repeatWeight))
-            map.addOverlay(poly)
-        }
-
-        map.removeAnnotations(map.annotations)
-        for g in memoryGroups {
-            map.addAnnotation(JourneyMemoryAnnotation(group: g))
-        }
-    }
-
-    final class Coordinator: NSObject, MKMapViewDelegate {
-        let parent: JourneyDetailMap
-        var didSetInitialRegion = false
-
-        init(_ parent: JourneyDetailMap) {
-            self.parent = parent
-        }
-
-        func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
-            guard let poly = overlay as? JourneyStyledPolyline else { return MKOverlayRenderer(overlay: overlay) }
-            let base = MapAppearanceSettings.routeBaseColor
-            let glowTint = MapAppearanceSettings.routeGlowColor
-            let isDark = MapAppearanceSettings.current == .dark
-            let gapDash = RouteRenderStyleTokens.dashLengths.map { NSNumber(value: Double($0)) }
-            let weight = CGFloat(max(0, min(1, poly.repeatWeight)))
-            let isGap = poly.isGap
-
-            let mainWidth: CGFloat = isGap ? 1.4 : (2.2 + weight * 0.8)
-            let glowWidth: CGFloat = mainWidth * (isGap ? 2.2 : 2.5)
-
-            let glowLayer = MKPolylineRenderer(polyline: poly)
-            glowLayer.lineWidth = glowWidth
-            glowLayer.lineCap = .round
-            glowLayer.lineJoin = .round
-            glowLayer.strokeColor = glowTint.withAlphaComponent(isGap ? 0.06 : (isDark ? 0.25 : 0.12))
-            if isGap { glowLayer.lineDashPattern = gapDash }
-
-            let mainLayer = MKPolylineRenderer(polyline: poly)
-            mainLayer.lineWidth = mainWidth
-            mainLayer.lineCap = .round
-            mainLayer.lineJoin = .round
-            mainLayer.strokeColor = base.withAlphaComponent(isGap ? 0.50 : 1.0)
-            if isGap { mainLayer.lineDashPattern = gapDash }
-
-            let highlightLayer = MKPolylineRenderer(polyline: poly)
-            highlightLayer.lineWidth = mainWidth * 0.35
-            highlightLayer.lineCap = .round
-            highlightLayer.lineJoin = .round
-            highlightLayer.strokeColor = isGap ? .clear : UIColor.white.withAlphaComponent(isDark ? 0.45 : 0.25)
-
-            let lr = JourneyLayeredPolylineRenderer(renderers: [glowLayer, mainLayer, highlightLayer])
-            if isDark {
-                lr.glowBlur = 6.0
-                lr.glowColor = glowTint.withAlphaComponent(0.50).cgColor
-            }
-            return lr
-        }
-
-        func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
-            guard let ann = annotation as? JourneyMemoryAnnotation else { return nil }
-            let id = "journeyMem"
-            let view = mapView.dequeueReusableAnnotationView(withIdentifier: id)
-                ?? MKAnnotationView(annotation: ann, reuseIdentifier: id)
-
-            view.annotation = ann
-            view.canShowCallout = false
-            view.bounds = CGRect(x: 0, y: 0, width: 56, height: 56)
-            view.backgroundColor = .clear
-            view.displayPriority = .required
-            if #available(iOS 14.0, *) {
-                view.zPriority = .max
-            }
-
-            let hosting = UIHostingController(rootView: MemoryPin(cluster: [ann.group.memory]))
-            hosting.view.backgroundColor = .clear
-            hosting.view.frame = view.bounds
-            hosting.view.isUserInteractionEnabled = false
-            view.subviews.forEach { $0.removeFromSuperview() }
-            view.addSubview(hosting.view)
-
-            return view
-        }
-
-        func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
-            guard let ann = view.annotation as? JourneyMemoryAnnotation else { return }
-            parent.onTapMemory(ann.group.memory)
-            mapView.deselectAnnotation(ann, animated: false)
-        }
-    }
-}
-
-private final class JourneyMemoryAnnotation: NSObject, MKAnnotation {
-    let group: JourneyDetailMap.MemoryGroup
-    var coordinate: CLLocationCoordinate2D { group.coordinate }
-
-    init(group: JourneyDetailMap.MemoryGroup) {
-        self.group = group
-    }
-}
-
-private final class JourneyStyledPolyline: MKPolyline {
-    var isGap: Bool = false
-    var repeatWeight: Double = 0
-}
-
-private final class JourneyLayeredPolylineRenderer: MKOverlayRenderer {
-    private let renderers: [MKPolylineRenderer]
-    var glowBlur: CGFloat = 0
-    var glowColor: CGColor?
-
-    init(renderers: [MKPolylineRenderer]) {
-        precondition(!renderers.isEmpty)
-        self.renderers = renderers
-        super.init(overlay: renderers[0].overlay)
-    }
-
-    override func draw(_ mapRect: MKMapRect, zoomScale: MKZoomScale, in context: CGContext) {
-        for (i, renderer) in renderers.enumerated() {
-            if i == 0 && glowBlur > 0, let color = glowColor {
-                context.saveGState()
-                let scaledBlur = glowBlur / zoomScale
-                context.setShadow(offset: .zero, blur: scaledBlur, color: color)
-                renderer.draw(mapRect, zoomScale: zoomScale, in: context)
-                context.restoreGState()
-            } else {
-                renderer.draw(mapRect, zoomScale: zoomScale, in: context)
-            }
-        }
-    }
-}
+// Old JourneyDetailMap, JourneyStyledPolyline, JourneyLayeredPolylineRenderer removed — now using UnifiedMapView

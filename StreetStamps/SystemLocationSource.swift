@@ -141,12 +141,12 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         manager.showsBackgroundLocationIndicator = true
         
         manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
-        manager.distanceFilter = 15
-        
+        manager.distanceFilter = 20
+
         manager.startUpdatingLocation()
         requestImmediateLocationRefresh()
     }
-    
+
     /// 前台静止/低功耗模式
     func startForegroundStationary() {
         stop()
@@ -293,7 +293,7 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         manager.activityType = .fitness
 
         manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
-        manager.distanceFilter = 15
+        manager.distanceFilter = 25
 
         manager.startUpdatingLocation()
         requestImmediateLocationRefresh()
@@ -309,8 +309,8 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         manager.showsBackgroundLocationIndicator = true
         manager.activityType = .otherNavigation
 
-        manager.desiredAccuracy = 30
-        manager.distanceFilter = 50
+        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+        manager.distanceFilter = 80
 
         manager.startUpdatingLocation()
         requestImmediateLocationRefresh()
@@ -337,8 +337,11 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         manager.pausesLocationUpdatesAutomatically = true
         manager.showsBackgroundLocationIndicator = true
         manager.activityType = .otherNavigation
-        manager.desiredAccuracy = 30
-        manager.distanceFilter = 50
+        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+        manager.distanceFilter = 80
+        // Fallback wakeup: if the process is killed while GPS is paused,
+        // significant-change monitoring can restart it when the user moves >500m.
+        manager.startMonitoringSignificantLocationChanges()
     }
 
     

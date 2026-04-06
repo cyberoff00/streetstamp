@@ -12,6 +12,8 @@ import UIKit
 import Photos
 import CoreImage
 import CoreImage.CIFilterBuiltins
+import MapboxMaps
+import Turf
 
 // MARK: - Privacy Mode
 enum ShareMapPrivacyMode: Hashable {
@@ -960,7 +962,26 @@ struct PopSharingCard: View {
         )
         let drawSegments = built.segments
         let isFlightLike = built.isFlightLike
-        let appearance = MapAppearanceSettings.current
+        let currentStyle = MapLayerStyle.current
+
+        // Mapbox path: delegate to async helper and return early.
+        if currentStyle.engine == .mapbox {
+            Task {
+                let img = await ShareCardGenerator.makeMapboxRouteImage(
+                    coordsWGS84: coords,
+                    fallbackCenter: fallbackCenter,
+                    style: currentStyle,
+                    snapshotSize: snapshotSize,
+                    scale: scale,
+                    privacy: privacy,
+                    drawRobot: true,
+                    countryISO2: countryISO2,
+                    cityKey: cityKey
+                ) ?? (UIImage(systemName: "map") ?? UIImage())
+                DispatchQueue.main.async { completion(img) }
+            }
+            return
+        }
 
         // Flatten for region calculation.
         let drawCoords = drawSegments.flatMap { $0.coords }
@@ -969,8 +990,13 @@ struct PopSharingCard: View {
         func snapshot(region: MKCoordinateRegion, drawRoute: Bool) {
             let options = MKMapSnapshotter.Options()
             options.region = region
-            options.mapType = MapAppearanceSettings.mapType(for: appearance)
-            options.traitCollection = UITraitCollection(userInterfaceStyle: MapAppearanceSettings.interfaceStyle(for: appearance))
+            options.mapType = currentStyle.mapKitType
+            options.traitCollection = UITraitCollection(traitsFrom: [
+                UITraitCollection(userInterfaceStyle: currentStyle.mapKitInterfaceStyle),
+                UITraitCollection(displayScale: scale),
+                UITraitCollection(activeAppearance: .active),
+                UITraitCollection(userInterfaceLevel: .base)
+            ])
             options.size = snapshotSize
             options.scale = scale
 
@@ -1010,15 +1036,15 @@ struct PopSharingCard: View {
                     }
 
                     // ✅ Shared segmented drawing (solid/dashed consistent across surfaces)
-                    let isDarkSnap = appearance == .dark
+                    let isDarkSnap = currentStyle.isDarkStyle
                     RouteSnapshotDrawer.draw(
                         segments: drawSegments,
                         isFlightLike: isFlightLike,
                         snapshot: snap,
                         ctx: renderer.cgContext,
-                        coreColor: MapAppearanceSettings.routeCoreColorForSnapshot(for: appearance),
+                        coreColor: currentStyle.routeBaseColor.withAlphaComponent(isDarkSnap ? 0.78 : 1.0),
                         stroke: .init(coreWidth: isFlightLike ? 8 : 7),
-                        glowColor: MapAppearanceSettings.routeGlowColor(for: appearance),
+                        glowColor: currentStyle.routeGlowColor,
                         isDarkMap: isDarkSnap
                     )
                     // ✅ Draw robot marker at the end of route
@@ -1437,7 +1463,27 @@ struct ShareCardGenerator {
         )
         let drawSegments = built.segments
         let isFlightLike = built.isFlightLike
-        let appearance = MapAppearanceSettings.current
+        let currentStyle2 = MapLayerStyle.current
+
+        // Mapbox path: delegate to async helper and return early.
+        if currentStyle2.engine == .mapbox {
+            Task {
+                let img = await makeMapboxRouteImage(
+                    coordsWGS84: coords,
+                    fallbackCenter: fallbackCenter,
+                    style: currentStyle2,
+                    snapshotSize: snapshotSize,
+                    scale: scale,
+                    privacy: privacy,
+                    drawRobot: drawRobot,
+                    countryISO2: countryISO2,
+                    cityKey: cityKey,
+                    hideLandmarks: hideLandmarks
+                ) ?? (UIImage(systemName: "map") ?? UIImage())
+                DispatchQueue.main.async { completion(img) }
+            }
+            return
+        }
 
         let drawCoords = drawSegments.flatMap { $0.coords }
         let adaptedFallbackCenter = fallbackCenter.map { MapCoordAdapter.forMapKit($0, countryISO2: countryISO2, cityKey: cityKey) }
@@ -1445,8 +1491,13 @@ struct ShareCardGenerator {
         func snapshot(region: MKCoordinateRegion, drawRoute: Bool) {
             let options = MKMapSnapshotter.Options()
             options.region = region
-            options.mapType = MapAppearanceSettings.mapType(for: appearance)
-            options.traitCollection = UITraitCollection(userInterfaceStyle: MapAppearanceSettings.interfaceStyle(for: appearance))
+            options.mapType = currentStyle2.mapKitType
+            options.traitCollection = UITraitCollection(traitsFrom: [
+                UITraitCollection(userInterfaceStyle: currentStyle2.mapKitInterfaceStyle),
+                UITraitCollection(displayScale: scale),
+                UITraitCollection(activeAppearance: .active),
+                UITraitCollection(userInterfaceLevel: .base)
+            ])
             options.size = snapshotSize
             options.scale = scale
             if hideLandmarks {
@@ -1485,15 +1536,15 @@ struct ShareCardGenerator {
                         return
                     }
 
-                    let isDarkSnap2 = appearance == .dark
+                    let isDarkSnap2 = currentStyle2.isDarkStyle
                     RouteSnapshotDrawer.draw(
                         segments: drawSegments,
                         isFlightLike: isFlightLike,
                         snapshot: snap,
                         ctx: renderer.cgContext,
-                        coreColor: MapAppearanceSettings.routeCoreColorForSnapshot(for: appearance),
+                        coreColor: currentStyle2.routeBaseColor.withAlphaComponent(isDarkSnap2 ? 0.78 : 1.0),
                         stroke: .init(coreWidth: isFlightLike ? 8 : 7),
-                        glowColor: MapAppearanceSettings.routeGlowColor(for: appearance),
+                        glowColor: currentStyle2.routeGlowColor,
                         isDarkMap: isDarkSnap2
                     )
 
@@ -1555,6 +1606,159 @@ struct ShareCardGenerator {
 
         let region = MKCoordinateRegion(center: center, span: .init(latitudeDelta: latDelta, longitudeDelta: lonDelta))
         snapshot(region: region, drawRoute: true)
+    }
+
+    // MARK: - Mapbox route snapshot
+
+    /// Async Mapbox snapshot: builds route as GeoJSON layers, draws robot marker via overlayHandler.
+    /// Uses WGS84 coordinates directly — Mapbox handles its own tile coordinate system.
+    static func makeMapboxRouteImage(
+        coordsWGS84: [CLLocationCoordinate2D],
+        fallbackCenter: CLLocationCoordinate2D?,
+        style: MapLayerStyle,
+        snapshotSize: CGSize,
+        scale: CGFloat,
+        privacy: ShareMapPrivacyMode,
+        drawRobot: Bool,
+        countryISO2: String?,
+        cityKey: String?,
+        hideLandmarks: Bool = false
+    ) async -> UIImage? {
+        let shouldBlurBase = (privacy == .hidden) || hideLandmarks
+        // Build segments in WGS84 for Mapbox — no coordinate adaptation.
+        let built = RouteRenderingPipeline.buildSegments(
+            .init(coordsWGS84: coordsWGS84, applyGCJForChina: false, gapDistanceMeters: 2_200, countryISO2: countryISO2, cityKey: cityKey),
+            surface: .mapbox
+        )
+        let segments = built.segments
+        let isFlightLike = built.isFlightLike
+        let drawCoords = segments.flatMap { $0.coords }
+
+        // Compute bounding box for camera from WGS84 coords.
+        let allCoords = drawCoords.isEmpty ? [fallbackCenter].compactMap { $0 } : drawCoords
+        guard !allCoords.isEmpty else { return nil }
+
+        let lats = allCoords.map { $0.latitude }
+        let lons = allCoords.map { $0.longitude }
+        let minLat = lats.min()!, maxLat = lats.max()!
+        let minLon = lons.min()!, maxLon = lons.max()!
+        let sw = CLLocationCoordinate2D(latitude: minLat, longitude: minLon)
+        let ne = CLLocationCoordinate2D(latitude: maxLat, longitude: maxLon)
+        let lastCoord = drawCoords.last ?? fallbackCenter
+
+        let styleURI = StyleURI(rawValue: style.mapboxStyleURI) ?? .dark
+        let isDark = style.isDarkStyle
+        let baseColor = style.routeBaseColor
+        let glowColor = style.routeGlowColor
+        let coreWidth: CGFloat = isFlightLike ? 8 : 7
+
+        print("[SharingCard] ▶ Mapbox snapshot START style=\(style.rawValue) segments=\(segments.count)")
+        return await withCheckedContinuation { cont in
+            DispatchQueue.main.async {
+                let snapOptions = MapSnapshotOptions(size: snapshotSize, pixelRatio: scale, showsLogo: false, showsAttribution: false)
+                let snapshotter = MapboxMaps.Snapshotter(options: snapOptions)
+
+                // onNext uses MapboxObservable which holds a strong reference to the handler;
+                // the returned Cancelable does not need to be retained.
+                snapshotter.onNext(event: .styleLoaded) { [snapshotter] _ in
+                    print("[SharingCard] ▶ styleLoaded fired, adding layers")
+
+                    // When blurring, skip adding route layers to the style —
+                    // routes will be drawn via CoreGraphics AFTER blurring the base map.
+                    if !shouldBlurBase {
+                        let routeSourceId = "share-routes"
+                        var src = GeoJSONSource(id: routeSourceId)
+                        let feats: [Turf.Feature] = segments.compactMap { seg in
+                            guard seg.coords.count >= 2 else { return nil }
+                            var f = Turf.Feature(geometry: .lineString(Turf.LineString(seg.coords)))
+                            f.properties = ["isGap": .init(booleanLiteral: seg.style == .dashed)]
+                            return f
+                        }
+                        src.data = .featureCollection(Turf.FeatureCollection(features: feats))
+                        try? snapshotter.addSource(src)
+
+                        var glow = LineLayer(id: "share-glow", source: routeSourceId)
+                        glow.filter = Exp(.eq) { Exp(.get) { "isGap" }; false }
+                        glow.lineColor = .constant(StyleColor(glowColor))
+                        glow.lineCap = .constant(.round)
+                        glow.lineJoin = .constant(.round)
+                        glow.lineOpacity = .constant(isDark ? 0.30 : 0.25)
+                        glow.lineWidth = .constant(Double(coreWidth + 6))
+                        glow.lineBlur = .constant(5.0)
+                        try? snapshotter.addLayer(glow)
+
+                        var main = LineLayer(id: "share-main", source: routeSourceId)
+                        main.filter = Exp(.eq) { Exp(.get) { "isGap" }; false }
+                        main.lineColor = .constant(StyleColor(baseColor.withAlphaComponent(isDark ? 0.78 : 1.0)))
+                        main.lineCap = .constant(.round)
+                        main.lineJoin = .constant(.round)
+                        main.lineOpacity = .constant(1.0)
+                        main.lineWidth = .constant(Double(coreWidth))
+                        try? snapshotter.addLayer(main)
+
+                        var dash = LineLayer(id: "share-dash", source: routeSourceId)
+                        dash.filter = Exp(.eq) { Exp(.get) { "isGap" }; true }
+                        dash.lineColor = .constant(StyleColor(baseColor))
+                        dash.lineCap = .constant(.round)
+                        dash.lineJoin = .constant(.round)
+                        dash.lineOpacity = .constant(0.5)
+                        dash.lineDasharray = .constant([10, 10])
+                        dash.lineWidth = .constant(Double(coreWidth) * 0.6)
+                        try? snapshotter.addLayer(dash)
+                    }
+
+                    // Camera: fit to route bounds with padding.
+                    let cam = snapshotter.camera(for: [sw, ne], padding: UIEdgeInsets(top: 80, left: 60, bottom: 80, right: 60), bearing: 0, pitch: 0)
+                    snapshotter.setCamera(to: cam)
+
+                    // overlayHandler: blur base map + draw routes + robot marker when needed.
+                    let overlayHandler: SnapshotOverlayHandler? = (shouldBlurBase || drawRobot) ? { overlay in
+                        guard let ctx = UIGraphicsGetCurrentContext() else { return }
+
+                        if shouldBlurBase {
+                            // Capture the rendered base map, blur it, and redraw
+                            if let baseCG = ctx.makeImage() {
+                                let baseUI = UIImage(cgImage: baseCG, scale: scale, orientation: .up)
+                                let blurred = mapPrivacyBlurred(baseUI, radius: 14)
+                                ctx.clear(CGRect(origin: .zero, size: CGSize(width: baseCG.width, height: baseCG.height)))
+                                blurred.draw(in: CGRect(origin: .zero, size: snapshotSize))
+                            }
+                            // Draw routes via CoreGraphics on top of the blurred base
+                            RouteSnapshotDrawer.draw(
+                                segments: segments,
+                                isFlightLike: isFlightLike,
+                                pointForCoordinate: { overlay.pointForCoordinate($0) },
+                                ctx: ctx,
+                                coreColor: baseColor.withAlphaComponent(isDark ? 0.78 : 1.0),
+                                stroke: .init(coreWidth: coreWidth),
+                                glowColor: glowColor,
+                                isDarkMap: isDark
+                            )
+                        }
+
+                        if drawRobot, let last = lastCoord {
+                            let point = overlay.pointForCoordinate(last)
+                            drawRobotMarker(in: ctx, at: point, face: .front, size: 112)
+                        }
+                    } : nil
+
+                    snapshotter.start(overlayHandler: overlayHandler) { [snapshotter] result in
+                        _ = snapshotter // retain until rendering completes
+                        switch result {
+                        case .success(let image):
+                            print("[SharingCard] ▶ Mapbox snapshot SUCCESS")
+                            cont.resume(returning: image)
+                        case .failure(let error):
+                            print("[SharingCard] ▶ Mapbox snapshot FAILED error=\(error)")
+                            cont.resume(returning: nil)
+                        }
+                    }
+                }
+
+                // Setting styleURI triggers async style load → fires .styleLoaded when ready.
+                snapshotter.styleURI = styleURI
+            }
+        }
     }
 }
 

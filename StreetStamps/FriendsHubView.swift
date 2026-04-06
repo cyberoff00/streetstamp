@@ -798,7 +798,7 @@ struct FriendsHubView: View {
                                     .padding(.vertical, 2)
                                     .background(Color.red)
                                     .clipShape(Capsule())
-                                    .offset(x: 10, y: -8)
+                                    .offset(x: 2, y: -6)
                             }
                         }
                         .appMinTapTarget()
@@ -3054,6 +3054,7 @@ private struct FriendCollectionScreen: View {
     @StateObject private var mirror: FriendMirrorContext
     @State private var page: FriendCollectionPage
     @State private var sidebarHideToken = UUID().uuidString
+    @State private var activeJourneyDetail: JourneyMemoryDetailDestination? = nil
 
     init(friendID: String, initialPage: FriendCollectionPage = .cities) {
         self.friendID = friendID
@@ -3082,6 +3083,16 @@ private struct FriendCollectionScreen: View {
         .background(SwipeBackEnabler())
         .navigationBarBackButtonHidden(true)
         .navigationBarHidden(true)
+        .navigationDestination(item: $activeJourneyDetail) { destination in
+            JourneyMemoryDetailView(
+                journey: destination.journey,
+                memories: destination.memories,
+                cityName: destination.cityName,
+                countryName: destination.countryName,
+                readOnly: destination.readOnly,
+                friendLoadout: destination.friendLoadout
+            )
+        }
         .onAppear {
             flow.pushSidebarButtonHidden(token: sidebarHideToken)
         }
@@ -3149,9 +3160,7 @@ private struct FriendCollectionScreen: View {
         ZStack {
             if page == .cities {
                 CityStampLibraryView(
-                    showSidebar: .constant(false),
                     autoRebuildFromJourneyStore: false,
-                    usesSidebarHeader: false,
                     showHeader: false,
                     allowCityDetailNavigation: false,
                     emptyTitleKey: "friend_city_cards_empty_title",
@@ -3163,13 +3172,12 @@ private struct FriendCollectionScreen: View {
                 .transition(.move(edge: .leading))
             } else {
                 JourneyMemoryMainView(
-                    showSidebar: .constant(false),
-                    usesSidebarHeader: false,
                     hideLeadingControl: true,
                     showHeader: false,
                     readOnly: true,
                     emptyTitleKey: "friend_memories_empty_title",
-                    emptySubtitleKey: "friend_memories_empty_subtitle"
+                    emptySubtitleKey: "friend_memories_empty_subtitle",
+                    onSelectJourney: { activeJourneyDetail = $0 }
                 )
                 .environmentObject(mirror.journeyStore)
                 .environmentObject(mirror.cityCache)
@@ -3177,10 +3185,10 @@ private struct FriendCollectionScreen: View {
                 .transition(.move(edge: .trailing))
             }
         }
-        .gesture(
+        .simultaneousGesture(
             DragGesture(minimumDistance: 30, coordinateSpace: .local)
                 .onEnded { value in
-                    guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                    guard abs(value.translation.width) > abs(value.translation.height) * 1.5 else { return }
                     if value.translation.width < -30, page == .cities {
                         withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                             page = .memories
@@ -3214,9 +3222,7 @@ private struct FriendCitiesScreen: View {
         Group {
             if let friend = socialStore.friends.first(where: { $0.id == friendID }) {
                 CityStampLibraryView(
-                    showSidebar: .constant(false),
                     autoRebuildFromJourneyStore: false,
-                    usesSidebarHeader: false,
                     allowCityDetailNavigation: false,
                     headerTitle: FriendSectionTitleFormatter.sectionTitle(for: .cityCards, friendName: friend.displayName, locale: locale),
                     emptyTitleKey: "friend_city_cards_empty_title",
@@ -3259,6 +3265,7 @@ private struct FriendPublicMemoriesScreen: View {
 
     @StateObject private var mirror: FriendMirrorContext
     @State private var sidebarHideToken = UUID().uuidString
+    @State private var activeJourneyDetail: JourneyMemoryDetailDestination? = nil
 
     init(friendID: String) {
         self.friendID = friendID
@@ -3269,12 +3276,11 @@ private struct FriendPublicMemoriesScreen: View {
         Group {
             if let friend = socialStore.friends.first(where: { $0.id == friendID }) {
                 JourneyMemoryMainView(
-                    showSidebar: .constant(false),
-                    usesSidebarHeader: false,
                     readOnly: true,
                     headerTitle: FriendSectionTitleFormatter.sectionTitle(for: .journeyMemories, friendName: friend.displayName, locale: locale),
                     emptyTitleKey: "friend_memories_empty_title",
-                    emptySubtitleKey: "friend_memories_empty_subtitle"
+                    emptySubtitleKey: "friend_memories_empty_subtitle",
+                    onSelectJourney: { activeJourneyDetail = $0 }
                 )
                     .environmentObject(mirror.journeyStore)
                     .environmentObject(mirror.cityCache)
@@ -3293,6 +3299,16 @@ private struct FriendPublicMemoriesScreen: View {
         }
         .onDisappear {
             flow.popSidebarButtonHidden(token: sidebarHideToken)
+        }
+        .navigationDestination(item: $activeJourneyDetail) { destination in
+            JourneyMemoryDetailView(
+                journey: destination.journey,
+                memories: destination.memories,
+                cityName: destination.cityName,
+                countryName: destination.countryName,
+                readOnly: destination.readOnly,
+                friendLoadout: destination.friendLoadout
+            )
         }
         .task {
             await socialStore.refreshFriendProfileIfPossible(

@@ -168,7 +168,7 @@ enum MemoryExportRenderer {
         let renderer = ImageRenderer(content: view)
         renderer.scale = 3
         renderer.proposedSize = .init(width: exportWidth, height: nil)
-        renderer.isOpaque = false
+        renderer.isOpaque = true
         return renderer.uiImage
     }
 }

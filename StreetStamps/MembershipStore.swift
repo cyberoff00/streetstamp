@@ -117,10 +117,10 @@ enum MembershipTierConfig {
 
     // MARK: Map Appearance
 
-    /// Free users only get the default map style; premium unlocks all.
-    static func mapAppearanceLocked(style: MapAppearanceStyle, for tier: MembershipTier) -> Bool {
+    /// Free users can only use Apple Maps styles; Mapbox styles require premium or active trial.
+    static func isMapboxStyleLocked(for tier: MembershipTier) -> Bool {
         switch tier {
-        case .free:    return style != .dark   // dark is default / free
+        case .free:    return !MapLayerStyle.isMapboxTrialActive
         case .premium: return false
         }
     }
@@ -173,8 +173,8 @@ final class MembershipStore: ObservableObject {
     var iCloudSyncEnabled: Bool { MembershipTierConfig.iCloudSyncEnabled(for: tier) }
     var gpxExportEnabled: Bool { MembershipTierConfig.gpxExportEnabled(for: tier) }
 
-    func isMapAppearanceLocked(_ style: MapAppearanceStyle) -> Bool {
-        MembershipTierConfig.mapAppearanceLocked(style: style, for: tier)
+    var isMapboxStyleLocked: Bool {
+        MembershipTierConfig.isMapboxStyleLocked(for: tier)
     }
 
     // MARK: - StoreKit 2 Subscription Verification

@@ -144,7 +144,7 @@ private struct LifelogGlobeCoverView: View {
     @EnvironmentObject private var trackTileStore: TrackTileStore
 
     var body: some View {
-        GlobeViewScreen(showSidebar: .constant(false))
+        GlobeViewScreen()
             .environmentObject(store)
             .environmentObject(cityCache)
             .environmentObject(lifelogStore)
@@ -195,7 +195,7 @@ struct LifelogView: View {
     /// Set to true after the first route-fit on enter, so we don't re-fit
     /// on every incremental snapshot update while the user is panning.
     @State private var didAutoFitToRoute = false
-    @AppStorage(MapAppearanceSettings.storageKey) private var mapAppearanceRaw = MapAppearanceSettings.current.rawValue
+    @AppStorage(MapLayerStyle.storageKey) private var layerStyleRaw = MapLayerStyle.current.rawValue
     @AppStorage("streetstamps.lifelog.health.steps.snapshot.byday") private var stepSnapshotByDayRaw = ""
     @AppStorage("streetstamps.lifelog.health.steps.snapshot.day") private var legacyStepSnapshotDay = ""
     @AppStorage("streetstamps.lifelog.health.steps.snapshot.value") private var legacyStepSnapshotValue = 0
@@ -210,10 +210,9 @@ struct LifelogView: View {
     @State private var diagnosticsAppearAt: Date? = nil
 #endif
 
-    private var mapAppearance: MapAppearanceStyle {
-        MapAppearanceStyle(rawValue: mapAppearanceRaw) ?? .dark
+    private var isDarkAppearance: Bool {
+        (MapLayerStyle(rawValue: layerStyleRaw) ?? .mutedDark).isDarkStyle
     }
-    private var isDarkAppearance: Bool { mapAppearance == .dark }
     private var panelBackground: Color { isDarkAppearance ? Color.black.opacity(0.80) : FigmaTheme.card.opacity(0.96) }
     private var panelText: Color { isDarkAppearance ? .white : .black }
 
@@ -482,7 +481,7 @@ struct LifelogView: View {
             seedSelectedDayIfNeeded()
         }
         .onChange(of: locationCenterKey) { _ in
-            centerOnCurrent(force: false)
+            centerOnCurrent(force: !didCenterOnEnter)
 #if DEBUG
             diagnosticsUpdateIfNeeded(reason: "locationCenterKey")
 #endif
@@ -504,20 +503,46 @@ struct LifelogView: View {
         }
     }
 
+    private var lifelogMapSegments: [MapRouteSegment] {
+        guard mapContentReady else { return [] }
+        let engine = (MapLayerStyle(rawValue: layerStyleRaw) ?? .mutedDark).engine
+        let needsGCJ = engine == .mapkit
+        let countryISO2 = lifelogCountryISO2
+        return farRouteSegments.enumerated().map { (i, seg) in
+            let coords = needsGCJ
+                ? MapCoordAdapter.forMapKit(seg.coords, countryISO2: countryISO2)
+                : seg.coords
+            return MapRouteSegment(id: "ll-\(i)", coordinates: coords, isGap: seg.style == .dashed, repeatWeight: 0)
+        }
+    }
+
+    private var lifelogMapAnnotations: [MapAnnotationItem] {
+        guard let coord = currentDisplayLocation?.coordinate else { return [] }
+        return [MapAnnotationItem(id: "lifelog-avatar", coordinate: coord, kind: .lifelogAvatar(showMoodQuestion: shouldShowMoodQuestionMark))]
+    }
+
+    @State private var unifiedCameraCommand: MapCameraCommand? = nil
+
     private var mapLayer: some View {
-        LifelogMKMapView(
-            segments: mapContentReady ? farRouteSegments : [],
-            locationCoordinate: currentDisplayLocation?.coordinate,
-            shouldShowMoodQuestion: shouldShowMoodQuestionMark,
-            cameraCommand: cameraCommand,
-            mapAppearanceRaw: mapAppearanceRaw,
-            onAvatarDoubleTap: { openEquipmentView() },
-            onMoodTap: {
-                moodPickerDay = Calendar.current.startOfDay(for: Date())
-                isMoodPopupVisible = true
-            }
+        UnifiedMapView(
+            segments: lifelogMapSegments,
+            annotations: lifelogMapAnnotations,
+            cameraCommand: unifiedCameraCommand,
+            config: .lifelog(),
+            callbacks: MapCallbacks(
+                onAvatarDoubleTap: { openEquipmentView() },
+                onMoodTap: {
+                    moodPickerDay = Calendar.current.startOfDay(for: Date())
+                    isMoodPopupVisible = true
+                }
+            )
         )
         .ignoresSafeArea()
+        .onChange(of: cameraCommand?.id) { _ in
+            if let cmd = cameraCommand {
+                unifiedCameraCommand = .setRegion(cmd.region)
+            }
+        }
     }
 
     private var header: some View {
@@ -638,7 +663,7 @@ struct LifelogView: View {
     private var bottomCard: some View {
         LifelogBottomCardView(
             profileName: profileName,
-            onOpenEquipment: { flow.requestOpenSidebarDestination(.equipment) },
+            onOpenEquipment: { flow.requestModalPush(.equipment) },
             onShare: {
                 if let image = captureCurrentPageImage() {
                     shareItem = LifelogShareImageItem(image: image)
@@ -734,7 +759,7 @@ struct LifelogView: View {
     }
 
     private func openEquipmentView() {
-        flow.requestOpenSidebarDestination(.equipment)
+        flow.requestModalPush(.equipment)
     }
 
     private var hasAlwaysPermission: Bool {
@@ -1858,19 +1883,9 @@ private struct AlwaysLocationGuideView: View {
     }
 }
 
-// MARK: - LifelogMKMapView
+// MARK: - Lifelog Avatar Annotation Content (used by UnifiedMapView engines)
 
-private final class LifelogAvatarAnnotation: NSObject, MKAnnotation {
-    @objc dynamic var coordinate: CLLocationCoordinate2D
-    var shouldShowMoodQuestion: Bool
-
-    init(coordinate: CLLocationCoordinate2D, shouldShowMoodQuestion: Bool) {
-        self.coordinate = coordinate
-        self.shouldShowMoodQuestion = shouldShowMoodQuestion
-    }
-}
-
-private struct LifelogAvatarAnnotationContent: View {
+struct LifelogAvatarAnnotationContent: View {
     let shouldShowMoodQuestion: Bool
     let onMoodTap: () -> Void
     let onDoubleTap: () -> Void
@@ -1901,161 +1916,4 @@ private struct LifelogAvatarAnnotationContent: View {
     }
 }
 
-private struct LifelogMKMapView: UIViewRepresentable {
-    let segments: [RenderRouteSegment]
-    let locationCoordinate: CLLocationCoordinate2D?
-    let shouldShowMoodQuestion: Bool
-    let cameraCommand: LifelogCameraCommand?
-    let mapAppearanceRaw: String
-    let onAvatarDoubleTap: () -> Void
-    let onMoodTap: () -> Void
-
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    func makeUIView(context: Context) -> MKMapView {
-        let map = MKMapView(frame: .zero)
-        map.delegate = context.coordinator
-        map.showsCompass = false
-        map.showsScale = false
-        map.showsTraffic = false
-        map.pointOfInterestFilter = .excludingAll
-        map.isRotateEnabled = false
-        map.isPitchEnabled = false
-        map.showsUserLocation = false
-        map.overrideUserInterfaceStyle = MapAppearanceSettings.interfaceStyle(for: mapAppearanceRaw)
-        map.mapType = MapAppearanceSettings.mapType(for: mapAppearanceRaw)
-        return map
-    }
-
-    func updateUIView(_ map: MKMapView, context: Context) {
-        context.coordinator.parent = self
-        map.overrideUserInterfaceStyle = MapAppearanceSettings.interfaceStyle(for: mapAppearanceRaw)
-        map.mapType = MapAppearanceSettings.mapType(for: mapAppearanceRaw)
-        context.coordinator.updateSegments(map)
-        context.coordinator.updateAvatarAnnotation(map)
-        context.coordinator.applyCommandIfNeeded(cameraCommand, on: map)
-    }
-
-    final class Coordinator: NSObject, MKMapViewDelegate {
-        var parent: LifelogMKMapView
-        var lastSegmentFingerprint = ""
-        var lastAppliedCommandID: UUID? = nil
-        var avatarAnnotation: LifelogAvatarAnnotation? = nil
-
-        init(_ parent: LifelogMKMapView) { self.parent = parent }
-
-        func applyCommandIfNeeded(_ command: LifelogCameraCommand?, on map: MKMapView) {
-            guard let command, command.id != lastAppliedCommandID else { return }
-            lastAppliedCommandID = command.id
-            map.setRegion(command.region, animated: true)
-        }
-
-        func updateSegments(_ map: MKMapView) {
-            let fp = parent.segments.map { "\($0.coords.count)_\($0.style.rawValue)" }.joined(separator: "|")
-            guard fp != lastSegmentFingerprint else { return }
-            lastSegmentFingerprint = fp
-            map.removeOverlays(map.overlays.filter { $0 is StyledPolyline })
-            for seg in parent.segments {
-                guard seg.coords.count >= 2 else { continue }
-                let poly = StyledPolyline(coordinates: seg.coords, count: seg.coords.count)
-                poly.isGap = seg.style == .dashed
-                poly.repeatWeight = 0
-                map.addOverlay(poly, level: .aboveRoads)
-            }
-        }
-
-        func updateAvatarAnnotation(_ map: MKMapView) {
-            if let coord = parent.locationCoordinate {
-                if let ann = avatarAnnotation {
-                    ann.coordinate = coord
-                    if ann.shouldShowMoodQuestion != parent.shouldShowMoodQuestion {
-                        ann.shouldShowMoodQuestion = parent.shouldShowMoodQuestion
-                        // Remove and re-add to trigger viewFor:annotation: with updated state
-                        map.removeAnnotation(ann)
-                        map.addAnnotation(ann)
-                    }
-                } else {
-                    let ann = LifelogAvatarAnnotation(
-                        coordinate: coord,
-                        shouldShowMoodQuestion: parent.shouldShowMoodQuestion
-                    )
-                    avatarAnnotation = ann
-                    map.addAnnotation(ann)
-                }
-            } else if let ann = avatarAnnotation {
-                map.removeAnnotation(ann)
-                avatarAnnotation = nil
-            }
-        }
-
-        func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
-            guard let poly = overlay as? StyledPolyline else { return MKOverlayRenderer(overlay: overlay) }
-            let base = MapAppearanceSettings.routeBaseColor(for: parent.mapAppearanceRaw)
-            let glowTint = MapAppearanceSettings.routeGlowColor(for: parent.mapAppearanceRaw)
-            let isDark = MapAppearanceSettings.resolved(from: parent.mapAppearanceRaw) == .dark
-            let gapDash = RouteRenderStyleTokens.dashLengths.map { NSNumber(value: Double($0)) }
-            let isGap = poly.isGap
-
-            let mainWidth: CGFloat = isGap ? 1.8 : 2.2
-            let glowWidth: CGFloat = mainWidth * (isGap ? 2.2 : 2.5)
-
-            let glowLayer = MKPolylineRenderer(polyline: poly)
-            glowLayer.lineWidth = glowWidth
-            glowLayer.lineCap = .round
-            glowLayer.lineJoin = .round
-            glowLayer.strokeColor = glowTint.withAlphaComponent(isGap ? 0.10 : (isDark ? 0.25 : 0.12))
-            if isGap { glowLayer.lineDashPattern = gapDash }
-
-            let mainLayer = MKPolylineRenderer(polyline: poly)
-            mainLayer.lineWidth = mainWidth
-            mainLayer.lineCap = .round
-            mainLayer.lineJoin = .round
-            mainLayer.strokeColor = base.withAlphaComponent(isGap ? 0.70 : 1.0)
-            if isGap { mainLayer.lineDashPattern = gapDash }
-
-            let highlightLayer = MKPolylineRenderer(polyline: poly)
-            highlightLayer.lineWidth = mainWidth * 0.35
-            highlightLayer.lineCap = .round
-            highlightLayer.lineJoin = .round
-            highlightLayer.strokeColor = isGap ? .clear : UIColor.white.withAlphaComponent(isDark ? 0.45 : 0.25)
-
-            let lr = LayeredPolylineRenderer(renderers: [glowLayer, mainLayer, highlightLayer])
-            if isDark {
-                lr.glowBlur = 6.0
-                lr.glowColor = glowTint.withAlphaComponent(0.50).cgColor
-            }
-            return lr
-        }
-
-        func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
-            guard let ann = annotation as? LifelogAvatarAnnotation else { return nil }
-            let reuseID = "lifelogAvatar"
-            let view = mapView.dequeueReusableAnnotationView(withIdentifier: reuseID)
-                ?? MKAnnotationView(annotation: ann, reuseIdentifier: reuseID)
-            view.annotation = ann
-            view.canShowCallout = false
-            view.backgroundColor = .clear
-
-            let moodRowHeight: CGFloat = ann.shouldShowMoodQuestion ? 38.0 : 0
-            let size = CGSize(
-                width: AvatarMapMarkerStyle.annotationSize,
-                height: AvatarMapMarkerStyle.annotationSize + moodRowHeight
-            )
-            view.frame = CGRect(origin: .zero, size: size)
-            // Anchor bottom-center of annotation view to the coordinate (same as SwiftUI Annotation default)
-            view.centerOffset = CGPoint(x: 0, y: -size.height / 2)
-
-            let content = LifelogAvatarAnnotationContent(
-                shouldShowMoodQuestion: ann.shouldShowMoodQuestion,
-                onMoodTap: parent.onMoodTap,
-                onDoubleTap: parent.onAvatarDoubleTap
-            )
-            let hosting = UIHostingController(rootView: content)
-            hosting.view.backgroundColor = .clear
-            hosting.view.frame = CGRect(origin: .zero, size: size)
-            view.subviews.forEach { $0.removeFromSuperview() }
-            view.addSubview(hosting.view)
-            return view
-        }
-    }
-}
+// Old LifelogMKMapView removed — now using UnifiedMapView

@@ -4,7 +4,7 @@ import SwiftUI
 
 final class CityCacheCallsiteTests: XCTestCase {
     func test_cityStampLibraryViewDefaultsToCachedLoadsWithoutAutoRebuild() {
-        let view = CityStampLibraryView(showSidebar: .constant(false))
+        let view = CityStampLibraryView()
         let mirror = Mirror(reflecting: view)
         let autoRebuild = mirror.descendant("autoRebuildFromJourneyStore") as? Bool
 

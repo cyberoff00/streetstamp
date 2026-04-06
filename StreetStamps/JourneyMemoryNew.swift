@@ -13,6 +13,8 @@ import SwiftUI
 import UIKit
 import CoreLocation
 import MapKit
+import MapboxMaps
+import Turf
 import Photos
 
 // MARK: - Route Thumbnail Cache
@@ -138,30 +140,24 @@ struct JourneyMemoryMainView: View {
     @State private var rebuildWorkItem: DispatchWorkItem?
     @State private var cachedSortedJourneys: [JourneyRoute] = []
     @State private var cachedActivityTags: [String] = []
-    @State private var activeJourneyDetail: JourneyMemoryDetailDestination? = nil
-
-    @Binding var showSidebar: Bool
-    private let usesSidebarHeader: Bool
     private let hideLeadingControl: Bool
     private let showHeader: Bool
     private let readOnly: Bool
     private let headerTitle: String?
     private let emptyTitleKey: String
     private let emptySubtitleKey: String
-    
+    var onSelectJourney: ((JourneyMemoryDetailDestination) -> Void)?
+
     init(
-        showSidebar: Binding<Bool>,
-        usesSidebarHeader: Bool = true,
         hideLeadingControl: Bool = false,
         showHeader: Bool = true,
         readOnly: Bool = false,
         headerTitle: String? = nil,
         emptyTitleKey: String = "no_memories_yet",
         emptySubtitleKey: String = "memory_empty_desc",
-        filterState: MemoryFilterState? = nil
+        filterState: MemoryFilterState? = nil,
+        onSelectJourney: ((JourneyMemoryDetailDestination) -> Void)? = nil
     ) {
-        self._showSidebar = showSidebar
-        self.usesSidebarHeader = usesSidebarHeader
         self.hideLeadingControl = hideLeadingControl
         self.showHeader = showHeader
         self.readOnly = readOnly
@@ -169,6 +165,7 @@ struct JourneyMemoryMainView: View {
         self.emptyTitleKey = emptyTitleKey
         self.emptySubtitleKey = emptySubtitleKey
         self.filterState = filterState ?? MemoryFilterState()
+        self.onSelectJourney = onSelectJourney
     }
 
     /// Cached sorted journeys — rebuilt by refreshSortedJourneys() on data change,
@@ -238,7 +235,7 @@ struct JourneyMemoryMainView: View {
                                     }
                                 },
                                 onSelectJourney: { destination in
-                                    activeJourneyDetail = destination
+                                    onSelectJourney?(destination)
                                 }
                             )
                             .environmentObject(store)
@@ -256,18 +253,6 @@ struct JourneyMemoryMainView: View {
             }
         }
         .navigationBarBackButtonHidden(true)
-        .navigationDestination(item: $activeJourneyDetail) { destination in
-            JourneyMemoryDetailView(
-                journey: destination.journey,
-                memories: destination.memories,
-                cityName: destination.cityName,
-                countryName: destination.countryName,
-                readOnly: destination.readOnly,
-                friendLoadout: destination.friendLoadout
-            )
-            .environmentObject(store)
-            .environmentObject(sessionStore)
-        }
         .onAppear {
             if JourneyMemoryMainLoadPolicy.shouldLoadOnAppear(hasLoaded: store.hasLoaded) {
                 store.load()
@@ -378,11 +363,9 @@ struct JourneyMemoryMainView: View {
     // MARK: - Header
     
     private var headerView: some View {
-        UnifiedTabPageHeader(title: resolvedHeaderTitle, titleLevel: usesSidebarHeader ? .primary : .secondary, horizontalPadding: 20, topPadding: 14, bottomPadding: 12) {
+        UnifiedTabPageHeader(title: resolvedHeaderTitle, titleLevel: .secondary, horizontalPadding: 20, topPadding: 14, bottomPadding: 12) {
             if hideLeadingControl {
                 Color.clear
-            } else if usesSidebarHeader {
-                SidebarHamburgerButton(showSidebar: $showSidebar, size: 44, iconSize: 20)
             } else {
                 AppBackButton(foreground: .black)
             }
@@ -2100,16 +2083,11 @@ struct JourneyMemoryDetailView: View {
         .frame(width: exportWidth)
         .fixedSize(horizontal: false, vertical: true)
 
-        // Measure content height to cap render scale within GPU texture limits.
-        // All iOS rendering paths go through Metal, whose max texture dimension
-        // is 8192px on A12+ devices. Use 8000 as safe ceiling with margin.
-        let measuringHost = UIHostingController(rootView: snapshotView)
-        let fittingSize = measuringHost.sizeThatFits(in: CGSize(width: exportWidth, height: .greatestFiniteMagnitude))
-        let maxSafePixels: CGFloat = 8000
-        let scale = max(1.0, min(3.0, maxSafePixels / max(fittingSize.height, 1)))
-
+        // ImageRenderer uses Core Graphics (offline bitmap), not Metal textures —
+        // no 8192px dimension limit applies. Worst case (12 portrait photos) is
+        // ~6000pt × 3x = 18000px ≈ 77MB, well within device RAM.
         let renderer = ImageRenderer(content: snapshotView)
-        renderer.scale = scale
+        renderer.scale = 3
         renderer.proposedSize = .init(width: exportWidth, height: nil)
         renderer.isOpaque = true
 
@@ -2144,6 +2122,23 @@ struct JourneyMemoryDetailView: View {
             return
         }
 
+        let currentStyle = MapLayerStyle.current
+
+        // Mapbox path: build WGS84 segments, render via Mapbox Snapshotter.
+        if currentStyle.engine == .mapbox {
+            if let img = await Self.makeMapboxJourneyThumbnail(
+                journey: j,
+                coordsWGS84: coords,
+                style: currentStyle,
+                hideLandmarks: j.shouldHideLandmarks
+            ) {
+                self.routeThumbnail = img
+                RouteThumbnailCache.shared.set(img, for: journey.id)
+            }
+            return
+        }
+
+        // MapKit path.
         let built = RouteRenderingPipeline.buildSegments(
             .init(coordsWGS84: coords, applyGCJForChina: false, gapDistanceMeters: 2_200,
                   countryISO2: j.countryISO2, cityKey: j.stableCityKey),
@@ -2164,14 +2159,18 @@ struct JourneyMemoryDetailView: View {
         let region = MKCoordinateRegion(center: center, span: span)
 
         let snapshotSize = CGSize(width: 400, height: 200)
-        let appearance = MapAppearanceSettings.current
-        let isDark = appearance == .dark
+        let isDark = currentStyle.isDarkStyle
         let options = MKMapSnapshotter.Options()
         options.region = region
         options.size = snapshotSize
         options.scale = UIScreen.main.scale
-        options.mapType = MapAppearanceSettings.mapType(for: appearance)
-        options.traitCollection = UITraitCollection(userInterfaceStyle: MapAppearanceSettings.interfaceStyle(for: appearance))
+        options.mapType = currentStyle.mapKitType
+        options.traitCollection = UITraitCollection(traitsFrom: [
+            UITraitCollection(userInterfaceStyle: currentStyle.mapKitInterfaceStyle),
+            UITraitCollection(displayScale: UIScreen.main.scale),
+            UITraitCollection(activeAppearance: .active),
+            UITraitCollection(userInterfaceLevel: .base)
+        ])
         if j.shouldHideLandmarks {
             options.showsPointsOfInterest = false
         }
@@ -2190,9 +2189,9 @@ struct JourneyMemoryDetailView: View {
                     isFlightLike: built.isFlightLike,
                     snapshot: snap,
                     ctx: renderer.cgContext,
-                    coreColor: MapAppearanceSettings.routeCoreColorForSnapshot(for: appearance),
+                    coreColor: currentStyle.routeBaseColor.withAlphaComponent(isDark ? 0.78 : 1.0),
                     stroke: .init(coreWidth: 3.0),
-                    glowColor: MapAppearanceSettings.routeGlowColor(for: appearance),
+                    glowColor: currentStyle.routeGlowColor,
                     isDarkMap: isDark
                 )
             }
@@ -2200,6 +2199,150 @@ struct JourneyMemoryDetailView: View {
             RouteThumbnailCache.shared.set(img, for: journey.id)
         } catch {
             print("Route thumbnail snapshot error:", error)
+        }
+    }
+
+    // MARK: - Mapbox Journey Thumbnail
+
+    nonisolated private static func makeMapboxJourneyThumbnail(
+        journey: JourneyRoute,
+        coordsWGS84: [CLLocationCoordinate2D],
+        style: MapLayerStyle,
+        hideLandmarks: Bool
+    ) async -> UIImage? {
+        let built = RouteRenderingPipeline.buildSegments(
+            .init(coordsWGS84: coordsWGS84, applyGCJForChina: false, gapDistanceMeters: 2_200,
+                  countryISO2: journey.countryISO2, cityKey: journey.stableCityKey),
+            surface: .mapbox
+        )
+        let segments = built.segments
+        let drawCoords = segments.flatMap { $0.coords }
+        guard drawCoords.count >= 2 else { return nil }
+
+        // Bounding box with padding.
+        let lats = drawCoords.map(\.latitude)
+        let lons = drawCoords.map(\.longitude)
+        var minLat = lats.min()!, maxLat = lats.max()!
+        var minLon = lons.min()!, maxLon = lons.max()!
+        let latPad = max((maxLat - minLat) * 0.25, 0.002)
+        let lonPad = max((maxLon - minLon) * 0.25, 0.002)
+        minLat -= latPad; maxLat += latPad; minLon -= lonPad; maxLon += lonPad
+        let sw = CLLocationCoordinate2D(latitude: minLat, longitude: minLon)
+        let ne = CLLocationCoordinate2D(latitude: maxLat, longitude: maxLon)
+
+        let snapshotSize = CGSize(width: 400, height: 200)
+        let styleURI = StyleURI(rawValue: style.mapboxStyleURI) ?? .dark
+        let isDark = style.isDarkStyle
+        let baseColor = style.routeBaseColor
+        let glowColor = style.routeGlowColor
+        let isFlightLike = built.isFlightLike
+        let coreWidth: Double = isFlightLike ? 5 : 3
+
+        print("[JourneyThumb] ▶ Mapbox snapshot START journey=\(journey.id)")
+        return await withCheckedContinuation { cont in
+            DispatchQueue.main.async {
+                let snapOptions = MapSnapshotOptions(
+                    size: snapshotSize,
+                    pixelRatio: UIScreen.main.scale,
+                    showsLogo: false,
+                    showsAttribution: false
+                )
+                let snapshotter = MapboxMaps.Snapshotter(options: snapOptions)
+
+                snapshotter.onNext(event: .styleLoaded) { [snapshotter] _ in
+                    print("[JourneyThumb] ▶ styleLoaded fired")
+
+                    // When hideLandmarks, skip adding route layers to the style —
+                    // routes will be drawn via CoreGraphics AFTER blurring the base map.
+                    if !hideLandmarks {
+                        let routeSourceId = "jthumb-routes"
+                        var src = GeoJSONSource(id: routeSourceId)
+                        let feats: [Turf.Feature] = segments.compactMap { seg in
+                            guard seg.coords.count >= 2 else { return nil }
+                            var f = Turf.Feature(geometry: .lineString(Turf.LineString(seg.coords)))
+                            f.properties = ["isGap": .init(booleanLiteral: seg.style == .dashed)]
+                            return f
+                        }
+                        src.data = .featureCollection(Turf.FeatureCollection(features: feats))
+                        try? snapshotter.addSource(src)
+
+                        var glow = LineLayer(id: "jthumb-glow", source: routeSourceId)
+                        glow.filter = Exp(.eq) { Exp(.get) { "isGap" }; false }
+                        glow.lineColor = .constant(StyleColor(glowColor))
+                        glow.lineCap = .constant(.round)
+                        glow.lineJoin = .constant(.round)
+                        glow.lineOpacity = .constant(isDark ? 0.30 : 0.25)
+                        glow.lineWidth = .constant(coreWidth + 4)
+                        glow.lineBlur = .constant(3.0)
+                        try? snapshotter.addLayer(glow)
+
+                        var main = LineLayer(id: "jthumb-main", source: routeSourceId)
+                        main.filter = Exp(.eq) { Exp(.get) { "isGap" }; false }
+                        main.lineColor = .constant(StyleColor(baseColor.withAlphaComponent(isDark ? 0.78 : 1.0)))
+                        main.lineCap = .constant(.round)
+                        main.lineJoin = .constant(.round)
+                        main.lineOpacity = .constant(1.0)
+                        main.lineWidth = .constant(coreWidth)
+                        try? snapshotter.addLayer(main)
+
+                        var dash = LineLayer(id: "jthumb-dash", source: routeSourceId)
+                        dash.filter = Exp(.eq) { Exp(.get) { "isGap" }; true }
+                        dash.lineColor = .constant(StyleColor(baseColor))
+                        dash.lineCap = .constant(.round)
+                        dash.lineJoin = .constant(.round)
+                        dash.lineOpacity = .constant(0.5)
+                        dash.lineDasharray = .constant([10, 10])
+                        dash.lineWidth = .constant(coreWidth * 0.6)
+                        try? snapshotter.addLayer(dash)
+                    }
+
+                    let cam = snapshotter.camera(
+                        for: [sw, ne],
+                        padding: UIEdgeInsets(top: 16, left: 16, bottom: 16, right: 16),
+                        bearing: 0, pitch: 0
+                    )
+                    snapshotter.setCamera(to: cam)
+
+                    // When hideLandmarks: use overlayHandler to blur the base map,
+                    // then draw routes on top so they stay crisp.
+                    let overlayHandler: SnapshotOverlayHandler? = hideLandmarks ? { overlay in
+                        guard let ctx = UIGraphicsGetCurrentContext() else { return }
+                        let size = snapshotSize
+                        // Capture the rendered base map, blur it, and redraw
+                        if let baseCG = ctx.makeImage() {
+                            let baseUI = UIImage(cgImage: baseCG, scale: UIScreen.main.scale, orientation: .up)
+                            let blurred = mapPrivacyBlurred(baseUI, radius: 14)
+                            ctx.clear(CGRect(origin: .zero, size: CGSize(width: baseCG.width, height: baseCG.height)))
+                            blurred.draw(in: CGRect(origin: .zero, size: size))
+                        }
+                        // Draw routes via CoreGraphics on top of the blurred base
+                        RouteSnapshotDrawer.draw(
+                            segments: segments,
+                            isFlightLike: isFlightLike,
+                            pointForCoordinate: { overlay.pointForCoordinate($0) },
+                            ctx: ctx,
+                            coreColor: baseColor.withAlphaComponent(isDark ? 0.78 : 1.0),
+                            stroke: .init(coreWidth: coreWidth),
+                            glowColor: glowColor,
+                            isDarkMap: isDark
+                        )
+                    } : nil
+
+                    snapshotter.start(overlayHandler: overlayHandler) { [snapshotter] result in
+                        _ = snapshotter
+                        switch result {
+                        case .success(let image):
+                            print("[JourneyThumb] ▶ Mapbox snapshot SUCCESS")
+                            cont.resume(returning: image)
+                        case .failure(let error):
+                            print("[JourneyThumb] ▶ Mapbox snapshot FAILED error=\(error)")
+                            cont.resume(returning: nil)
+                        }
+                    }
+                }
+
+                snapshotter.styleURI = styleURI
+            }
         }
     }
 
@@ -2219,20 +2362,55 @@ struct JourneyMemoryDetailView: View {
 
         guard let center, CLLocationCoordinate2DIsValid(center) else { return }
 
+        let fallbackStyle = MapLayerStyle.current
+        let snapshotSize = CGSize(width: 400, height: 200)
+
+        // Mapbox fallback: plain map tile at city center.
+        if fallbackStyle.engine == .mapbox {
+            let styleURI = StyleURI(rawValue: fallbackStyle.mapboxStyleURI) ?? .dark
+            let zoom = MapboxEngineView.Coordinator.altitudeToZoom(80_000, latitude: center.latitude)
+            let img: UIImage? = await withCheckedContinuation { cont in
+                DispatchQueue.main.async {
+                    let snapOptions = MapSnapshotOptions(size: snapshotSize, pixelRatio: UIScreen.main.scale, showsLogo: false, showsAttribution: false)
+                    let snapshotter = MapboxMaps.Snapshotter(options: snapOptions)
+                    snapshotter.onNext(event: .styleLoaded) { [snapshotter] _ in
+                        snapshotter.setCamera(to: CameraOptions(center: center, zoom: zoom))
+                        snapshotter.start(overlayHandler: nil) { [snapshotter] result in
+                            _ = snapshotter
+                            switch result {
+                            case .success(let image): cont.resume(returning: image)
+                            case .failure: cont.resume(returning: nil)
+                            }
+                        }
+                    }
+                    snapshotter.styleURI = styleURI
+                }
+            }
+            if let img {
+                self.routeThumbnail = img
+                RouteThumbnailCache.shared.set(img, for: journey.id)
+            }
+            return
+        }
+
+        // MapKit fallback.
         let mappedCenter = MapCoordAdapter.forMapKit(center, countryISO2: countryISO2, cityKey: cityKey)
         let region = MKCoordinateRegion(
             center: mappedCenter,
             span: MKCoordinateSpan(latitudeDelta: 0.18, longitudeDelta: 0.18)
         )
 
-        let snapshotSize = CGSize(width: 400, height: 200)
-        let appearance = MapAppearanceSettings.current
         let options = MKMapSnapshotter.Options()
         options.region = region
         options.size = snapshotSize
         options.scale = UIScreen.main.scale
-        options.mapType = MapAppearanceSettings.mapType(for: appearance)
-        options.traitCollection = UITraitCollection(userInterfaceStyle: MapAppearanceSettings.interfaceStyle(for: appearance))
+        options.mapType = fallbackStyle.mapKitType
+        options.traitCollection = UITraitCollection(traitsFrom: [
+            UITraitCollection(userInterfaceStyle: fallbackStyle.mapKitInterfaceStyle),
+            UITraitCollection(displayScale: UIScreen.main.scale),
+            UITraitCollection(activeAppearance: .active),
+            UITraitCollection(userInterfaceLevel: .base)
+        ])
 
         do {
             let snap = try await MKMapSnapshotter(options: options).start()

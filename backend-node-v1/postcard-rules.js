@@ -55,6 +55,9 @@ function canSendPostcard({ sentPostcards, toUserID, cityID, cityJourneyCount, cl
   }
 
   const isPremium = normalizeKey(membershipTier) === 'premium';
+  if (isPremium) {
+    return { ok: true, reason: null, idempotentHit: null };
+  }
   const sentOnly = all.filter((item) => statusOf(item) === 'sent');
   const additionalJourneyCount = Math.max(0, normalizedJourneyCount(cityJourneyCount) - 1);
   const basePerFriend = isPremium ? 2 : 1;

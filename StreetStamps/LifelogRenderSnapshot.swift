@@ -449,7 +449,9 @@ enum LifelogRenderSnapshotBuilder {
             countryISO2: countryISO2,
             cityKey: cityKey
         )
-        return RouteRenderingPipeline.buildSegments(input, surface: .mapKit).segments
+        // Use WGS84 output so both MapKit and Mapbox engines receive engine-agnostic coords.
+        // MapKit callers (LifelogView.lifelogMapSegments) apply GCJ-02 themselves when needed.
+        return RouteRenderingPipeline.buildSegments(input, surface: .canvas).segments
     }
 
     private static func uniformSampledCoords(

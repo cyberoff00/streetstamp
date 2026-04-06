@@ -36,7 +36,7 @@ struct TrackingLiveActivity: Widget {
                 }
 
                 DynamicIslandExpandedRegion(.trailing) {
-                    Button(intent: OpenCaptureIntent()) {
+                    Link(destination: URL(string: "streetstamps://capture")!) {
                         Image(systemName: "camera.aperture")
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(.white)
@@ -44,7 +44,6 @@ struct TrackingLiveActivity: Widget {
                             .background(WidgetTheme.buttonGreen)
                             .clipShape(Circle())
                     }
-                    .buttonStyle(.plain)
                 }
 
                 DynamicIslandExpandedRegion(.center) {
@@ -71,6 +70,19 @@ struct TrackingLiveActivity: Widget {
                         }
                     }
                 }
+
+                DynamicIslandExpandedRegion(.bottom) {
+                    Button(intent: TogglePauseIntent()) {
+                        Image(systemName: context.state.isPaused ? "play.fill" : "pause.fill")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.white.opacity(0.9))
+                            .frame(width: 40, height: 26)
+                            .background(
+                                Capsule().fill(context.state.isPaused ? WidgetTheme.buttonGreen : Color.white.opacity(0.22))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
             } compactLeading: {
                 MiniAvatarBadge()
             } compactTrailing: {
@@ -94,36 +106,55 @@ private struct UnifiedLockScreenView: View {
             LiveActivityAvatar()
 
             VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
                     Text(formatDistance(state.distanceMeters))
-                        .font(.system(size: 30, weight: .black, design: .rounded))
+                        .font(.system(size: 28, weight: .black, design: .rounded))
                         .foregroundColor(WidgetTheme.ink)
+                        .lineLimit(1)
 
                     Text(distanceUnitLabel())
-                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
                         .foregroundColor(WidgetTheme.unitText)
                 }
+                .minimumScaleFactor(0.7)
 
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     Circle()
                         .fill(state.isPaused ? WidgetTheme.mutedDot : WidgetTheme.buttonGreen)
-                        .frame(width: 11, height: 11)
+                        .frame(width: 9, height: 9)
 
                     Text(formatDuration(state.elapsedSeconds))
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
                         .foregroundColor(WidgetTheme.secondaryText)
+                        .lineLimit(1)
                 }
             }
 
             Spacer(minLength: 0)
 
-            ZStack {
-                Circle()
-                    .fill(WidgetTheme.buttonGreen)
-                    .frame(width: 66, height: 66)
-                Image(systemName: "square.and.pencil")
-                    .font(.system(size: 23, weight: .bold))
-                    .foregroundColor(WidgetTheme.noteIcon)
+            HStack(spacing: 6) {
+                Button(intent: TogglePauseIntent()) {
+                    ZStack {
+                        Circle()
+                            .fill(state.isPaused ? WidgetTheme.buttonGreen : WidgetTheme.buttonWarm)
+                            .frame(width: 42, height: 42)
+                        Image(systemName: state.isPaused ? "play.fill" : "pause.fill")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.white)
+                    }
+                }
+                .buttonStyle(.plain)
+
+                Link(destination: URL(string: "streetstamps://capture")!) {
+                    ZStack {
+                        Circle()
+                            .fill(WidgetTheme.buttonGreen)
+                            .frame(width: 42, height: 42)
+                        Image(systemName: "camera.fill")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.white)
+                    }
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -163,6 +194,7 @@ enum WidgetTheme {
     static let ink = Color(red: 0.39, green: 0.33, blue: 0.27)
     static let secondaryText = Color(red: 0.48, green: 0.42, blue: 0.35)
     static let unitText = Color(red: 0.52, green: 0.47, blue: 0.41)
+    static let buttonWarm = Color(red: 0.55, green: 0.50, blue: 0.44)
     static let mutedDot = Color(red: 0.66, green: 0.66, blue: 0.62)
     static let islandMuted = Color.white.opacity(0.68)
     static let noteIcon = Color.white

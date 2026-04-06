@@ -145,15 +145,10 @@ struct MapboxGlobeView: View {
     // MARK: - Setup
 
     private func setup() {
-        mapView.mapboxMap.onEvery(event: .mapLoadingError) { evt in
-            print("❌ Map loading error:", evt)
-        }
-        mapView.mapboxMap.onEvery(event: .styleLoaded) { _ in
-            print("✅ styleLoaded")
-        }
-
         let holder = mapHolder
-        mapView.mapboxMap.loadStyleURI(.dark) { _ in
+        mapView.mapboxMap.loadStyle(.dark) { error in
+            if let error { print("❌ Map style load error:", error) }
+
             // far view camera (globe)
             holder.mapView.mapboxMap.setCamera(
                 to: CameraOptions(center: CLLocationCoordinate2D(latitude: 20, longitude: 0), zoom: 1.1)
@@ -161,7 +156,7 @@ struct MapboxGlobeView: View {
 
             // globe projection (enable if available)
             do {
-                try holder.mapView.mapboxMap.style.setProjection(StyleProjection(name: .globe))
+                try holder.mapView.mapboxMap.setProjection(StyleProjection(name: .globe))
             } catch {
                 print("⚠️ projection not available:", error)
             }
@@ -185,13 +180,13 @@ struct MapboxGlobeView: View {
     }
 
     private func addFallbackBackground() {
-        let style = mapView.mapboxMap.style
+        let map: MapboxMap = mapView.mapboxMap
         do {
-            if !style.layerExists(withId: "ss-bg") {
+            if !map.layerExists(withId: "ss-bg") {
                 var bg = BackgroundLayer(id: "ss-bg")
                 bg.backgroundColor = .constant(StyleColor(.black))
                 bg.backgroundOpacity = .constant(1.0)
-                try style.addLayer(bg, layerPosition: .at(0))
+                try map.addLayer(bg, layerPosition: .at(0))
             }
         } catch {
             print("⚠️ add background failed:", error)
@@ -201,40 +196,40 @@ struct MapboxGlobeView: View {
     // MARK: - Sources & Layers
 
     private func addSourcesAndLayers() {
-        let style = mapView.mapboxMap.style
+        let map: MapboxMap = mapView.mapboxMap
 
         // --- Country vector source ---
-        if !style.sourceExists(withId: countriesSourceId) {
-            var v = VectorSource()
+        if !map.sourceExists(withId: countriesSourceId) {
+            var v = VectorSource(id: countriesSourceId)
             v.url = "mapbox://mapbox.country-boundaries-v1"
-            try? style.addSource(v, id: countriesSourceId)
+            try? map.addSource(v)
         }
 
         // --- GeoJSON sources ---
-        if !style.sourceExists(withId: footprintsSourceId) {
-            var src = GeoJSONSource()
+        if !map.sourceExists(withId: footprintsSourceId) {
+            var src = GeoJSONSource(id: footprintsSourceId)
             src.data = .featureCollection(Turf.FeatureCollection(features: []))
-            try? style.addSource(src, id: footprintsSourceId)
+            try? map.addSource(src)
         }
 
-        if !style.sourceExists(withId: routesSourceId) {
-            var src = GeoJSONSource()
+        if !map.sourceExists(withId: routesSourceId) {
+            var src = GeoJSONSource(id: routesSourceId)
             src.data = .featureCollection(Turf.FeatureCollection(features: []))
-            try? style.addSource(src, id: routesSourceId)
+            try? map.addSource(src)
         }
-        if !style.sourceExists(withId: citiesSourceId) {
-            var src = GeoJSONSource()
+        if !map.sourceExists(withId: citiesSourceId) {
+            var src = GeoJSONSource(id: citiesSourceId)
             src.data = .featureCollection(Turf.FeatureCollection(features: []))
-            try? style.addSource(src, id: citiesSourceId)
+            try? map.addSource(src)
         }
 
         // --- City pin icon ---
         do {
-            if style.image(withId: cityIconId) == nil {
+            if map.image(withId: cityIconId) == nil {
                 let img = UIImage(systemName: "mappin.circle.fill")?
                     .withTintColor(.white, renderingMode: .alwaysOriginal)
                 if let img {
-                    try style.addImage(img, id: cityIconId, sdf: false)
+                    try map.addImage(img, id: cityIconId, sdf: false)
                 }
             }
         } catch {
@@ -243,9 +238,8 @@ struct MapboxGlobeView: View {
 
 
         // --- Country fill layer (cyan; keep visible when zooming in) ---
-        if !style.layerExists(withId: countriesLayerId) {
-            var fill = FillLayer(id: countriesLayerId)
-            fill.source = countriesSourceId
+        if !map.layerExists(withId: countriesLayerId) {
+            var fill = FillLayer(id: countriesLayerId, source: countriesSourceId)
             fill.sourceLayer = "country_boundaries"
             // ✅ do NOT set maxZoom; we want it to remain visible
 
@@ -260,13 +254,12 @@ struct MapboxGlobeView: View {
             })
             fill.fillOutlineColor = .constant(StyleColor(UIColor.cyan.withAlphaComponent(0.45)))
 
-            try? style.addLayer(fill)
+            try? map.addLayer(fill)
         }
 
         // --- Country boundary stroke (always visible) ---
-        if !style.layerExists(withId: countriesBorderLayerId) {
-            var border = LineLayer(id: countriesBorderLayerId)
-            border.source = countriesSourceId
+        if !map.layerExists(withId: countriesBorderLayerId) {
+            var border = LineLayer(id: countriesBorderLayerId, source: countriesSourceId)
             border.sourceLayer = "country_boundaries"
             border.lineColor = .constant(StyleColor(UIColor.cyan.withAlphaComponent(0.95)))
             border.lineCap = .constant(.round)
@@ -285,13 +278,12 @@ struct MapboxGlobeView: View {
                 8;  1.5
                 14; 2.2
             })
-            try? style.addLayer(border)
+            try? map.addLayer(border)
         }
 
         // --- Footprints heatmap (region highlight: light red; never disappears) ---
-        if !style.layerExists(withId: footprintsLayerId) {
-            var heat = HeatmapLayer(id: footprintsLayerId)
-            heat.source = footprintsSourceId
+        if !map.layerExists(withId: footprintsLayerId) {
+            var heat = HeatmapLayer(id: footprintsLayerId, source: footprintsSourceId)
 
             heat.minZoom = 1.8
             heat.maxZoom = 24.0
@@ -327,13 +319,12 @@ struct MapboxGlobeView: View {
                 16.0; 56
             })
 
-            try? style.addLayer(heat)
+            try? map.addLayer(heat)
         }
 
         // --- Routes glow (far zoom MUST be visible) ---
-        if !style.layerExists(withId: routesGlowLayerId) {
-            var glow = LineLayer(id: routesGlowLayerId)
-            glow.source = routesSourceId
+        if !map.layerExists(withId: routesGlowLayerId) {
+            var glow = LineLayer(id: routesGlowLayerId, source: routesSourceId)
             glow.minZoom = 1.0
 
             // Solid routes only (exclude flight dashed)
@@ -370,13 +361,12 @@ struct MapboxGlobeView: View {
                 14.0; 3.2
             })
 
-            try? style.addLayer(glow)
+            try? map.addLayer(glow)
         }
 
         // --- Flight glow (make dashed flight visible at far zoom) ---
-        if !style.layerExists(withId: routesFlightGlowLayerId) {
-            var fglow = LineLayer(id: routesFlightGlowLayerId)
-            fglow.source = routesSourceId
+        if !map.layerExists(withId: routesFlightGlowLayerId) {
+            var fglow = LineLayer(id: routesFlightGlowLayerId, source: routesSourceId)
             fglow.minZoom = 1.0
 
             fglow.filter = Exp(.eq) { Exp(.get) { "isFlight" }; true }
@@ -411,13 +401,12 @@ struct MapboxGlobeView: View {
                 14.0; 3.4
             })
 
-            try? style.addLayer(fglow)
+            try? map.addLayer(fglow)
         }
 
         // --- Flight routes: ONLY start→end, dashed ---
-        if !style.layerExists(withId: routesFlightLayerId) {
-            var flight = LineLayer(id: routesFlightLayerId)
-            flight.source = routesSourceId
+        if !map.layerExists(withId: routesFlightLayerId) {
+            var flight = LineLayer(id: routesFlightLayerId, source: routesSourceId)
             flight.minZoom = 1.0
 
             flight.filter = Exp(.eq) { Exp(.get) { "isFlight" }; true }
@@ -456,14 +445,13 @@ struct MapboxGlobeView: View {
                 14.0; 0.5
             })
 
-            try? style.addLayer(flight)
+            try? map.addLayer(flight)
         }
 
 
         // --- Routes main (always visible; zoom in becomes clearer; never disappears) ---
-        if !style.layerExists(withId: routesLayerId) {
-            var line = LineLayer(id: routesLayerId)
-            line.source = routesSourceId
+        if !map.layerExists(withId: routesLayerId) {
+            var line = LineLayer(id: routesLayerId, source: routesSourceId)
             line.minZoom = 1.0
 
             // Solid routes only (exclude flight dashed)
@@ -494,13 +482,12 @@ struct MapboxGlobeView: View {
                 1.0; 0.55
             })
 
-            try? style.addLayer(line)
+            try? map.addLayer(line)
         }
 
         // --- Cities glow + pin (always visible, and kept above routes) ---
-        if !style.layerExists(withId: citiesGlowLayerId) {
-            var glow = CircleLayer(id: citiesGlowLayerId)
-            glow.source = citiesSourceId
+        if !map.layerExists(withId: citiesGlowLayerId) {
+            var glow = CircleLayer(id: citiesGlowLayerId, source: citiesSourceId)
 
             glow.circleColor = .constant(StyleColor(UIColor.cyan))
             glow.circleBlur  = .expression(Exp(.interpolate) {
@@ -525,12 +512,11 @@ struct MapboxGlobeView: View {
                 14.0; 0.30
             })
 
-            try? style.addLayer(glow)
+            try? map.addLayer(glow)
         }
 
-        if !style.layerExists(withId: citiesLayerId) {
-            var sym = SymbolLayer(id: citiesLayerId)
-            sym.source = citiesSourceId
+        if !map.layerExists(withId: citiesLayerId) {
+            var sym = SymbolLayer(id: citiesLayerId, source: citiesSourceId)
 
             sym.iconImage = .constant(.name(cityIconId))
             sym.iconAllowOverlap = .constant(true)
@@ -560,7 +546,7 @@ struct MapboxGlobeView: View {
             })
             sym.iconHaloBlur = .constant(0.8)
 
-            try? style.addLayer(sym)
+            try? map.addLayer(sym)
         }
     }
 
@@ -572,8 +558,8 @@ struct MapboxGlobeView: View {
             .filter { $0.count == 2 }
         let iso2 = overrideISO2.isEmpty ? visitedISO2FromJourneys(journeys) : overrideISO2
 
-        let style = mapView.mapboxMap.style
-        guard style.layerExists(withId: countriesLayerId) else { return }
+        let map: MapboxMap = mapView.mapboxMap
+        guard map.layerExists(withId: countriesLayerId) else { return }
 
         do {
             let worldview = resolvedWorldviewCode()
@@ -609,11 +595,11 @@ struct MapboxGlobeView: View {
             }
             let filterExpr = MapboxMaps.Expression(operator: .all, arguments: allFilters)
 
-            try style.updateLayer(withId: countriesLayerId, type: FillLayer.self) { layer in
+            try map.updateLayer(withId: countriesLayerId, type: FillLayer.self) { layer in
                 layer.filter = filterExpr
             }
-            if style.layerExists(withId: countriesBorderLayerId) {
-                try style.updateLayer(withId: countriesBorderLayerId, type: LineLayer.self) { layer in
+            if map.layerExists(withId: countriesBorderLayerId) {
+                try map.updateLayer(withId: countriesBorderLayerId, type: LineLayer.self) { layer in
                     layer.filter = filterExpr
                 }
             }
@@ -665,10 +651,11 @@ struct MapboxGlobeView: View {
     // MARK: - Data
 
     private func refreshData() {
+        let map: MapboxMap = mapView.mapboxMap
         guard mapHolder.styleLoadRevision > 0,
-              mapView.mapboxMap.style.sourceExists(withId: footprintsSourceId),
-              mapView.mapboxMap.style.sourceExists(withId: citiesSourceId) else {
-            print("🔴 [Globe] refreshData SKIPPED: styleRev=\(mapHolder.styleLoadRevision) footprintsSrc=\(mapView.mapboxMap.style.sourceExists(withId: footprintsSourceId)) citiesSrc=\(mapView.mapboxMap.style.sourceExists(withId: citiesSourceId))")
+              map.sourceExists(withId: footprintsSourceId),
+              map.sourceExists(withId: citiesSourceId) else {
+            print("🔴 [Globe] refreshData SKIPPED: styleRev=\(mapHolder.styleLoadRevision)")
             return
         }
 
@@ -685,18 +672,8 @@ struct MapboxGlobeView: View {
     }
 
     private func updateGeoJSONSource(id: String, fc: Turf.FeatureCollection) {
-        do {
-            try mapView.mapboxMap.style.updateGeoJSONSource(withId: id, geoJSON: .featureCollection(fc))
-        } catch {
-            do {
-                var src = try mapView.mapboxMap.style.source(withId: id, type: GeoJSONSource.self)
-                src.data = .featureCollection(fc)
-                try mapView.mapboxMap.style.removeSource(withId: id)
-                try mapView.mapboxMap.style.addSource(src, id: id)
-            } catch {
-                print("❌ update source \(id) failed:", error)
-            }
-        }
+        let map: MapboxMap = mapView.mapboxMap
+        map.updateGeoJSONSource(withId: id, geoJSON: .featureCollection(fc))
     }
 
     private func makeFootprintsFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
@@ -961,7 +938,8 @@ private func makeRoutesFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
         let bounds = CoordinateBounds(southwest: sw, northeast: ne)
 
         let padding = UIEdgeInsets(top: 120, left: 60, bottom: 140, right: 60)
-        var cam = mapView.mapboxMap.camera(for: bounds, padding: padding, bearing: 0, pitch: 0)
+        let mapboxMap: MapboxMap = mapView.mapboxMap
+        var cam = mapboxMap.camera(for: bounds, padding: padding, bearing: 0, pitch: 0, maxZoom: nil, offset: nil)
 
         // keep "far view feel"
         if let z = cam.zoom {

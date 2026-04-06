@@ -596,8 +596,8 @@
 "postcard_sent_status" = "已发送";
 "postcard_send" = "发送";
 "postcard_send_failed" = "发送失败，请稍后重试。";
-"postcard_quota_friend_limit_reached" = "这位好友在这座城市的明信片额度已经满了，开启更多旅程即可解锁更多明信片额度。";
-"postcard_quota_city_limit_reached" = "这座城市的明信片额度已经满了，开启更多旅程即可解锁更多明信片额度。";
+"postcard_quota_friend_limit_reached" = "你已用完给这位好友在这座城市的明信片额度。每增加一次有效旅程（1公里以上），可多获得一次发送机会。";
+"postcard_quota_city_limit_reached" = "这座城市的明信片额度已满。每增加一次有效旅程（1公里以上），可多获得一次发送机会。";
 "postcard_sent_success_title" = "明信片已寄出";
 "postcard_go_to_sent_box" = "去发件箱看看";
 "postcard_notification_badge" = "收到明信片";
@@ -618,9 +618,9 @@
 "verify_your_email" = "验证你的邮箱";
 "resend_verification_email" = "重新发送验证邮件";
 "i_verified_my_email" = "我已完成验证";
-"verification_email_description_format" = "我们已向 %@ 发送验证链接。请先完成验证，再返回这里继续。";
-"verification_email_description" = "我们已向你的邮箱发送验证链接。请先完成验证，再返回这里继续。";
-"verification_email_sent" = "验证邮件已发送。";
+"verification_email_description_format" = "我们已向 %@ 发送验证链接。请先完成验证，再返回这里继续。如果没看到，请检查垃圾邮件文件夹。";
+"verification_email_description" = "我们已向你的邮箱发送验证链接。请先完成验证，再返回这里继续。如果没看到，请检查垃圾邮件文件夹。";
+"verification_email_sent" = "验证邮件已发送。如果没看到，请检查垃圾邮件文件夹。";
 "email_still_unverified" = "该邮箱仍未验证。";
 "main_unlock_new_journey" = "开启我的Worldo旅程";
 "discard_changes_title" = "丢弃更改？";
@@ -791,6 +791,12 @@
 "settings_section_map_appearance" = "地图外观";
 "settings_section_tracking_assist" = "追踪辅助";
 "settings_section_general" = "通用";
+"settings_map_engine" = "地图样式";
+"map_layer_title" = "地图样式";
+"map_layer_standard" = "标准";
+"map_layer_dark" = "暗色";
+"map_layer_satellite" = "卫星";
+"map_layer_hybrid" = "混合";
 "settings_import_gpx_row" = "导入 GPX";
 "settings_section_services" = "服务";
 "settings_section_utilities" = "辅助功能";
@@ -1027,19 +1033,26 @@
 "membership_benefit_map" = "全部地图主题";
 "membership_benefit_coins" = "5 倍金币奖励";
 "membership_page_title" = "Premium";
+"membership_hero_title" = "解锁你的旅程";
+"membership_your_benefits" = "你的权益";
+"membership_indie_note" = "你的订阅直接支持独立开发者。无广告。不出售任何数据。";
 "membership_status_active" = "Premium 已激活";
 "membership_status_free" = "免费版";
 "membership_upgrade_subtitle" = "解锁全部功能，畅享旅途记录。";
 "membership_active_all_features" = "已解锁全部 Premium 功能";
 "membership_expires_format" = "到期时间：%@";
 "membership_manage_subscription" = "管理订阅";
+"membership_compare_features_title" = "功能对比";
+"membership_cta_yearly" = "开始年度会员";
+"membership_cta_monthly" = "开始月度会员";
 "membership_compare_feature" = "功能";
+"membership_compare_premium_only" = "专属功能";
 "membership_compare_free" = "免费";
 "membership_compare_premium" = "Premium";
 "membership_compare_photos" = "照片 / 旅程";
 "membership_info_photos" = "每段旅程最多可添加的照片数，每条记忆最多 2 张。免费 6 张，Premium 12 张。";
 "journey_photo_limit_toast" = "本段旅程最多可添加 %d 张照片";
-"membership_info_postcard" = "每个城市：可向每位好友发 1 张(免费)/2 张(Premium)明信片，最多 3 位(免费)/10 位(Premium)好友。该城市每多一段旅程，每位好友 +1 张，可发好友数也增加。";
+"membership_info_postcard" = "每个城市：免费版每位好友最多发 1 张明信片（最多 3 位好友）。Premium 无限制。";
 "membership_compare_friends" = "好友";
 "membership_compare_unlimited" = "无限";
 "membership_compare_globe" = "全球视图";
@@ -1201,3 +1214,12 @@
 "photo_editor_skip" = "跳过";
 "photo_editor_type_text" = "输入文字…";
 "photo_editor_tap_to_place" = "点击图片放置文字";
+
+// MARK: - Mapbox Trial
+"mapbox_trial_free_hint" = "免费体验24小时";
+"mapbox_trial_remaining_hours" = "剩余 %d小时%d分钟";
+"mapbox_trial_remaining_minutes" = "剩余 %d分钟";
+"mapbox_trial_expired_title" = "地图样式试用已结束";
+"mapbox_trial_expired_message" = "Mapbox 地图样式 24 小时免费试用已结束。开通会员可继续使用高级地图样式，或切换回默认样式。";
+"mapbox_trial_expired_subscribe" = "开通会员";
+"mapbox_trial_expired_dismiss" = "切换回默认";

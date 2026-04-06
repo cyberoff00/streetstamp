@@ -1202,6 +1202,7 @@ struct PhotoLibraryPicker: UIViewControllerRepresentable {
 
 struct MapView: View {
     @ObservedObject private var tracking = TrackingService.shared
+    @AppStorage(MapLayerStyle.storageKey) private var layerStyleRaw = MapLayerStyle.current.rawValue
 
     @EnvironmentObject private var flow: AppFlowCoordinator
     @EnvironmentObject private var journeyStore: JourneyStore
@@ -1274,11 +1275,20 @@ struct MapView: View {
 
     private func mapUserCoord() -> CLLocationCoordinate2D? {
         guard let loc = tracking.userLocation else { return nil }
-        return mapCoord(loc.coordinate)
+        // Mapbox uses WGS84; MapKit in China needs GCJ-02 via mapCoord().
+        let engine = (MapLayerStyle(rawValue: layerStyleRaw) ?? .mutedDark).engine
+        return engine == .mapkit ? mapCoord(loc.coordinate) : loc.coordinate
     }
 
     private var displaySegments: [RenderRouteSegment] { tracking.renderSnapshot.unifiedSegments }
+    /// WGS84 live tail from TrackingService. Apply GCJ-02 for MapKit via engineLiveTail.
     private var liveTail: [CLLocationCoordinate2D] { tracking.renderSnapshot.liveTail }
+    /// Live tail with coordinate system adapted for the current map engine.
+    private var engineLiveTail: [CLLocationCoordinate2D] {
+        let engine = (MapLayerStyle(rawValue: layerStyleRaw) ?? .mutedDark).engine
+        guard engine == .mapkit && tracking.shouldApplyChinaOffset else { return liveTail }
+        return liveTail.map { ChinaCoordinateTransform.wgs84ToGcj02($0) }
+    }
     private enum PersistReason { case coordsTick, memoryAdded, exitToHome, finish, sharingContinue, sharingComplete }
 
     private func persistSnapshot(_ reason: PersistReason) {
@@ -1764,23 +1774,54 @@ struct MapView: View {
         }
     }
 
-    private var mapLayer: some View {
-        JourneyMKMapView(
-            controller: mapController,
-            userCoordinate: mapUserCoord(),
-            travelMode: tracking.mode,
-            segments: displaySegments,
-            liveTail: liveTail,
-            memoryGroups: groupedMemoriesCache,
-            cameraDistance: $cameraDistance,
-            followUser: $followUser,
-            isUserInteracting: $isUserInteractingWithMap
-        ) { items in
-            let sorted = items.sorted { $0.timestamp > $1.timestamp }
-            guard let first = sorted.first else { return }
-            editingMemory = first
-            showMemoryEditor = true
+    private var journeyMapSegments: [MapRouteSegment] {
+        let engine = (MapLayerStyle(rawValue: layerStyleRaw) ?? .mutedDark).engine
+        let needsGCJ = engine == .mapkit && tracking.shouldApplyChinaOffset
+        return displaySegments.enumerated().map { (i, seg) in
+            let coords = needsGCJ
+                ? seg.coords.map { ChinaCoordinateTransform.wgs84ToGcj02($0) }
+                : seg.coords
+            return MapRouteSegment(id: "jt-\(seg.id)", coordinates: coords, isGap: seg.style == .dashed, repeatWeight: 0)
         }
+    }
+
+    private var journeyMapAnnotations: [MapAnnotationItem] {
+        var items: [MapAnnotationItem] = []
+        if let coord = mapUserCoord() {
+            items.append(MapAnnotationItem(id: "robot", coordinate: coord, kind: .robot))
+        }
+        for g in groupedMemoriesCache {
+            items.append(MapAnnotationItem(id: "mem-\(g.key)", coordinate: g.coordinate, kind: .memoryGroup(key: g.key, items: g.items)))
+        }
+        return items
+    }
+
+    private var mapLayer: some View {
+        UnifiedMapView(
+            segments: journeyMapSegments,
+            annotations: journeyMapAnnotations,
+            cameraCommand: mapController.unifiedCommand,
+            config: .journeyTracking(travelMode: tracking.mode, liveTail: engineLiveTail),
+            callbacks: MapCallbacks(
+                onSelectMemories: { items in
+                    let sorted = items.sorted { $0.timestamp > $1.timestamp }
+                    guard let first = sorted.first else { return }
+                    editingMemory = first
+                    showMemoryEditor = true
+                },
+                onGestureStateChanged: { interacting in
+                    isUserInteractingWithMap = interacting
+                },
+                onFollowUserChanged: { follow in
+                    followUser = follow
+                },
+                onCameraAltitudeChanged: { alt in
+                    if abs(alt - cameraDistance) > 1 {
+                        cameraDistance = alt
+                    }
+                }
+            )
+        )
         .ignoresSafeArea()
     }
 
@@ -4220,10 +4261,12 @@ final class JourneyMapController: ObservableObject {
 
     func setCamera(center: CLLocationCoordinate2D, distance: CLLocationDistance, heading: CLLocationDirection, pitch: CGFloat) {
         command = Command(kind: .setCamera(center: center, distance: distance, heading: heading, pitch: pitch))
+        syncUnifiedCommand()
     }
 
     func setRegion(_ region: MKCoordinateRegion) {
         command = Command(kind: .setRegion(region))
+        syncUnifiedCommand()
     }
 
     func fit(coordinates: [CLLocationCoordinate2D], edgePadding: UIEdgeInsets = UIEdgeInsets(top: 80, left: 50, bottom: 220, right: 50)) {
@@ -4234,32 +4277,32 @@ final class JourneyMapController: ObservableObject {
             rect = rect.union(MKMapRect(x: p.x, y: p.y, width: 0, height: 0))
         }
         command = Command(kind: .fit(rect: rect, edgePadding: edgePadding))
+        syncUnifiedCommand()
+    }
+
+    /// Bridge to UnifiedMapView's MapCameraCommand.
+    /// Caches the MapCameraCommand so the UUID stays stable for a given Command.id.
+    @Published var unifiedCommand: MapCameraCommand? = nil
+
+    private func syncUnifiedCommand() {
+        guard let cmd = command else {
+            unifiedCommand = nil
+            return
+        }
+        switch cmd.kind {
+        case let .setCamera(center, distance, heading, pitch):
+            unifiedCommand = MapCameraCommand.setCamera(center: center, distance: distance, heading: heading, pitch: pitch)
+        case let .setRegion(region):
+            unifiedCommand = MapCameraCommand.setRegion(region)
+        case let .fit(rect, edgePadding):
+            unifiedCommand = MapCameraCommand.fitRect(rect, padding: edgePadding)
+        }
     }
 }
 
-private final class MemoryGroupAnnotation: NSObject, MKAnnotation {
-    let key: String
-    dynamic var coordinate: CLLocationCoordinate2D
-    let items: [JourneyMemory]
+// Old MemoryGroupAnnotation, RobotAnnotation removed — now in MapKitEngine
 
-    init(key: String, coordinate: CLLocationCoordinate2D, items: [JourneyMemory]) {
-        self.key = key
-        self.coordinate = coordinate
-        self.items = items
-    }
-}
-
-private final class RobotAnnotation: NSObject, MKAnnotation {
-    dynamic var coordinate: CLLocationCoordinate2D
-    var face: RobotFace
-
-    init(coordinate: CLLocationCoordinate2D, face: RobotFace) {
-        self.coordinate = coordinate
-        self.face = face
-    }
-}
-
-private struct RobotMapMarkerView: View {
+struct RobotMapMarkerView: View {
     let face: RobotFace
     let onOpenEquipment: () -> Void
 
@@ -4273,555 +4316,4 @@ private struct RobotMapMarkerView: View {
     }
 }
 
-private struct JourneyMKMapView: UIViewRepresentable {
-    @ObservedObject var controller: JourneyMapController
-    @AppStorage(MapAppearanceSettings.storageKey) private var mapAppearanceRaw = MapAppearanceSettings.current.rawValue
-
-    let userCoordinate: CLLocationCoordinate2D?
-    let travelMode: TravelMode
-
-    let segments: [RenderRouteSegment]
-    let liveTail: [CLLocationCoordinate2D]
-    let memoryGroups: [(key: String, coordinate: CLLocationCoordinate2D, items: [JourneyMemory])]
-
-    @Binding var cameraDistance: CLLocationDistance
-    @Binding var followUser: Bool
-    @Binding var isUserInteracting: Bool
-
-    let onSelectMemories: ([JourneyMemory]) -> Void
-
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    func makeUIView(context: Context) -> MKMapView {
-        let map = MKMapView(frame: .zero)
-        map.delegate = context.coordinator
-        map.showsCompass = false
-        map.showsScale = false
-        map.showsUserLocation = false
-        map.isRotateEnabled = false
-        map.isPitchEnabled = false
-
-        applyAppearance(on: map)
-        map.pointOfInterestFilter = .excludingAll
-        map.showsTraffic = false
-
-        map.register(MKAnnotationView.self, forAnnotationViewWithReuseIdentifier: "robot")
-        map.register(MKAnnotationView.self, forAnnotationViewWithReuseIdentifier: "memoryGroup")
-
-        // Gesture detection to match previous SwiftUI modifier behavior
-        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.onUserGesture(_:)))
-        pan.cancelsTouchesInView = false
-        map.addGestureRecognizer(pan)
-
-        let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.onUserGesture(_:)))
-        pinch.cancelsTouchesInView = false
-        map.addGestureRecognizer(pinch)
-
-        context.coordinator.ensureRobotAnnotation(on: map, coord: userCoordinate)
-        context.coordinator.syncOverlays(on: map, segments: segments, liveTail: liveTail)
-        context.coordinator.syncMemoryAnnotations(on: map, groups: memoryGroups)
-
-        return map
-    }
-
-    func updateUIView(_ map: MKMapView, context: Context) {
-        context.coordinator.parent = self
-        applyAppearance(on: map)
-
-        if let cmd = controller.command, cmd.id != context.coordinator.lastCommandID {
-            context.coordinator.lastCommandID = cmd.id
-            context.coordinator.apply(cmd.kind, to: map)
-        }
-
-        context.coordinator.ensureRobotAnnotation(on: map, coord: userCoordinate)
-        context.coordinator.syncOverlays(on: map, segments: segments, liveTail: liveTail)
-        context.coordinator.syncMemoryAnnotations(on: map, groups: memoryGroups)
-
-        // Keep cameraDistance roughly in sync
-        let d = map.camera.altitude
-        if abs(d - cameraDistance) > 1 {
-            DispatchQueue.main.async { cameraDistance = d }
-        }
-    }
-
-    // MARK: - Coordinator
-
-    private func applyAppearance(on map: MKMapView) {
-        map.overrideUserInterfaceStyle = MapAppearanceSettings.interfaceStyle(for: mapAppearanceRaw)
-        map.mapType = MapAppearanceSettings.mapType(for: mapAppearanceRaw)
-    }
-
-    final class Coordinator: NSObject, MKMapViewDelegate {
-        var parent: JourneyMKMapView
-        var lastCommandID: UUID? = nil
-
-        private var robotAnnotation: RobotAnnotation? = nil
-        private var memoryAnnotationsByKey: [String: MemoryGroupAnnotation] = [:]
-        private var memoryHostingsByKey: [String: UIHostingController<MemoryPin>] = [:]
-
-        private var lastSegmentsSignature: String = ""
-        private var lastTailSignature: String = ""
-        private var lastAltitudeBucket: Int?
-        private var lastAppearance: String?
-        private var isProgrammaticRegionChange = false
-        private var renderedSegments: [RenderRouteSegment] = []
-        private var routeOverlays: [WeightedRoutePolyline] = []
-        private var tailOverlay: MKPolyline?
-
-        init(_ parent: JourneyMKMapView) {
-            self.parent = parent
-        }
-
-        @objc func onUserGesture(_ gr: UIGestureRecognizer) {
-            if gr.state == .began || gr.state == .changed {
-                parent.followUser = false
-                parent.isUserInteracting = true
-            } else if gr.state == .ended || gr.state == .cancelled || gr.state == .failed {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                    self.parent.isUserInteracting = false
-                }
-            }
-        }
-
-        func apply(_ kind: JourneyMapController.Kind, to map: MKMapView) {
-            isProgrammaticRegionChange = true
-            switch kind {
-            case let .setCamera(center, distance, heading, pitch):
-                let cam = MKMapCamera(lookingAtCenter: center, fromDistance: distance, pitch: pitch, heading: heading)
-                map.setCamera(cam, animated: true)
-
-            case let .setRegion(region):
-                map.setRegion(region, animated: true)
-
-            case let .fit(rect, edgePadding):
-                map.setVisibleMapRect(rect, edgePadding: edgePadding, animated: true)
-            }
-        }
-
-        func ensureRobotAnnotation(on map: MKMapView, coord: CLLocationCoordinate2D?) {
-            guard let coord else {
-                if let existing = robotAnnotation {
-                    map.removeAnnotation(existing)
-                    robotAnnotation = nil
-                }
-                return
-            }
-
-            if let existing = robotAnnotation {
-                existing.coordinate = coord
-            } else {
-                let ann = RobotAnnotation(coordinate: coord, face: .front)
-                robotAnnotation = ann
-                map.addAnnotation(ann)
-            }
-        }
-
-        private func configureRobotAnnotationView(
-            _ view: MKAnnotationView,
-            face _: RobotFace
-        ) {
-            let fixedFace: RobotFace = .front
-            view.canShowCallout = false
-            view.bounds = CGRect(
-                x: 0,
-                y: 0,
-                width: AvatarMapMarkerStyle.annotationSize,
-                height: AvatarMapMarkerStyle.annotationSize
-            )
-            view.backgroundColor = .clear
-            view.centerOffset = .zero
-            view.displayPriority = .required
-            view.collisionMode = .circle
-            if #available(iOS 14.0, *) {
-                view.zPriority = .min
-            }
-
-            let hosting = UIHostingController(
-                rootView: RobotMapMarkerView(
-                    face: fixedFace,
-                    onOpenEquipment: {
-                        AppFlowCoordinator.shared.requestOpenSidebarDestination(.equipment)
-                    }
-                )
-            )
-            hosting.view.backgroundColor = .clear
-            hosting.view.frame = view.bounds
-
-            view.subviews.forEach { $0.removeFromSuperview() }
-            view.addSubview(hosting.view)
-        }
-
-        func syncMemoryAnnotations(on map: MKMapView, groups: [(key: String, coordinate: CLLocationCoordinate2D, items: [JourneyMemory])]) {
-            func itemsSignature(_ items: [JourneyMemory]) -> String {
-                items
-                    .sorted { $0.id < $1.id }
-                    .map { m in
-                        let t = m.title.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let n = m.notes.trimmingCharacters(in: .whitespacesAndNewlines)
-                        return "\(m.id)|t:\(t.count)|n:\(n.count)|p:\(m.imagePaths.count)|rp:\(m.remoteImageURLs.count)"
-                    }
-                    .joined(separator: ";")
-            }
-
-            let newKeys = Set(groups.map(\.key))
-            let oldKeys = Set(memoryAnnotationsByKey.keys)
-
-            // Remove
-            for k in oldKeys.subtracting(newKeys) {
-                if let ann = memoryAnnotationsByKey.removeValue(forKey: k) {
-                    map.removeAnnotation(ann)
-                }
-                memoryHostingsByKey.removeValue(forKey: k)
-            }
-
-            // Add / update
-            for g in groups {
-                if let ann = memoryAnnotationsByKey[g.key] {
-                    ann.coordinate = g.coordinate
-                    // ✅ Replace annotation not only when count changes, but also when content changes.
-                    // Otherwise tapping the pin may show stale notes/title until app relaunch.
-                    if ann.items.count != g.items.count || itemsSignature(ann.items) != itemsSignature(g.items) {
-                        map.removeAnnotation(ann)
-                        memoryHostingsByKey.removeValue(forKey: g.key)
-                        let newAnn = MemoryGroupAnnotation(key: g.key, coordinate: g.coordinate, items: g.items)
-                        memoryAnnotationsByKey[g.key] = newAnn
-                        map.addAnnotation(newAnn)
-                    }
-                } else {
-                    let ann = MemoryGroupAnnotation(key: g.key, coordinate: g.coordinate, items: g.items)
-                    memoryAnnotationsByKey[g.key] = ann
-                    map.addAnnotation(ann)
-                }
-            }
-        }
-
-        private func signature(for segments: [RenderRouteSegment], tail: [CLLocationCoordinate2D]) -> (String, String) {
-            let segSig = segments.map { "\($0.id):\($0.style.rawValue):\($0.coords.count)" }.joined(separator: "|")
-            let tailSig = tail.map { "\(Int($0.latitude*1e5)):\(Int($0.longitude*1e5))" }.joined(separator: "|")
-            return (segSig, tailSig)
-        }
-
-        private func segmentSignature(_ coords: [CLLocationCoordinate2D]) -> String {
-            guard let first = coords.first, let last = coords.last else { return UUID().uuidString }
-            let stride = max(1, coords.count / 6)
-            var samples: [CLLocationCoordinate2D] = [first]
-            if coords.count > 2 {
-                var i = stride
-                while i < coords.count - 1 {
-                    samples.append(coords[i])
-                    i += stride
-                }
-            }
-            samples.append(last)
-
-            func q(_ c: CLLocationCoordinate2D) -> String {
-                let lat = Int((c.latitude * 2_000).rounded())
-                let lon = Int((c.longitude * 2_000).rounded())
-                return "\(lat):\(lon)"
-            }
-
-            let forward = samples.map(q).joined(separator: "|")
-            let backward = samples.reversed().map(q).joined(separator: "|")
-            return min(forward, backward)
-        }
-
-        private func quantile(_ values: [Int], p: Double) -> Double {
-            guard !values.isEmpty else { return 1.0 }
-            let sorted = values.sorted()
-            let index = Int((Double(sorted.count - 1) * p).rounded())
-            return Double(sorted[max(0, min(sorted.count - 1, index))])
-        }
-
-        func syncOverlays(on map: MKMapView, segments: [RenderRouteSegment], liveTail: [CLLocationCoordinate2D]) {
-            let currentAppearance = MapAppearanceSettings.current.rawValue
-            if currentAppearance != lastAppearance {
-                lastAppearance = currentAppearance
-                if lastSegmentsSignature != "" {
-                    refreshOverlayStyles(on: map)
-                    return
-                }
-            }
-            lastAltitudeBucket = MapViewRouteRenderStyle.altitudeBucket(for: map.camera.altitude)
-            let (segSig, tailSig) = signature(for: segments, tail: liveTail)
-            let needsSegUpdate = (segSig != lastSegmentsSignature)
-            let needsTailUpdate = (tailSig != lastTailSignature)
-
-            guard needsSegUpdate || needsTailUpdate else { return }
-
-            if needsSegUpdate {
-                var counts: [String: Int] = [:]
-                for seg in segments where seg.style != .dashed && seg.coords.count >= 2 {
-                    let sig = segmentSignature(seg.coords)
-                    counts[sig, default: 0] += 1
-                }
-                let p95 = max(1.0, quantile(Array(counts.values), p: 0.95))
-                let commonPrefixCount = sharedPrefixCount(lhs: renderedSegments, rhs: segments)
-
-                if commonPrefixCount < routeOverlays.count {
-                    let stale = Array(routeOverlays[commonPrefixCount...])
-                    map.removeOverlays(stale)
-                    routeOverlays.removeSubrange(commonPrefixCount..<routeOverlays.count)
-                }
-
-                if commonPrefixCount < segments.count {
-                    var appended: [WeightedRoutePolyline] = []
-                    appended.reserveCapacity(segments.count - commonPrefixCount)
-
-                    for seg in segments[commonPrefixCount...] where seg.coords.count > 1 {
-                        let poly = WeightedRoutePolyline(coordinates: seg.coords, count: seg.coords.count)
-                        poly.isGap = (seg.style == .dashed)
-                        if let n = counts[segmentSignature(seg.coords)], !poly.isGap {
-                            poly.repeatWeight = min(1.0, log(1.0 + Double(n)) / log(1.0 + p95))
-                        } else {
-                            poly.repeatWeight = 0.0
-                        }
-                        poly.title = poly.isGap ? "route_dashed" : "route_solid"
-                        appended.append(poly)
-                    }
-
-                    if !appended.isEmpty {
-                        map.addOverlays(appended)
-                        routeOverlays.append(contentsOf: appended)
-                    }
-                }
-
-                renderedSegments = segments
-
-                // Keep tail above newly-added route overlays when only segments changed.
-                if !needsTailUpdate, let tail = tailOverlay {
-                    map.removeOverlay(tail)
-                    map.addOverlay(tail)
-                }
-            }
-
-            if needsTailUpdate {
-                if let oldTail = tailOverlay {
-                    map.removeOverlay(oldTail)
-                    tailOverlay = nil
-                }
-                if liveTail.count == 2 {
-                    let poly = MKPolyline(coordinates: liveTail, count: liveTail.count)
-                    poly.title = "tail"
-                    map.addOverlay(poly)
-                    tailOverlay = poly
-                }
-            }
-
-            lastSegmentsSignature = segSig
-            lastTailSignature = tailSig
-        }
-
-        private func refreshOverlayStyles(on map: MKMapView) {
-            lastSegmentsSignature = ""
-            lastTailSignature = ""
-            renderedSegments = []
-            syncOverlays(on: map, segments: parent.segments, liveTail: parent.liveTail)
-        }
-
-        private func refreshMemoryPinModes(on map: MKMapView) {
-            let isCompact = map.camera.altitude >= 2400
-            for (key, hosting) in memoryHostingsByKey {
-                guard let ann = memoryAnnotationsByKey[key] else { continue }
-                hosting.rootView = MemoryPin(cluster: ann.items, isCompact: isCompact)
-            }
-        }
-
-        private func sharedPrefixCount(lhs: [RenderRouteSegment], rhs: [RenderRouteSegment]) -> Int {
-            let limit = min(lhs.count, rhs.count)
-            var index = 0
-            while index < limit {
-                if lhs[index] != rhs[index] { break }
-                index += 1
-            }
-            return index
-        }
-
-        // MARK: - MKMapViewDelegate
-
-        func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
-            guard let poly = overlay as? MKPolyline else { return MKOverlayRenderer(overlay: overlay) }
-            let altitude = mapView.camera.altitude
-            let isDark = MapAppearanceSettings.current == .dark
-            let base = MapAppearanceSettings.routeBaseColor
-            let glowTint = MapAppearanceSettings.routeGlowColor
-
-            if poly.title == "tail" {
-                let tailMain = MKPolylineRenderer(polyline: poly)
-                tailMain.strokeColor = base.withAlphaComponent(0.90)
-                tailMain.lineWidth = max(2.0, min(3.1, MapViewRouteRenderStyle.coreWidth(forAltitude: altitude, mode: parent.travelMode) * 0.82))
-                tailMain.lineCap = .round
-                tailMain.lineJoin = .round
-                if isDark {
-                    let tailGlow = MKPolylineRenderer(polyline: poly)
-                    tailGlow.lineWidth = tailMain.lineWidth * 2.5
-                    tailGlow.lineCap = .round
-                    tailGlow.lineJoin = .round
-                    tailGlow.strokeColor = glowTint.withAlphaComponent(0.18)
-                    let mr = MultiPolylineRenderer(renderers: [tailGlow, tailMain])
-                    mr.glowBlur = 6.0
-                    mr.glowColor = glowTint.withAlphaComponent(0.45).cgColor
-                    return mr
-                }
-                return tailMain
-            }
-
-            let coreWidth = MapViewRouteRenderStyle.coreWidth(forAltitude: altitude, mode: parent.travelMode)
-            guard let styled = poly as? WeightedRoutePolyline else {
-                let renderer = MKPolylineRenderer(polyline: poly)
-                renderer.lineWidth = coreWidth * 0.98
-                renderer.lineCap = .round
-                renderer.lineJoin = .round
-                renderer.strokeColor = base.withAlphaComponent(0.94)
-                if poly.title == "route_dashed" {
-                    renderer.lineDashPattern = RouteRenderStyleTokens.dashLengths.map { NSNumber(value: Double($0)) }
-                }
-                return renderer
-            }
-
-            let isGap = styled.isGap
-            let weight = CGFloat(max(0, min(1, styled.repeatWeight)))
-            let widths = MapViewRouteRenderStyle.layerWidths(
-                forAltitude: altitude,
-                mode: parent.travelMode,
-                repeatWeight: weight,
-                isGap: isGap
-            )
-
-            // Layer 1: Glow
-            let glowLayer = MKPolylineRenderer(polyline: styled)
-            glowLayer.lineWidth = widths.glow
-            glowLayer.lineCap = .round
-            glowLayer.lineJoin = .round
-            glowLayer.strokeColor = glowTint.withAlphaComponent(isGap ? 0.06 : (isDark ? 0.25 : 0.12))
-            if isGap {
-                glowLayer.lineDashPattern = RouteRenderStyleTokens.dashLengths.map { NSNumber(value: Double($0)) }
-            }
-
-            // Layer 2: Main
-            let mainLayer = MKPolylineRenderer(polyline: styled)
-            mainLayer.lineWidth = widths.main
-            mainLayer.lineCap = .round
-            mainLayer.lineJoin = .round
-            mainLayer.strokeColor = base.withAlphaComponent(isGap ? 0.56 : 1.0)
-            if isGap {
-                mainLayer.lineDashPattern = RouteRenderStyleTokens.dashLengths.map { NSNumber(value: Double($0)) }
-            }
-
-            // Layer 3: Highlight
-            let highlightLayer = MKPolylineRenderer(polyline: styled)
-            highlightLayer.lineWidth = widths.highlight
-            highlightLayer.lineCap = .round
-            highlightLayer.lineJoin = .round
-            highlightLayer.strokeColor = isGap ? .clear : UIColor.white.withAlphaComponent(isDark ? 0.45 : 0.25)
-
-            let mr = MultiPolylineRenderer(renderers: [glowLayer, mainLayer, highlightLayer])
-            if isDark {
-                mr.glowBlur = 8.0
-                mr.glowColor = glowTint.withAlphaComponent(0.50).cgColor
-            }
-            return mr
-        }
-
-        func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
-            if let ann = annotation as? RobotAnnotation {
-                let view = mapView.dequeueReusableAnnotationView(withIdentifier: "robot", for: ann)
-                configureRobotAnnotationView(
-                    view,
-                    face: ann.face
-                )
-                return view
-            }
-
-            if let ann = annotation as? MemoryGroupAnnotation {
-                let view = mapView.dequeueReusableAnnotationView(withIdentifier: "memoryGroup", for: ann)
-                view.canShowCallout = false
-                view.bounds = CGRect(x: 0, y: 0, width: 56, height: 56)
-                view.backgroundColor = .clear
-                view.displayPriority = .required
-                if #available(iOS 14.0, *) {
-                    view.zPriority = .max
-                }
-
-                let isCompact = mapView.camera.altitude >= 2400
-                let hosting = UIHostingController(rootView: MemoryPin(cluster: ann.items, isCompact: isCompact))
-                hosting.view.backgroundColor = .clear
-                hosting.view.frame = view.bounds
-
-                view.subviews.forEach { $0.removeFromSuperview() }
-                view.addSubview(hosting.view)
-                memoryHostingsByKey[ann.key] = hosting
-                return view
-            }
-
-            return nil
-        }
-
-        func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
-            if let ann = view.annotation as? RobotAnnotation {
-                // Keep avatar always front-facing on map.
-                ann.face = .front
-                configureRobotAnnotationView(
-                    view,
-                    face: .front
-                )
-                mapView.deselectAnnotation(ann, animated: false)
-                return
-            }
-
-            if let ann = view.annotation as? MemoryGroupAnnotation {
-                parent.onSelectMemories(ann.items)
-                mapView.deselectAnnotation(ann, animated: false)
-            }
-        }
-
-        func mapView(_ mapView: MKMapView, regionWillChangeAnimated animated: Bool) {
-            if !isProgrammaticRegionChange {
-                parent.followUser = false
-                parent.isUserInteracting = true
-            }
-        }
-
-        func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
-            if isProgrammaticRegionChange { isProgrammaticRegionChange = false }
-            let currentBucket = MapViewRouteRenderStyle.altitudeBucket(for: mapView.camera.altitude)
-            if lastAltitudeBucket != currentBucket {
-                refreshOverlayStyles(on: mapView)
-                refreshMemoryPinModes(on: mapView)
-                lastAltitudeBucket = currentBucket
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                self.parent.isUserInteracting = false
-            }
-        }
-    }
-}
-
-private final class WeightedRoutePolyline: MKPolyline {
-    var isGap: Bool = false
-    var repeatWeight: Double = 0
-}
-
-private final class MultiPolylineRenderer: MKOverlayRenderer {
-    private let renderers: [MKOverlayPathRenderer]
-    var glowBlur: CGFloat = 0
-    var glowColor: CGColor?
-
-    init(renderers: [MKOverlayPathRenderer]) {
-        self.renderers = renderers
-        super.init(overlay: renderers.first?.overlay ?? MKPolyline())
-    }
-
-    override func draw(_ mapRect: MKMapRect, zoomScale: MKZoomScale, in context: CGContext) {
-        for (i, r) in renderers.enumerated() {
-            if i == 0 && glowBlur > 0, let color = glowColor {
-                context.saveGState()
-                let scaledBlur = glowBlur / zoomScale
-                context.setShadow(offset: .zero, blur: scaledBlur, color: color)
-                r.draw(mapRect, zoomScale: zoomScale, in: context)
-                context.restoreGState()
-            } else {
-                r.draw(mapRect, zoomScale: zoomScale, in: context)
-            }
-        }
-    }
-}
+// Old JourneyMKMapView, WeightedRoutePolyline, MultiPolylineRenderer removed — now using UnifiedMapView

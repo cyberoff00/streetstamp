@@ -607,8 +607,8 @@
 "postcard_sent_status" = "Sent";
 "postcard_send" = "Send";
 "postcard_send_failed" = "Send failed. Please try again.";
-"postcard_quota_friend_limit_reached" = "You've reached this friend's postcard limit for the city. Start more journeys here to unlock more postcard quota.";
-"postcard_quota_city_limit_reached" = "This city's postcard quota is full. Start more journeys here to unlock more postcard quota.";
+"postcard_quota_friend_limit_reached" = "You've used up your postcard quota for this friend in this city. Each additional valid journey (1km+) unlocks one more send.";
+"postcard_quota_city_limit_reached" = "This city's postcard quota is full. Each additional valid journey (1km+) unlocks one more send.";
 "postcard_sent_success_title" = "Postcard sent!";
 "postcard_go_to_sent_box" = "View in Sent Box";
 "postcard_notification_badge" = "Postcard";
@@ -629,9 +629,9 @@
 "verify_your_email" = "Verify Your Email";
 "resend_verification_email" = "Resend Verification Email";
 "i_verified_my_email" = "I've Verified My Email";
-"verification_email_description_format" = "We sent a verification link to %@. Verify it first, then come back here to continue.";
-"verification_email_description" = "We sent a verification link to your email. Verify it first, then come back here to continue.";
-"verification_email_sent" = "Verification email sent.";
+"verification_email_description_format" = "We sent a verification link to %@. Verify it first, then come back here to continue. If you don't see it, check your spam or junk folder.";
+"verification_email_description" = "We sent a verification link to your email. Verify it first, then come back here to continue. If you don't see it, check your spam or junk folder.";
+"verification_email_sent" = "Verification email sent. If you don't see it, check your spam or junk folder.";
 "email_still_unverified" = "This email is still unverified.";
 "main_unlock_new_journey" = "START MY JOURNEY IN WORLDO";
 "discard_changes_title" = "Discard changes?";
@@ -802,6 +802,12 @@
 "settings_section_map_appearance" = "MAP APPEARANCE";
 "settings_section_tracking_assist" = "TRACKING ASSIST";
 "settings_section_general" = "GENERAL";
+"settings_map_engine" = "MAP STYLE";
+"map_layer_title" = "MAP STYLE";
+"map_layer_standard" = "Standard";
+"map_layer_dark" = "Dark";
+"map_layer_satellite" = "Satellite";
+"map_layer_hybrid" = "Hybrid";
 "settings_import_gpx_row" = "IMPORT GPX";
 "settings_section_services" = "SERVICES";
 "settings_section_utilities" = "UTILITIES";
@@ -1017,19 +1023,26 @@
 "membership_benefit_map" = "All map themes";
 "membership_benefit_coins" = "5× coin rewards";
 "membership_page_title" = "Premium";
+"membership_hero_title" = "Elevate Your Journey";
+"membership_your_benefits" = "YOUR BENEFITS";
+"membership_indie_note" = "Your subscription directly supports independent development. No ads. No data sold. Ever.";
 "membership_status_active" = "Premium Active";
 "membership_status_free" = "Free Plan";
 "membership_upgrade_subtitle" = "Unlock all features and get the most out of your journeys.";
 "membership_active_all_features" = "All premium features unlocked";
 "membership_expires_format" = "Expires: %@";
 "membership_manage_subscription" = "Manage Subscription";
+"membership_compare_features_title" = "Compare Features";
+"membership_cta_yearly" = "Start Yearly Premium";
+"membership_cta_monthly" = "Start Monthly Premium";
 "membership_compare_feature" = "Feature";
+"membership_compare_premium_only" = "PREMIUM ONLY";
 "membership_compare_free" = "Free";
 "membership_compare_premium" = "Premium";
 "membership_compare_photos" = "Photos / journey";
 "membership_info_photos" = "Max photos per journey. Each memory can hold up to 2 photos. Free: 6 total, Premium: 12 total.";
 "journey_photo_limit_toast" = "This journey can hold up to %d photos";
-"membership_info_postcard" = "Per city: send up to 1 (Free) or 2 (Premium) postcards to each friend, to max 3 (Free) or 10 (Premium) friends. Each extra journey in that city gives +1 per friend and more recipients.";
+"membership_info_postcard" = "Per city: Free plan can send 1 postcard per friend (max 3 friends). Premium is unlimited.";
 "membership_compare_friends" = "Friends";
 "membership_compare_unlimited" = "Unlimited";
 "membership_compare_globe" = "Global view";
@@ -1207,3 +1220,12 @@
 "photo_editor_skip" = "Skip";
 "photo_editor_type_text" = "Type text...";
 "photo_editor_tap_to_place" = "Tap photo to place text";
+
+// MARK: - Mapbox Trial
+"mapbox_trial_free_hint" = "Free 24h trial";
+"mapbox_trial_remaining_hours" = "%dh %dm left";
+"mapbox_trial_remaining_minutes" = "%dm left";
+"mapbox_trial_expired_title" = "Map Style Trial Ended";
+"mapbox_trial_expired_message" = "Your 24-hour free trial for Mapbox styles has ended. Subscribe to keep using premium map styles, or switch back to the default.";
+"mapbox_trial_expired_subscribe" = "Subscribe";
+"mapbox_trial_expired_dismiss" = "Switch Back";

@@ -197,17 +197,15 @@ struct CityDeepStyledSegment {
 }
 
 enum CityDeepRenderEngine {
-    private static let cityFocusRadiusMeters: CLLocationDistance = 80_000
-    private static let cityFocusWindowMeters: CLLocationDistance = 40_000
     private static let cityFocusMinPoints = 2
-    private static let cityFocusWindowMaxPoints = 80
     private static let boundaryTrustMaxDistanceMeters: CLLocationDistance = 120_000
     private static let boundaryTrustMaxSpanDegrees: CLLocationDegrees = 3.0
 
     static func styledSegments(
         journeys: [JourneyRoute],
         countryISO2: String?,
-        cityKey: String?
+        cityKey: String?,
+        surface: RouteRenderSurface = .mapKit
     ) -> [CityDeepStyledSegment] {
         let raw: [CityDeepStyledSegment] = journeys.flatMap { journey in
             RouteRenderingPipeline
@@ -219,7 +217,7 @@ enum CityDeepRenderEngine {
                         countryISO2: countryISO2,
                         cityKey: cityKey
                     ),
-                    surface: .mapKit
+                    surface: surface
                 )
                 .segments
                 .map { segment in
@@ -255,7 +253,8 @@ enum CityDeepRenderEngine {
         journeys: [JourneyRoute],
         anchorWGS: CLLocationCoordinate2D?,
         effectiveBoundaryWGS: [CLLocationCoordinate2D]?,
-        fetchedBoundaryWGS: [CLLocationCoordinate2D]?
+        fetchedBoundaryWGS: [CLLocationCoordinate2D]?,
+        applyGCJ: Bool = true
     ) -> MKCoordinateRegion? {
         let derivedAnchorWGS: CLLocationCoordinate2D? = {
             if let anchorWGS { return anchorWGS }
@@ -265,15 +264,20 @@ enum CityDeepRenderEngine {
             return journeys.first?.allCLCoords.first
         }()
 
-        let derivedAnchorForMap = derivedAnchorWGS.map {
-            MapCoordAdapter.forMapKit($0, countryISO2: countryISO2, cityKey: cityKey)
+        func adapt(_ coord: CLLocationCoordinate2D) -> CLLocationCoordinate2D {
+            applyGCJ ? MapCoordAdapter.forMapKit(coord, countryISO2: countryISO2, cityKey: cityKey) : coord
         }
+        func adaptArray(_ coords: [CLLocationCoordinate2D]) -> [CLLocationCoordinate2D] {
+            applyGCJ ? MapCoordAdapter.forMapKit(coords, countryISO2: countryISO2, cityKey: cityKey) : coords
+        }
+
+        let derivedAnchorForMap = derivedAnchorWGS.map { adapt($0) }
         let focusedWGS = focusedJourneyCoords(journeys: journeys, anchorWGS: derivedAnchorWGS)
-        let focusedForMap = MapCoordAdapter.forMapKit(focusedWGS, countryISO2: countryISO2, cityKey: cityKey)
+        let focusedForMap = adaptArray(focusedWGS)
 
         let boundaryCandidates = [fetchedBoundaryWGS, effectiveBoundaryWGS]
         if let boundaryWGS = boundaryCandidates.compactMap({ $0 }).first(where: { !$0.isEmpty }) {
-            let boundaryForMap = MapCoordAdapter.forMapKit(boundaryWGS, countryISO2: countryISO2, cityKey: cityKey)
+            let boundaryForMap = adaptArray(boundaryWGS)
             if let boundaryRegion = regionByFitting(boundaryForMap),
                isBoundaryTrusted(boundaryRegion, anchor: derivedAnchorForMap) {
                 return zoomRegionInsideBoundary(boundaryRegion: boundaryRegion, journeyCoordsForMap: focusedForMap)
@@ -281,7 +285,7 @@ enum CityDeepRenderEngine {
         }
 
         if let anchorWGS = derivedAnchorWGS {
-            let anchor = MapCoordAdapter.forMapKit(anchorWGS, countryISO2: countryISO2, cityKey: cityKey)
+            let anchor = adapt(anchorWGS)
             if let region = regionByFitting(focusedForMap), !focusedForMap.isEmpty { return region }
             return MKCoordinateRegion(center: anchor, span: MKCoordinateSpan(latitudeDelta: 0.18, longitudeDelta: 0.18))
         }
@@ -290,11 +294,11 @@ enum CityDeepRenderEngine {
     }
 
     static func routeBaseColor(for appearanceRaw: String) -> UIColor {
-        MapAppearanceSettings.routeBaseColor(for: appearanceRaw)
+        (MapLayerStyle(rawValue: appearanceRaw) ?? .mutedDark).routeBaseColor
     }
 
     static func routeGlowColor(for appearanceRaw: String) -> UIColor {
-        MapAppearanceSettings.routeGlowColor(for: appearanceRaw)
+        (MapLayerStyle(rawValue: appearanceRaw) ?? .mutedDark).routeGlowColor
     }
 
     static func drawStyledSegments(
@@ -307,7 +311,7 @@ enum CityDeepRenderEngine {
 
         let base = routeBaseColor(for: appearanceRaw)
         let glowTint = routeGlowColor(for: appearanceRaw)
-        let isDark = MapAppearanceSettings.resolved(from: appearanceRaw) == .dark
+        let isDark = (MapLayerStyle(rawValue: appearanceRaw) ?? .mutedDark).isDarkStyle
         let dash = RouteRenderStyleTokens.dashLengths
 
         for seg in segments where seg.coords.count >= 2 {
@@ -365,61 +369,41 @@ enum CityDeepRenderEngine {
         context.restoreGState()
     }
 
-    /// Adaptive focus radius based on per-journey reach distribution.
-    /// Uses P75 of each journey's max distance from anchor so that one
-    /// long intercity trip doesn't blow up the bounding box for a city
-    /// dominated by short local routes.
-    private static func adaptiveFocusRadius(
-        journeys: [JourneyRoute],
-        anchorWGS: CLLocationCoordinate2D
-    ) -> CLLocationDistance {
-        let anchorLoc = CLLocation(latitude: anchorWGS.latitude, longitude: anchorWGS.longitude)
-
-        let reaches: [CLLocationDistance] = journeys.compactMap { journey in
-            let coords = journey.allCLCoords
-            guard !coords.isEmpty else { return nil }
-            return coords.lazy.map {
-                CLLocation(latitude: $0.latitude, longitude: $0.longitude).distance(from: anchorLoc)
-            }.max()
-        }
-
-        // Need enough journeys to establish a pattern; otherwise fall back to default.
-        guard reaches.count >= 3 else { return cityFocusRadiusMeters }
-
-        let sorted = reaches.sorted()
-        let p75 = sorted[Int(Double(sorted.count - 1) * 0.75)]
-        return min(max(p75 * 1.3, 2_000), cityFocusRadiusMeters)
-    }
-
     private static func focusedJourneyCoords(
         journeys: [JourneyRoute],
         anchorWGS: CLLocationCoordinate2D?
     ) -> [CLLocationCoordinate2D] {
         guard let anchorWGS else { return journeys.flatMap { $0.allCLCoords } }
         let anchorLoc = CLLocation(latitude: anchorWGS.latitude, longitude: anchorWGS.longitude)
-        let focusRadius = adaptiveFocusRadius(journeys: journeys, anchorWGS: anchorWGS)
 
-        func localWindow(_ coords: [CLLocationCoordinate2D]) -> [CLLocationCoordinate2D] {
-            guard !coords.isEmpty else { return [] }
-
-            let near = coords.filter {
-                CLLocation(latitude: $0.latitude, longitude: $0.longitude).distance(from: anchorLoc) < focusRadius
-            }
-            if near.count >= cityFocusMinPoints { return near }
-
-            var out: [CLLocationCoordinate2D] = []
-            let head = CLLocation(latitude: coords[0].latitude, longitude: coords[0].longitude)
-            for c in coords {
-                out.append(c)
-                if out.count >= cityFocusWindowMaxPoints { break }
-                let d = CLLocation(latitude: c.latitude, longitude: c.longitude).distance(from: head)
-                if d >= cityFocusWindowMeters, out.count >= cityFocusMinPoints { break }
-            }
-            return out
+        // Per-journey max reach from anchor.
+        let reaches: [(journey: JourneyRoute, reach: CLLocationDistance)] = journeys.compactMap { journey in
+            let coords = journey.allCLCoords
+            guard !coords.isEmpty else { return nil }
+            let maxDist = coords.lazy.map {
+                CLLocation(latitude: $0.latitude, longitude: $0.longitude).distance(from: anchorLoc)
+            }.max() ?? 0
+            return (journey, maxDist)
         }
 
-        let focused = journeys.flatMap { localWindow($0.allCLCoords) }
-        if focused.count >= cityFocusMinPoints { return focused }
+        guard !reaches.isEmpty else { return [anchorWGS] }
+
+        // Exclude outlier journeys: any journey whose max reach > median * 3
+        // is likely a cross-city trip and should not influence the camera.
+        let sortedReaches = reaches.map(\.reach).sorted()
+        let median = sortedReaches[sortedReaches.count / 2]
+        let outlierThreshold = max(median * 3, 5_000) // at least 5km to avoid over-filtering small cities
+
+        let localJourneys = reaches
+            .filter { $0.reach <= outlierThreshold }
+            .map(\.journey)
+
+        // If filtering removed everything (all journeys are "outliers"), keep them all.
+        let effectiveJourneys = localJourneys.isEmpty ? journeys : localJourneys
+
+        // Use ALL coordinates from non-outlier journeys — full coverage, no per-point clipping.
+        let allCoords = effectiveJourneys.flatMap { $0.allCLCoords }
+        if allCoords.count >= cityFocusMinPoints { return allCoords }
         return [anchorWGS]
     }
 

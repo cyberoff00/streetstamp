@@ -390,12 +390,17 @@ final class CitySnapshotService {
         renderSemaphore.wait()
 
         let options = MKMapSnapshotter.Options()
-        let appearance = MapAppearanceSettings.current
+        let currentStyle = MapLayerStyle.current
         options.region = safeRegion
         options.size = Tokens.size
         options.scale = Tokens.scale
-        options.mapType = MapAppearanceSettings.mapType(for: appearance)
-        options.traitCollection = UITraitCollection(userInterfaceStyle: MapAppearanceSettings.interfaceStyle(for: appearance))
+        options.mapType = currentStyle.mapKitType
+        options.traitCollection = UITraitCollection(traitsFrom: [
+            UITraitCollection(userInterfaceStyle: currentStyle.mapKitInterfaceStyle),
+            UITraitCollection(displayScale: Tokens.scale),
+            UITraitCollection(activeAppearance: .active),
+            UITraitCollection(userInterfaceLevel: .base)
+        ])
         options.showsBuildings = Tokens.buildings
         options.showsPointsOfInterest = Tokens.poi
 
@@ -410,15 +415,15 @@ final class CitySnapshotService {
                         snapshot.image.draw(at: .zero)
 
                         if drawRoute, overlaySegments.count >= 1 {
-                            let isDark = appearance == .dark
+                            let isDark = currentStyle.isDarkStyle
                             RouteSnapshotDrawer.draw(
                                 segments: overlaySegments,
                                 isFlightLike: isFlightLike,
                                 snapshot: snapshot,
                                 ctx: renderer.cgContext,
-                                coreColor: MapAppearanceSettings.routeCoreColorForSnapshot(for: appearance),
+                                coreColor: currentStyle.routeBaseColor.withAlphaComponent(isDark ? 0.78 : 1.0),
                                 stroke: .init(coreWidth: 3.5),
-                                glowColor: MapAppearanceSettings.routeGlowColor(for: appearance),
+                                glowColor: currentStyle.routeGlowColor,
                                 isDarkMap: isDark
                             )
                         }

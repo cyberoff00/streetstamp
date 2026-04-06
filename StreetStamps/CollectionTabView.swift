@@ -23,6 +23,7 @@ struct CollectionTabView: View {
     @StateObject private var memoryFilterState = MemoryFilterState()
     @State private var cachedSortedJourneys: [JourneyRoute] = []
     @State private var cachedActivityTags: [String] = []
+    @State private var activeJourneyDetail: JourneyMemoryDetailDestination? = nil
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -60,6 +61,17 @@ struct CollectionTabView: View {
         }
         .background(SwipeBackEnabler())
         .navigationBarBackButtonHidden(true)
+        .navigationDestination(item: $activeJourneyDetail) { destination in
+            JourneyMemoryDetailView(
+                journey: destination.journey,
+                memories: destination.memories,
+                cityName: destination.cityName,
+                countryName: destination.countryName,
+                readOnly: destination.readOnly,
+                friendLoadout: destination.friendLoadout
+            )
+            .environmentObject(store)
+        }
         .onAppear { refreshDerivedJourneyData() }
         .onChange(of: store.journeys.count) { _, _ in refreshDerivedJourneyData() }
         .onChange(of: store.metadataRevision) { _, _ in refreshDerivedJourneyData() }
@@ -133,18 +145,15 @@ struct CollectionTabView: View {
         ZStack {
             if page == .cities {
                 CityStampLibraryView(
-                    showSidebar: .constant(false),
-                    usesSidebarHeader: false,
                     showHeader: false
                 )
                 .transition(.move(edge: .leading))
             } else {
                 JourneyMemoryMainView(
-                    showSidebar: .constant(false),
-                    usesSidebarHeader: false,
                     hideLeadingControl: true,
                     showHeader: false,
-                    filterState: memoryFilterState
+                    filterState: memoryFilterState,
+                    onSelectJourney: { activeJourneyDetail = $0 }
                 )
                 .transition(.move(edge: .trailing))
             }

@@ -202,7 +202,15 @@ struct PostcardComposerView: View {
     var body: some View {
         content
         .background(FigmaTheme.background.ignoresSafeArea())
-        .navigationDestination(isPresented: $showPreview) {
+        .sheet(isPresented: $showRecipientPicker) {
+            RecipientPickerSheet(
+                friends: socialStore.friends,
+                selectedRecipient: selectedRecipient
+            ) { recipient in
+                selectedRecipient = recipient
+            }
+        }
+        .fullScreenCover(isPresented: $showPreview) {
             if let selectedRecipient {
                 PostcardPreviewView(
                     friendID: selectedRecipient.userID,
@@ -446,14 +454,6 @@ struct PostcardComposerView: View {
         }
         .buttonStyle(.plain)
         .disabled(!canPreview)
-        .sheet(isPresented: $showRecipientPicker) {
-            RecipientPickerSheet(
-                friends: socialStore.friends,
-                selectedRecipient: selectedRecipient
-            ) { recipient in
-                selectedRecipient = recipient
-            }
-        }
     }
 }
 

@@ -57,17 +57,6 @@ struct MembershipGateView: View {
         products.sorted { $0.price < $1.price }
     }
 
-    // MARK: - Colors (warm earth-tone gradient, inspired by the app's secondary palette)
-
-    private let heroGradient = LinearGradient(
-        colors: [
-            Color(red: 82.0/255, green: 183.0/255, blue: 136.0/255),   // #52B788 primary
-            Color(red: 116.0/255, green: 198.0/255, blue: 157.0/255),  // #74C69D accent
-            Color(red: 212.0/255, green: 165.0/255, blue: 116.0/255)   // #D4A574 secondary
-        ],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
 
     var body: some View {
         VStack(spacing: 0) {
@@ -116,19 +105,12 @@ struct MembershipGateView: View {
     private var heroSection: some View {
         VStack(spacing: 16) {
             ZStack {
-                // Soft gradient circle
-                Circle()
-                    .fill(heroGradient.opacity(0.18))
-                    .frame(width: 96, height: 96)
-                    .blur(radius: 2)
-
-                Circle()
-                    .fill(heroGradient.opacity(0.35))
-                    .frame(width: 72, height: 72)
-
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(FigmaTheme.primary.opacity(0.15))
+                    .frame(width: 80, height: 80)
                 Image(systemName: "crown.fill")
-                    .font(.system(size: 30, weight: .bold))
-                    .foregroundStyle(heroGradient)
+                    .font(.system(size: 32, weight: .bold))
+                    .foregroundColor(FigmaTheme.primary)
             }
             .padding(.top, 16)
 
@@ -306,13 +288,16 @@ struct MembershipGateView: View {
                     Text(L10n.t("membership_subscribe_button"))
                         .font(.system(size: 16, weight: .bold))
                         .foregroundColor(.white)
+                    if !isPurchasing {
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.white)
+                    }
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 15)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(heroGradient)
-                )
+                .background(FigmaTheme.primary)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
             .disabled(isPurchasing || selectedProductID == nil)
             .opacity(isPurchasing ? 0.7 : 1.0)

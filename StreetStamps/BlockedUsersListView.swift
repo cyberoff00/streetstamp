@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct BlockedUsersListView: View {
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var blockStore: UserBlockStore
     @EnvironmentObject private var sessionStore: UserSessionStore
 
@@ -43,8 +44,22 @@ struct BlockedUsersListView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle(L10n.t("settings_blocked_users_row"))
-        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            UnifiedNavigationHeader(
+                chrome: NavigationChrome(
+                    title: L10n.t("settings_blocked_users_row"),
+                    leadingAccessory: .back,
+                    titleLevel: .secondary
+                ),
+                horizontalPadding: 18,
+                topPadding: 8,
+                bottomPadding: 12,
+                onLeadingTap: { dismiss() }
+            ) {
+                Color.clear
+            }
+        }
+        .toolbar(.hidden, for: .navigationBar)
         .task {
             await blockStore.refresh(accessToken: sessionStore.currentAccessToken)
         }

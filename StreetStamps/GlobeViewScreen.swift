@@ -15,7 +15,6 @@ private struct GlobeShareImageItem: Identifiable {
 
 /// Standalone page for Sidebar tab: Globe View
 struct GlobeViewScreen: View {
-    @Binding var showSidebar: Bool
     var externalJourneys: [JourneyRoute]? = nil
     @Environment(\.dismiss) private var dismiss
 
@@ -89,7 +88,7 @@ struct GlobeViewScreen: View {
 
     private var topHeader: some View {
         HStack {
-            SidebarHamburgerButton(showSidebar: $showSidebar, size: 42, iconSize: 20, iconWeight: .semibold, foreground: .black)
+            AppBackButton(foreground: .black)
 
             Spacer()
 

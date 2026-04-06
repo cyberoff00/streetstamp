@@ -24,7 +24,7 @@ enum CityDeepMemoryVisibility {
 }
 
 struct CityDeepView: View {
-    @AppStorage(MapAppearanceSettings.storageKey) private var mapAppearanceRaw = MapAppearanceStyle.dark.rawValue
+    @AppStorage(MapLayerStyle.storageKey) private var layerStyleRaw = MapLayerStyle.current.rawValue
     private let cityFocusRadiusMeters: CLLocationDistance = 80_000
     private let cityFocusWindowMeters: CLLocationDistance = 40_000
     private let cityFocusMinPoints = 2
@@ -53,6 +53,7 @@ struct CityDeepView: View {
     @State private var showMemoriesOnMap = true
 
     @State private var fittedRegion: MKCoordinateRegion? = nil
+    @State private var initialCameraCommand: MapCameraCommand? = nil
     @State private var fetchedBoundaryPolygon: [CLLocationCoordinate2D]? = nil
     @State private var sidebarHideToken = UUID().uuidString
 
@@ -152,15 +153,41 @@ struct CityDeepView: View {
         return Double(sorted[max(0, min(sorted.count - 1, index))])
     }
 
+    private var currentEngine: MapEngineSetting {
+        (MapLayerStyle(rawValue: layerStyleRaw) ?? .mutedDark).engine
+    }
+
     private func styledSegments() -> [Segment] {
-        CityDeepRenderEngine
+        let surface: RouteRenderSurface = currentEngine == .mapbox ? .mapbox : .mapKit
+        return CityDeepRenderEngine
             .styledSegments(
                 journeys: currentJourneys,
                 countryISO2: effectiveCountryISO2,
-                cityKey: activeCityKey
+                cityKey: activeCityKey,
+                surface: surface
             )
             .map { seg in
                 Segment(coords: seg.coords, isGap: seg.isGap, repeatWeight: seg.repeatWeight)
+            }
+    }
+
+    private func mapSegments() -> [MapRouteSegment] {
+        styledSegments().enumerated().map { (i, seg) in
+            MapRouteSegment(id: "cd-\(i)", coordinates: seg.coords, isGap: seg.isGap, repeatWeight: seg.repeatWeight)
+        }
+    }
+
+    private var mapAnnotations: [MapAnnotationItem] {
+        guard showMemoriesOnMap, store.hasLoaded, !store.isLoading else { return [] }
+        return groupedMemories.map { g in
+            MapAnnotationItem(id: g.id, coordinate: g.coordinate, kind: .memoryGroup(key: g.key, items: g.items))
+        }
+    }
+
+    private var mapCircles: [MapCircleOverlay] {
+        guard showMemoriesOnMap, store.hasLoaded, !store.isLoading else { return [] }
+        return memoryDotCoordinates.enumerated().map { (i, coord) in
+            MapCircleOverlay(id: "dot-\(i)", center: coord, radiusMeters: 30)
         }
     }
 
@@ -328,15 +355,18 @@ struct CityDeepView: View {
     var body: some View {
         let isDataLoading = !store.hasLoaded || store.isLoading
         ZStack(alignment: .top) {
-            CityDeepMKMap(
-                segments: styledSegments(),
-                memoryGroups: showMemoriesOnMap && !isDataLoading ? groupedMemories : [],
-                memoryDots: showMemoriesOnMap && !isDataLoading ? memoryDotCoordinates : [],
-                initialRegion: fittedRegion,
-                onTapMemoryGroup: { group in
-                    guard let latest = group.items.sorted(by: { $0.timestamp > $1.timestamp }).first else { return }
-                    editingMemory = latest
-                }
+            UnifiedMapView(
+                segments: mapSegments(),
+                annotations: mapAnnotations,
+                circles: mapCircles,
+                cameraCommand: initialCameraCommand,
+                config: .cityDeep(),
+                callbacks: MapCallbacks(
+                    onSelectMemories: { memories in
+                        guard let latest = memories.sorted(by: { $0.timestamp > $1.timestamp }).first else { return }
+                        editingMemory = latest
+                    }
+                )
             )
             .ignoresSafeArea()
         .onAppear {
@@ -440,7 +470,7 @@ struct CityDeepView: View {
         .onChange(of: currentJourneys.count) { _ in
             refreshRegionAndBoundary()
         }
-        .onChange(of: mapAppearanceRaw) { _ in
+        .onChange(of: layerStyleRaw) { _ in
             refreshRegionAndBoundary()
         }
         .background(SwipeBackEnabler())
@@ -493,7 +523,9 @@ struct CityDeepView: View {
     }
 
     private func refreshRegionAndBoundary() {
-        fittedRegion = computeFittedRegion()
+        let region = computeFittedRegion()
+        fittedRegion = region
+        if let region { initialCameraCommand = .setRegion(region, animated: false) }
         Task {
             let boundary = await CityBoundaryService.shared.boundaryPolygon(
                 cityKey: activeCityKey,
@@ -504,274 +536,16 @@ struct CityDeepView: View {
             guard let boundary, !boundary.isEmpty else { return }
             await MainActor.run {
                 fetchedBoundaryPolygon = boundary
-                fittedRegion = computeFittedRegion()
+                let r = computeFittedRegion()
+                fittedRegion = r
+                if let r { initialCameraCommand = .setRegion(r, animated: false) }
             }
         }
     }
 
 }
 
-private struct CityDeepMKMap: UIViewRepresentable {
-    let segments: [AnySegment]
-    let memoryGroups: [CityDeepView.MemoryGroup]
-    let memoryDots: [CLLocationCoordinate2D]
-    let initialRegion: MKCoordinateRegion?
-    let onTapMemoryGroup: (CityDeepView.MemoryGroup) -> Void
-
-    struct AnySegment {
-        let coords: [CLLocationCoordinate2D]
-        let isGap: Bool
-        let repeatWeight: Double
-    }
-
-    init(
-        segments: [CityDeepView.Segment],
-        memoryGroups: [CityDeepView.MemoryGroup],
-        memoryDots: [CLLocationCoordinate2D],
-        initialRegion: MKCoordinateRegion?,
-        onTapMemoryGroup: @escaping (CityDeepView.MemoryGroup) -> Void
-    ) {
-        self.segments = segments.map { AnySegment(coords: $0.coords, isGap: $0.isGap, repeatWeight: $0.repeatWeight) }
-        self.memoryDots = memoryDots
-        self.memoryGroups = memoryGroups
-        self.initialRegion = initialRegion
-        self.onTapMemoryGroup = onTapMemoryGroup
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    func makeUIView(context: Context) -> MKMapView {
-        let map = MKMapView(frame: .zero)
-        map.delegate = context.coordinator
-        map.overrideUserInterfaceStyle = MapAppearanceSettings.interfaceStyle
-        map.showsCompass = false
-        map.showsScale = false
-        map.showsTraffic = false
-        map.pointOfInterestFilter = .excludingAll
-        map.mapType = MapAppearanceSettings.mapType
-        map.isRotateEnabled = false
-        map.isPitchEnabled = false
-
-        if let r = initialRegion {
-            map.setRegion(r, animated: false)
-        }
-
-        return map
-    }
-
-    func updateUIView(_ map: MKMapView, context: Context) {
-        context.coordinator.parent = self
-        map.overrideUserInterfaceStyle = MapAppearanceSettings.interfaceStyle
-        map.mapType = MapAppearanceSettings.mapType
-
-        if let r = initialRegion, !context.coordinator.didSetInitialRegion {
-            context.coordinator.didSetInitialRegion = true
-            map.setRegion(r, animated: false)
-        }
-
-        // Only rebuild overlays when segment or dot data actually changes
-        let dotFP = memoryDots.map { "\(Int($0.latitude * 10000))_\(Int($0.longitude * 10000))" }.joined(separator: ",")
-        let segFP = segments.map { "\($0.coords.count)_\($0.isGap)_\($0.repeatWeight)" }.joined(separator: "|") + "||" + dotFP
-        if segFP != context.coordinator.lastSegmentFingerprint {
-            context.coordinator.lastSegmentFingerprint = segFP
-            map.removeOverlays(map.overlays)
-            for seg in segments {
-                guard seg.coords.count >= 2 else { continue }
-                let poly = CityDeepStyledPolyline(coordinates: seg.coords, count: seg.coords.count)
-                poly.isGap = seg.isGap
-                poly.repeatWeight = max(0, min(1, seg.repeatWeight))
-                map.addOverlay(poly)
-            }
-            // Memory glow dots — rendered as small circles at memory locations
-            for coord in memoryDots {
-                let circle = MemoryDotCircle(center: coord, radius: 30) // 30m radius
-                map.addOverlay(circle, level: .aboveRoads)
-            }
-        }
-
-        // Only rebuild annotations when memory data actually changes
-        let memFP = memoryGroups.map { $0.id }.joined(separator: "|")
-        if memFP != context.coordinator.lastMemoryFingerprint {
-            context.coordinator.lastMemoryFingerprint = memFP
-            map.removeAnnotations(map.annotations)
-            for g in memoryGroups {
-                let ann = MemoryGroupAnnotation(group: g)
-                map.addAnnotation(ann)
-            }
-        }
-
-        context.coordinator.syncMemoryPresentation(on: map, animated: false)
-    }
-
-    final class Coordinator: NSObject, MKMapViewDelegate {
-        var parent: CityDeepMKMap
-        var didSetInitialRegion = false
-        var lastSegmentFingerprint: String = ""
-        var lastMemoryFingerprint: String = ""
-        private var pinsVisible = true
-
-        init(_ parent: CityDeepMKMap) {
-            self.parent = parent
-        }
-
-        func syncMemoryPresentation(on mapView: MKMapView, animated: Bool) {
-            let shouldShowPins = CityDeepMemoryVisibility.shouldShowPins(latitudeDelta: mapView.region.span.latitudeDelta)
-            pinsVisible = shouldShowPins
-
-            let applyPinAlpha = {
-                for ann in mapView.annotations {
-                    guard ann is MemoryGroupAnnotation else { continue }
-                    mapView.view(for: ann)?.alpha = CityDeepMemoryVisibility.pinAlpha(shouldShowPins: shouldShowPins)
-                }
-            }
-
-            if animated {
-                UIView.animate(withDuration: 0.25) {
-                    applyPinAlpha()
-                }
-            } else {
-                applyPinAlpha()
-            }
-
-            for overlay in mapView.overlays {
-                guard overlay is MemoryDotCircle else { continue }
-                mapView.renderer(for: overlay)?.alpha = CityDeepMemoryVisibility.dotAlpha(shouldShowPins: shouldShowPins)
-            }
-        }
-
-        func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
-            let shouldShowPins = CityDeepMemoryVisibility.shouldShowPins(latitudeDelta: mapView.region.span.latitudeDelta)
-            guard shouldShowPins != pinsVisible else { return }
-            syncMemoryPresentation(on: mapView, animated: true)
-        }
-
-        func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
-            // Memory glow dot
-            if let dot = overlay as? MemoryDotCircle {
-                let r = MKCircleRenderer(circle: dot)
-                let isDark = MapAppearanceSettings.current == .dark
-                let green = UIColor(red: 0.30, green: 0.85, blue: 0.45, alpha: 1.0)
-                r.fillColor = green.withAlphaComponent(isDark ? 0.50 : 0.35)
-                r.strokeColor = green.withAlphaComponent(isDark ? 0.75 : 0.55)
-                r.lineWidth = 1.5
-                let shouldShowPins = CityDeepMemoryVisibility.shouldShowPins(latitudeDelta: mapView.region.span.latitudeDelta)
-                r.alpha = CityDeepMemoryVisibility.dotAlpha(shouldShowPins: shouldShowPins)
-                return r
-            }
-
-            guard let poly = overlay as? CityDeepStyledPolyline else { return MKOverlayRenderer(overlay: overlay) }
-            let base = MapAppearanceSettings.routeBaseColor
-            let glowTint = MapAppearanceSettings.routeGlowColor
-            let isDark = MapAppearanceSettings.current == .dark
-            let gapDash = RouteRenderStyleTokens.dashLengths.map { NSNumber(value: Double($0)) }
-            let weight = CGFloat(max(0, min(1, poly.repeatWeight)))
-            let isGap = poly.isGap
-
-            let mainWidth: CGFloat = isGap ? 1.4 : (2.2 + weight * 0.8)
-            let glowWidth: CGFloat = mainWidth * (isGap ? 2.2 : 2.5)
-
-            let glowLayer = MKPolylineRenderer(polyline: poly)
-            glowLayer.lineWidth = glowWidth
-            glowLayer.lineCap = .round
-            glowLayer.lineJoin = .round
-            glowLayer.strokeColor = glowTint.withAlphaComponent(isGap ? 0.06 : (isDark ? 0.25 : 0.12))
-            if isGap { glowLayer.lineDashPattern = gapDash }
-
-            let mainLayer = MKPolylineRenderer(polyline: poly)
-            mainLayer.lineWidth = mainWidth
-            mainLayer.lineCap = .round
-            mainLayer.lineJoin = .round
-            mainLayer.strokeColor = base.withAlphaComponent(isGap ? 0.50 : 1.0)
-            if isGap { mainLayer.lineDashPattern = gapDash }
-
-            let highlightLayer = MKPolylineRenderer(polyline: poly)
-            highlightLayer.lineWidth = mainWidth * 0.35
-            highlightLayer.lineCap = .round
-            highlightLayer.lineJoin = .round
-            highlightLayer.strokeColor = isGap ? .clear : UIColor.white.withAlphaComponent(isDark ? 0.45 : 0.25)
-
-            let lr = CityDeepLayeredPolylineRenderer(renderers: [glowLayer, mainLayer, highlightLayer])
-            if isDark {
-                lr.glowBlur = 6.0
-                lr.glowColor = glowTint.withAlphaComponent(0.50).cgColor
-            }
-            return lr
-        }
-
-        func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
-            guard let ann = annotation as? MemoryGroupAnnotation else { return nil }
-            let id = "memGroup"
-            let view = mapView.dequeueReusableAnnotationView(withIdentifier: id)
-                ?? MKAnnotationView(annotation: ann, reuseIdentifier: id)
-            view.annotation = ann
-            view.canShowCallout = false
-            view.bounds = CGRect(x: 0, y: 0, width: 56, height: 56)
-            view.backgroundColor = .clear
-            view.displayPriority = .required
-            if #available(iOS 14.0, *) {
-                view.zPriority = .max
-            }
-
-            let hosting = UIHostingController(rootView: MemoryPin(cluster: ann.group.items))
-            hosting.view.backgroundColor = .clear
-            hosting.view.frame = view.bounds
-            view.subviews.forEach { $0.removeFromSuperview() }
-            view.addSubview(hosting.view)
-
-            let shouldShowPins = CityDeepMemoryVisibility.shouldShowPins(latitudeDelta: mapView.region.span.latitudeDelta)
-            view.alpha = CityDeepMemoryVisibility.pinAlpha(shouldShowPins: shouldShowPins)
-            return view
-        }
-
-        func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
-            guard let ann = view.annotation as? MemoryGroupAnnotation else { return }
-            parent.onTapMemoryGroup(ann.group)
-            mapView.deselectAnnotation(ann, animated: false)
-        }
-    }
-}
-
-private final class MemoryGroupAnnotation: NSObject, MKAnnotation {
-    let group: CityDeepView.MemoryGroup
-    var coordinate: CLLocationCoordinate2D { group.coordinate }
-
-    init(group: CityDeepView.MemoryGroup) {
-        self.group = group
-    }
-}
-
-private final class CityDeepStyledPolyline: MKPolyline {
-    var isGap: Bool = false
-    var repeatWeight: Double = 0
-}
-
-/// Small circle overlay marking a memory location on the route
-private final class MemoryDotCircle: MKCircle {}
-
-private final class CityDeepLayeredPolylineRenderer: MKOverlayRenderer {
-    private let renderers: [MKPolylineRenderer]
-    var glowBlur: CGFloat = 0
-    var glowColor: CGColor?
-
-    init(renderers: [MKPolylineRenderer]) {
-        precondition(!renderers.isEmpty)
-        self.renderers = renderers
-        super.init(overlay: renderers[0].overlay)
-    }
-
-    override func draw(_ mapRect: MKMapRect, zoomScale: MKZoomScale, in context: CGContext) {
-        for (index, renderer) in renderers.enumerated() {
-            if index == 0 && glowBlur > 0, let color = glowColor {
-                context.saveGState()
-                context.setShadow(offset: .zero, blur: glowBlur / zoomScale, color: color)
-                renderer.draw(mapRect, zoomScale: zoomScale, in: context)
-                context.restoreGState()
-            } else {
-                renderer.draw(mapRect, zoomScale: zoomScale, in: context)
-            }
-        }
-    }
-}
+// Old CityDeepMKMap, CityDeepStyledPolyline, CityDeepLayeredPolylineRenderer, MemoryDotCircle removed — now using UnifiedMapView
 
 private extension String {
     func normalizedCityNameForMatching() -> String {

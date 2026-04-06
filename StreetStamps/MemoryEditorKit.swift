@@ -14,7 +14,7 @@ enum MemoryTypography {
     static let fontSwiftUI: Font = .system(size: 14)
     static let lineSpacing: CGFloat = 8.75
     static let textColor: UIColor = UIColor(red: 0.21, green: 0.26, blue: 0.32, alpha: 1.0)
-    static let textColorSwiftUI: Color = Color(red: 0.21, green: 0.26, blue: 0.32)
+    static let textColorSwiftUI: Color = Color(uiColor: textColor)
 }
 
 // MARK: - UIKit backed editor to guarantee consistent line spacing across the app.
