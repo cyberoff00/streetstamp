@@ -111,10 +111,12 @@ struct JourneyRouteDetailView: View {
     private var mapAnnotations: [MapAnnotationItem] {
         guard let j = journey else { return [] }
         return j.memories.filter { $0.locationStatus != .pending }.map { memory in
+            let engine = (MapLayerStyle(rawValue: layerStyleRaw) ?? .mutedDark).engine
             let mapped = JourneyMemoryMapCoordinateResolver.mapCoordinate(
                 for: memory,
                 fallbackCountryISO2: j.countryISO2,
-                fallbackCityKey: j.cityKey
+                fallbackCityKey: j.cityKey,
+                engine: engine
             )
             return MapAnnotationItem(id: memory.id, coordinate: mapped, kind: .memoryGroup(key: memory.id, items: [memory]))
         }

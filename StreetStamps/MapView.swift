@@ -2355,7 +2355,9 @@ struct MapView: View {
         }
 
         if let last = tracking.coords.last {
-            mapController.setRegion(.init(center: mapCoord(last), span: .init(latitudeDelta: 0.01, longitudeDelta: 0.01)))
+            let engine = (MapLayerStyle(rawValue: layerStyleRaw) ?? .mutedDark).engine
+            let center = engine == .mapkit ? mapCoord(last) : last
+            mapController.setRegion(.init(center: center, span: .init(latitudeDelta: 0.01, longitudeDelta: 0.01)))
         }
     }
 
@@ -2437,7 +2439,8 @@ struct MapView: View {
         }
 
         cameraDistance = d
-        let center = mapCoord(location.coordinate)
+        let engine = (MapLayerStyle(rawValue: layerStyleRaw) ?? .mutedDark).engine
+        let center = engine == .mapkit ? mapCoord(location.coordinate) : location.coordinate
         mapController.setCamera(center: center, distance: d, heading: 0, pitch: 0)
     }
 
@@ -2536,7 +2539,9 @@ struct MapView: View {
         hasOngoingJourney = false
         tracking.stopJourney()
 
-        autoFitMap(to: tracking.coords.map { mapCoord($0) })
+        let engine = (MapLayerStyle(rawValue: layerStyleRaw) ?? .mutedDark).engine
+        let fitCoords = engine == .mapkit ? tracking.coords.map { mapCoord($0) } : tracking.coords
+        autoFitMap(to: fitCoords)
 
         JourneyFinalizer.finalize(
             route: journeyRoute,
@@ -2714,12 +2719,14 @@ struct MapView: View {
             }
         }
 
+        let engine = (MapLayerStyle(rawValue: layerStyleRaw) ?? .mutedDark).engine
         return clusters.map { c in
             let mapped = JourneyMemoryMapCoordinateResolver.mapCoordinate(
                 rawCoordinate: c.center,
                 preferredCityKey: c.items.first?.cityKey,
                 fallbackCountryISO2: journeyRoute.countryISO2,
-                fallbackCityKey: journeyRoute.startCityKey ?? journeyRoute.cityKey
+                fallbackCityKey: journeyRoute.startCityKey ?? journeyRoute.cityKey,
+                engine: engine
             )
             return (c.key, mapped, c.items)
         }

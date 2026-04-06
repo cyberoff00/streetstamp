@@ -1,0 +1,30 @@
+{
+  "" : {
+    "const-values" : "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/build/StreetStamps.build/Release-iphoneos/TrackingWidgeExtension.build/Objects-normal/arm64/TrackingWidgeExtension-master.swiftconstvalues",
+    "dependencies" : "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/build/StreetStamps.build/Release-iphoneos/TrackingWidgeExtension.build/Objects-normal/arm64/TrackingWidgeExtension-master.d",
+    "diagnostics" : "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/build/StreetStamps.build/Release-iphoneos/TrackingWidgeExtension.build/Objects-normal/arm64/TrackingWidgeExtension-master.dia",
+    "emit-module-dependencies" : "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/build/StreetStamps.build/Release-iphoneos/TrackingWidgeExtension.build/Objects-normal/arm64/TrackingWidgeExtension-master-emit-module.d",
+    "emit-module-diagnostics" : "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/build/StreetStamps.build/Release-iphoneos/TrackingWidgeExtension.build/Objects-normal/arm64/TrackingWidgeExtension-master-emit-module.dia",
+    "swift-dependencies" : "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/build/StreetStamps.build/Release-iphoneos/TrackingWidgeExtension.build/Objects-normal/arm64/TrackingWidgeExtension-master.swiftdeps"
+  },
+  "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/build/StreetStamps.build/Release-iphoneos/TrackingWidgeExtension.build/DerivedSources/GeneratedAssetSymbols.swift" : {
+    "index-unit-output-path" : "/StreetStamps.build/Release-iphoneos/TrackingWidgeExtension.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "llvm-bc" : "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/build/StreetStamps.build/Release-iphoneos/TrackingWidgeExtension.build/Objects-normal/arm64/GeneratedAssetSymbols.bc",
+    "object" : "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/build/StreetStamps.build/Release-iphoneos/TrackingWidgeExtension.build/Objects-normal/arm64/GeneratedAssetSymbols.o"
+  },
+  "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/TrackingWidge/StreetStampsWidgets/AddMemoryIntent.swift" : {
+    "index-unit-output-path" : "/StreetStamps.build/Release-iphoneos/TrackingWidgeExtension.build/Objects-normal/arm64/AddMemoryIntent.o",
+    "llvm-bc" : "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/build/StreetStamps.build/Release-iphoneos/TrackingWidgeExtension.build/Objects-normal/arm64/AddMemoryIntent.bc",
+    "object" : "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/build/StreetStamps.build/Release-iphoneos/TrackingWidgeExtension.build/Objects-normal/arm64/AddMemoryIntent.o"
+  },
+  "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/TrackingWidge/StreetStampsWidgets/StreetStampsWidgetsBundle.swift" : {
+    "index-unit-output-path" : "/StreetStamps.build/Release-iphoneos/TrackingWidgeExtension.build/Objects-normal/arm64/StreetStampsWidgetsBundle.o",
+    "llvm-bc" : "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/build/StreetStamps.build/Release-iphoneos/TrackingWidgeExtension.build/Objects-normal/arm64/StreetStampsWidgetsBundle.bc",
+    "object" : "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/build/StreetStamps.build/Release-iphoneos/TrackingWidgeExtension.build/Objects-normal/arm64/StreetStampsWidgetsBundle.o"
+  },
+  "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/TrackingWidge/StreetStampsWidgets/TrackingLiveActivity.swift" : {
+    "index-unit-output-path" : "/StreetStamps.build/Release-iphoneos/TrackingWidgeExtension.build/Objects-normal/arm64/TrackingLiveActivity.o",
+    "llvm-bc" : "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/build/StreetStamps.build/Release-iphoneos/TrackingWidgeExtension.build/Objects-normal/arm64/TrackingLiveActivity.bc",
+    "object" : "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/build/StreetStamps.build/Release-iphoneos/TrackingWidgeExtension.build/Objects-normal/arm64/TrackingLiveActivity.o"
+  }
+}

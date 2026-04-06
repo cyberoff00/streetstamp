@@ -1,0 +1,220 @@
+[
+  {
+    "typeName": "TrackingWidgeExtension.AddMemoryIntent",
+    "mangledTypeName": "22TrackingWidgeExtension15AddMemoryIntentV",
+    "kind": "struct",
+    "file": "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/TrackingWidge/StreetStampsWidgets/AddMemoryIntent.swift",
+    "line": 11,
+    "conformances": [
+      "AppIntents.AppIntent",
+      "AppIntents.PersistentlyIdentifiable",
+      "AppIntents._SupportsAppDependencies",
+      "Swift.Sendable",
+      "Swift.BitwiseCopyable"
+    ],
+    "associatedTypeAliases": [
+      {
+        "typeAliasName": "PerformResult",
+        "substitutedTypeName": "some AppIntents.IntentResult",
+        "substitutedMangledTypeName": "22TrackingWidgeExtension15AddMemoryIntentV7performQryYaKFQOy_Qo_",
+        "opaqueTypeProtocolRequirements": [
+          "AppIntents.IntentResult"
+        ],
+        "opaqueTypeSameTypeRequirements": []
+      },
+      {
+        "typeAliasName": "SummaryContent",
+        "substitutedTypeName": "some AppIntents.ParameterSummary",
+        "substitutedMangledTypeName": "10AppIntents0A6IntentPAAE16parameterSummaryQrvpZQOy22TrackingWidgeExtension09AddMemoryC0V_Qo_",
+        "opaqueTypeProtocolRequirements": [
+          "AppIntents.ParameterSummary"
+        ],
+        "opaqueTypeSameTypeRequirements": []
+      }
+    ],
+    "properties": [
+      {
+        "label": "title",
+        "type": "Foundation.LocalizedStringResource",
+        "mangledTypeName": "n/a - deprecated",
+        "isStatic": "true",
+        "isComputed": "false",
+        "file": "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/TrackingWidge/StreetStampsWidgets/AddMemoryIntent.swift",
+        "line": 12,
+        "valueKind": "RawLiteral",
+        "value": "Add Memory"
+      },
+      {
+        "label": "description",
+        "type": "AppIntents.IntentDescription",
+        "mangledTypeName": "n/a - deprecated",
+        "isStatic": "true",
+        "isComputed": "false",
+        "file": "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/TrackingWidge/StreetStampsWidgets/AddMemoryIntent.swift",
+        "line": 13,
+        "valueKind": "RawLiteral",
+        "value": "Add a memory to your current journey"
+      },
+      {
+        "label": "openAppWhenRun",
+        "type": "Swift.Bool",
+        "mangledTypeName": "n/a - deprecated",
+        "isStatic": "true",
+        "isComputed": "false",
+        "file": "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/TrackingWidge/StreetStampsWidgets/AddMemoryIntent.swift",
+        "line": 16,
+        "valueKind": "RawLiteral",
+        "value": "true"
+      }
+    ]
+  },
+  {
+    "typeName": "TrackingWidgeExtension.OpenCaptureIntent",
+    "mangledTypeName": "22TrackingWidgeExtension17OpenCaptureIntentV",
+    "kind": "struct",
+    "file": "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/TrackingWidge/StreetStampsWidgets/AddMemoryIntent.swift",
+    "line": 29,
+    "conformances": [
+      "AppIntents.AppIntent",
+      "AppIntents.PersistentlyIdentifiable",
+      "AppIntents._SupportsAppDependencies",
+      "Swift.Sendable",
+      "Swift.BitwiseCopyable"
+    ],
+    "associatedTypeAliases": [
+      {
+        "typeAliasName": "PerformResult",
+        "substitutedTypeName": "some AppIntents.IntentResult",
+        "substitutedMangledTypeName": "22TrackingWidgeExtension17OpenCaptureIntentV7performQryYaKFQOy_Qo_",
+        "opaqueTypeProtocolRequirements": [
+          "AppIntents.IntentResult"
+        ],
+        "opaqueTypeSameTypeRequirements": []
+      },
+      {
+        "typeAliasName": "SummaryContent",
+        "substitutedTypeName": "some AppIntents.ParameterSummary",
+        "substitutedMangledTypeName": "10AppIntents0A6IntentPAAE16parameterSummaryQrvpZQOy22TrackingWidgeExtension011OpenCaptureC0V_Qo_",
+        "opaqueTypeProtocolRequirements": [
+          "AppIntents.ParameterSummary"
+        ],
+        "opaqueTypeSameTypeRequirements": []
+      }
+    ],
+    "properties": [
+      {
+        "label": "title",
+        "type": "Foundation.LocalizedStringResource",
+        "mangledTypeName": "n/a - deprecated",
+        "isStatic": "true",
+        "isComputed": "false",
+        "file": "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/TrackingWidge/StreetStampsWidgets/AddMemoryIntent.swift",
+        "line": 30,
+        "valueKind": "RawLiteral",
+        "value": "Open Capture"
+      },
+      {
+        "label": "description",
+        "type": "AppIntents.IntentDescription",
+        "mangledTypeName": "n/a - deprecated",
+        "isStatic": "true",
+        "isComputed": "false",
+        "file": "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/TrackingWidge/StreetStampsWidgets/AddMemoryIntent.swift",
+        "line": 31,
+        "valueKind": "RawLiteral",
+        "value": "Open the current journey capture flow"
+      },
+      {
+        "label": "openAppWhenRun",
+        "type": "Swift.Bool",
+        "mangledTypeName": "n/a - deprecated",
+        "isStatic": "true",
+        "isComputed": "false",
+        "file": "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/TrackingWidge/StreetStampsWidgets/AddMemoryIntent.swift",
+        "line": 32,
+        "valueKind": "RawLiteral",
+        "value": "true"
+      },
+      {
+        "label": "isDiscoverable",
+        "type": "Swift.Bool",
+        "mangledTypeName": "n/a - deprecated",
+        "isStatic": "true",
+        "isComputed": "false",
+        "file": "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/TrackingWidge/StreetStampsWidgets/AddMemoryIntent.swift",
+        "line": 33,
+        "valueKind": "RawLiteral",
+        "value": "false"
+      }
+    ]
+  },
+  {
+    "typeName": "TrackingWidgeExtension.TogglePauseIntent",
+    "mangledTypeName": "22TrackingWidgeExtension17TogglePauseIntentV",
+    "kind": "struct",
+    "file": "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/TrackingWidge/StreetStampsWidgets/AddMemoryIntent.swift",
+    "line": 46,
+    "conformances": [
+      "AppIntents.AppIntent",
+      "AppIntents.PersistentlyIdentifiable",
+      "AppIntents._SupportsAppDependencies",
+      "Swift.Sendable",
+      "Swift.BitwiseCopyable"
+    ],
+    "associatedTypeAliases": [
+      {
+        "typeAliasName": "PerformResult",
+        "substitutedTypeName": "some AppIntents.IntentResult",
+        "substitutedMangledTypeName": "22TrackingWidgeExtension17TogglePauseIntentV7performQryYaKFQOy_Qo_",
+        "opaqueTypeProtocolRequirements": [
+          "AppIntents.IntentResult"
+        ],
+        "opaqueTypeSameTypeRequirements": []
+      },
+      {
+        "typeAliasName": "SummaryContent",
+        "substitutedTypeName": "some AppIntents.ParameterSummary",
+        "substitutedMangledTypeName": "10AppIntents0A6IntentPAAE16parameterSummaryQrvpZQOy22TrackingWidgeExtension011TogglePauseC0V_Qo_",
+        "opaqueTypeProtocolRequirements": [
+          "AppIntents.ParameterSummary"
+        ],
+        "opaqueTypeSameTypeRequirements": []
+      }
+    ],
+    "properties": [
+      {
+        "label": "title",
+        "type": "Foundation.LocalizedStringResource",
+        "mangledTypeName": "n/a - deprecated",
+        "isStatic": "true",
+        "isComputed": "false",
+        "file": "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/TrackingWidge/StreetStampsWidgets/AddMemoryIntent.swift",
+        "line": 47,
+        "valueKind": "RawLiteral",
+        "value": "Toggle Pause"
+      },
+      {
+        "label": "description",
+        "type": "AppIntents.IntentDescription",
+        "mangledTypeName": "n/a - deprecated",
+        "isStatic": "true",
+        "isComputed": "false",
+        "file": "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/TrackingWidge/StreetStampsWidgets/AddMemoryIntent.swift",
+        "line": 48,
+        "valueKind": "RawLiteral",
+        "value": "Pause or resume tracking"
+      },
+      {
+        "label": "openAppWhenRun",
+        "type": "Swift.Bool",
+        "mangledTypeName": "n/a - deprecated",
+        "isStatic": "true",
+        "isComputed": "false",
+        "file": "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/TrackingWidge/StreetStampsWidgets/AddMemoryIntent.swift",
+        "line": 50,
+        "valueKind": "RawLiteral",
+        "value": "false"
+      }
+    ]
+  }
+]

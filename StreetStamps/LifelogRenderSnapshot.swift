@@ -298,13 +298,6 @@ enum LifelogRenderSnapshotBuilder {
             .last?
             .coordsWGS84
             .last
-            .map {
-                MapCoordAdapter.forMapKit(
-                    $0,
-                    countryISO2: renderRuns.last?.countryISO2,
-                    cityKey: renderRuns.last?.cityKey
-                )
-            }
 
         return LifelogSegmentedDaySnapshot(
             key: key,

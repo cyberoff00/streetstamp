@@ -2002,7 +2002,7 @@ private struct FriendProfileScreen: View {
     @State private var isDeletingFriend = false
     @State private var showPostcardComposer = false
     @State private var showPhotoBooth = false
-    @State private var activeRoute: FriendsRoute?
+    @State private var activeCollectionPage: FriendCollectionPageDestination?
     @State private var showBlockConfirm = false
     @State private var showReportSheet = false
     @State private var reportReason: String = ""
@@ -2057,7 +2057,7 @@ private struct FriendProfileScreen: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 14) {
-                    friendHeroSection(friend: f, sceneState: sceneState, activeRoute: $activeRoute)
+                    friendHeroSection(friend: f, sceneState: sceneState, activeCollectionPage: $activeCollectionPage)
 
                     VStack(spacing: 14) {
                         if let displayBio = resolvedBioText(for: f) {
@@ -2127,28 +2127,17 @@ private struct FriendProfileScreen: View {
         } message: {
             Text(deleteFriendErrorText)
         }
-        .navigationDestination(isPresented: $showPostcardComposer) {
-            PostcardInboxView(
-                friendID: friendID,
-                friendName: (friend ?? fallbackFriend).displayName
-            )
+        .sheet(isPresented: $showPostcardComposer) {
+            NavigationStack {
+                PostcardInboxView(
+                    friendID: friendID,
+                    friendName: (friend ?? fallbackFriend).displayName
+                )
+            }
         }
-        .navigationDestination(item: $activeRoute) { route in
-            switch route {
-            case .myProfile:
-                ProfileView()
-            case .myJourney(let journeyID):
-                SelfJourneyDetailScreen(journeyID: journeyID)
-            case .profile(let friendID):
-                FriendProfileScreen(friendID: friendID)
-            case .cities(let friendID):
-                FriendCitiesScreen(friendID: friendID)
-            case .publicMemories(let friendID):
-                FriendPublicMemoriesScreen(friendID: friendID)
-            case .collection(let friendID, let rawPage):
-                FriendCollectionScreen(friendID: friendID, initialPage: FriendCollectionPage(rawValue: rawPage) ?? .cities)
-            case .journey(let friendID, let snapshot, let journeyID):
-                FriendJourneyDetailScreen(friendID: friendID, fallbackSnapshot: snapshot, journeyID: journeyID)
+        .sheet(item: $activeCollectionPage) { dest in
+            NavigationStack {
+                FriendCollectionScreen(friendID: friendID, initialPage: dest.page)
             }
         }
         .fullScreenCover(isPresented: $showPhotoBooth) {
@@ -2286,7 +2275,7 @@ private struct FriendProfileScreen: View {
         .frame(height: 96)
     }
 
-    private func friendHeroSection(friend: FriendProfileSnapshot, sceneState: ProfileSceneInteractionState, activeRoute: Binding<FriendsRoute?>) -> some View {
+    private func friendHeroSection(friend: FriendProfileSnapshot, sceneState: ProfileSceneInteractionState, activeCollectionPage: Binding<FriendCollectionPageDestination?>) -> some View {
         VStack(spacing: 0) {
             ProfileHeroTopBackdrop {
                 GeometryReader { _ in
@@ -2366,11 +2355,8 @@ private struct FriendProfileScreen: View {
                 }
 
                 VStack(alignment: .leading, spacing: 12) {
-                    NavigationLink {
-                        PostcardInboxView(
-                            friendID: friendID,
-                            friendName: (friend ?? fallbackFriend).displayName
-                        )
+                    Button {
+                        showPostcardComposer = true
                     } label: {
                         friendActivityTile(title: L10n.t("friend_postcards"), subtitle: nil)
                     }
@@ -2381,10 +2367,10 @@ private struct FriendProfileScreen: View {
                         levelProgress: levelProgress,
                         journeyDates: friend.journeys.compactMap { $0.endTime ?? $0.startTime },
                         onCardsTap: {
-                            activeRoute.wrappedValue = .collection(friendID, 0)
+                            activeCollectionPage.wrappedValue = FriendCollectionPageDestination(page: .cities)
                         },
                         onMemoriesTap: {
-                            activeRoute.wrappedValue = .collection(friendID, 1)
+                            activeCollectionPage.wrappedValue = FriendCollectionPageDestination(page: .memories)
                         }
                     )
                 }
@@ -3029,6 +3015,11 @@ private final class FriendMirrorContext: ObservableObject {
 
 }
 
+struct FriendCollectionPageDestination: Identifiable {
+    let id = UUID()
+    let page: FriendCollectionPage
+}
+
 enum FriendCollectionPage: Int, CaseIterable, Identifiable {
     case cities
     case memories
@@ -3300,15 +3291,17 @@ private struct FriendPublicMemoriesScreen: View {
         .onDisappear {
             flow.popSidebarButtonHidden(token: sidebarHideToken)
         }
-        .navigationDestination(item: $activeJourneyDetail) { destination in
-            JourneyMemoryDetailView(
-                journey: destination.journey,
-                memories: destination.memories,
-                cityName: destination.cityName,
-                countryName: destination.countryName,
-                readOnly: destination.readOnly,
-                friendLoadout: destination.friendLoadout
-            )
+        .sheet(item: $activeJourneyDetail) { destination in
+            NavigationStack {
+                JourneyMemoryDetailView(
+                    journey: destination.journey,
+                    memories: destination.memories,
+                    cityName: destination.cityName,
+                    countryName: destination.countryName,
+                    readOnly: destination.readOnly,
+                    friendLoadout: destination.friendLoadout
+                )
+            }
         }
         .task {
             await socialStore.refreshFriendProfileIfPossible(

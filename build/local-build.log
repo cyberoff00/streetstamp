@@ -1,0 +1,185 @@
+perl: warning: Setting locale failed.
+perl: warning: Please check that your locale settings:
+	LC_ALL = "C.UTF-8",
+	LC_CTYPE = "C.UTF-8",
+	LANG = "C.UTF-8"
+    are supported and installed on your system.
+perl: warning: Falling back to the standard locale ("C").
+perl: warning: Setting locale failed.
+perl: warning: Please check that your locale settings:
+	LC_ALL = "C.UTF-8",
+	LC_CTYPE = "C.UTF-8",
+	LANG = "C.UTF-8"
+    are supported and installed on your system.
+perl: warning: Falling back to the standard locale ("C").
+perl: warning: Setting locale failed.
+perl: warning: Please check that your locale settings:
+	LC_ALL = "C.UTF-8",
+	LC_CTYPE = "C.UTF-8",
+	LANG = "C.UTF-8"
+    are supported and installed on your system.
+perl: warning: Falling back to the standard locale ("C").
+perl: warning: Setting locale failed.
+perl: warning: Please check that your locale settings:
+	LC_ALL = "C.UTF-8",
+	LC_CTYPE = "C.UTF-8",
+	LANG = "C.UTF-8"
+    are supported and installed on your system.
+perl: warning: Falling back to the standard locale ("C").
+perl: warning: Setting locale failed.
+perl: warning: Please check that your locale settings:
+	LC_ALL = "C.UTF-8",
+	LC_CTYPE = "C.UTF-8",
+	LANG = "C.UTF-8"
+    are supported and installed on your system.
+perl: warning: Falling back to the standard locale ("C").
+perl: warning: Setting locale failed.
+perl: warning: Please check that your locale settings:
+	LC_ALL = "C.UTF-8",
+	LC_CTYPE = "C.UTF-8",
+	LANG = "C.UTF-8"
+    are supported and installed on your system.
+perl: warning: Falling back to the standard locale ("C").
+perl: warning: Setting locale failed.
+perl: warning: Please check that your locale settings:
+	LC_ALL = "C.UTF-8",
+	LC_CTYPE = "C.UTF-8",
+	LANG = "C.UTF-8"
+    are supported and installed on your system.
+perl: warning: Falling back to the standard locale ("C").
+perl: warning: Setting locale failed.
+perl: warning: Please check that your locale settings:
+	LC_ALL = "C.UTF-8",
+	LC_CTYPE = "C.UTF-8",
+	LANG = "C.UTF-8"
+    are supported and installed on your system.
+perl: warning: Falling back to the standard locale ("C").
+perl: warning: Setting locale failed.
+perl: warning: Please check that your locale settings:
+	LC_ALL = "C.UTF-8",
+	LC_CTYPE = "C.UTF-8",
+	LANG = "C.UTF-8"
+    are supported and installed on your system.
+perl: warning: Falling back to the standard locale ("C").
+/* com.apple.actool.document.warnings */
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/Assets.xcassets:./人物装备/front_ac017.imageset: warning: The image set name "front_ac017" is used by multiple image sets.
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/Assets.xcassets:./待定素材/front_ac017.imageset: warning: The image set name "front_ac017" is used by multiple image sets.
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/Assets.xcassets:./人物装备/front_ac018.imageset: warning: The image set name "front_ac018" is used by multiple image sets.
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/Assets.xcassets:./待定素材/front_ac018.imageset: warning: The image set name "front_ac018" is used by multiple image sets.
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/Assets.xcassets:./人物装备/front_shoes002.imageset/(null)[2d][front_shoes002.png]: warning: The image set "front_shoes002" has an unassigned child.
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/Assets.xcassets:./人物装备/front_pat001.imageset/(null)[2d][front_pat001.png]: warning: The image set "front_pat001" has an unassigned child.
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/Assets.xcassets:./tab_cities_icon.imageset/(null)[2d][Icon.png]: warning: The image set "tab_cities_icon" has an unassigned child.
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/Assets.xcassets:./人物装备/front_shoes002.imageset/(null)[2d][front_shoes002.png]: warning: The image set "front_shoes002" has an unassigned child.
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/Assets.xcassets:./人物装备/front_pat001.imageset/(null)[2d][front_pat001.png]: warning: The image set "front_pat001" has an unassigned child.
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/Assets.xcassets:./tab_cities_icon.imageset/(null)[2d][Icon.png]: warning: The image set "tab_cities_icon" has an unassigned child.
+/* com.apple.actool.compilation-results */
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/build/DerivedDataLocal/Build/Intermediates.noindex/StreetStamps.build/Release-iphonesimulator/StreetStamps.build/assetcatalog_generated_info.plist
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/build/DerivedDataLocal/Build/Products/Release-iphonesimulator/StreetStamps.app/AppIcon60x60@2x.png
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/build/DerivedDataLocal/Build/Products/Release-iphonesimulator/StreetStamps.app/AppIcon76x76@2x~ipad.png
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/build/DerivedDataLocal/Build/Products/Release-iphonesimulator/StreetStamps.app/Assets.car
+
+/* com.apple.actool.document.warnings */
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/Assets.xcassets:./人物装备/front_shoes002.imageset/(null)[2d][front_shoes002.png]: warning: The image set "front_shoes002" has an unassigned child.
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/Assets.xcassets:./人物装备/front_pat001.imageset/(null)[2d][front_pat001.png]: warning: The image set "front_pat001" has an unassigned child.
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/Assets.xcassets:./tab_cities_icon.imageset/(null)[2d][Icon.png]: warning: The image set "tab_cities_icon" has an unassigned child.
+/* com.apple.actool.compilation-results */
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/build/DerivedDataLocal/Build/Intermediates.noindex/StreetStamps.build/Release-iphonesimulator/StreetStamps.build/DerivedSources/GeneratedAssetSymbols-Index.plist
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/build/DerivedDataLocal/Build/Intermediates.noindex/StreetStamps.build/Release-iphonesimulator/StreetStamps.build/DerivedSources/GeneratedAssetSymbols.h
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/build/DerivedDataLocal/Build/Intermediates.noindex/StreetStamps.build/Release-iphonesimulator/StreetStamps.build/DerivedSources/GeneratedAssetSymbols.swift
+
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/AuthEntryView.swift:268:13: warning: variable 'and' was never mutated; consider changing to 'let' constant
+        var and = AttributedString(L10n.t("auth_terms_and"))
+        ~~~ ^
+        let
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/AuthEntryView.swift:673:13: warning: switch must be exhaustive; this is an error in the Swift 6 language mode
+            switch authError.code {
+            ^
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/AuthEntryView.swift:673:13: note: add missing case: '.notInteractive'
+            switch authError.code {
+            ^
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/AuthEntryView.swift:673:13: note: add missing case: '.matchedExcludedCredential'
+            switch authError.code {
+            ^
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/AuthEntryView.swift:673:13: note: add missing case: '.credentialImport'
+            switch authError.code {
+            ^
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/AuthEntryView.swift:673:13: note: add missing case: '.credentialExport'
+            switch authError.code {
+            ^
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/CityCache.swift:400:17: warning: 'showsPointsOfInterest' was deprecated in iOS 13.0: Use preferredConfiguration
+        options.showsPointsOfInterest = Tokens.poi
+                ^
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/CityCache.swift:841:32: warning: no calls to throwing functions occur within 'try' expression
+        if let routesFileURL = try? paths.routeCacheURL,
+                               ^
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/CityCache.swift:863:36: warning: no calls to throwing functions occur within 'try' expression
+            if let routesFileURL = try? paths.routeCacheURL {
+                                   ^
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/CityCache.swift:943:27: warning: reference to captured var 'self' in concurrently-executing code; this is an error in the Swift 6 language mode
+                guard let self else { return }
+                          ^
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/CityCache.swift:945:21: warning: reference to captured var 'updatedJourneys' in concurrently-executing code; this is an error in the Swift 6 language mode
+                if !updatedJourneys.isEmpty {
+                    ^
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/CityCache.swift:946:35: warning: reference to captured var 'updatedJourneys' in concurrently-executing code; this is an error in the Swift 6 language mode
+                    for update in updatedJourneys {
+                                  ^
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/CityCache.swift:1332:27: warning: reference to captured var 'self' in concurrently-executing code; this is an error in the Swift 6 language mode
+                guard let self else { return }
+                          ^
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/CityCache.swift:1777:13: warning: initialization of immutable value 'journeys' was never used; consider replacing with assignment to '_' or removing it
+        let journeys = journeyStore.journeys
+        ~~~~^~~~~~~~
+        _
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/CityDeepView.swift:429:10: warning: 'onChange(of:perform:)' was deprecated in iOS 17.0: Use `onChange` with a two or zero parameter action closure instead.
+        .onChange(of: activeCityKey) { _ in
+         ^
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/CityDeepView.swift:434:10: warning: 'onChange(of:perform:)' was deprecated in iOS 17.0: Use `onChange` with a two or zero parameter action closure instead.
+        .onChange(of: locale) { _ in
+         ^
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/CityDeepView.swift:437:10: warning: 'onChange(of:perform:)' was deprecated in iOS 17.0: Use `onChange` with a two or zero parameter action closure instead.
+        .onChange(of: languagePreference.currentLanguage) { _ in
+         ^
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/CityDeepView.swift:440:10: warning: 'onChange(of:perform:)' was deprecated in iOS 17.0: Use `onChange` with a two or zero parameter action closure instead.
+        .onChange(of: currentJourneys.count) { _ in
+         ^
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/CityDeepView.swift:443:10: warning: 'onChange(of:perform:)' was deprecated in iOS 17.0: Use `onChange` with a two or zero parameter action closure instead.
+        .onChange(of: mapAppearanceRaw) { _ in
+         ^
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/CityLibraryVM.swift:394:61: warning: reference to captured var 'localizedUpdates' in concurrently-executing code; this is an error in the Swift 6 language mode
+                self.cityCache?.updateLocalizedDisplayNames(localizedUpdates, locale: LanguagePreference.shared.displayLocale)
+                                                            ^
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/CityStampLibraryView.swift:128:10: warning: 'onChange(of:perform:)' was deprecated in iOS 17.0: Use `onChange` with a two or zero parameter action closure instead.
+        .onChange(of: store.hasLoaded) { loaded in
+         ^
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/CityStampLibraryView.swift:135:10: warning: 'onChange(of:perform:)' was deprecated in iOS 17.0: Use `onChange` with a two or zero parameter action closure instead.
+        .onChange(of: languagePreference.currentLanguage) { _ in
+         ^
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/CityStampLibraryView.swift:1170:17: warning: 'showsPointsOfInterest' was deprecated in iOS 13.0: Use preferredConfiguration
+        options.showsPointsOfInterest = false
+                ^
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/CityStampLibraryView.swift:1214:17: warning: 'showsPointsOfInterest' was deprecated in iOS 13.0: Use preferredConfiguration
+        options.showsPointsOfInterest = false
+                ^
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/CityStampLibraryView.swift:1218:44: warning: consider using asynchronous alternative function
+        MKMapSnapshotter(options: options).start(with: .global(qos: .userInitiated)) { snapshot, _ in
+                                           ^
+MapKit.MKMapSnapshotter:9:15: note: 'start(with:)' declared here
+    open func start(with queue: dispatch_queue_t) async throws -> MKMapSnapshotter.Snapshot
+              ^
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/CityStampLibraryView.swift:1223:17: warning: instance method 'wait' is unavailable from asynchronous contexts; Await a Task handle instead; this is an error in the Swift 6 language mode
+        _ = sem.wait(timeout: .now() + 15)
+                ^
+Dispatch.DispatchSemaphore:5:17: note: 'wait(timeout:)' declared here
+    public func wait(timeout: DispatchTime) -> DispatchTimeoutResult
+                ^
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/CloudKitSyncService.swift:47:44: warning: passing argument of non-sendable type 'UserDefaults' into actor-isolated context may introduce data races; this is an error in the Swift 6 language mode
+    static let shared = CloudKitSyncService()
+                                           ^
+Foundation.UserDefaults:1:12: note: class 'UserDefaults' does not conform to the 'Sendable' protocol
+open class UserDefaults : NSObject {
+           ^
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/CoachMarkSystem.swift:141:42: warning: 'onChange(of:perform:)' was deprecated in iOS 17.0: Use `onChange` with a two or zero parameter action closure instead.
+                                        .onChange(of: currentIndex) { _ in
+                                         ^
+/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/StreetStamps/CollectionTabView.swift:56:10: warning: 'onChange(o

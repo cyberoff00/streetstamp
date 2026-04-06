@@ -1341,7 +1341,7 @@ struct JourneyMemoryDetailView: View {
             Button(L10n.t("cancel"), role: .cancel) {}
         }
         .sheet(item: $shareItem) { item in
-            ActivityView(activityItems: [item.image])
+            ActivityView(activityItems: item.images)
         }
         .sheet(item: $showMembershipGate) { feature in
             MembershipGateView(feature: feature)
@@ -2066,33 +2066,148 @@ struct JourneyMemoryDetailView: View {
         guard #available(iOS 16.0, *) else { return }
 
         let exportWidth: CGFloat = 360
+        let scale: CGFloat = 3
+        // Keep each page under ~10000px to avoid overly long images and
+        // stay well within GPU texture limits.
+        let maxPixelHeight: CGFloat = 10_000
+        let maxPointHeight = maxPixelHeight / scale
 
-        let snapshotView = JourneyMemoryDetailExportSnapshotView(
-            journey: journey,
-            memories: draftMemories,
-            overallMemory: draftOverallMemory,
-            cityName: cityName,
-            countryName: countryName,
-            journeyDate: journeyDate,
-            distanceText: distanceText,
-            durationText: durationText,
-            userID: sessionStore.currentUserID,
-            routeThumbnail: routeThumbnail,
-            loadout: AvatarLoadoutStore.load()
+        let sorted = draftMemories.sorted { $0.timestamp < $1.timestamp }
+        let loadout = AvatarLoadoutStore.load()
+        let uid = sessionStore.currentUserID
+
+        // Helper: build a page view for a given slice of memories
+        func makePageView(
+            memories: [JourneyMemory],
+            showHeader: Bool,
+            showRouteThumbnail: Bool,
+            showOverallMemory: Bool,
+            pageIndicator: String?
+        ) -> some View {
+            JourneyMemoryDetailExportSnapshotView(
+                journey: journey,
+                memories: memories,
+                overallMemory: draftOverallMemory,
+                cityName: cityName,
+                countryName: countryName,
+                journeyDate: journeyDate,
+                distanceText: distanceText,
+                durationText: durationText,
+                userID: uid,
+                routeThumbnail: routeThumbnail,
+                loadout: loadout,
+                showHeader: showHeader,
+                showRouteThumbnail: showRouteThumbnail,
+                showOverallMemory: showOverallMemory,
+                pageIndicator: pageIndicator
+            )
+            .frame(width: exportWidth)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+
+        // Helper: probe a view's intrinsic point height at scale=1 (always safe)
+        func probeHeight<V: View>(_ view: V) -> CGFloat {
+            let r = ImageRenderer(content: view)
+            r.scale = 1
+            r.proposedSize = .init(width: exportWidth, height: nil)
+            return r.uiImage?.size.height ?? 0
+        }
+
+        // Helper: render a page at target scale
+        func renderPage<V: View>(_ view: V) -> UIImage? {
+            let r = ImageRenderer(content: view)
+            r.scale = scale
+            r.proposedSize = .init(width: exportWidth, height: nil)
+            r.isOpaque = true
+            return r.uiImage
+        }
+
+        // --- Try single page first ---
+        let fullView = makePageView(
+            memories: sorted,
+            showHeader: true,
+            showRouteThumbnail: true,
+            showOverallMemory: true,
+            pageIndicator: nil
         )
-        .frame(width: exportWidth)
-        .fixedSize(horizontal: false, vertical: true)
+        let totalHeight = probeHeight(fullView)
 
-        // ImageRenderer uses Core Graphics (offline bitmap), not Metal textures —
-        // no 8192px dimension limit applies. Worst case (12 portrait photos) is
-        // ~6000pt × 3x = 18000px ≈ 77MB, well within device RAM.
-        let renderer = ImageRenderer(content: snapshotView)
-        renderer.scale = 3
-        renderer.proposedSize = .init(width: exportWidth, height: nil)
-        renderer.isOpaque = true
+        if totalHeight <= maxPointHeight {
+            if let img = renderPage(fullView) {
+                shareItem = ShareImageItem(images: [img])
+            }
+            return
+        }
 
-        if let img = renderer.uiImage {
-            shareItem = ShareImageItem(image: img)
+        // --- Multi-page: split at memory boundaries ---
+        // Measure the "chrome" height (header + thumb + overall + footer) without any memories
+        let chromeHeight = probeHeight(makePageView(
+            memories: [],
+            showHeader: true,
+            showRouteThumbnail: true,
+            showOverallMemory: true,
+            pageIndicator: "1/2" // placeholder for height estimation
+        ))
+        let continuationChromeHeight = probeHeight(makePageView(
+            memories: [],
+            showHeader: false,
+            showRouteThumbnail: false,
+            showOverallMemory: false,
+            pageIndicator: "2/2"
+        ))
+
+        // Greedily pack memories into pages by measuring cumulative height
+        var pages: [[JourneyMemory]] = []
+        var currentPage: [JourneyMemory] = []
+        var isFirstPage = true
+
+        for mem in sorted {
+            let candidate = currentPage + [mem]
+            let chrome = isFirstPage ? chromeHeight : continuationChromeHeight
+            // Measure this page with the candidate memories
+            let pageView = makePageView(
+                memories: candidate,
+                showHeader: isFirstPage,
+                showRouteThumbnail: isFirstPage,
+                showOverallMemory: isFirstPage,
+                pageIndicator: "X" // placeholder
+            )
+            let h = probeHeight(pageView)
+
+            if h > maxPointHeight && !currentPage.isEmpty {
+                // This memory pushes over the limit — finalize current page
+                pages.append(currentPage)
+                currentPage = [mem]
+                isFirstPage = false
+            } else {
+                currentPage = candidate
+            }
+        }
+        if !currentPage.isEmpty {
+            pages.append(currentPage)
+        }
+
+        // Edge case: if only one page after splitting, no page indicators
+        let totalPages = pages.count
+        var images: [UIImage] = []
+
+        for (i, pageMemories) in pages.enumerated() {
+            let isFirst = (i == 0)
+            let indicator = totalPages > 1 ? "\(i + 1)/\(totalPages)" : nil
+            let pageView = makePageView(
+                memories: pageMemories,
+                showHeader: isFirst,
+                showRouteThumbnail: isFirst,
+                showOverallMemory: isFirst,
+                pageIndicator: indicator
+            )
+            if let img = renderPage(pageView) {
+                images.append(img)
+            }
+        }
+
+        if !images.isEmpty {
+            shareItem = ShareImageItem(images: images)
         }
     }
 
@@ -2648,15 +2763,28 @@ private struct ExportMemoryTimelineItem: View {
 /// Synchronous image loading for ImageRenderer export (async .task won't fire in ImageRenderer).
 /// contentWidth must be passed explicitly — ImageRenderer's layout engine does not reliably
 /// propagate frame(maxWidth: .infinity) proposals, so we bypass it with concrete dimensions.
+///
+/// Images are downscaled to match the exact export pixel width (contentWidth × rendererScale)
+/// so there is zero quality loss in the final image, while keeping total memory bounded.
+/// Without this, 12 full-res photos (~48MB each) would require ~576MB simultaneously,
+/// causing Core Graphics bitmap allocation failure (black image).
 private struct SyncMemoryImagesView: View {
     let imagePaths: [String]
     let userID: String
     let contentWidth: CGFloat
+    /// Must match ImageRenderer.scale so downscale target = pixel-perfect for export.
+    var rendererScale: CGFloat = 3
+
+    private func loadExportImage(named filename: String) -> UIImage? {
+        guard let full = PhotoStore.loadImage(named: filename, userID: userID) else { return nil }
+        let targetPixel = contentWidth * rendererScale // 296 × 3 = 888px — exact 1:1 mapping
+        return full.downscaled(maxPixel: targetPixel)
+    }
 
     var body: some View {
         VStack(spacing: 12) {
             ForEach(imagePaths, id: \.self) { path in
-                if let img = PhotoStore.loadImage(named: path, userID: userID) {
+                if let img = loadExportImage(named: path) {
                     let ratio = img.size.height > 0 ? img.size.width / img.size.height : 4.0/3.0
                     let imgHeight = contentWidth / ratio
                     Image(uiImage: img)
@@ -2990,7 +3118,7 @@ private struct EditableMemoryTimelineItem: View {
 
 private struct ShareImageItem: Identifiable {
     let id = UUID()
-    let image: UIImage
+    let images: [UIImage]
 }
 
 struct JourneyMemoryDetailExportPresentation {
@@ -3105,6 +3233,12 @@ private struct JourneyMemoryDetailExportSnapshotView: View {
     let routeThumbnail: UIImage?
     let loadout: RobotLoadout
 
+    // Pagination support
+    var showHeader: Bool = true
+    var showRouteThumbnail: Bool = true
+    var showOverallMemory: Bool = true
+    var pageIndicator: String? = nil
+
     private var sortedMemories: [JourneyMemory] {
         memories.sorted(by: { $0.timestamp < $1.timestamp })
     }
@@ -3131,8 +3265,10 @@ private struct JourneyMemoryDetailExportSnapshotView: View {
             FigmaTheme.background
 
             VStack(alignment: .center, spacing: 24) {
-                headerCard
-                if let thumb = routeThumbnail {
+                if showHeader {
+                    headerCard
+                }
+                if showRouteThumbnail, let thumb = routeThumbnail {
                     Image(uiImage: thumb)
                         .resizable()
                         .scaledToFill()
@@ -3146,7 +3282,14 @@ private struct JourneyMemoryDetailExportSnapshotView: View {
                         )
                         .padding(.horizontal, 32)
                 }
-                if presentation.shouldShowOverallMemory {
+                if let indicator = pageIndicator {
+                    Text(indicator)
+                        .font(.system(size: 11, weight: .medium))
+                        .tracking(1.0)
+                        .foregroundColor(Color(red: 0.62, green: 0.65, blue: 0.70))
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+                if showOverallMemory, presentation.shouldShowOverallMemory {
                     overallMemorySection
                 }
                 memoriesTimeline

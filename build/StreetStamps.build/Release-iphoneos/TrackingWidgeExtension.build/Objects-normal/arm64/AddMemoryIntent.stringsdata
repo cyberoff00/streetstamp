@@ -1,0 +1,56 @@
+{
+  "source": "/Users/liuyang/Downloads/StreetStamps_fixed_v3_3/TrackingWidge/StreetStampsWidgets/AddMemoryIntent.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Add Memory",
+        "location": {
+          "startingColumn": 49,
+          "startingLine": 12
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add a memory to your current journey",
+        "location": {
+          "startingColumn": 48,
+          "startingLine": 13
+        }
+      },
+      {
+        "comment": "",
+        "key": "Open Capture",
+        "location": {
+          "startingColumn": 49,
+          "startingLine": 30
+        }
+      },
+      {
+        "comment": "",
+        "key": "Open the current journey capture flow",
+        "location": {
+          "startingColumn": 48,
+          "startingLine": 31
+        }
+      },
+      {
+        "comment": "",
+        "key": "Toggle Pause",
+        "location": {
+          "startingColumn": 49,
+          "startingLine": 47
+        }
+      },
+      {
+        "comment": "",
+        "key": "Pause or resume tracking",
+        "location": {
+          "startingColumn": 48,
+          "startingLine": 48
+        }
+      }
+    ]
+  },
+  "version": 1
+}

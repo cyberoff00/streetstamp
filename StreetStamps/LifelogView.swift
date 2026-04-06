@@ -1073,7 +1073,10 @@ struct LifelogView: View {
     }
 
     private func centerCoordinateForSelectedDay() -> CLLocationCoordinate2D? {
-        renderSnapshot.selectedDayCenterCoordinate ?? currentCoordinateForCentering()
+        if let wgs = renderSnapshot.selectedDayCenterCoordinate {
+            return mapCoordForLifelog(wgs)
+        }
+        return currentCoordinateForCentering()
     }
 
     /// Returns the tightest MKCoordinateRegion that fits all coordinates in `segments`,
@@ -1128,9 +1131,9 @@ struct LifelogView: View {
 
         if let region = regionFittingRoute(snapshot.farRouteSegments) {
             cameraCommand = LifelogCameraCommand(id: UUID(), region: region)
-        } else if let center = snapshot.selectedDayCenterCoordinate {
+        } else if let wgs = snapshot.selectedDayCenterCoordinate {
             cameraCommand = LifelogCameraCommand(id: UUID(), region: MKCoordinateRegion(
-                center: center,
+                center: mapCoordForLifelog(wgs),
                 span: MKCoordinateSpan(latitudeDelta: 0.03, longitudeDelta: 0.03)
             ))
         }
@@ -1219,7 +1222,9 @@ struct LifelogView: View {
     }
 
     private func mapCoordForLifelog(_ coord: CLLocationCoordinate2D) -> CLLocationCoordinate2D {
-        MapCoordAdapter.forMapKit(coord, countryISO2: lifelogCountryISO2)
+        let engine = (MapLayerStyle(rawValue: layerStyleRaw) ?? .mutedDark).engine
+        guard engine == .mapkit else { return coord }
+        return MapCoordAdapter.forMapKit(coord, countryISO2: lifelogCountryISO2)
     }
 
     private func seedSelectedDayIfNeeded() {

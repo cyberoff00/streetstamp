@@ -196,7 +196,7 @@ struct CityDeepView: View {
         currentJourneys
             .flatMap { $0.memories }
             .filter { $0.locationStatus != .pending }
-            .map { JourneyMemoryMapCoordinateResolver.mapCoordinate(for: $0, fallbackCountryISO2: effectiveCountryISO2, fallbackCityKey: activeCityKey) }
+            .map { JourneyMemoryMapCoordinateResolver.mapCoordinate(for: $0, fallbackCountryISO2: effectiveCountryISO2, fallbackCityKey: activeCityKey, engine: currentEngine) }
     }
 
     struct MemoryGroup: Identifiable {
@@ -218,7 +218,8 @@ struct CityDeepView: View {
                 let mapped = JourneyMemoryMapCoordinateResolver.mapCoordinate(
                     for: m,
                     fallbackCountryISO2: effectiveCountryISO2,
-                    fallbackCityKey: activeCityKey
+                    fallbackCityKey: activeCityKey,
+                    engine: currentEngine
                 )
                 return MemoryGroup(id: m.id, key: m.id, coordinate: mapped, items: [m])
             }

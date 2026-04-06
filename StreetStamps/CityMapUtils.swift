@@ -128,14 +128,35 @@ enum JourneySnapshotFraming {
 }
 
 enum MapCoordAdapter {
-    /// MapKit in Mainland China expects GCJ-02. We only opt-in when we have an authoritative signal.
+    /// Apply GCJ-02 only when displaying on MapKit in Mainland China.
+    /// Mapbox uses WGS-84 natively and handles its own China tile offsets.
+    static func forEngine(
+        _ c: CLLocationCoordinate2D,
+        engine: MapEngineSetting,
+        countryISO2: String? = nil,
+        cityKey: String? = nil
+    ) -> CLLocationCoordinate2D {
+        guard engine == .mapkit else { return c }
+        guard ChinaCoordinateTransform.shouldApplyGCJ(countryISO2: countryISO2, cityKey: cityKey) else { return c }
+        return ChinaCoordinateTransform.wgs84ToGcj02(c)
+    }
+
+    static func forEngine(
+        _ coords: [CLLocationCoordinate2D],
+        engine: MapEngineSetting,
+        countryISO2: String? = nil,
+        cityKey: String? = nil
+    ) -> [CLLocationCoordinate2D] {
+        coords.map { forEngine($0, engine: engine, countryISO2: countryISO2, cityKey: cityKey) }
+    }
+
+    /// Legacy convenience — assumes MapKit. Use `forEngine` when the map engine is known.
     static func forMapKit(
         _ c: CLLocationCoordinate2D,
         countryISO2: String? = nil,
         cityKey: String? = nil
     ) -> CLLocationCoordinate2D {
-        guard ChinaCoordinateTransform.shouldApplyGCJ(countryISO2: countryISO2, cityKey: cityKey) else { return c }
-        return ChinaCoordinateTransform.wgs84ToGcj02(c)
+        forEngine(c, engine: .mapkit, countryISO2: countryISO2, cityKey: cityKey)
     }
 
     static func forMapKit(
@@ -143,7 +164,7 @@ enum MapCoordAdapter {
         countryISO2: String? = nil,
         cityKey: String? = nil
     ) -> [CLLocationCoordinate2D] {
-        coords.map { forMapKit($0, countryISO2: countryISO2, cityKey: cityKey) }
+        forEngine(coords, engine: .mapkit, countryISO2: countryISO2, cityKey: cityKey)
     }
 }
 
@@ -152,7 +173,8 @@ enum JourneyMemoryMapCoordinateResolver {
         rawCoordinate: CLLocationCoordinate2D,
         preferredCityKey: String?,
         fallbackCountryISO2: String?,
-        fallbackCityKey: String?
+        fallbackCityKey: String?,
+        engine: MapEngineSetting = .mapkit
     ) -> CLLocationCoordinate2D {
         let normalizedPreferredCityKey = preferredCityKey?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -166,8 +188,9 @@ enum JourneyMemoryMapCoordinateResolver {
             guard cityKeyForDecision == nil else { return nil }
             return fallbackCountryISO2
         }()
-        return MapCoordAdapter.forMapKit(
+        return MapCoordAdapter.forEngine(
             rawCoordinate,
+            engine: engine,
             countryISO2: countryForDecision,
             cityKey: cityKeyForDecision
         )
@@ -176,7 +199,8 @@ enum JourneyMemoryMapCoordinateResolver {
     static func mapCoordinate(
         for memory: JourneyMemory,
         fallbackCountryISO2: String?,
-        fallbackCityKey: String?
+        fallbackCityKey: String?,
+        engine: MapEngineSetting = .mapkit
     ) -> CLLocationCoordinate2D {
         mapCoordinate(
             rawCoordinate: CLLocationCoordinate2D(
@@ -185,7 +209,8 @@ enum JourneyMemoryMapCoordinateResolver {
             ),
             preferredCityKey: memory.cityKey,
             fallbackCountryISO2: fallbackCountryISO2,
-            fallbackCityKey: fallbackCityKey
+            fallbackCityKey: fallbackCityKey,
+            engine: engine
         )
     }
 }
