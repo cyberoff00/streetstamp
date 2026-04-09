@@ -1055,3 +1055,18 @@
 "mapbox_trial_expired_message" = "Mapbox マップスタイルの24時間無料体験が終了しました。プレミアムマップスタイルを引き続き使用するには会員登録してください。";
 "mapbox_trial_expired_subscribe" = "会員登録";
 "mapbox_trial_expired_dismiss" = "デフォルトに戻す";
+
+// Photo City Discovery
+"photo_discovery_intro_title" = "写真から訪れた都市を発見";
+"photo_discovery_intro_subtitle" = "写真の位置情報をスキャンして、都市カードを自動生成します";
+"photo_discovery_intro_button" = "スキャン開始";
+"photo_discovery_scanning" = "都市を発見中… %d/%d";
+"photo_discovery_found_new" = "%d 個の新しい都市を発見！";
+"photo_discovery_no_new_cities" = "スキャン完了 — 新しい都市は見つかりませんでした";
+"photo_discovery_from_photos" = "写真から";
+"photo_count_format" = "%d 枚の写真";
+"photo_discovery_unlock_all" = "発見した都市をすべてアンロック";
+"photo_scan_confirm_title" = "写真から取り込む";
+"photo_scan_confirm_message" = "写真の位置情報をスキャンして、訪問した都市をシティカードとして追加します。";
+"photo_scan_confirm_start" = "スキャン開始";
+"empty_city_guide_hint" = "シティカードがまだありません。旅を始めるか、右上のボタンから写真で取り込みましょう。";

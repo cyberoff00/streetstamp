@@ -1055,3 +1055,18 @@
 "mapbox_trial_expired_message" = "Tu prueba gratuita de 24h para los estilos Mapbox ha finalizado. Suscríbete para seguir usando los estilos de mapa premium.";
 "mapbox_trial_expired_subscribe" = "Suscribirse";
 "mapbox_trial_expired_dismiss" = "Volver al predeterminado";
+
+// Photo City Discovery
+"photo_discovery_intro_title" = "Descubre ciudades desde tus fotos";
+"photo_discovery_intro_subtitle" = "Escanea la ubicación de tus fotos para generar tarjetas de ciudad automáticamente";
+"photo_discovery_intro_button" = "Comenzar escaneo";
+"photo_discovery_scanning" = "Descubriendo ciudades… %d/%d";
+"photo_discovery_found_new" = "¡%d nuevas ciudades descubiertas!";
+"photo_discovery_no_new_cities" = "Escaneo completo — no se encontraron nuevas ciudades";
+"photo_discovery_from_photos" = "De fotos";
+"photo_count_format" = "%d fotos";
+"photo_discovery_unlock_all" = "Desbloquear todas las ciudades descubiertas";
+"photo_scan_confirm_title" = "Importar desde fotos";
+"photo_scan_confirm_message" = "Escanea los datos de ubicación de tus fotos para añadir ciudades visitadas como tarjetas.";
+"photo_scan_confirm_start" = "Iniciar escaneo";
+"empty_city_guide_hint" = "Aún no hay tarjetas. Inicia un viaje o toca el botón superior derecho para importar desde tus fotos.";

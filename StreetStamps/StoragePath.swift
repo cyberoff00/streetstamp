@@ -72,6 +72,8 @@ struct StoragePath: Sendable {
     var trackTileManifestURL: URL { trackTilesDir.appendingPathComponent("manifest.json", isDirectory: false) }
     var journeyRepairSourcesURL: URL { cachesDir.appendingPathComponent("journey_repair_sources.json", isDirectory: false) }
     var deletedJourneyIDsURL: URL { cachesDir.appendingPathComponent("deleted_journey_ids.json", isDirectory: false) }
+    var photoDiscoveredCitiesURL: URL { cachesDir.appendingPathComponent("photo_discovered_cities.json", isDirectory: false) }
+    var photoScanResultURL: URL { cachesDir.appendingPathComponent("photo_scan_result.json", isDirectory: false) }
 
     /// Marker file to ensure one-time migrations.
     var migrationMarkerV1: URL { userRoot.appendingPathComponent(".migrated_v1", isDirectory: false) }
@@ -86,7 +88,10 @@ struct StoragePath: Sendable {
     /// Marker file for lifelog split migration (legacy -> passive + bak).
     var migrationMarkerV5_lifelogPassiveSplit: URL { userRoot.appendingPathComponent(".migrated_v5_lifelog_passive_split", isDirectory: false) }
     /// Marker file for re-keying journeys to auto-level (removing user level preference).
-    var migrationMarkerV6_autoLevelRekey: URL { userRoot.appendingPathComponent(".migrated_v6_auto_level_rekey", isDirectory: false) }
+    /// Bumped to v6b: KR strategy changed from locality to admin, strip list expanded.
+    var migrationMarkerV6_autoLevelRekey: URL { userRoot.appendingPathComponent(".migrated_v6b_auto_level_rekey", isDirectory: false) }
+    /// Marker file for strategy v2 rekey: JP/TH→admin, expanded country/subAdmin lists.
+    var migrationMarkerV7_strategyV2Rekey: URL { userRoot.appendingPathComponent(".migrated_v7_strategy_v2_rekey", isDirectory: false) }
 
     // MARK: - Ensure directories exist
 

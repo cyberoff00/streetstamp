@@ -124,11 +124,13 @@ struct LatLon: Codable {
 }
 
 // MARK: - CachedCity (disk)
+// Locale-independent identity model. All fields are en_US or locale-free.
+// Display name translation happens at render time via CityNameTranslationCache.
 struct CachedCity: Identifiable, Codable {
     let id: String                 // identity key; canonical: "name|ISO2" or temp: "__TMP__|journeyId"
     let cityKey: String
-    let name: String
-    let canonicalNameEN: String
+    let name: String               // en_US fallback display name
+    let canonicalNameEN: String    // en_US canonical name
     let countryISO2: String?
 
     var journeyIds: [String]
@@ -141,26 +143,17 @@ struct CachedCity: Identifiable, Codable {
     var thumbnailBasePath: String?
     var thumbnailRoutePath: String?
 
-    // Identity/display split:
-    // - identityLevelRaw is inferred from cityKey and does not move with display changes.
-    // - selectedDisplayLevelRaw is the current UI level and can move upward.
-    var identityLevelRaw: String? = nil
-    var selectedDisplayLevelRaw: String? = nil
     var parentScopeKey: String? = nil
-    var availableLevelNames: [String: String]? = nil
-    var availableLevelNamesLocaleID: String? = nil
-
-    /// Persisted localized display names keyed by locale identifier (e.g. "zh-Hans": "上海").
-    /// Populated by CityLibraryVM after successful reverse-geocode localization.
-    var localizedDisplayNameByLocale: [String: String]? = nil
-
-    /// Single source of truth for the city's display name under the current locale.
-    /// Written by CityCache whenever locale, level, or geocode data changes.
-    /// All UI consumers should read `displayTitle` instead of computing names themselves.
-    var resolvedDisplayName: String? = nil
-    var resolvedDisplayNameLocaleID: String? = nil
+    /// The level at which this city was created (e.g. "locality", "subAdmin", "admin").
+    /// Written once at city creation time by resolveCanonical. Never inferred.
+    var identityLevelRaw: String? = nil
+    /// en_US level names from canonical geocode. Keys are CardLevel.rawValue.
+    var availableLevelNamesEN: [String: String]? = nil
 
     var isTemporary: Bool? = false
+    var isPhotoDiscovered: Bool? = nil
+    var photoCount: Int? = nil
+    var photoDateRange: String? = nil
 
     init(
         id: String,
@@ -175,19 +168,13 @@ struct CachedCity: Identifiable, Codable {
         anchor: LatLon?,
         thumbnailBasePath: String?,
         thumbnailRoutePath: String?,
-        identityLevelRaw: String? = nil,
-        selectedDisplayLevelRaw: String? = nil,
         parentScopeKey: String? = nil,
-        availableLevelNames: [String: String]? = nil,
-        availableLevelNamesLocaleID: String? = nil,
-        localizedDisplayNameByLocale: [String: String]? = nil,
-        resolvedDisplayName: String? = nil,
-        resolvedDisplayNameLocaleID: String? = nil,
+        identityLevelRaw: String? = nil,
+        availableLevelNamesEN: [String: String]? = nil,
         isTemporary: Bool? = false,
-        reservedLevelRaw: String? = nil,
-        reservedParentRegionKey: String? = nil,
-        reservedAvailableLevelNames: [String: String]? = nil,
-        reservedAvailableLevelNamesLocaleID: String? = nil
+        isPhotoDiscovered: Bool? = nil,
+        photoCount: Int? = nil,
+        photoDateRange: String? = nil
     ) {
         self.id = id
         self.cityKey = (cityKey ?? id).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -201,81 +188,65 @@ struct CachedCity: Identifiable, Codable {
         self.anchor = anchor
         self.thumbnailBasePath = thumbnailBasePath
         self.thumbnailRoutePath = thumbnailRoutePath
+        self.parentScopeKey = parentScopeKey
         self.identityLevelRaw = identityLevelRaw
-        self.selectedDisplayLevelRaw = selectedDisplayLevelRaw ?? reservedLevelRaw
-        self.parentScopeKey = parentScopeKey ?? reservedParentRegionKey
-        self.availableLevelNames = availableLevelNames ?? reservedAvailableLevelNames
-        self.availableLevelNamesLocaleID = availableLevelNamesLocaleID ?? reservedAvailableLevelNamesLocaleID
-        self.localizedDisplayNameByLocale = localizedDisplayNameByLocale
-        self.resolvedDisplayName = resolvedDisplayName
-        self.resolvedDisplayNameLocaleID = resolvedDisplayNameLocaleID
+        self.availableLevelNamesEN = availableLevelNamesEN
         self.isTemporary = isTemporary
+        self.isPhotoDiscovered = isPhotoDiscovered
+        self.photoCount = photoCount
+        self.photoDateRange = photoDateRange
     }
 
-    /// The single display name all UI consumers should use.
-    /// Returns resolvedDisplayName if it matches the current locale, otherwise falls back to `name`.
+    /// The en_US display name extracted from cityKey — the only reliable source.
+    var englishName: String {
+        let fromKey = cityKey.components(separatedBy: "|").first?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return fromKey.isEmpty ? name : fromKey
+    }
+
+    /// The display name for UI. Checks translation cache first, falls back to en_US.
     var displayTitle: String {
-        let currentLocaleID = LanguagePreference.shared.effectiveLocaleIdentifier
-        if let resolved = resolvedDisplayName,
-           !resolved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           resolvedDisplayNameLocaleID == currentLocaleID {
-            return resolved
+        let localeID = LanguagePreference.shared.effectiveLocaleIdentifier
+        if localeID.hasPrefix("en") { return englishName }
+        if let translated = CityNameTranslationCache.shared.cachedName(cityKey: cityKey, localeID: localeID) {
+            return translated
         }
-        return name
+        return englishName
     }
 
-    var reservedLevelRaw: String? {
-        get { selectedDisplayLevelRaw }
-        set { selectedDisplayLevelRaw = newValue }
+    /// The identity level stored at city creation time.
+    var identityLevel: CityPlacemarkResolver.CardLevel {
+        identityLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) } ?? .locality
     }
 
-    var reservedParentRegionKey: String? {
-        get { parentScopeKey }
-        set { parentScopeKey = newValue }
-    }
-
-    var reservedAvailableLevelNames: [String: String]? {
-        get { availableLevelNames }
-        set { availableLevelNames = newValue }
-    }
-
-    var reservedAvailableLevelNamesLocaleID: String? {
-        get { availableLevelNamesLocaleID }
-        set { availableLevelNamesLocaleID = newValue }
-    }
+    // MARK: - Codable (backwards-compatible decode, clean encode)
 
     enum CodingKeys: String, CodingKey {
-        case id
-        case cityKey
-        case name
-        case canonicalNameEN
-        case countryISO2
-        case journeyIds
-        case explorations
-        case memories
-        case boundary
-        case anchor
-        case thumbnailBasePath
-        case thumbnailRoutePath
-        case identityLevelRaw
+        case id, cityKey, name, canonicalNameEN, countryISO2
+        case journeyIds, explorations, memories
+        case boundary, anchor
+        case thumbnailBasePath, thumbnailRoutePath
+        case parentScopeKey, identityLevelRaw
+        case availableLevelNamesEN
+        case isTemporary, isPhotoDiscovered, photoCount, photoDateRange
+        // Legacy keys — read during decode for migration, never written
         case selectedDisplayLevelRaw
-        case parentScopeKey
-        case availableLevelNames
-        case availableLevelNamesLocaleID
+        case availableLevelNames, availableLevelNamesLocaleID
         case localizedDisplayNameByLocale
-        case resolvedDisplayName
-        case resolvedDisplayNameLocaleID
-        case isTemporary
-        case reservedLevelRaw
-        case reservedParentRegionKey
-        case reservedAvailableLevelNames
-        case reservedAvailableLevelNamesLocaleID
+        case resolvedDisplayName, resolvedDisplayNameLocaleID
+        case reservedLevelRaw, reservedParentRegionKey
+        case reservedAvailableLevelNames, reservedAvailableLevelNamesLocaleID
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let id = try container.decode(String.self, forKey: .id)
         let name = try container.decode(String.self, forKey: .name)
+
+        // Only read canonical keys. All legacy/locale-dependent fields
+        // (availableLevelNames, reservedParentRegionKey, localizedDisplayNameByLocale, etc.)
+        // are NOT trusted — repairAllCityIdentityData() re-geocodes with en_US and fills
+        // the correct values for parentScopeKey, identityLevelRaw, availableLevelNamesEN.
 
         self.init(
             id: id,
@@ -290,19 +261,13 @@ struct CachedCity: Identifiable, Codable {
             anchor: try container.decodeIfPresent(LatLon.self, forKey: .anchor),
             thumbnailBasePath: try container.decodeIfPresent(String.self, forKey: .thumbnailBasePath),
             thumbnailRoutePath: try container.decodeIfPresent(String.self, forKey: .thumbnailRoutePath),
-            identityLevelRaw: try container.decodeIfPresent(String.self, forKey: .identityLevelRaw),
-            selectedDisplayLevelRaw: try container.decodeIfPresent(String.self, forKey: .selectedDisplayLevelRaw),
             parentScopeKey: try container.decodeIfPresent(String.self, forKey: .parentScopeKey),
-            availableLevelNames: try container.decodeIfPresent([String: String].self, forKey: .availableLevelNames),
-            availableLevelNamesLocaleID: try container.decodeIfPresent(String.self, forKey: .availableLevelNamesLocaleID),
-            localizedDisplayNameByLocale: try container.decodeIfPresent([String: String].self, forKey: .localizedDisplayNameByLocale),
-            resolvedDisplayName: try container.decodeIfPresent(String.self, forKey: .resolvedDisplayName),
-            resolvedDisplayNameLocaleID: try container.decodeIfPresent(String.self, forKey: .resolvedDisplayNameLocaleID),
+            identityLevelRaw: try container.decodeIfPresent(String.self, forKey: .identityLevelRaw),
+            availableLevelNamesEN: try container.decodeIfPresent([String: String].self, forKey: .availableLevelNamesEN),
             isTemporary: try container.decodeIfPresent(Bool.self, forKey: .isTemporary),
-            reservedLevelRaw: try container.decodeIfPresent(String.self, forKey: .reservedLevelRaw),
-            reservedParentRegionKey: try container.decodeIfPresent(String.self, forKey: .reservedParentRegionKey),
-            reservedAvailableLevelNames: try container.decodeIfPresent([String: String].self, forKey: .reservedAvailableLevelNames),
-            reservedAvailableLevelNamesLocaleID: try container.decodeIfPresent(String.self, forKey: .reservedAvailableLevelNamesLocaleID)
+            isPhotoDiscovered: try container.decodeIfPresent(Bool.self, forKey: .isPhotoDiscovered),
+            photoCount: try container.decodeIfPresent(Int.self, forKey: .photoCount),
+            photoDateRange: try container.decodeIfPresent(String.self, forKey: .photoDateRange)
         )
     }
 
@@ -320,15 +285,13 @@ struct CachedCity: Identifiable, Codable {
         try container.encodeIfPresent(anchor, forKey: .anchor)
         try container.encodeIfPresent(thumbnailBasePath, forKey: .thumbnailBasePath)
         try container.encodeIfPresent(thumbnailRoutePath, forKey: .thumbnailRoutePath)
-        try container.encodeIfPresent(identityLevelRaw, forKey: .identityLevelRaw)
-        try container.encodeIfPresent(selectedDisplayLevelRaw, forKey: .selectedDisplayLevelRaw)
         try container.encodeIfPresent(parentScopeKey, forKey: .parentScopeKey)
-        try container.encodeIfPresent(availableLevelNames, forKey: .availableLevelNames)
-        try container.encodeIfPresent(availableLevelNamesLocaleID, forKey: .availableLevelNamesLocaleID)
-        try container.encodeIfPresent(localizedDisplayNameByLocale, forKey: .localizedDisplayNameByLocale)
-        try container.encodeIfPresent(resolvedDisplayName, forKey: .resolvedDisplayName)
-        try container.encodeIfPresent(resolvedDisplayNameLocaleID, forKey: .resolvedDisplayNameLocaleID)
+        try container.encodeIfPresent(identityLevelRaw, forKey: .identityLevelRaw)
+        try container.encodeIfPresent(availableLevelNamesEN, forKey: .availableLevelNamesEN)
         try container.encodeIfPresent(isTemporary, forKey: .isTemporary)
+        try container.encodeIfPresent(isPhotoDiscovered, forKey: .isPhotoDiscovered)
+        try container.encodeIfPresent(photoCount, forKey: .photoCount)
+        try container.encodeIfPresent(photoDateRange, forKey: .photoDateRange)
     }
 }
 
@@ -615,6 +578,17 @@ final class CityCache: ObservableObject {
         case updatedCity(cityKey: String)
     }
 
+    // MARK: - Photo discovery
+
+    enum PhotoDiscoveryProgress: Equatable {
+        case idle
+        case scanning(done: Int, total: Int)
+        case completed(newCities: [String])
+        case noNewCities
+    }
+
+    @Published var photoDiscoveryProgress: PhotoDiscoveryProgress = .idle
+
     @Published private(set) var cachedCities: [CachedCity] = []
     @Published private(set) var lastEvent: CityEvent? = nil
     @Published private(set) var pendingUnlock: UnlockedPayload? = nil
@@ -622,11 +596,9 @@ final class CityCache: ObservableObject {
     /// Keyed lookup excluding temporary cities. Lazily rebuilt when `cachedCities` changes.
     var cachedCitiesByKey: [String: CachedCity] {
         if let cached = _cachedCitiesByKey { return cached }
-        let dict = Dictionary(
-            uniqueKeysWithValues: cachedCities
-                .filter { !($0.isTemporary ?? false) }
-                .map { ($0.id, $0) }
-        )
+        let dict: [String: CachedCity] = cachedCities
+            .filter { !($0.isTemporary ?? false) }
+            .reduce(into: [:]) { acc, city in acc[city.id] = city }
         _cachedCitiesByKey = dict
         return dict
     }
@@ -653,6 +625,7 @@ final class CityCache: ObservableObject {
     private var migrationMarkerV3URL: URL
     private var migrationMarkerV4URL: URL
     private var migrationMarkerV6URL: URL
+    private var migrationMarkerV7URL: URL
     private var paths: StoragePath
     private var membershipIndex = CityMembershipIndex()
     private var cancellables: Set<AnyCancellable> = []
@@ -670,6 +643,7 @@ final class CityCache: ObservableObject {
         self.migrationMarkerV3URL = paths.migrationMarkerV3_intercityToStartingCity
         self.migrationMarkerV4URL = paths.migrationMarkerV4_removeLegacyThumbnails
         self.migrationMarkerV6URL = paths.migrationMarkerV6_autoLevelRekey
+        self.migrationMarkerV7URL = paths.migrationMarkerV7_strategyV2Rekey
         self.paths = paths
         // Disk I/O deferred to loadInitialData() to avoid blocking app launch.
 
@@ -704,6 +678,7 @@ final class CityCache: ObservableObject {
         migrateInterCityRoutesToStartingCitiesIfNeeded()
         removeLegacyDiskThumbnailsIfNeeded()
         handleJourneyStoreLoadedState(journeyStore.hasLoaded)
+        loadPhotoDiscoveredFromDisk()
     }
 
     /// Async variant that moves JSON decode off the main thread.
@@ -740,13 +715,12 @@ final class CityCache: ObservableObject {
         // Apply on main thread (lightweight: property assignment + string iteration)
         self.cachedCities = cities
         self.membershipIndex = membership
-        backfillLocalizedNamesFromGeocodeDefaults()
-        refreshAllResolvedDisplayNames()
         invalidateThumbnailsIfStyleChanged()
         migrateThumbnailPathsIfNeeded()
         migrateInterCityRoutesToStartingCitiesIfNeeded()
         removeLegacyDiskThumbnailsIfNeeded()
         handleJourneyStoreLoadedState(journeyStore.hasLoaded)
+        loadPhotoDiscoveredFromDisk()
     }
 
     func rebind(paths: StoragePath) {
@@ -758,6 +732,7 @@ final class CityCache: ObservableObject {
         self.migrationMarkerV3URL = paths.migrationMarkerV3_intercityToStartingCity
         self.migrationMarkerV4URL = paths.migrationMarkerV4_removeLegacyThumbnails
         self.migrationMarkerV6URL = paths.migrationMarkerV6_autoLevelRekey
+        self.migrationMarkerV7URL = paths.migrationMarkerV7_strategyV2Rekey
 
         loadFromDisk()
         loadMembershipIndexFromDisk()
@@ -765,6 +740,7 @@ final class CityCache: ObservableObject {
         migrateInterCityRoutesToStartingCitiesIfNeeded()
         removeLegacyDiskThumbnailsIfNeeded()
         handleJourneyStoreLoadedState(journeyStore.hasLoaded)
+        loadPhotoDiscoveredFromDisk()
     }
 
     /// Async rebind that moves JSON decode off the main thread.
@@ -777,6 +753,7 @@ final class CityCache: ObservableObject {
         self.migrationMarkerV3URL = paths.migrationMarkerV3_intercityToStartingCity
         self.migrationMarkerV4URL = paths.migrationMarkerV4_removeLegacyThumbnails
         self.migrationMarkerV6URL = paths.migrationMarkerV6_autoLevelRekey
+        self.migrationMarkerV7URL = paths.migrationMarkerV7_strategyV2Rekey
 
         let cityURL = fileURL
         let membershipURL = membershipIndexURL
@@ -803,13 +780,12 @@ final class CityCache: ObservableObject {
 
         self.cachedCities = cities
         self.membershipIndex = membership
-        backfillLocalizedNamesFromGeocodeDefaults()
-        refreshAllResolvedDisplayNames()
         invalidateThumbnailsIfStyleChanged()
         migrateThumbnailPathsIfNeeded()
         migrateInterCityRoutesToStartingCitiesIfNeeded()
         removeLegacyDiskThumbnailsIfNeeded()
         handleJourneyStoreLoadedState(journeyStore.hasLoaded)
+        loadPhotoDiscoveredFromDisk()
     }
 
     private func handleJourneyStoreLoadedState(_ loaded: Bool) {
@@ -820,9 +796,116 @@ final class CityCache: ObservableObject {
         guard membershipIndex.entries.isEmpty || !hasRebuiltForCurrentLoadedState else { return }
         hasRebuiltForCurrentLoadedState = true
         rebuildFromJourneyStore()
-        migrateJourneyKeysToAutoLevelIfNeeded()
+        let v6Done = FileManager.default.fileExists(atPath: migrationMarkerV6URL.path)
+        if v6Done {
+            // Most users: V6 already done, only run V7 for changed countries
+            migrateJourneyKeysToStrategyV2IfNeeded(fullRekey: false)
+        } else {
+            // Old users: skip V6, let V7 re-geocode ALL journeys (covers V6 + V7)
+            migrateJourneyKeysToStrategyV2IfNeeded(fullRekey: true)
+        }
     }
     
+    // MARK: - Photo city discovery
+
+    func loadPhotoDiscoveredFromDisk() {
+        let url = paths.photoDiscoveredCitiesURL
+        guard fm.fileExists(atPath: url.path),
+              let data = try? Data(contentsOf: url),
+              let decoded = try? JSONDecoder().decode([CachedCity].self, from: data) else { return }
+
+        let existingKeys = Set(cachedCities.map { $0.id })
+        let photoOnly = decoded.filter { !existingKeys.contains($0.id) }
+        guard !photoOnly.isEmpty else { return }
+        cachedCities.append(contentsOf: photoOnly)
+    }
+
+    func loadPreviousPhotoScanResult() -> PhotoScanResult? {
+        let url = paths.photoScanResultURL
+        guard fm.fileExists(atPath: url.path),
+              let data = try? Data(contentsOf: url),
+              let result = try? JSONDecoder().decode(PhotoScanResult.self, from: data) else { return nil }
+        // Version mismatch: geocode logic changed, old results are stale.
+        // Clear them so the scan button reappears and user can re-scan.
+        if result.version != PhotoScanResult.currentVersion {
+            cachedCities.removeAll { $0.isPhotoDiscovered == true }
+            try? fm.removeItem(at: url)
+            try? fm.removeItem(at: paths.photoDiscoveredCitiesURL)
+            saveToDisk()
+            notifyCitiesChanged()
+            return nil
+        }
+        return result
+    }
+
+    func applyPhotoDiscoveredCities(_ discovered: [PhotoDiscoveredCity], scanResult: PhotoScanResult) {
+        let df = DateFormatter()
+        df.dateFormat = "yyyy.MM"
+
+        let photoCities = discovered.map { d -> CachedCity in
+            var dateRange: String?
+            if let earliest = d.earliestDate, let latest = d.latestDate {
+                let e = df.string(from: earliest)
+                let l = df.string(from: latest)
+                dateRange = e == l ? e : "\(e) - \(l)"
+            }
+            // Convert availableLevelNames keys if present (already String:String from PhotoDiscoveredCity)
+            let levelNamesEN: [String: String]? = d.availableLevelNames
+            return CachedCity(
+                id: d.cityKey,
+                cityKey: d.cityKey,
+                name: d.cityName,
+                canonicalNameEN: d.cityName,
+                countryISO2: d.countryISO2,
+                journeyIds: [],
+                explorations: 0,
+                memories: 0,
+                boundary: nil,
+                anchor: d.anchor,
+                thumbnailBasePath: nil,
+                thumbnailRoutePath: nil,
+                parentScopeKey: d.parentScopeKey,
+                identityLevelRaw: d.identityLevelRaw,
+                availableLevelNamesEN: levelNamesEN,
+                isTemporary: false,
+                isPhotoDiscovered: true,
+                photoCount: d.photoCount,
+                photoDateRange: dateRange
+            )
+        }
+
+        // Persist photo-discovered cities to separate file
+        if let data = try? JSONEncoder().encode(photoCities) {
+            try? data.write(to: paths.photoDiscoveredCitiesURL, options: .atomic)
+        }
+
+        // Persist scan result (for incremental scans)
+        if let data = try? JSONEncoder().encode(scanResult) {
+            try? data.write(to: paths.photoScanResultURL, options: .atomic)
+        }
+
+        // Merge into cachedCities: upsert photo-discovered in place, never touching journey cities.
+        let journeyKeys = Set(cachedCities
+            .filter { !($0.isTemporary ?? false) && $0.isPhotoDiscovered != true }
+            .map { $0.id })
+        let incoming = photoCities.filter { !journeyKeys.contains($0.id) }
+        let incomingKeys = Set(incoming.map { $0.id })
+
+        // Remove stale photo cities that are no longer in the scan result
+        cachedCities.removeAll { $0.isPhotoDiscovered == true && !incomingKeys.contains($0.id) }
+
+        // Upsert: update existing in place, append new
+        for city in incoming {
+            if let idx = cachedCities.firstIndex(where: { $0.id == city.id && $0.isPhotoDiscovered == true }) {
+                cachedCities[idx] = city
+            } else {
+                cachedCities.append(city)
+            }
+        }
+        saveToDisk()
+        notifyCitiesChanged()
+    }
+
     /// Migrate thumbnail paths from absolute paths to relative paths (filenames only).
     private func migrateThumbnailPathsIfNeeded() {
         // Note: routes parameter removed as intercity routes are no longer stored separately
@@ -967,6 +1050,122 @@ final class CityCache: ObservableObject {
         }
     }
 
+    /// V7 migration: strategy v2 rekey — JP/TH now use admin (not locality),
+    /// expanded country/subAdmin lists. Re-geocodes journeys whose city key
+    /// level doesn't match the new strategy.
+    /// When `fullRekey` is true (V6 not yet done), re-geocodes ALL journeys
+    /// to also cover V6's work in a single pass.
+    private func migrateJourneyKeysToStrategyV2IfNeeded(fullRekey: Bool) {
+        let fm = FileManager.default
+        guard !fm.fileExists(atPath: migrationMarkerV7URL.path) else { return }
+
+        let journeys = journeyStore.journeys.filter { $0.isCompleted }
+        guard !journeys.isEmpty else {
+            try? Data("ok".utf8).write(to: migrationMarkerV7URL, options: .atomic)
+            if fullRekey { try? Data("ok".utf8).write(to: migrationMarkerV6URL, options: .atomic) }
+            return
+        }
+
+        let needsRekey: [JourneyRoute]
+        if fullRekey {
+            // Full rekey: re-geocode all completed journeys (covers V6 + V7)
+            needsRekey = journeys
+        } else {
+            // Incremental: only re-geocode journeys in countries whose strategy changed
+            let changedISOs: Set<String> = [
+                "JP", "TH",
+                "AI", "AS", "AW", "BL", "BM", "BQ", "BS", "CK", "CW", "CX",
+                "DM", "FK", "FM", "GD", "GG", "GI", "GP", "GQ", "GU",
+                "IM", "JE", "KI", "KM", "KN", "KY", "LC",
+                "MF", "MH", "MP", "MQ", "MS", "NR", "NU",
+                "PF", "PM", "PW", "RE", "SH", "SX", "ST",
+                "TC", "TK", "TO", "TV", "VG", "VI", "VU", "WF", "WS", "YT",
+                "AF", "BD", "GE", "MN", "PG", "TM",
+                "DE", "GR", "PL", "PT", "FI", "IE", "HR", "SK", "RS", "BA", "LT",
+            ]
+            needsRekey = journeys.filter { j in
+                guard let iso2 = j.countryISO2?.uppercased(), changedISOs.contains(iso2) else { return false }
+                return true
+            }
+        }
+
+        guard !needsRekey.isEmpty else {
+            try? Data("ok".utf8).write(to: migrationMarkerV7URL, options: .atomic)
+            if fullRekey { try? Data("ok".utf8).write(to: migrationMarkerV6URL, options: .atomic) }
+            return
+        }
+
+        let markerV7URL = migrationMarkerV7URL
+        let markerV6URL = fullRekey ? migrationMarkerV6URL : nil
+        let fixedLocale = Locale(identifier: "en_US")
+
+        Task.detached(priority: .utility) { [weak self] in
+            var updatedJourneys: [(id: String, newKey: String, newName: String, iso2: String?)] = []
+
+            for journey in needsRekey {
+                guard let startCoord = journey.coordinates.first?.cl,
+                      CLLocationCoordinate2DIsValid(startCoord) else { continue }
+
+                let currentKey = journey.stableCityKey ?? ""
+                guard !currentKey.isEmpty else { continue }
+
+                // Wait for network + throttle
+                if !ReverseGeocodeService.shared.isNetworkAvailable {
+                    let recovered = await ReverseGeocodeService.shared.waitForNetwork(timeout: 30)
+                    if !recovered { break } // No network — stop, will retry next launch
+                }
+
+                let location = CLLocation(latitude: startCoord.latitude, longitude: startCoord.longitude)
+                let result: (key: String, name: String, iso2: String?)? = await withCheckedContinuation { cont in
+                    CLGeocoder().reverseGeocodeLocation(location, preferredLocale: fixedLocale) { placemarks, error in
+                        guard let pm = placemarks?.first, error == nil else {
+                            cont.resume(returning: nil)
+                            return
+                        }
+                        let canonical = CityPlacemarkResolver.resolveCanonical(from: pm)
+                        cont.resume(returning: (canonical.cityKey, canonical.city, canonical.iso2))
+                    }
+                }
+
+                guard let result else {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    continue
+                }
+
+                let newKey = result.key.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !newKey.isEmpty, newKey != currentKey {
+                    updatedJourneys.append((id: journey.id, newKey: newKey, newName: result.name, iso2: result.iso2))
+                }
+
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+            }
+
+            await MainActor.run {
+                guard let self else { return }
+
+                if !updatedJourneys.isEmpty {
+                    for update in updatedJourneys {
+                        guard var journey = self.journeyStore.journeys.first(where: { $0.id == update.id }) else { continue }
+                        journey.startCityKey = update.newKey
+                        journey.cityKey = update.newKey
+                        journey.canonicalCity = CityPlacemarkResolver.stableCityName(from: update.newKey, fallback: update.newName)
+                        if let iso2 = update.iso2 {
+                            journey.countryISO2 = iso2
+                        }
+                        self.journeyStore.upsertSnapshotThrottled(journey, coordCount: journey.coordinates.count)
+                    }
+                    self.journeyStore.flushPersist()
+                    self.rebuildFromJourneyStore()
+                }
+
+                try? Data("ok".utf8).write(to: markerV7URL, options: .atomic)
+                if let v6URL = markerV6URL {
+                    try? Data("ok".utf8).write(to: v6URL, options: .atomic)
+                }
+            }
+        }
+    }
+
     /// Populate in-memory cities directly without disk I/O.
     /// Used by FriendMirrorContext to avoid async loading flash.
     func loadFromMemory(_ cities: [CachedCity]) {
@@ -998,8 +1197,6 @@ final class CityCache: ObservableObject {
         } catch {
             self.cachedCities = []
         }
-        backfillLocalizedNamesFromGeocodeDefaults()
-        refreshAllResolvedDisplayNames()
         invalidateThumbnailsIfStyleChanged()
     }
 
@@ -1049,40 +1246,6 @@ final class CityCache: ObservableObject {
                 }
             }
         }
-    }
-
-    /// Backfill `localizedDisplayNameByLocale` for historical cities from
-    /// ReverseGeocodeService's persisted UserDefaults cache. Runs synchronously
-    /// on cold start so all views see localized names immediately.
-    private func backfillLocalizedNamesFromGeocodeDefaults() {
-        let defaults = UserDefaults(suiteName: "group.com.streetstamps.shared") ?? .standard
-        guard let data = defaults.data(forKey: "reverseGeocode.displayCacheByLocaleKey.v2"),
-              let dict = try? JSONDecoder().decode([String: String].self, from: data),
-              !dict.isEmpty
-        else { return }
-
-        let localeID = LanguagePreference.shared.effectiveLocaleIdentifier
-        var changed = false
-
-        for i in cachedCities.indices {
-            let city = cachedCities[i]
-            if let existing = city.localizedDisplayNameByLocale?[localeID],
-               !existing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                continue
-            }
-            let scope = CityLevelPreferenceStore.shared.displayCacheScope(for: city.parentScopeKey)
-            let cacheKey = "\(city.id)|\(localeID)|\(scope)"
-            if let title = dict[cacheKey]?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !title.isEmpty {
-                var d = cachedCities[i].localizedDisplayNameByLocale ?? [:]
-                d[localeID] = title
-                cachedCities[i].localizedDisplayNameByLocale = d
-                refreshResolvedDisplayName(at: i)
-                changed = true
-            }
-        }
-
-        if changed { saveToDisk() }
     }
 
     private func saveMembershipIndexToDisk() {
@@ -1172,14 +1335,8 @@ final class CityCache: ObservableObject {
                 anchor: cachedCities[targetIdx].anchor ?? anchor.map(LatLon.init) ?? sourceAnchor,
                 thumbnailBasePath: cachedCities[targetIdx].thumbnailBasePath,
                 thumbnailRoutePath: cachedCities[targetIdx].thumbnailRoutePath,
-                identityLevelRaw: cachedCities[targetIdx].identityLevelRaw,
-                selectedDisplayLevelRaw: nil,
                 parentScopeKey: cachedCities[targetIdx].parentScopeKey,
-                availableLevelNames: cachedCities[targetIdx].availableLevelNames,
-                availableLevelNamesLocaleID: cachedCities[targetIdx].availableLevelNamesLocaleID,
-                localizedDisplayNameByLocale: cachedCities[targetIdx].localizedDisplayNameByLocale,
-                resolvedDisplayName: cachedCities[targetIdx].resolvedDisplayName,
-                resolvedDisplayNameLocaleID: cachedCities[targetIdx].resolvedDisplayNameLocaleID,
+                availableLevelNamesEN: cachedCities[targetIdx].availableLevelNamesEN,
                 isTemporary: cachedCities[targetIdx].isTemporary
             )
         } else {
@@ -1196,19 +1353,11 @@ final class CityCache: ObservableObject {
                 anchor: anchor.map(LatLon.init) ?? sourceAnchor,
                 thumbnailBasePath: nil,
                 thumbnailRoutePath: nil,
-                identityLevelRaw: nil,
-                selectedDisplayLevelRaw: nil,
-                parentScopeKey: nil,
-                availableLevelNames: nil,
-                availableLevelNamesLocaleID: nil,
                 isTemporary: false
             )
             cachedCities.append(created)
         }
 
-        if let idx = cachedCities.firstIndex(where: { $0.id == targetCityKey }) {
-            refreshResolvedDisplayName(at: idx)
-        }
         generateRouteThumbnail(cityKey: targetCityKey)
         saveToDisk()
         notifyCitiesChanged()
@@ -1228,98 +1377,20 @@ final class CityCache: ObservableObject {
         if let parentRegionKey, !parentRegionKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             cachedCities[idx].parentScopeKey = parentRegionKey
         }
+        if let level {
+            cachedCities[idx].identityLevelRaw = level.rawValue
+        }
         if let availableLevels {
             let mapped = Dictionary(availableLevels.map { ($0.key.rawValue, $0.value) }, uniquingKeysWith: { _, latest in latest })
-            cachedCities[idx].availableLevelNames = mapped
-            let fallbackLocaleID = LanguagePreference.shared.effectiveLocaleIdentifier
-            let localeID = (availableLevelsLocaleIdentifier ?? fallbackLocaleID)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            cachedCities[idx].availableLevelNamesLocaleID = localeID.isEmpty ? fallbackLocaleID : localeID
-            if cachedCities[idx].identityLevelRaw == nil {
-                let inferred = CityPlacemarkResolver.identityLevel(
-                    cityKey: cachedCities[idx].cityKey,
-                    availableLevelNames: availableLevels,
-                    iso2: cachedCities[idx].countryISO2
-                )
-                cachedCities[idx].identityLevelRaw = inferred?.rawValue ?? level?.rawValue
-            }
+            cachedCities[idx].availableLevelNamesEN = mapped
         }
         if let anchor, anchor.isValid, cachedCities[idx].anchor == nil {
             cachedCities[idx].anchor = LatLon(anchor)
         }
 
-        refreshResolvedDisplayName(at: idx)
         saveToDisk()
         notifyCitiesChanged()
     }
-
-    /// Persist a localized display name for the given city + locale.
-    // MARK: - Resolved display name (single source of truth)
-
-    /// Compute and store the resolved display name for a single city at the given index.
-    /// This is the ONLY function that writes `resolvedDisplayName`. All other paths funnel through here.
-    @MainActor
-    func refreshResolvedDisplayName(at idx: Int, locale: Locale = LanguagePreference.shared.displayLocale) {
-        guard cachedCities.indices.contains(idx) else { return }
-        let city = cachedCities[idx]
-        guard !(city.isTemporary ?? false) else { return }
-        let title = CityPlacemarkResolver.displayTitle(for: city, locale: locale)
-        let localeID = LanguagePreference.shared.effectiveLocaleIdentifier
-        cachedCities[idx].resolvedDisplayName = title
-        cachedCities[idx].resolvedDisplayNameLocaleID = localeID
-    }
-
-    /// Recompute resolved display names for ALL non-temporary cities.
-    /// Called on locale change and on load when locale differs from stored.
-    @MainActor
-    func refreshAllResolvedDisplayNames(locale: Locale = LanguagePreference.shared.displayLocale) {
-        let localeID = LanguagePreference.shared.effectiveLocaleIdentifier
-        var changed = false
-        for i in cachedCities.indices {
-            guard !(cachedCities[i].isTemporary ?? false) else { continue }
-            let title = CityPlacemarkResolver.displayTitle(for: cachedCities[i], locale: locale)
-            if cachedCities[i].resolvedDisplayName != title || cachedCities[i].resolvedDisplayNameLocaleID != localeID {
-                cachedCities[i].resolvedDisplayName = title
-                cachedCities[i].resolvedDisplayNameLocaleID = localeID
-                changed = true
-            }
-        }
-        if changed {
-            saveToDisk()
-            notifyCitiesChanged()
-        }
-    }
-
-    /// Called by CityLibraryVM after a successful reverse-geocode localization.
-    @MainActor
-    func updateLocalizedDisplayName(cityKey: String, locale: Locale, displayName: String) {
-        guard let idx = cachedCities.firstIndex(where: { $0.id == cityKey }) else { return }
-        let localeID = locale.identifier
-        var dict = cachedCities[idx].localizedDisplayNameByLocale ?? [:]
-        guard dict[localeID] != displayName else { return }
-        dict[localeID] = displayName
-        cachedCities[idx].localizedDisplayNameByLocale = dict
-        refreshResolvedDisplayName(at: idx, locale: locale)
-        saveToDisk()
-    }
-
-    /// Batch-persist localized display names (avoids repeated disk writes).
-    @MainActor
-    func updateLocalizedDisplayNames(_ updates: [(cityKey: String, displayName: String)], locale: Locale) {
-        let localeID = locale.identifier
-        var changed = false
-        for update in updates {
-            guard let idx = cachedCities.firstIndex(where: { $0.id == update.cityKey }) else { continue }
-            var dict = cachedCities[idx].localizedDisplayNameByLocale ?? [:]
-            guard dict[localeID] != update.displayName else { continue }
-            dict[localeID] = update.displayName
-            cachedCities[idx].localizedDisplayNameByLocale = dict
-            refreshResolvedDisplayName(at: idx, locale: locale)
-            changed = true
-        }
-        if changed { saveToDisk() }
-    }
-
 
     func rebuildFromJourneyStore() {
         guard journeyStore.hasLoaded else { return }
@@ -1372,11 +1443,9 @@ final class CityCache: ObservableObject {
     }
 
     private func replaceCachedCitiesFromMembershipIndex() {
-        let stableExistingByKey = Dictionary(
-            uniqueKeysWithValues: cachedCities
-                .filter { !($0.isTemporary ?? false) }
-                .map { ($0.id, $0) }
-        )
+        let stableExistingByKey: [String: CachedCity] = cachedCities
+            .filter { !($0.isTemporary ?? false) && $0.isPhotoDiscovered != true }
+            .reduce(into: [:]) { acc, city in acc[city.id] = city }
 
         let rebuilt = membershipIndex.entries.values.map { entry in
             makeCachedCity(from: entry, previous: stableExistingByKey[entry.cityKey], preferredAnchorJourney: nil)
@@ -1384,7 +1453,12 @@ final class CityCache: ObservableObject {
 
         let temps = cachedCities.filter { $0.isTemporary ?? false }
         let sortedStable = sortStableCities(rebuilt)
-        cachedCities = sortedStable + temps
+
+        // Preserve photo-discovered cities that don't overlap with journey-derived
+        let journeyKeys = Set(sortedStable.map { $0.id })
+        let photoOnly = cachedCities.filter { $0.isPhotoDiscovered == true && !journeyKeys.contains($0.id) }
+
+        cachedCities = sortedStable + photoOnly + temps
         saveToDisk()
         notifyCitiesChanged()
     }
@@ -1392,7 +1466,7 @@ final class CityCache: ObservableObject {
     private func refreshCachedCities(for cityKeys: Set<String>, preferredAnchorJourney: JourneyRoute?) {
         guard !cityKeys.isEmpty else { return }
 
-        var stableCities = cachedCities.filter { !($0.isTemporary ?? false) }
+        var stableCities = cachedCities.filter { !($0.isTemporary ?? false) && $0.isPhotoDiscovered != true }
         let existingByKey = Dictionary(stableCities.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
 
         stableCities.removeAll { cityKeys.contains($0.id) }
@@ -1411,7 +1485,12 @@ final class CityCache: ObservableObject {
         }
 
         let temps = cachedCities.filter { $0.isTemporary ?? false }
-        cachedCities = sortStableCities(stableCities) + temps
+
+        // Preserve photo-discovered cities that don't overlap with journey-derived
+        let journeyKeys = Set(stableCities.map { $0.id })
+        let photoOnly = cachedCities.filter { $0.isPhotoDiscovered == true && !journeyKeys.contains($0.id) }
+
+        cachedCities = sortStableCities(stableCities) + photoOnly + temps
         saveToDisk()
         notifyCitiesChanged()
     }
@@ -1438,14 +1517,9 @@ final class CityCache: ObservableObject {
             anchor: anchorCoord.map(LatLon.init),
             thumbnailBasePath: previous?.thumbnailBasePath,
             thumbnailRoutePath: previous?.thumbnailRoutePath,
-            identityLevelRaw: previous?.identityLevelRaw,
-            selectedDisplayLevelRaw: nil,
             parentScopeKey: previous?.parentScopeKey,
-            availableLevelNames: previous?.availableLevelNames,
-            availableLevelNamesLocaleID: previous?.availableLevelNamesLocaleID,
-            localizedDisplayNameByLocale: previous?.localizedDisplayNameByLocale,
-            resolvedDisplayName: previous?.resolvedDisplayName,
-            resolvedDisplayNameLocaleID: previous?.resolvedDisplayNameLocaleID,
+            identityLevelRaw: previous?.identityLevelRaw,
+            availableLevelNamesEN: previous?.availableLevelNamesEN,
             isTemporary: false
         )
     }
@@ -1664,6 +1738,52 @@ final class CityCache: ObservableObject {
     }
 
     // ===================================================
+    // MARK: - Province-to-city redirect
+    // ===================================================
+
+    /// When geocode returns a province-level key (e.g. "Jiangsu|CN" because locality
+    /// was nil), check if we already have a city card whose parentScopeKey matches.
+    /// If so, redirect the journey to that existing city.
+    /// When multiple cities share the same parent (Suzhou & Nanjing both in Jiangsu),
+    /// pick the one whose anchor is closest to the journey's start coordinate.
+    private func resolveProvinceToCityRedirect(
+        key: String,
+        journeyAnchor: CLLocationCoordinate2D?
+    ) -> (key: String, name: String)? {
+        // Only redirect if the key doesn't already exist as a real city card.
+        // If "Jiangsu|CN" already has its own card with journeys, don't redirect.
+        if cachedCities.contains(where: { $0.id == key && !($0.isTemporary ?? false) }) {
+            return nil
+        }
+
+        let candidates = cachedCities.filter {
+            !($0.isTemporary ?? false)
+            && $0.parentScopeKey == key
+        }
+        guard !candidates.isEmpty else { return nil }
+
+        // Single candidate — no ambiguity
+        if candidates.count == 1, let c = candidates.first {
+            return (key: c.id, name: c.englishName)
+        }
+
+        // Multiple candidates — pick closest to journey anchor
+        guard let anchor = journeyAnchor, CLLocationCoordinate2DIsValid(anchor) else {
+            // No anchor to compare; pick the one with most journeys
+            let best = candidates.max(by: { $0.journeyIds.count < $1.journeyIds.count })!
+            return (key: best.id, name: best.englishName)
+        }
+
+        let anchorLoc = CLLocation(latitude: anchor.latitude, longitude: anchor.longitude)
+        let closest = candidates.min(by: { a, b in
+            let aDist = a.anchor.map { CLLocation(latitude: $0.lat, longitude: $0.lon).distance(from: anchorLoc) } ?? .greatestFiniteMagnitude
+            let bDist = b.anchor.map { CLLocation(latitude: $0.lat, longitude: $0.lon).distance(from: anchorLoc) } ?? .greatestFiniteMagnitude
+            return aDist < bDist
+        })!
+        return (key: closest.id, name: closest.englishName)
+    }
+
+    // ===================================================
     // MARK: - Temporary helpers
     // ===================================================
 
@@ -1733,7 +1853,6 @@ final class CityCache: ObservableObject {
             anchor: tmp.anchor,
             thumbnailBasePath: tmp.thumbnailBasePath,
             thumbnailRoutePath: tmp.thumbnailRoutePath,
-            localizedDisplayNameByLocale: tmp.localizedDisplayNameByLocale,
             isTemporary: false
         )
 
@@ -1771,9 +1890,6 @@ final class CityCache: ObservableObject {
         cachedCities.sort {
             if $0.explorations != $1.explorations { return $0.explorations > $1.explorations }
             return $0.name < $1.name
-        }
-        if let idx = cachedCities.firstIndex(where: { $0.id == cityKey }) {
-            refreshResolvedDisplayName(at: idx)
         }
         saveToDisk()
     }
@@ -1975,6 +2091,192 @@ final class CityCache: ObservableObject {
             baseThumbPath: nil,
             routeThumbPath: nil
         )
+    }
+
+    // MARK: - Identity data repair (one-time migration)
+
+    private static let identityRepairKey = "cityCache.identityRepairV10.done"
+
+    /// Re-geocode ALL non-temporary cities with en_US to ensure identity fields are correct.
+    /// Runs once per device. Fixes: wrong canonicalNameEN, missing identityLevelRaw,
+    /// missing availableLevelNamesEN, missing parentScopeKey.
+    func repairAllCityIdentityData() {
+        let alreadyDone = UserDefaults.standard.bool(forKey: Self.identityRepairKey)
+        #if DEBUG
+        print("🔧 [Repair] called. alreadyDone=\(alreadyDone) cities=\(cachedCities.count) journeys=\(journeyStore.journeys.count) hasLoaded=\(journeyStore.hasLoaded)")
+        #endif
+        guard !alreadyDone else { return }
+        // Don't run until journeys are loaded — we need journey coordinates as fallback for cities without anchor
+        guard journeyStore.hasLoaded else { return }
+
+        // Collect coordinate for each city: prefer anchor, fallback to first journey start coord
+        let journeysById = Dictionary(
+            journeyStore.journeys.map { ($0.id, $0) },
+            uniquingKeysWith: { _, latest in latest }
+        )
+
+        // Collect by cityKey (not index) to avoid stale-index bugs during async repair
+        var citiesToRepair: [(String, LatLon)] = []
+        var skippedNoCoord = 0
+        for city in cachedCities {
+            guard !(city.isTemporary ?? false), !(city.isPhotoDiscovered ?? false) else { continue }
+            if let anchor = city.anchor {
+                citiesToRepair.append((city.cityKey, anchor))
+                continue
+            }
+            var found = false
+            for jid in city.journeyIds {
+                if let j = journeysById[jid], let first = j.coordinates.first {
+                    citiesToRepair.append((city.cityKey, LatLon(CLLocationCoordinate2D(latitude: first.lat, longitude: first.lon))))
+                    found = true
+                    break
+                }
+            }
+            if !found { skippedNoCoord += 1 }
+        }
+
+        #if DEBUG
+        print("🔧 [Repair] citiesToRepair=\(citiesToRepair.count) skippedNoCoord=\(skippedNoCoord) (from \(cachedCities.filter { !($0.isTemporary ?? false) && !($0.isPhotoDiscovered ?? false) }.count) non-temp cities)")
+        #endif
+
+        guard !citiesToRepair.isEmpty else {
+            // Only mark done if nothing was skipped — skipped cities need retry next launch
+            if skippedNoCoord == 0 {
+                UserDefaults.standard.set(true, forKey: Self.identityRepairKey)
+            }
+            return
+        }
+
+        Task.detached(priority: .utility) { [weak self] in
+            var geocodeFailedCount = 0
+            var reKeyedCityKeys = Set<String>()  // old keys that changed during repair
+            for (cityKey, anchor) in citiesToRepair {
+                let location = CLLocation(latitude: anchor.lat, longitude: anchor.lon)
+                var result: ReverseGeocodeService.CanonicalResult?
+                for _ in 0..<3 {
+                    result = await ReverseGeocodeService.shared.canonicalWithRetry(for: location, maxAttempts: 2)
+                    if result != nil { break }
+                    try? await Task.sleep(nanoseconds: 2_500_000_000)
+                }
+
+                guard let r = result else {
+                    geocodeFailedCount += 1
+                    continue
+                }
+
+                await MainActor.run {
+                    guard let self else { return }
+                    // Find by cityKey at write time — array may have shifted
+                    guard let idx = self.cachedCities.firstIndex(where: { $0.cityKey == cityKey }) else { return }
+                    let city = self.cachedCities[idx]
+
+                    let newKey = r.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let oldKey = city.cityKey
+                    #if DEBUG
+                    print("🔧 [Repair] old=\(oldKey) new=\(newKey) level=\(r.level.rawValue)")
+                    #endif
+
+                    let mapped = Dictionary(
+                        r.availableLevels.map { ($0.key.rawValue, $0.value) },
+                        uniquingKeysWith: { _, latest in latest }
+                    )
+                    let cityName = newKey.components(separatedBy: "|").first?
+                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? r.cityName
+
+                    // Re-key: use geocode's canonical key as the new id/cityKey
+                    self.cachedCities[idx] = CachedCity(
+                        id: newKey,
+                        cityKey: newKey,
+                        name: cityName,
+                        canonicalNameEN: cityName,
+                        countryISO2: r.iso2 ?? city.countryISO2,
+                        journeyIds: city.journeyIds,
+                        explorations: city.explorations,
+                        memories: city.memories,
+                        boundary: city.boundary,
+                        anchor: city.anchor,
+                        thumbnailBasePath: city.thumbnailBasePath,
+                        thumbnailRoutePath: city.thumbnailRoutePath,
+                        parentScopeKey: r.parentRegionKey ?? city.parentScopeKey,
+                        identityLevelRaw: r.level.rawValue,
+                        availableLevelNamesEN: mapped,
+                        isTemporary: city.isTemporary,
+                        isPhotoDiscovered: city.isPhotoDiscovered,
+                        photoCount: city.photoCount,
+                        photoDateRange: city.photoDateRange
+                    )
+
+                    // Update journeys that reference the old key
+                    if oldKey != newKey {
+                        reKeyedCityKeys.insert(oldKey)
+                        reKeyedCityKeys.insert(newKey)
+                        for j in self.journeyStore.journeys {
+                            if j.startCityKey == oldKey || j.cityKey == oldKey {
+                                var updated = j
+                                if updated.startCityKey == oldKey { updated.startCityKey = newKey }
+                                if updated.cityKey == oldKey { updated.cityKey = newKey }
+                                self.journeyStore.upsertSnapshotThrottled(updated, coordCount: updated.coordinates.count)
+                            }
+                        }
+                    }
+                }
+            }
+
+            await MainActor.run { [skippedNoCoord, geocodeFailedCount] in
+                guard let self else { return }
+                // Merge duplicates: re-keying may map multiple old cities to the same canonical key.
+                // Instead of discarding, merge journeyIds/explorations/memories and keep best metadata.
+                var merged: [String: CachedCity] = [:]
+                for city in self.cachedCities {
+                    if var existing = merged[city.id] {
+                        let combinedJourneyIds = Array(Set(existing.journeyIds + city.journeyIds))
+                        existing = CachedCity(
+                            id: existing.id,
+                            cityKey: existing.cityKey,
+                            name: existing.name,
+                            canonicalNameEN: existing.canonicalNameEN,
+                            countryISO2: existing.countryISO2 ?? city.countryISO2,
+                            journeyIds: combinedJourneyIds,
+                            explorations: existing.explorations + city.explorations,
+                            memories: existing.memories + city.memories,
+                            boundary: existing.boundary ?? city.boundary,
+                            anchor: existing.anchor ?? city.anchor,
+                            thumbnailBasePath: existing.thumbnailBasePath ?? city.thumbnailBasePath,
+                            thumbnailRoutePath: existing.thumbnailRoutePath ?? city.thumbnailRoutePath,
+                            parentScopeKey: existing.parentScopeKey ?? city.parentScopeKey,
+                            identityLevelRaw: existing.identityLevelRaw ?? city.identityLevelRaw,
+                            availableLevelNamesEN: existing.availableLevelNamesEN ?? city.availableLevelNamesEN,
+                            isTemporary: existing.isTemporary,
+                            isPhotoDiscovered: existing.isPhotoDiscovered,
+                            photoCount: existing.photoCount,
+                            photoDateRange: existing.photoDateRange
+                        )
+                        merged[city.id] = existing
+                    } else {
+                        merged[city.id] = city
+                    }
+                }
+                self.cachedCities = self.cachedCities.compactMap { merged.removeValue(forKey: $0.id) }
+
+                // Only flush translations for cities whose keys actually changed.
+                // Preserves valid cached translations for unchanged cities, avoiding
+                // a full re-geocode that can fail under VPN/throttle conditions.
+                if reKeyedCityKeys.isEmpty {
+                    // No re-keying happened — translations are all still valid
+                } else {
+                    CityNameTranslationCache.shared.clearKeys(reKeyedCityKeys)
+                }
+                self.saveToDisk()
+                self.notifyCitiesChanged()
+                // Only mark done if ALL cities were successfully repaired
+                if skippedNoCoord == 0 && geocodeFailedCount == 0 {
+                    UserDefaults.standard.set(true, forKey: Self.identityRepairKey)
+                }
+                #if DEBUG
+                print("✅ [CityCache] Identity repair completed for \(citiesToRepair.count) cities, skippedNoCoord=\(skippedNoCoord), geocodeFailed=\(geocodeFailedCount)")
+                #endif
+            }
+        }
     }
 }
 

@@ -235,10 +235,8 @@ enum CityPlacemarkResolver {
         availableLevelNames: [CardLevel: String]? = nil,
         parentRegionKey: String? = nil,
         preferredLevel: CardLevel? = nil,
-        localizedDisplayNameByLocale: [String: String]? = nil,
         locale: Locale = LanguagePreference.shared.displayLocale
     ) -> String {
-        let regionStyledKey = isRegionStyledDisplayKey(cityKey: cityKey, iso2: iso2)
         let chosenLevel = resolvedDisplayLevel(
             cityKey: cityKey,
             availableLevelNames: availableLevelNames,
@@ -246,11 +244,10 @@ enum CityPlacemarkResolver {
             preferredLevel: preferredLevel
         )
 
-        // Selected level must win over generic localized/cache titles.
+        // Selected level title is the primary display source.
         if let chosenLevel,
            let levelTitle = availableLevelNames?[chosenLevel]?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !levelTitle.isEmpty,
-           shouldUseStoredLevelTitle(levelTitle, locale: locale) {
+           !levelTitle.isEmpty {
             let resolved = normalizeUserFacingTitle(levelTitle, iso2: iso2, level: chosenLevel, locale: locale)
             CityLocalizationDebugLogger.log(
                 "displayTitle",
@@ -268,50 +265,7 @@ enum CityPlacemarkResolver {
             return resolved
         }
 
-        // Fast path: use persisted localized name if available for this locale.
-        if let localized = localizedDisplayNameByLocale?[locale.identifier]?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           !localized.isEmpty,
-           (!regionStyledKey || matchesRegionAlias(localized, iso2: iso2 ?? "")),
-           shouldUseStoredDisplayTitle(localized, locale: locale) {
-            let resolved = normalizeUserFacingTitle(localized, iso2: iso2, level: nil, locale: locale)
-            CityLocalizationDebugLogger.log(
-                "displayTitle",
-                CityLocalizationDebugTrace.displayDecision(
-                    cityKey: cityKey,
-                    locale: locale,
-                    source: "localizedDisplayNameByLocale",
-                    title: resolved,
-                    fallbackTitle: fallbackTitle,
-                    chosenLevel: nil,
-                    parentRegionKey: parentRegionKey,
-                    availableLevelNames: availableLevelNames
-                )
-            )
-            return resolved
-        }
-
-        // Second chance: sync lookup from ReverseGeocodeService UserDefaults cache.
-        if let cached = syncCachedDisplayTitle(cityKey: cityKey, parentRegionKey: parentRegionKey, locale: locale),
-           (!regionStyledKey || matchesRegionAlias(cached, iso2: iso2 ?? "")),
-           shouldUseStoredDisplayTitle(cached, locale: locale) {
-            let resolved = normalizeUserFacingTitle(cached, iso2: iso2, level: nil, locale: locale)
-            CityLocalizationDebugLogger.log(
-                "displayTitle",
-                CityLocalizationDebugTrace.displayDecision(
-                    cityKey: cityKey,
-                    locale: locale,
-                    source: "displayCacheByLocaleKey.v2",
-                    title: resolved,
-                    fallbackTitle: fallbackTitle,
-                    chosenLevel: nil,
-                    parentRegionKey: parentRegionKey,
-                    availableLevelNames: availableLevelNames
-                )
-            )
-            return resolved
-        }
-
+        // Fallback: use fallbackTitle or extract city name from key.
         let decision: (source: String, rawTitle: String) = {
             let trimmedFallback = fallbackTitle.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmedFallback.isEmpty {
@@ -352,7 +306,6 @@ enum CityPlacemarkResolver {
         storedAvailableLevelNamesLocaleID: String? = nil,
         parentRegionKey: String? = nil,
         preferredLevel: CardLevel? = nil,
-        localizedDisplayNameByLocale: [String: String]? = nil,
         locale: Locale = LanguagePreference.shared.displayLocale
     ) -> String {
         let decoded = preferredAvailableLevelNamesForDisplay(
@@ -367,7 +320,6 @@ enum CityPlacemarkResolver {
             availableLevelNames: decoded,
             parentRegionKey: parentRegionKey,
             preferredLevel: preferredLevel,
-            localizedDisplayNameByLocale: localizedDisplayNameByLocale,
             locale: locale
         )
     }
@@ -378,30 +330,13 @@ enum CityPlacemarkResolver {
         preferredLevelOverride: CardLevel? = nil,
         localizedCandidate: String? = nil
     ) -> String {
-        let localeID = locale.identifier
-        var localizedMap = cachedCity.localizedDisplayNameByLocale ?? [:]
-        if let localizedCandidate {
-            let trimmed = localizedCandidate.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
-                localizedMap[localeID] = trimmed
-            }
+        // If caller already resolved a localized name (e.g. from CityNameTranslationCache),
+        // prefer it over the English canonical name.
+        if let candidate = localizedCandidate?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !candidate.isEmpty {
+            return candidate
         }
-
-        let identityLevel = preferredLevelOverride
-            ?? cachedCity.identityLevelRaw.flatMap { CardLevel(rawValue: $0) }
-            ?? inferIdentityLevel(cityKey: cachedCity.id, iso2: cachedCity.countryISO2)
-
-        return displayTitle(
-            cityKey: cachedCity.id,
-            iso2: cachedCity.countryISO2,
-            fallbackTitle: cachedCity.name,
-            availableLevelNamesRaw: cachedCity.availableLevelNames,
-            storedAvailableLevelNamesLocaleID: cachedCity.availableLevelNamesLocaleID,
-            parentRegionKey: cachedCity.parentScopeKey,
-            preferredLevel: identityLevel,
-            localizedDisplayNameByLocale: localizedMap,
-            locale: locale
-        )
+        return cachedCity.canonicalNameEN
     }
 
     static func stableCityKey(
@@ -490,15 +425,48 @@ enum CityPlacemarkResolver {
         let cityName = cityKey.components(separatedBy: "|").first?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if iso2 == "CN", isChineseMunicipality(cityName) { return .admin }
-        if iso2 == "JP", cityName.contains("Tokyo") { return .admin }
-        if iso2 == "KR", cityName.contains("Seoul") || cityName.contains("Busan") { return .admin }
-        if iso2 == "TH", cityName.contains("Bangkok") { return .admin }
+        if strategyAdmin.contains(iso2) { return .admin }
         if strategySubAdmin.contains(iso2) { return .subAdmin }
         return .locality
     }
 
-    private static let strategyCountry: Set<String> = ["SG", "HK", "MO", "TW", "MC", "VA", "LI", "AD", "LU", "MT", "BH", "SC", "MV", "SM"]
-    private static let strategySubAdmin: Set<String> = ["CN", "GB", "AU", "NZ", "FR", "IT", "ES", "NL", "CH", "ID", "PH", "VN", "MY", "BE", "SE", "NO", "DK"]
+    /// Version tag for strategy definitions. Bump when strategies change to trigger
+    /// city key migration in `CityStrategyMigration`.
+    static let strategyVersion = 2
+
+    /// City-states, micro-states, and tiny territories — whole territory = one card.
+    private static let strategyCountry: Set<String> = [
+        // City-states & micro-states
+        "SG", "HK", "MO", "TW", "MC", "VA", "LI", "AD", "LU", "MT", "BH", "SM",
+        // Small island territories & dependencies (geocoder returns little/no fine data)
+        "AI", "AS", "AW", "BL", "BM", "BQ", "BS", "CK", "CW", "CX",
+        "DM", "FK", "FM", "GD", "GG", "GI", "GP", "GQ", "GU",
+        "IM", "JE", "KI", "KM", "KN", "KY", "LC",
+        "MF", "MH", "MP", "MQ", "MS", "MV", "NR", "NU",
+        "PF", "PM", "PW", "RE", "SC", "SH", "SX", "ST",
+        "TC", "TK", "TO", "TV", "VG", "VI", "VU", "WF", "WS", "YT",
+    ]
+
+    /// Countries where admin (province/state/prefecture) is the right city-card level.
+    /// Either locality is too fine (district names) or geocoder has no finer data.
+    private static let strategyAdmin: Set<String> = [
+        "JP", "KR", "TH",
+        // Geocoder returns no locality or subAdmin for these
+        "AF", "BD", "GE", "MN", "PG", "TM",
+    ]
+
+    /// Countries verified to ALWAYS return subAdministrativeArea from Apple geocoder,
+    /// where subAdmin represents a meaningful city-level name.
+    /// Verified with 234-country geocoder diagnostics (2026-04).
+    private static let strategySubAdmin: Set<String> = [
+        // Europe (verified 100% subAdmin)
+        "GB", "FR", "IT", "DE", "NL", "BE", "SE", "NO", "DK",
+        "GR", "PL", "PT", "FI", "IE", "HR", "SK", "RS", "BA", "LT",
+        // Oceania
+        "AU", "NZ",
+        // Southeast Asia
+        "MY", "VN",
+    ]
 
     private static func decideLevel(candidates: LevelCandidates, preferred: CardLevel?) -> CardLevel {
         // Island detection disabled — skip straight to preference / country strategy.
@@ -518,15 +486,24 @@ enum CityPlacemarkResolver {
         }
 
         if strategyCountry.contains(iso2) { return .country }
-        if iso2 == "CN", isChineseMunicipality(candidates.admin) { return .admin }
-        if iso2 == "JP", candidates.admin?.contains("Tokyo") == true || candidates.admin?.contains("東京都") == true { return .admin }
-        if iso2 == "KR", candidates.admin?.contains("Seoul") == true || candidates.admin?.contains("Busan") == true { return .admin }
-        if iso2 == "TH", candidates.admin?.contains("Bangkok") == true { return .admin }
 
-        if strategySubAdmin.contains(iso2), candidates.subAdmin != nil {
-            return .subAdmin
+        // CN municipalities (Beijing, Shanghai, etc.) use admin even though CN is default locality
+        if iso2 == "CN", isChineseMunicipality(candidates.admin) { return .admin }
+
+        if strategyAdmin.contains(iso2) {
+            // admin → country
+            if candidates.admin != nil { return .admin }
+            return .country
         }
 
+        if strategySubAdmin.contains(iso2) {
+            // subAdmin → admin → country
+            if candidates.subAdmin != nil { return .subAdmin }
+            if candidates.admin != nil { return .admin }
+            return .country
+        }
+
+        // Default (locality) strategy: locality → subAdmin → admin → country
         if candidates.locality != nil { return .locality }
         if candidates.subAdmin != nil { return .subAdmin }
         if candidates.admin != nil { return .admin }
@@ -589,9 +566,12 @@ enum CityPlacemarkResolver {
         return nil
     }
 
-    private static func isChineseMunicipality(_ admin: String?) -> Bool {
+    static func isChineseMunicipality(_ admin: String?) -> Bool {
         guard let a = admin else { return false }
-        let municipalities = ["Beijing", "Shanghai", "Tianjin", "Chongqing", "北京市", "上海市", "天津市", "重庆市"]
+        let municipalities = [
+            "Beijing", "Shanghai", "Tianjin", "Chongqing",
+            "北京", "上海", "天津", "重庆", "重慶",
+        ]
         return municipalities.contains { a.contains($0) }
     }
 
@@ -605,8 +585,12 @@ enum CityPlacemarkResolver {
         return false
     }
 
+    static func stripAdminSuffixPublic(_ s: String) -> String { stripAdminSuffix(s) }
+
     private static func stripAdminSuffix(_ s: String) -> String {
-        let suffixes = [" City", " Shi", " Prefecture", " District", "市", "区", "县"]
+        let suffixes = [" City", " Shi", " Prefecture", " Province", " District", " Region",
+                        "特别市", "特別市", "广域市", "廣域市", "특별시", "광역시", "특별자치시", "특별자치도",
+                        "市", "区", "县", "都", "道", "府", "省", "도"]
         var result = s
         for suffix in suffixes where result.hasSuffix(suffix) {
             result = String(result.dropLast(suffix.count))
@@ -653,20 +637,13 @@ enum CityPlacemarkResolver {
         let decoded = decodeAvailableLevelNames(availableLevelNamesRaw)
         guard !decoded.isEmpty else { return nil }
 
-        // Always check per-value locale compatibility.
-        // Even when storedLocaleIdentifier matches, individual values may have been
-        // written at different times under different locales (mixed-locale data).
-        let hasIncompatibleValue = decoded.values.contains { value in
-            !shouldUseStoredDisplayTitle(value, locale: locale)
-        }
-        if hasIncompatibleValue { return nil }
-
-        if let storedLocaleIdentifier,
-           localeDisplayLanguageIdentifier(storedLocaleIdentifier) == localeDisplayLanguageIdentifier(locale.identifier) {
-            return decoded
-        }
-        if storedLocaleIdentifier != nil {
-            return nil
+        // If a stored locale is recorded, only use the labels when the language matches.
+        if let storedLocaleIdentifier {
+            let storedLang = storedLocaleIdentifier.replacingOccurrences(of: "_", with: "-")
+                .split(separator: "-").first.map(String.init)?.lowercased() ?? ""
+            let currentLang = locale.identifier.replacingOccurrences(of: "_", with: "-")
+                .split(separator: "-").first.map(String.init)?.lowercased() ?? ""
+            guard storedLang == currentLang else { return nil }
         }
 
         return decoded
@@ -848,76 +825,11 @@ enum CityPlacemarkResolver {
             .lowercased()
     }
 
-    private static func shouldUseStoredLevelTitle(_ title: String, locale: Locale) -> Bool {
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
-
-        return shouldUseStoredDisplayTitle(trimmed, locale: locale)
-    }
-
-    private static func looksASCIIOnly(_ value: String) -> Bool {
-        value.unicodeScalars.allSatisfy { scalar in
-            scalar.isASCII && (scalar.properties.isAlphabetic || scalar.properties.isWhitespace || scalar.properties.generalCategory == .dashPunctuation)
-        }
-    }
-
-    private static func shouldUseStoredDisplayTitle(_ title: String, locale: Locale) -> Bool {
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
-
-        let languageCode = localeDisplayLanguageIdentifier(locale.identifier)
-        if ["zh", "ja", "ko"].contains(languageCode) {
-            return !looksASCIIOnly(trimmed)
-        }
-        if languageCode == "en" {
-            return !containsCJKCharacters(trimmed)
-        }
-        return true
-    }
-
-    private static func localeDisplayLanguageIdentifier(_ localeIdentifier: String) -> String {
-        let normalized = localeIdentifier.replacingOccurrences(of: "_", with: "-")
-        return normalized.split(separator: "-").first.map(String.init)?.lowercased() ?? normalized.lowercased()
-    }
-
-    private static func containsCJKCharacters(_ value: String) -> Bool {
-        value.unicodeScalars.contains { scalar in
-            switch scalar.value {
-            case 0x3400...0x4DBF, 0x4E00...0x9FFF, 0xF900...0xFAFF,
-                 0x3040...0x309F, 0x30A0...0x30FF, 0xAC00...0xD7AF:
-                return true
-            default:
-                return false
-            }
-        }
-    }
-
     private static func clean(_ s: String?) -> String? {
         let t = (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         return t.isEmpty ? nil : t
     }
 
-    // MARK: - Sync UserDefaults cache lookup
-
-    /// Lazy-loaded cache from ReverseGeocodeService's persisted UserDefaults.
-    /// Avoids repeated disk reads on every `displayTitle()` call.
-    private static let geocodeDefaultsCache: [String: String] = {
-        let defaults = UserDefaults(suiteName: "group.com.streetstamps.shared") ?? .standard
-        guard let data = defaults.data(forKey: "reverseGeocode.displayCacheByLocaleKey.v2"),
-              let dict = try? JSONDecoder().decode([String: String].self, from: data)
-        else { return [:] }
-        return dict
-    }()
-
-    /// Synchronous lookup of a display title from ReverseGeocodeService's persisted cache.
-    private static func syncCachedDisplayTitle(cityKey: String, parentRegionKey: String?, locale: Locale) -> String? {
-        let scope = CityLevelPreferenceStore.shared.displayCacheScope(for: parentRegionKey)
-        let cacheKey = "\(cityKey)|\(locale.identifier)|\(scope)"
-        guard let title = geocodeDefaultsCache[cacheKey]?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !title.isEmpty
-        else { return nil }
-        return title
-    }
 }
 
 extension CityPlacemarkResolver.Canonical {
@@ -975,7 +887,6 @@ enum CityDisplayTitlePresentation {
         localizedCityNameByKey: [String: String] = [:],
         availableLevelNamesRaw: [String: String]? = nil,
         parentRegionKey: String? = nil,
-        localizedDisplayNameByLocale: [String: String]? = nil,
         locale: Locale = LanguagePreference.shared.displayLocale
     ) -> String {
         let trimmedKey = (cityKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -995,7 +906,6 @@ enum CityDisplayTitlePresentation {
             fallbackTitle: trimmedFallback.isEmpty ? trimmedKey : trimmedFallback,
             availableLevelNamesRaw: availableLevelNamesRaw,
             parentRegionKey: parentRegionKey,
-            localizedDisplayNameByLocale: localizedDisplayNameByLocale,
             locale: locale
         )
     }

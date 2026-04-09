@@ -1223,3 +1223,18 @@
 "mapbox_trial_expired_message" = "Mapbox 地图样式 24 小时免费试用已结束。开通会员可继续使用高级地图样式，或切换回默认样式。";
 "mapbox_trial_expired_subscribe" = "开通会员";
 "mapbox_trial_expired_dismiss" = "切换回默认";
+
+// Photo City Discovery
+"photo_discovery_intro_title" = "从相册发现你去过的城市";
+"photo_discovery_intro_subtitle" = "扫描照片中的位置信息，自动生成城市卡片";
+"photo_discovery_intro_button" = "开始扫描";
+"photo_discovery_scanning" = "正在发现城市... %d/%d";
+"photo_discovery_found_new" = "发现了 %d 个新城市！";
+"photo_discovery_no_new_cities" = "扫描完成，未发现新城市";
+"photo_discovery_from_photos" = "来自相册";
+"photo_count_format" = "%d 张照片";
+"photo_discovery_unlock_all" = "解锁全部发现的城市";
+"photo_scan_confirm_title" = "从相册导入";
+"photo_scan_confirm_message" = "扫描照片中的位置信息，将未记录旅程的城市添加为城市卡片。";
+"photo_scan_confirm_start" = "开始扫描";
+"empty_city_guide_hint" = "暂无城市卡，开启旅程解锁城市或右上角通过相册导入历史城市";

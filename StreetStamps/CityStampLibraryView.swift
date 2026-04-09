@@ -53,6 +53,9 @@ struct CityStampLibraryView: View {
     @State private var showDeleteCityAlert = false
     @State private var showPublicDetailUnavailableAlert = false
     @State private var activeCityDetail: City? = nil
+    @State private var photoScanPulse = false
+    @State private var showMembershipGate = false
+    @State private var showPhotoScanConfirm = false
 
     @AppStorage(MapLayerStyle.storageKey) private var layerStyleRaw = MapLayerStyle.current.rawValue
     @Environment(\.dismiss) private var dismiss
@@ -120,11 +123,10 @@ struct CityStampLibraryView: View {
         .background(SwipeBackEnabler())
         .navigationBarBackButtonHidden(true)
         .onAppear {
-            if store.hasLoaded {
-                vm.load(journeyStore: store, cityCache: cache)
-                digestByCityID = makeDigestMap(from: cache.cachedCities)
-                StartupWarmupService.shared.start(cities: displayCities, appearanceRaw: effectiveAppearanceRaw, renderCacheStore: renderCacheStore, limit: 16)
-            }
+            guard store.hasLoaded, vm.cities.isEmpty else { return }
+            vm.load(journeyStore: store, cityCache: cache)
+            digestByCityID = makeDigestMap(from: cache.cachedCities)
+            StartupWarmupService.shared.start(cities: displayCities, appearanceRaw: effectiveAppearanceRaw, renderCacheStore: renderCacheStore, limit: 16)
         }
         .onChange(of: store.hasLoaded) { loaded in
             if loaded {
@@ -135,7 +137,6 @@ struct CityStampLibraryView: View {
         }
         .onChange(of: languagePreference.currentLanguage) { _ in
             guard store.hasLoaded else { return }
-            cache.refreshAllResolvedDisplayNames()
             vm.load(journeyStore: store, cityCache: cache)
         }
         .onReceive(cache.$cachedCities) { nextCities in
@@ -184,6 +185,24 @@ struct CityStampLibraryView: View {
         .fullScreenCover(item: $activeCityDetail) { city in
             CityDeepView(city: city)
         }
+        .sheet(isPresented: $showMembershipGate) {
+            MembershipGateView(feature: .photoCityDiscovery)
+        }
+        .alert(L10n.t("photo_scan_confirm_title"), isPresented: $showPhotoScanConfirm) {
+            Button(L10n.t("photo_scan_confirm_start")) {
+                triggerPhotoDiscoveryScan()
+            }
+            Button(L10n.t("cancel"), role: .cancel) {}
+        } message: {
+            Text(L10n.t("photo_scan_confirm_message"))
+        }
+        .onChange(of: cache.photoDiscoveryProgress) { progress in
+            if case .scanning = progress {
+                photoScanPulse = true
+            } else {
+                photoScanPulse = false
+            }
+        }
     }
 
     private func makeDigestMap(from cities: [CachedCity]) -> [String: CityDigest] {
@@ -209,7 +228,26 @@ struct CityStampLibraryView: View {
 
                 Spacer()
 
-                Color.clear.frame(width: 42, height: 42)
+                if !hasEverScannedPhotos || isScanning {
+                    Button {
+                        if isScanning { return }
+                        showPhotoScanConfirm = true
+                    } label: {
+                        ZStack {
+                            Image(systemName: "sparkle.magnifyingglass")
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundColor(UITheme.softBlack)
+                                .frame(width: 42, height: 42)
+                                .opacity(photoScanPulse ? 0.4 : 1.0)
+                                .animation(
+                                    isScanning ? .easeInOut(duration: 0.8).repeatForever(autoreverses: true) : .default,
+                                    value: photoScanPulse
+                                )
+                        }
+                    }
+                } else {
+                    Color.clear.frame(width: 42, height: 42)
+                }
             }
             .padding(.horizontal, 18)
             .padding(.top, 8)
@@ -231,8 +269,28 @@ struct CityStampLibraryView: View {
                 ],
                 spacing: rowGap
             ) {
-                ForEach(displayCities, id: \.id) { city in
-                    if allowCityDetailNavigation {
+                ForEach(Array(displayCities.enumerated()), id: \.element.id) { index, city in
+                    let isLocked = city.isPhotoDiscovered
+                        && !MembershipStore.shared.isPremium
+                        && photoDiscoveredIndex(of: city) >= 3
+
+                    if isLocked {
+                        Button {
+                            showMembershipGate = true
+                        } label: {
+                            CityStampCard(city: city, cardWidth: cardW)
+                                .overlay(
+                                    ZStack {
+                                        Color.white.opacity(0.6)
+                                        Image(systemName: "lock.fill")
+                                            .font(.system(size: 22))
+                                            .foregroundColor(.gray)
+                                    }
+                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    } else if allowCityDetailNavigation {
                         Button {
                             activeCityDetail = city
                         } label: {
@@ -268,13 +326,39 @@ struct CityStampLibraryView: View {
                 }
             }
 
+            // Scanning progress banner
+            if case .scanning(let done, let total) = cache.photoDiscoveryProgress, total > 0 {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                    Text(String(format: L10n.t("photo_discovery_scanning"), done, total))
+                        .font(.system(size: 12))
+                        .foregroundColor(UITheme.subText)
+                }
+                .padding(.vertical, 8)
+            }
+
+            if case .noNewCities = cache.photoDiscoveryProgress {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle")
+                        .font(.system(size: 13))
+                    Text(L10n.t("photo_discovery_no_new_cities"))
+                        .font(.system(size: 13))
+                }
+                .foregroundColor(UITheme.subText)
+                .padding(.vertical, 10)
+                .task {
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    if case .noNewCities = cache.photoDiscoveryProgress {
+                        cache.photoDiscoveryProgress = .idle
+                    }
+                }
+            }
+
             if displayCities.isEmpty {
-                emptyState(
-                    title: L10n.key(emptyTitleKey),
-                    subtitle: L10n.key(emptySubtitleKey)
-                )
-                .padding(.top, 28)
-                .padding(.bottom, 60)
+                emptyCityGuide
+                    .padding(.top, 28)
+                    .padding(.bottom, 60)
             }
         }
     }
@@ -295,6 +379,100 @@ struct CityStampLibraryView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
         }
+    }
+
+    // MARK: - Photo discovery
+
+    private var hasEverScannedPhotos: Bool {
+        cache.loadPreviousPhotoScanResult() != nil
+    }
+
+    private var photoDiscoveryIntroCard: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "photo.on.rectangle.angled")
+                .font(.system(size: 48))
+                .foregroundColor(.blue.opacity(0.6))
+
+            Text(L10n.t("photo_discovery_intro_title"))
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(UITheme.softBlack)
+                .multilineTextAlignment(.center)
+
+            Text(L10n.t("photo_discovery_intro_subtitle"))
+                .font(.system(size: 13))
+                .foregroundColor(UITheme.subText)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+
+            Button {
+                triggerPhotoDiscoveryScan()
+            } label: {
+                Text(L10n.t("photo_discovery_intro_button"))
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 10)
+                    .background(Color.blue)
+                    .clipShape(Capsule())
+            }
+        }
+    }
+
+    private var emptyCityGuide: some View {
+        Text(L10n.t("empty_city_guide_hint"))
+            .font(.system(size: 13))
+            .foregroundColor(UITheme.subText)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 32)
+    }
+
+    private var isScanning: Bool {
+        if case .scanning = cache.photoDiscoveryProgress { return true }
+        return false
+    }
+
+    private func triggerPhotoDiscoveryScan() {
+        guard !isScanning else { return }
+        photoScanPulse = true
+        cache.photoDiscoveryProgress = .scanning(done: 0, total: 0)
+
+        let cityCache = cache
+        Task {
+            let previous = cityCache.loadPreviousPhotoScanResult()
+            let result = await PhotoCityDiscoveryService.shared.scan(
+                previousResult: previous,
+                onProgress: { done, total in
+                    Task { @MainActor in
+                        cityCache.photoDiscoveryProgress = .scanning(done: done, total: total)
+                    }
+                }
+            )
+
+            photoScanPulse = false
+            guard let result else {
+                cityCache.photoDiscoveryProgress = .idle
+                return
+            }
+
+            let oldKeys = Set(previous?.cities.map { $0.cityKey } ?? [])
+            let newCities = result.cities
+                .filter { !oldKeys.contains($0.cityKey) }
+                .map { $0.cityName }
+
+            cityCache.applyPhotoDiscoveredCities(result.cities, scanResult: result)
+
+            if !newCities.isEmpty {
+                cityCache.photoDiscoveryProgress = .completed(newCities: newCities)
+            } else {
+                cityCache.photoDiscoveryProgress = .noNewCities
+            }
+        }
+    }
+
+    /// Returns the index of this city among photo-discovered cities only (for membership gating).
+    private func photoDiscoveredIndex(of city: City) -> Int {
+        let photoCities = displayCities.filter { $0.isPhotoDiscovered }
+        return photoCities.firstIndex(where: { $0.id == city.id }) ?? 0
     }
 }
 
@@ -356,7 +534,18 @@ struct CityStampCard: View {
     }
 
     private var statsLine: some View {
-        let text = String(format: L10n.t("city_card_stats"), city.explorations, city.memories)
+        let text: String
+        if city.isPhotoDiscovered {
+            let count = city.photoCount ?? 0
+            let countText = String(format: L10n.t("photo_count_format"), count)
+            if let range = city.photoDateRange, !range.isEmpty {
+                text = "\(countText) · \(range)"
+            } else {
+                text = countText
+            }
+        } else {
+            text = String(format: L10n.t("city_card_stats"), city.explorations, city.memories)
+        }
 
         return Text(text)
             .font(.system(size: 11, weight: .regular))
@@ -366,6 +555,96 @@ struct CityStampCard: View {
             .allowsTightening(true)
             .fixedSize(horizontal: false, vertical: true)
             .layoutPriority(1)
+    }
+}
+
+// =======================================================
+// MARK: - Photo discovery scan button (reusable)
+// =======================================================
+
+struct PhotoDiscoveryScanButton: View {
+    @ObservedObject var cityCache: CityCache
+    @State private var pulse = false
+    @State private var showConfirm = false
+
+    private var isScanning: Bool {
+        if case .scanning = cityCache.photoDiscoveryProgress { return true }
+        return false
+    }
+
+    var body: some View {
+        Button {
+            if isScanning { return }
+            showConfirm = true
+        } label: {
+            Image(systemName: "sparkle.magnifyingglass")
+                .font(.system(size: 18, weight: .medium))
+                .foregroundColor(UITheme.softBlack)
+                .frame(width: 42, height: 42)
+                .opacity(pulse ? 0.4 : 1.0)
+                .animation(
+                    isScanning ? .easeInOut(duration: 0.8).repeatForever(autoreverses: true) : .default,
+                    value: pulse
+                )
+        }
+        .onChange(of: cityCache.photoDiscoveryProgress) { progress in
+            if case .scanning = progress {
+                pulse = true
+            } else {
+                pulse = false
+            }
+        }
+        .alert(L10n.t("photo_scan_confirm_title"), isPresented: $showConfirm) {
+            Button(L10n.t("photo_scan_confirm_start")) {
+                triggerScan()
+            }
+            Button(L10n.t("cancel"), role: .cancel) {}
+        } message: {
+            Text(L10n.t("photo_scan_confirm_message"))
+        }
+    }
+
+    @State private var lastScanTime: Date = .distantPast
+
+    private func triggerScan() {
+        guard !isScanning else { return }
+        // 60s cooldown to avoid repeated taps
+        guard Date().timeIntervalSince(lastScanTime) > 60 else { return }
+        lastScanTime = Date()
+        pulse = true
+        cityCache.photoDiscoveryProgress = .scanning(done: 0, total: 0)
+
+        let cache = cityCache
+        Task {
+            let previous = cache.loadPreviousPhotoScanResult()
+            let result = await PhotoCityDiscoveryService.shared.scan(
+                previousResult: previous,
+                onProgress: { done, total in
+                    Task { @MainActor in
+                        cache.photoDiscoveryProgress = .scanning(done: done, total: total)
+                    }
+                }
+            )
+
+            pulse = false
+            guard let result else {
+                cache.photoDiscoveryProgress = .idle
+                return
+            }
+
+            let oldKeys = Set(previous?.cities.map { $0.cityKey } ?? [])
+            let newCities = result.cities
+                .filter { !oldKeys.contains($0.cityKey) }
+                .map { $0.cityName }
+
+            cache.applyPhotoDiscoveredCities(result.cities, scanResult: result)
+
+            if !newCities.isEmpty {
+                cache.photoDiscoveryProgress = .completed(newCities: newCities)
+            } else {
+                cache.photoDiscoveryProgress = .noNewCities
+            }
+        }
     }
 }
 

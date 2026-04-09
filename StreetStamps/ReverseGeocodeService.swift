@@ -1,13 +1,13 @@
 import Foundation
 import CoreLocation
+import Network
 
 /// Centralized reverse-geocode coordinator.
 ///
-/// P0 fixes:
 /// - Global rate limit: at least ~1–2s between reverseGeocode requests (default 1.5s)
 /// - Cell-level cache + in-flight de-dupe: same rounded cell only requests once
-/// - City-level de-dupe for display localization: same cityKey only localizes once
 /// - When system throttles (GEOErrorDomain Code=-3), skip requests until reset
+/// - Network-aware: detects connectivity loss and waits for recovery
 ///
 /// Notes:
 /// - We intentionally "skip" (do not wait/sleep) when rate-limited, to avoid build-ups.
@@ -15,6 +15,46 @@ import CoreLocation
 actor ReverseGeocodeService {
 
     static let shared = ReverseGeocodeService()
+
+    // MARK: - Network monitoring
+    private let networkMonitor = NWPathMonitor()
+    private nonisolated(unsafe) var _networkSatisfied: Bool = true
+
+    /// Whether the device currently has network connectivity.
+    nonisolated var isNetworkAvailable: Bool { _networkSatisfied }
+
+    /// Posted on any network path change (e.g. VPN toggle, Wi-Fi ↔ cellular).
+    /// Observers can retry failed geocoding when the routing changes.
+    static let networkPathDidChange = Notification.Name("ReverseGeocodeService.networkPathDidChange")
+
+    private func startNetworkMonitor() {
+        networkMonitor.pathUpdateHandler = { [weak self] path in
+            let wasSatisfied = self?._networkSatisfied ?? true
+            let nowSatisfied = path.status == .satisfied
+            self?._networkSatisfied = nowSatisfied
+            // Post on ANY path change (covers VPN toggle, interface switch, reconnect)
+            if wasSatisfied != nowSatisfied || nowSatisfied {
+                NotificationCenter.default.post(name: ReverseGeocodeService.networkPathDidChange, object: nil)
+            }
+        }
+        networkMonitor.start(queue: DispatchQueue(label: "ReverseGeocodeService.network", qos: .utility))
+    }
+
+    /// Wait up to `timeout` seconds for network to become available.
+    /// Returns true if network is available, false if timed out.
+    nonisolated func waitForNetwork(timeout: TimeInterval = 60) async -> Bool {
+        if isNetworkAvailable { return true }
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            try? await Task.sleep(nanoseconds: 1_000_000_000) // check every 1s
+            if isNetworkAvailable { return true }
+        }
+        return false
+    }
+
+    private init() {
+        startNetworkMonitor()
+    }
 
     // MARK: - Tunables
     private let minIntervalSeconds: TimeInterval = 1.5
@@ -29,47 +69,8 @@ actor ReverseGeocodeService {
     private var localizedHierarchyCacheByLocaleCell: [String: CanonicalResult] = [:]
     private var localizedHierarchyInFlightByLocaleCell: [String: [CheckedContinuation<CanonicalResult?, Never>]] = [:]
 
-    /// Display localization cache is locale-dependent.
-    ///
-    /// Why: A user can change device language (or run in a different preferred language)
-    /// and we must not keep returning a previously cached title from another locale.
-    ///
-    /// Key format: "<cityKey>|<localeIdentifier>".
-    private var displayCacheByLocaleKey: [String: String] = [:]
-    private var displayInFlightByLocaleKey: [String: [CheckedContinuation<String?, Never>]] = [:]
-
     private let canonicalGeocoder = CLGeocoder()
-    private let displayGeocoder = CLGeocoder()
     private let fixedLocale = Locale(identifier: "en_US")
-
-    // MARK: - Persistent cache (display titles)
-    // Persist display localization cache across app launches to avoid re-geocoding every cold start.
-    private let sharedDefaults = UserDefaults(suiteName: "group.com.streetstamps.shared") ?? .standard
-    private let persistKey = "reverseGeocode.displayCacheByLocaleKey.v2"
-    private var persistTask: Task<Void, Never>? = nil
-
-    init() {
-        // Load persisted cache (best-effort).
-        if let data = sharedDefaults.data(forKey: persistKey),
-           let dict = try? JSONDecoder().decode([String: String].self, from: data) {
-            self.displayCacheByLocaleKey = dict
-        }
-    }
-
-    private func schedulePersist() {
-        // Debounce to avoid frequent disk writes.
-        persistTask?.cancel()
-        persistTask = Task { [persistKey] in
-            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s
-            persistNow(persistKey: persistKey)
-        }
-    }
-
-    private func persistNow(persistKey: String) {
-        guard let data = try? JSONEncoder().encode(displayCacheByLocaleKey) else { return }
-        sharedDefaults.set(data, forKey: persistKey)
-    }
-
 
     // MARK: - Models
     struct CanonicalResult: Sendable {
@@ -230,77 +231,6 @@ actor ReverseGeocodeService {
         return result
     }
 
-    /// Localized display title.
-    /// - Only does reverse geocode once per cityKey.
-    /// - Uses Locale.current.
-    /// - Returns cached title immediately; otherwise nil if rate-limited/throttled.
-    func displayTitle(for location: CLLocation, cityKey: String, parentRegionKey: String? = nil) async -> String? {
-        let displayLocale = LanguagePreference.shared.displayLocale
-        let localeKey = displayCacheKey(cityKey: cityKey, locale: displayLocale, parentRegionKey: parentRegionKey)
-        if let cached = displayCacheByLocaleKey[localeKey] {
-            return cached
-        }
-
-        if displayInFlightByLocaleKey[localeKey] != nil {
-            return await withCheckedContinuation { cont in
-                displayInFlightByLocaleKey[localeKey]?.append(cont)
-            }
-        }
-
-        let now = Date()
-        if now < throttledUntil {
-            return nil
-        }
-        if now.timeIntervalSince(lastRequestAt) < minIntervalSeconds {
-            return nil
-        }
-        lastRequestAt = now
-
-        displayInFlightByLocaleKey[localeKey] = []
-
-        let title: String? = await withCheckedContinuation { cont in
-            displayGeocoder.reverseGeocodeLocation(location, preferredLocale: displayLocale) { placemarks, error in
-                if let nsErr = error as NSError? {
-                    // Completion may be invoked off-actor; hop back before mutating actor state.
-                    Task { await self.handlePossibleThrottle(nsErr) }
-                }
-                guard let pm = placemarks?.first else {
-                    cont.resume(returning: nil)
-                    return
-                }
-                let disp = CityPlacemarkResolver.resolveDisplay(from: pm)
-                let title = CityPlacemarkResolver.displayTitle(
-                    cityKey: cityKey,
-                    iso2: disp.iso2,
-                    fallbackTitle: disp.title,
-                    parentRegionKey: parentRegionKey,
-                    preferredLevel: disp.level,
-                    locale: displayLocale
-                )
-                cont.resume(returning: title)
-            }
-        }
-
-        if let title {
-            displayCacheByLocaleKey[localeKey] = title
-            CityLocalizationDebugLogger.log(
-                "displayCacheWrite",
-                "locale=\(displayLocale.identifier) cacheKey=\(localeKey) title=\(title)"
-            )
-            schedulePersist()
-        }
-
-        let waiters = displayInFlightByLocaleKey[localeKey] ?? []
-        displayInFlightByLocaleKey[localeKey] = nil
-        waiters.forEach { $0.resume(returning: title) }
-        return title
-    }
-
-    /// Optional helper: get cached display title without making a request.
-    func cachedDisplayTitle(cityKey: String, parentRegionKey: String? = nil, locale: Locale = LanguagePreference.shared.displayLocale) -> String? {
-        displayCacheByLocaleKey[displayCacheKey(cityKey: cityKey, locale: locale, parentRegionKey: parentRegionKey)]
-    }
-
     // MARK: - Retry helpers
 
     func canonicalWithRetry(for location: CLLocation, maxAttempts: Int = 2) async -> CanonicalResult? {
@@ -321,13 +251,9 @@ actor ReverseGeocodeService {
         return nil
     }
 
-    func displayTitleWithRetry(for location: CLLocation, cityKey: String, parentRegionKey: String? = nil, maxAttempts: Int = 2) async -> String? {
-        for attempt in 0..<maxAttempts {
-            if let result = await displayTitle(for: location, cityKey: cityKey, parentRegionKey: parentRegionKey) { return result }
-            guard attempt + 1 < maxAttempts else { break }
-            try? await Task.sleep(nanoseconds: UInt64(minIntervalSeconds * 1_100_000_000))
-        }
-        return nil
+    /// Seconds remaining until the throttle window expires, or 0 if not throttled.
+    func throttleRemainingSeconds() -> TimeInterval {
+        max(0, throttledUntil.timeIntervalSinceNow)
     }
 
     // MARK: - Internals
@@ -339,12 +265,6 @@ actor ReverseGeocodeService {
         let lat = roundPlaces(location.coordinate.latitude, places: cellRoundingPlaces)
         let lon = roundPlaces(location.coordinate.longitude, places: cellRoundingPlaces)
         return "\(lat),\(lon)"
-    }
-
-    private func displayCacheKey(cityKey: String, locale: Locale, parentRegionKey: String?) -> String {
-        let id = locale.identifier
-        let scope = CityLevelPreferenceStore.shared.displayCacheScope(for: parentRegionKey)
-        return "\(cityKey)|\(id)|\(scope)"
     }
 
     private func roundPlaces(_ value: Double, places: Int) -> Double {
@@ -374,4 +294,5 @@ actor ReverseGeocodeService {
         }
         return nil
     }
+
 }

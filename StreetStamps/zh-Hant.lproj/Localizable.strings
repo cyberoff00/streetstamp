@@ -1075,3 +1075,18 @@
 "mapbox_trial_expired_message" = "Mapbox 地圖樣式 24 小時免費試用已結束。開通會員可繼續使用高級地圖樣式，或切換回預設樣式。";
 "mapbox_trial_expired_subscribe" = "開通會員";
 "mapbox_trial_expired_dismiss" = "切換回預設";
+
+// Photo City Discovery
+"photo_discovery_intro_title" = "從相簿發現你去過的城市";
+"photo_discovery_intro_subtitle" = "掃描照片中的位置資訊，自動產生城市卡片";
+"photo_discovery_intro_button" = "開始掃描";
+"photo_discovery_scanning" = "正在發現城市… %d/%d";
+"photo_discovery_found_new" = "發現了 %d 個新城市！";
+"photo_discovery_no_new_cities" = "掃描完成，未發現新城市";
+"photo_discovery_from_photos" = "來自相簿";
+"photo_count_format" = "%d 張照片";
+"photo_discovery_unlock_all" = "解鎖全部發現的城市";
+"photo_scan_confirm_title" = "從相簿匯入";
+"photo_scan_confirm_message" = "掃描照片中的位置資訊，將未記錄旅程的城市新增為城市卡片。";
+"photo_scan_confirm_start" = "開始掃描";
+"empty_city_guide_hint" = "暫無城市卡，去開啟旅程或點擊右上角從相簿匯入歷史造訪城市";
