@@ -724,6 +724,15 @@ final class LifelogStore: ObservableObject {
         return shardForDay(key).points.map(\.coord)
     }
 
+    /// Returns coords sorted by timestamp — needed for fallback rendering when
+    /// journey-archived points have been appended out of chronological order.
+    func rawCoordsSortedForDay(_ day: Date) -> [CoordinateCodable] {
+        let key = dayKey(day)
+        return shardForDay(key).points
+            .sorted { $0.timestamp < $1.timestamp }
+            .map(\.coord)
+    }
+
     /// Call from debug console: `LifelogStore.shared.diagnosePassiveGaps()`
     /// Prints today's point gap analysis to console.
     func diagnosePassiveGaps() {
@@ -1286,9 +1295,11 @@ final class LifelogStore: ObservableObject {
         deletedMoodDayKeys.forEach { moodByDay.removeValue(forKey: $0) }
         restoredMoodByDay.forEach { moodByDay[$0.key] = $0.value }
 
-        // Recompute distance — read all shards for accurate sum
-        let allCoords = snapshotPointsByDay().values.flatMap { $0.map(\.coord) }
-        cachedDistanceMeters = Self.computeTotalDistanceMeters(coords: Array(allCoords))
+        // Recompute distance — sum per-day to avoid connecting last point of one day
+        // to first point of the next day across the dictionary's random ordering.
+        cachedDistanceMeters = snapshotPointsByDay().values.reduce(0.0) { sum, pts in
+            sum + Self.computeTotalDistanceMeters(coords: pts.map(\.coord))
+        }
         shardIndex.cachedDistanceMeters = cachedDistanceMeters
 
         // Update last point
@@ -1914,6 +1925,10 @@ final class LifelogStore: ObservableObject {
                     allPoints.append(contentsOf: Self.loadShardFromDisk(dir: daysDir, dayKey: key).points)
                 }
             }
+            // Sort by timestamp — archived journey points may be appended
+            // out of chronological order within a day shard, causing index-
+            // based slicing to produce coordinate jumps (straight lines).
+            allPoints.sort { $0.timestamp < $1.timestamp }
             return Self.makePassiveCountryRuns(
                 from: allPoints,
                 attribution: attributionSnapshot,

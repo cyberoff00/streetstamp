@@ -24,6 +24,7 @@ struct CollectionTabView: View {
     @State private var cachedSortedJourneys: [JourneyRoute] = []
     @State private var cachedActivityTags: [String] = []
     @State private var activeJourneyDetail: JourneyMemoryDetailDestination? = nil
+    @State private var showMapLayerPicker = false
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -92,7 +93,17 @@ struct CollectionTabView: View {
 
     private var header: some View {
         UnifiedTabPageHeader(title: L10n.t("collection_page_title"), titleLevel: .primary, horizontalPadding: 18, topPadding: 14, bottomPadding: 12) {
-            Color.clear
+            if page == .cities {
+                Button { showMapLayerPicker.toggle() } label: {
+                    Image(systemName: "square.3.layers.3d")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(FigmaTheme.text)
+                        .appMinTapTarget()
+                }
+                .buttonStyle(.plain)
+            } else {
+                Color.clear
+            }
         } trailing: {
             if page == .memories {
                 MemoryFilterControls(
@@ -100,9 +111,15 @@ struct CollectionTabView: View {
                     availableActivityTags: availableActivityTags,
                     allJourneys: allMemoryJourneys
                 )
+            } else if cityCache.loadPreviousPhotoScanResult() == nil {
+                PhotoDiscoveryScanButton(cityCache: cityCache)
             } else {
-                Color.clear
+                Color.clear.frame(width: 42, height: 42)
             }
+        }
+        .sheet(isPresented: $showMapLayerPicker) {
+            MapLayerPickerView(isPresented: $showMapLayerPicker)
+                .presentationDetents([.height(340)])
         }
     }
 

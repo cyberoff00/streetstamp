@@ -1030,15 +1030,18 @@ struct FriendsHubView: View {
 
         // MARK: - Feed Like Stats Cache
 
-        private static let likeStatsCacheKey = "streetstamps.feedLikeStatsCache"
+        private var likeStatsCacheKey: String {
+            let userID = sessionStore.accountUserID ?? sessionStore.currentUserID
+            return "streetstamps.feedLikeStatsCache.\(userID)"
+        }
 
         private func saveLikeStatsToCache(_ stats: [String: (likes: Int, likedByMe: Bool)]) {
             let encoded = stats.mapValues { ["l": $0.likes, "m": $0.likedByMe ? 1 : 0] }
-            UserDefaults.standard.set(encoded, forKey: Self.likeStatsCacheKey)
+            UserDefaults.standard.set(encoded, forKey: likeStatsCacheKey)
         }
 
         private func loadLikeStatsFromCache() -> [String: (likes: Int, likedByMe: Bool)] {
-            guard let raw = UserDefaults.standard.dictionary(forKey: Self.likeStatsCacheKey) else { return [:] }
+            guard let raw = UserDefaults.standard.dictionary(forKey: likeStatsCacheKey) else { return [:] }
             var result: [String: (likes: Int, likedByMe: Bool)] = [:]
             for (key, value) in raw {
                 guard let dict = value as? [String: Int],
@@ -2039,8 +2042,11 @@ private struct FriendProfileScreen: View {
         )
     }
 
-    private var levelProgress: UserLevelProgress {
-        UserLevelProgress.from(completedJourneyCount: max(0, (friend ?? fallbackFriend).stats.totalJourneys))
+    private func collectionBadges(for friend: FriendProfileSnapshot) -> [String] {
+        [
+            "\(friend.stats.totalJourneys) \(L10n.t("activity_stat_journeys"))",
+            String(format: "%.0f KM", friend.stats.totalDistance / 1000.0)
+        ]
     }
 
     var body: some View {
@@ -2304,24 +2310,17 @@ private struct FriendProfileScreen: View {
             .frame(height: 376)
 
             VStack(spacing: 18) {
-                HStack(alignment: .center, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 8) {
-                            Text(friend.displayName)
-                                .font(.system(size: 24, weight: .bold, design: .rounded))
-                                .foregroundColor(Color(red: 17.0 / 255.0, green: 24.0 / 255.0, blue: 39.0 / 255.0))
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(friend.displayName)
+                            .font(.system(size: 24, weight: .bold, design: .rounded))
+                            .foregroundColor(Color(red: 17.0 / 255.0, green: 24.0 / 255.0, blue: 39.0 / 255.0))
 
-                            ProfileHeroLevelPill(level: levelProgress.level)
-                        }
-
-                        HStack(spacing: 8) {
-                            Text(String(format: L10n.t("friends_joined_format"), heroJoinedDateText(friend.createdAt)))
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(Color(red: 156.0 / 255.0, green: 163.0 / 255.0, blue: 175.0 / 255.0))
-                        }
+                        Text(String(format: L10n.t("friends_joined_format"), heroJoinedDateText(friend.createdAt)))
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(Color(red: 156.0 / 255.0, green: 163.0 / 255.0, blue: 175.0 / 255.0))
                     }
-
-                    Spacer(minLength: 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                     if sceneState.showsCTA, let ctaTitle = sceneState.ctaTitle {
                         Button {
@@ -2362,18 +2361,20 @@ private struct FriendProfileScreen: View {
                     }
                     .buttonStyle(.plain)
 
-                    CompactActivityRingCard(
-                        stats: friend.stats,
-                        levelProgress: levelProgress,
-                        journeyDates: friend.journeys.compactMap { $0.endTime ?? $0.startTime },
-                        onCardsTap: {
-                            activeCollectionPage.wrappedValue = FriendCollectionPageDestination(page: .cities)
-                        },
-                        onMemoriesTap: {
-                            activeCollectionPage.wrappedValue = FriendCollectionPageDestination(page: .memories)
-                        }
-                    )
+                    Button {
+                        activeCollectionPage.wrappedValue = FriendCollectionPageDestination(page: .cities)
+                    } label: {
+                        friendCollectionTile(friend: friend)
+                    }
+                    .buttonStyle(.plain)
                 }
+
+                ProfileHeroActivitySummarySection(
+                    levelProgress: UserLevelProgress.from(completedJourneyCount: friend.stats.totalJourneys),
+                    citiesCount: friend.stats.totalUnlockedCities,
+                    memoriesCount: friend.stats.totalMemories,
+                    journeyDates: friend.journeys.compactMap { $0.endTime ?? $0.startTime }
+                )
             }
             .padding(.horizontal, 24)
             .padding(.top, 18)
@@ -2421,6 +2422,17 @@ private struct FriendProfileScreen: View {
 
     private func friendActivityTile(title: String, subtitle: String?) -> some View {
         ProfilePostcardEntryCard(title: title, subtitle: subtitle)
+    }
+
+    private func friendCollectionTile(friend: FriendProfileSnapshot) -> some View {
+        ProfilePostcardEntryCard(
+            systemImage: "square.on.square",
+            iconColor: FigmaTheme.primary,
+            iconBackground: FigmaTheme.primary.opacity(0.10),
+            title: L10n.t("friend_collection"),
+            subtitle: nil,
+            badges: collectionBadges(for: friend)
+        )
     }
 
     private func friendProfileMenuTile(icon: String, iconColor: Color, iconBg: Color, title: String) -> some View {
@@ -2913,10 +2925,6 @@ private final class FriendMirrorContext: ObservableObject {
                 anchor: anchorCoord.map(LatLon.init),
                 thumbnailBasePath: nil,
                 thumbnailRoutePath: nil,
-                identityLevelRaw: nil,
-                selectedDisplayLevelRaw: nil,
-                parentScopeKey: nil,
-                availableLevelNames: nil,
                 isTemporary: false
             )
         }

@@ -333,8 +333,8 @@ struct JourneyMemoryMainView: View {
                 }
             }
 
-            let parentRegionKey = citiesByKey[key]?.parentScopeKey
-            if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key, parentRegionKey: parentRegionKey),
+            let locale = LanguagePreference.shared.displayLocale
+            if let cached = CityNameTranslationCache.shared.cachedName(cityKey: key, localeID: locale.identifier),
                !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 resolvedBatch[key] = cached
                 continue
@@ -350,10 +350,11 @@ struct JourneyMemoryMainView: View {
         }
 
         // Phase 2: geocode remaining keys (still serial due to CLGeocoder rate limits)
+        let locale = LanguagePreference.shared.displayLocale
         for item in needsGeocode {
-            let parentRegionKey = citiesByKey[item.key]?.parentScopeKey
-            let loc = CLLocation(latitude: item.coord.latitude, longitude: item.coord.longitude)
-            if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: item.key, parentRegionKey: parentRegionKey),
+            let level = citiesByKey[item.key]?.identityLevel
+                ?? CityPlacemarkResolver.inferIdentityLevel(cityKey: item.key, iso2: item.key.components(separatedBy: "|").last)
+            if let title = await CityNameTranslationCache.shared.translate(cityKey: item.key, anchor: item.coord, level: level, locale: locale),
                !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 await MainActor.run { localizedCityNameByKey[item.key] = title }
             }

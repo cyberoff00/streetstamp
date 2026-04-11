@@ -115,7 +115,7 @@ enum MapLayerStyle: String, CaseIterable, Identifiable {
         switch self {
         case .mapboxStreets:   return "mapbox://styles/cyberkkk/cmnm4g83300cq01s7dl87a277"
         case .mapboxDark:      return "mapbox://styles/mapbox/dark-v11"
-        case .mapboxLight:     return "mapbox://styles/cyberkkk/cmnm4jckm001301qth4793z39"
+        case .mapboxLight:     return "mapbox://styles/mapbox/light-v11"
         case .mapboxOutdoors:  return "mapbox://styles/mapbox/outdoors-v12"
         default:               return "mapbox://styles/mapbox/dark-v11"
         }
@@ -395,12 +395,12 @@ struct MapLayerButton: View {
     var body: some View {
         Button { showPicker.toggle() } label: {
             Image(systemName: "square.3.layers.3d")
-                .font(.system(size: 17, weight: .medium))
-                .foregroundColor(.white)
-                .frame(width: 42, height: 42)
-                .background(.ultraThinMaterial)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.black)
+                .frame(width: 44, height: 44)
+                .background(Color.white)
                 .clipShape(Circle())
-                .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
+                .shadow(color: .black.opacity(0.30), radius: 8, x: 0, y: 3)
         }
         .buttonStyle(.plain)
     }

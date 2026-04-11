@@ -213,6 +213,7 @@
 "finish_pending_memory_finish_now" = "Finalizar ahora";
 "finish_pending_memory_wait_gps" = "Esperar GPS";
 "finish_upper" = "FINISH";
+"pause_upper" = "PAUSAR";
 "finished" = "Finalizar";
 "first_city_prompt_desc" = "Genera tu primera tarjeta de ciudad según tu ubicación actual (con mapa de la ciudad).\nCuando completes un viaje en una ciudad nueva, se añadirá automáticamente una nueva tarjeta de ciudad.";
 "first_city_prompt_generate" = "Generar";
@@ -906,8 +907,15 @@
 "membership_welcome_bonus_ok" = "Entendido";
 "membership_products_unavailable" = "Los productos no están disponibles. Inténtalo de nuevo más tarde.";
 "activity_record_title" = "REGISTRO DE ACTIVIDAD";
-"activity_ring_help" = "Exterior: Progreso de nivel (viajes ≥1km cuentan)\nMedio: Colección de recuerdos (50 recuerdos por anillo)\nInterior: Progreso de ciudades desbloqueadas (10 ciudades por anillo)";
+"activity_ring_help" = "Exterior: Progreso de nivel (viajes ≥1km cuentan)\nMedio: Colección de recuerdos (50 recuerdos por anillo)\nInterior: Progreso de ciudades desbloqueadas (20 ciudades por anillo)";
 "activity_ring_next_level_hint" = "Faltan %d viajes para el siguiente nivel";
+"activity_rings" = "Anillos de actividad";
+"ring_outer_title" = "Anillo exterior";
+"ring_outer_desc" = "Progreso de nivel (viajes ≥1 km)";
+"ring_middle_title" = "Anillo medio";
+"ring_middle_desc" = "Colección de recuerdos (50 por anillo)";
+"ring_inner_title" = "Anillo interior";
+"ring_inner_desc" = "Ciudades desbloqueadas (20 por anillo)";
 "activity_stat_cards" = "TARJETAS";
 "activity_stat_distance_km" = "DISTANCIA (KM)";
 "activity_stat_journeys" = "VIAJES";
@@ -918,7 +926,7 @@
 "friend_activity_record_entry" = "REGISTRO DE ACTIVIDAD";
 "friend_city_cards" = "TARJETAS DE CIUDAD";
 "friend_journey_memories" = "RECUERDOS DE VIAJE";
-"friend_collection" = "COLECCIÓN";
+"friend_collection" = "HUELLAS";
 "friend_collection_subtitle_format" = "%d ciudades · %d recuerdos";
 "friend_collection_title_format" = "Colección de %@";
 "friend_postcards" = "POSTAL";
@@ -1048,6 +1056,9 @@
 "about_us_cyber_dog_content" = "一个朋友打算在装备里画了一只小狗，因为她想到她的小狗安迪以后死了，她散步的时候可以看到地图里自己带着赛博小狗一起，然后还没画她就痛哭一场。很萌，我想要做的就是这种很萌的东西。又有一天我在为生活的一切，为这款app焦虑的时候，骑着车记录着轨迹，我突然觉得没关系，即使最后是自娱自乐也没关系。我为朋友们建造了一个赛博空间，这个空间只有30个人也是另一种伟大的故事。";
 
 // MARK: - Mapbox Trial
+"map_btn_capture" = "FOTO";
+"map_btn_memory" = "NOTA";
+"map_btn_locate" = "UBICAR";
 "mapbox_trial_free_hint" = "Prueba gratis 24h";
 "mapbox_trial_remaining_hours" = "%dh %dmin restantes";
 "mapbox_trial_remaining_minutes" = "%dmin restantes";
@@ -1070,3 +1081,5 @@
 "photo_scan_confirm_message" = "Escanea los datos de ubicación de tus fotos para añadir ciudades visitadas como tarjetas.";
 "photo_scan_confirm_start" = "Iniciar escaneo";
 "empty_city_guide_hint" = "Aún no hay tarjetas. Inicia un viaje o toca el botón superior derecho para importar desde tus fotos.";
+"city_empty_title" = "Aún no hay tarjetas";
+"city_empty_desc" = "Inicia un viaje para desbloquear ciudades,\no importa desde tus fotos arriba a la derecha";

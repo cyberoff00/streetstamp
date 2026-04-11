@@ -33,11 +33,11 @@ actor SettingsCloudKitSync {
         try await CloudKitZoneCache.shared.ensureZone(zoneID, in: database)
     }
 
-    func uploadSettings(_ allSettings: [String: Any]) async throws {
+    func uploadSettings(_ allSettings: [String: Any], accountID: String) async throws {
         let filtered = allSettings.filter { Self.syncableKeys.contains($0.key) }
         guard !filtered.isEmpty else { return }
 
-        let recordID = CKRecord.ID(recordName: "settings", zoneID: zoneID)
+        let recordID = CKRecord.ID(recordName: "settings_\(accountID)", zoneID: zoneID)
         let record = CKRecord(recordType: CloudKitRecordType.settings, recordID: recordID)
 
         let data = try PropertyListSerialization.data(
@@ -51,8 +51,8 @@ actor SettingsCloudKitSync {
         try await cloudKitSaveRecord(record, in: database)
     }
 
-    func downloadSettings() async throws -> [String: Any]? {
-        let recordID = CKRecord.ID(recordName: "settings", zoneID: zoneID)
+    func downloadSettings(accountID: String) async throws -> [String: Any]? {
+        let recordID = CKRecord.ID(recordName: "settings_\(accountID)", zoneID: zoneID)
         do {
             let record = try await database.record(for: recordID)
             if let data = record["data"] as? Data,

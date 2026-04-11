@@ -131,7 +131,14 @@ struct MainTabView: View {
         }
         .onReceive(store.$hasLoaded) { loaded in
             guard loaded else { return }
-            maybePromptResumeIfNeeded()
+            // Delay the prompt so startup animations finish before the alert
+            // appears. Presenting a fullScreenCover while SwiftUI is still
+            // mid-animation silently drops the presentation and leaves the
+            // app in a frozen state.
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 900_000_000)
+                maybePromptResumeIfNeeded()
+            }
         }
         .onChange(of: selectedTab) { tab in
             loadedTabs.insert(tab)

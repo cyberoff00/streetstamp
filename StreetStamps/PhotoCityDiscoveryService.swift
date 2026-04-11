@@ -31,7 +31,8 @@ struct PhotoScanResult: Codable, Sendable {
     /// Bump this when geocode logic changes to force a full re-scan.
     /// v3: KR strategy changed to admin, strip suffix list expanded.
     /// v4: Reject fallback levels for photo scan; clear all old photo-discovered cities.
-    static let currentVersion = 4
+    /// v5: fittedRegion fix (single-anchor cities used 0.01° span → blank tiles); force full re-scan.
+    static let currentVersion = 5
 
     var version: Int = PhotoScanResult.currentVersion
     var cities: [PhotoDiscoveredCity]
@@ -94,14 +95,13 @@ actor PhotoCityDiscoveryService {
         let minPhotosPerCell = 10
         let knownCells = previous?.processedGridCells ?? []
         let newCells = clusters.filter { !knownCells.contains($0.key.key) && $0.value.count >= minPhotosPerCell }
-        let existingCells = clusters.filter { knownCells.contains($0.key.key) }
-
         // 5. Geocode new cells ----------------------------------------------
         let total = newCells.count
         var newDiscovered: [PhotoDiscoveredCity] = []
         var allProcessedCells = knownCells
 
         for (index, (cell, points)) in newCells.enumerated() {
+            guard !Task.isCancelled else { return nil }
             let centroid = computeCentroid(points)
             let location = CLLocation(latitude: centroid.latitude, longitude: centroid.longitude)
 

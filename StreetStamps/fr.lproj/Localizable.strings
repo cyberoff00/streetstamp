@@ -213,6 +213,7 @@
 "finish_pending_memory_finish_now" = "Terminer maintenant";
 "finish_pending_memory_wait_gps" = "Attendre le GPS";
 "finish_upper" = "FINISH";
+"pause_upper" = "PAUSE";
 "finished" = "Terminer";
 "first_city_prompt_desc" = "Générez votre première carte de ville à partir de votre position actuelle (avec une carte de la ville).\nAprès avoir terminé un parcours dans une nouvelle ville, une nouvelle carte de ville sera ajoutée automatiquement.";
 "first_city_prompt_generate" = "Générer";
@@ -906,8 +907,15 @@
 "membership_welcome_bonus_ok" = "Compris";
 "membership_products_unavailable" = "Produits actuellement indisponibles. Réessayez plus tard.";
 "activity_record_title" = "HISTORIQUE D'ACTIVITÉ";
-"activity_ring_help" = "Extérieur : Progression de niveau (voyages ≥1km comptent)\nMilieu : Collection de souvenirs (50 souvenirs par anneau)\nIntérieur : Progression des villes déverrouillées (10 villes par anneau)";
+"activity_ring_help" = "Extérieur : Progression de niveau (voyages ≥1km comptent)\nMilieu : Collection de souvenirs (50 souvenirs par anneau)\nIntérieur : Progression des villes déverrouillées (20 villes par anneau)";
 "activity_ring_next_level_hint" = "Encore %d voyages pour le niveau suivant";
+"activity_rings" = "Anneaux d'activité";
+"ring_outer_title" = "Anneau extérieur";
+"ring_outer_desc" = "Progression de niveau (voyages ≥1 km)";
+"ring_middle_title" = "Anneau central";
+"ring_middle_desc" = "Collection de souvenirs (50 par anneau)";
+"ring_inner_title" = "Anneau intérieur";
+"ring_inner_desc" = "Villes déverrouillées (20 par anneau)";
 "activity_stat_cards" = "CARTES";
 "activity_stat_distance_km" = "KM";
 "activity_stat_journeys" = "PARCOURS";
@@ -918,7 +926,7 @@
 "friend_activity_record_entry" = "HISTORIQUE D'ACTIVITÉ";
 "friend_city_cards" = "CARTES DE VILLE";
 "friend_journey_memories" = "SOUVENIRS DE PARCOURS";
-"friend_collection" = "COLLECTION";
+"friend_collection" = "TRACES";
 "friend_collection_subtitle_format" = "%d villes · %d souvenirs";
 "friend_collection_title_format" = "Collection de %@";
 "friend_postcards" = "CARTE POSTALE";
@@ -1048,6 +1056,9 @@
 "about_us_cyber_dog_content" = "一个朋友打算在装备里画了一只小狗，因为她想到她的小狗安迪以后死了，她散步的时候可以看到地图里自己带着赛博小狗一起，然后还没画她就痛哭一场。很萌，我想要做的就是这种很萌的东西。又有一天我在为生活的一切，为这款app焦虑的时候，骑着车记录着轨迹，我突然觉得没关系，即使最后是自娱自乐也没关系。我为朋友们建造了一个赛博空间，这个空间只有30个人也是另一种伟大的故事。";
 
 // MARK: - Mapbox Trial
+"map_btn_capture" = "PHOTO";
+"map_btn_memory" = "NOTE";
+"map_btn_locate" = "LOCALISER";
 "mapbox_trial_free_hint" = "Essai gratuit 24h";
 "mapbox_trial_remaining_hours" = "%dh %dmin restantes";
 "mapbox_trial_remaining_minutes" = "%dmin restantes";
@@ -1070,3 +1081,5 @@
 "photo_scan_confirm_message" = "Analysez les données de localisation de vos photos pour ajouter les villes visitées.";
 "photo_scan_confirm_start" = "Lancer l'analyse";
 "empty_city_guide_hint" = "Pas encore de cartes. Commencez un trajet ou appuyez en haut à droite pour importer depuis vos photos.";
+"city_empty_title" = "Pas encore de cartes";
+"city_empty_desc" = "Commencez un trajet pour débloquer des villes,\nou importez depuis vos photos en haut à droite";

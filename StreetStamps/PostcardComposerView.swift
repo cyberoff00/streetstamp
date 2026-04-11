@@ -151,15 +151,15 @@ struct PostcardComposerView: View {
             }.first
             guard let anchor, anchor.isValid else { continue }
 
-            if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key, parentRegionKey: city.parentScopeKey),
+            let locale = LanguagePreference.shared.displayLocale
+            if let cached = CityNameTranslationCache.shared.cachedName(cityKey: key, localeID: locale.identifier),
                !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 let resolved = normalizedPrefetchedCityName(for: city, candidateTitle: cached)
                 await MainActor.run { localizedCityNamesByID[key] = resolved }
                 continue
             }
 
-            let loc = CLLocation(latitude: anchor.latitude, longitude: anchor.longitude)
-            if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key, parentRegionKey: city.parentScopeKey),
+            if let title = await CityNameTranslationCache.shared.translate(cityKey: key, anchor: anchor, level: city.identityLevel, locale: locale),
                !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 let resolved = normalizedPrefetchedCityName(for: city, candidateTitle: title)
                 await MainActor.run { localizedCityNamesByID[key] = resolved }
@@ -179,9 +179,7 @@ struct PostcardComposerView: View {
     private var cityRefreshTaskID: String {
         let lang = languagePreference.currentLanguage ?? "sys"
         let citiesPart = cityCache.cachedCities.map { city in
-            let localizedCount = city.localizedDisplayNameByLocale?.count ?? 0
-            let levelCount = city.availableLevelNames?.count ?? 0
-            return "\(city.id)|\(city.name)|\(city.selectedDisplayLevelRaw ?? "")|\(city.parentScopeKey ?? "")|\(city.availableLevelNamesLocaleID ?? "")|\(localizedCount)|\(levelCount)"
+            "\(city.id)|\(city.name)|\(city.parentScopeKey ?? "")"
         }.joined(separator: ";")
         return "\(lang)|\(citiesPart)"
     }

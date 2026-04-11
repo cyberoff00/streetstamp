@@ -11,7 +11,7 @@ final class CachedCityModelTests: XCTestCase {
           "journeyIds": ["journey-1"],
           "explorations": 1,
           "memories": 2,
-          "reservedLevelRaw": "subAdmin",
+          "identityLevelRaw": "locality",
           "reservedParentRegionKey": "Shenzhen|CN",
           "reservedAvailableLevelNames": {
             "locality": "Nanshan District",
@@ -19,9 +19,6 @@ final class CachedCityModelTests: XCTestCase {
             "admin": "Guangdong"
           },
           "reservedAvailableLevelNamesLocaleID": "en",
-          "localizedDisplayNameByLocale": {
-            "en": "Shenzhen"
-          },
           "isTemporary": false
         }
         """.data(using: .utf8)!
@@ -31,12 +28,12 @@ final class CachedCityModelTests: XCTestCase {
         XCTAssertEqual(city.id, "Nanshan District|CN")
         XCTAssertEqual(city.cityKey, "Nanshan District|CN")
         XCTAssertEqual(city.canonicalNameEN, "Nanshan District")
-        XCTAssertEqual(city.selectedDisplayLevelRaw, "subAdmin")
         XCTAssertEqual(city.parentScopeKey, "Shenzhen|CN")
-        XCTAssertEqual(city.availableLevelNames?["subAdmin"], "Shenzhen")
-        XCTAssertEqual(city.availableLevelNamesLocaleID, "en")
-        XCTAssertEqual(city.reservedLevelRaw, "subAdmin")
-        XCTAssertEqual(city.reservedParentRegionKey, "Shenzhen|CN")
+        XCTAssertEqual(city.availableLevelNamesEN?["subAdmin"], "Shenzhen")
+        XCTAssertEqual(city.availableLevelNamesEN?["locality"], "Nanshan District")
+        XCTAssertEqual(city.availableLevelNamesEN?["admin"], "Guangdong")
+        XCTAssertEqual(city.displayTitle, "Nanshan District")
+        XCTAssertEqual(city.identityLevel, .locality)
     }
 
     func test_cachedCityInitializerDefaultsIdentityFieldsFromExistingArguments() {
@@ -50,12 +47,15 @@ final class CachedCityModelTests: XCTestCase {
             boundary: nil,
             anchor: nil,
             thumbnailBasePath: nil,
-            thumbnailRoutePath: nil
+            thumbnailRoutePath: nil,
+            identityLevelRaw: "subAdmin"
         )
 
         XCTAssertEqual(city.cityKey, "Shenzhen|CN")
         XCTAssertEqual(city.canonicalNameEN, "Shenzhen")
-        XCTAssertNil(city.identityLevelRaw)
-        XCTAssertNil(city.selectedDisplayLevelRaw)
+        XCTAssertEqual(city.displayTitle, "Shenzhen")
+        XCTAssertEqual(city.identityLevel, .subAdmin)
+        XCTAssertNil(city.parentScopeKey)
+        XCTAssertNil(city.availableLevelNamesEN)
     }
 }

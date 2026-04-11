@@ -142,7 +142,7 @@ actor CloudKitSyncService {
                 lifelogStore: lifelogStore,
                 forceFull: forceFullLifelogUpload
             )
-            let didUploadSettings = try await uploadSettingsSnapshot()
+            let didUploadSettings = try await uploadSettingsSnapshot(accountID: userID)
 
             guard didUploadJourneys || didUploadLifelog || didUploadSettings
                 || forceFullJourneyUpload || forceFullLifelogUpload else {
@@ -265,12 +265,12 @@ actor CloudKitSyncService {
 
     // MARK: - Settings Restore
 
-    func restoreSettingsSnapshot() async -> Int {
+    func restoreSettingsSnapshot(accountID: String) async -> Int {
         guard AppSettings.isICloudSyncEnabled else { return 0 }
         guard await isAvailable() else { return 0 }
         do {
             try await settingsSync.ensureZone()
-            guard let restored = try await settingsSync.downloadSettings() else { return 0 }
+            guard let restored = try await settingsSync.downloadSettings(accountID: accountID) else { return 0 }
             for (key, value) in restored {
                 if SettingsCloudKitSync.mergeOnRestoreKeys.contains(key) {
                     Self.mergeEconomyFromCloud(remoteValue: value, defaults: defaults)
@@ -355,7 +355,7 @@ actor CloudKitSyncService {
             userID: userID,
             forceFull: forceFull
         )
-        var rawSettingsCount = await restoreSettingsSnapshot()
+        var rawSettingsCount = await restoreSettingsSnapshot(accountID: userID)
         var rawPhotoCount = await restorePhotos(
             localUserID: localUserID ?? userID,
             forceFull: forceFull
@@ -374,7 +374,7 @@ actor CloudKitSyncService {
                 if retry >= 0 { rawLifelogCount = retry }
             }
             if failedDomains.2 {
-                let retry = await restoreSettingsSnapshot()
+                let retry = await restoreSettingsSnapshot(accountID: userID)
                 if retry >= 0 { rawSettingsCount = retry }
             }
             if failedDomains.3 {
@@ -436,7 +436,7 @@ actor CloudKitSyncService {
     private func downloadAll(journeyStore: JourneyStore, lifelogStore: LifelogStore, paths: StoragePath) async {
         _ = await restoreJourneySnapshot(into: journeyStore, userID: paths.userID)
         _ = await restoreLifelogSnapshot(into: lifelogStore, userID: paths.userID)
-        _ = await restoreSettingsSnapshot()
+        _ = await restoreSettingsSnapshot(accountID: paths.userID)
         _ = await restorePhotos(localUserID: paths.userID, forceFull: false)
     }
 
@@ -444,7 +444,7 @@ actor CloudKitSyncService {
         do {
             _ = try await uploadJourneySnapshot(journeyStore: journeyStore, forceFull: true, localUserID: paths.userID)
             _ = try await uploadLifelogSnapshot(lifelogStore: lifelogStore, forceFull: true)
-            _ = try await uploadSettingsSnapshot()
+            _ = try await uploadSettingsSnapshot(accountID: paths.userID)
         } catch {
             print("☁️ uploadAll failed:", error)
         }
@@ -517,7 +517,7 @@ actor CloudKitSyncService {
         return true
     }
 
-    private func uploadSettingsSnapshot() async throws -> Bool {
+    private func uploadSettingsSnapshot(accountID: String) async throws -> Bool {
         try await settingsSync.ensureZone()
         let syncable = SettingsCloudKitSync.syncableKeys
         let snapshot = syncable.reduce(into: [String: Any]()) { partial, key in
@@ -526,7 +526,7 @@ actor CloudKitSyncService {
             }
         }
         guard !snapshot.isEmpty else { return false }
-        try await settingsSync.uploadSettings(snapshot)
+        try await settingsSync.uploadSettings(snapshot, accountID: accountID)
         return true
     }
 

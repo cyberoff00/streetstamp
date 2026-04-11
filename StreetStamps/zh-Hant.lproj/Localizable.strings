@@ -213,6 +213,7 @@
 "finish_pending_memory_finish_now" = "立即結束";
 "finish_pending_memory_wait_gps" = "等待 GPS 恢復";
 "finish_upper" = "結束";
+"pause_upper" = "暫停";
 "finished" = "完成";
 "first_city_prompt_desc" = "根据你当前的位置生成第一张城市卡（包含城市地圖）。\n当你在新城市完成一次旅程后，会自動新增一张城市卡。";
 "first_city_prompt_generate" = "生成";
@@ -920,7 +921,7 @@
 "membership_welcome_bonus_ok" = "知道了";
 "membership_products_unavailable" = "產品暫不可用，請稍後再試。";
 "activity_record_title" = "活動記錄";
-"activity_ring_help" = "外圈：等級進度（完成1公里以上的旅程升級）\n中圈：記憶收集進度（每50個記憶滿環）\n內圈：城市解鎖進度（每10個城市滿環）";
+"activity_ring_help" = "外圈：等級進度（完成1公里以上的旅程升級）\n中圈：記憶收集進度（每50個記憶滿環）\n內圈：城市解鎖進度（每20個城市滿環）";
 "activity_ring_next_level_hint" = "還差 %d 個旅程解鎖下一級";
 "activity_stat_cards" = "卡片";
 "activity_stat_distance_km" = "距離（公里）";
@@ -932,7 +933,7 @@
 "friend_activity_record_entry" = "活動記錄";
 "friend_city_cards" = "城市卡";
 "friend_journey_memories" = "旅程記憶";
-"friend_collection" = "收藏集";
+"friend_collection" = "足跡";
 "friend_collection_subtitle_format" = "%d 城市 · %d 記憶";
 "friend_collection_title_format" = "%@的收藏";
 "friend_postcards" = "明信片";
@@ -1068,6 +1069,9 @@
 "about_us_cyber_dog_content" = "一个朋友打算在装备里画了一只小狗，因为她想到她的小狗安迪以后死了，她散步的时候可以看到地图里自己带着赛博小狗一起，然后还没画她就痛哭一场。很萌，我想要做的就是这种很萌的东西。又有一天我在为生活的一切，为这款app焦虑的时候，骑着车记录着轨迹，我突然觉得没关系，即使最后是自娱自乐也没关系。我为朋友们建造了一个赛博空间，这个空间只有30个人也是另一种伟大的故事。";
 
 // MARK: - Mapbox Trial
+"map_btn_capture" = "拍攝";
+"map_btn_memory" = "記錄";
+"map_btn_locate" = "定位";
 "mapbox_trial_free_hint" = "免費體驗24小時";
 "mapbox_trial_remaining_hours" = "剩餘 %d小時%d分鐘";
 "mapbox_trial_remaining_minutes" = "剩餘 %d分鐘";
@@ -1090,3 +1094,5 @@
 "photo_scan_confirm_message" = "掃描照片中的位置資訊，將未記錄旅程的城市新增為城市卡片。";
 "photo_scan_confirm_start" = "開始掃描";
 "empty_city_guide_hint" = "暫無城市卡，去開啟旅程或點擊右上角從相簿匯入歷史造訪城市";
+"city_empty_title" = "暫無城市卡";
+"city_empty_desc" = "開啟旅程解鎖城市，\n或點擊右上角從相簿匯入";

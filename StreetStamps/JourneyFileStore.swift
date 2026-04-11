@@ -25,6 +25,32 @@ final class JourneysFileStore {
         baseURL.appendingPathComponent("\(id).delta.jsonl")
     }
 
+    /// Lightweight completion marker (~20 bytes). Written synchronously when a journey
+    /// ends; the full JSON write is async. On cold-start, if the full file is missing
+    /// but this marker exists the journey is still treated as completed.
+    private func urlMarker(for id: String) -> URL {
+        baseURL.appendingPathComponent("\(id).done.json")
+    }
+
+    // MARK: - Completion marker
+
+    /// Write a tiny file recording endTime. Called synchronously before the async full-write
+    /// so we never lose the completed state even if the app is killed mid-write.
+    func writeCompletionMarker(for journey: JourneyRoute) throws {
+        guard let endTime = journey.endTime else { return }
+        try ensureBaseDir()
+        let data = try JSONEncoder().encode(["endTime": endTime.timeIntervalSince1970])
+        try data.write(to: urlMarker(for: journey.id), options: .atomic)
+    }
+
+    /// Returns the endTime stored in the completion marker, or nil if the marker does not exist.
+    func completionMarkerEndTime(for id: String) -> Date? {
+        guard let data = try? Data(contentsOf: urlMarker(for: id)),
+              let dict = try? JSONDecoder().decode([String: Double].self, from: data),
+              let ts = dict["endTime"] else { return nil }
+        return Date(timeIntervalSince1970: ts)
+    }
+
     // MARK: - Writes
 
     /// Full snapshot (includes full coordinates). Used when a journey is completed (or edited after completion).
@@ -85,25 +111,29 @@ final class JourneysFileStore {
         }
     }
 
-    /// Finalize a journey by writing the full snapshot and removing any meta/delta leftovers.
+    /// Finalize a journey by writing the full snapshot and removing any meta/delta/marker leftovers.
     func finalizeJourney(_ journey: JourneyRoute) throws {
         try saveFullJourney(journey)
 
         // Best-effort cleanup: if we crash during cleanup, full snapshot is still correct.
-        let meta = urlMeta(for: journey.id)
-        let delta = urlDelta(for: journey.id)
+        let meta   = urlMeta(for: journey.id)
+        let delta  = urlDelta(for: journey.id)
+        let marker = urlMarker(for: journey.id)
         _ = try? fm.removeItem(at: meta)
         _ = try? fm.removeItem(at: delta)
+        _ = try? fm.removeItem(at: marker)
     }
 
     /// Remove all persisted files for a journey id.
     func deleteJourney(id: String) throws {
-        let full = urlFull(for: id)
-        let meta = urlMeta(for: id)
-        let delta = urlDelta(for: id)
-        if fm.fileExists(atPath: full.path) { try fm.removeItem(at: full) }
-        if fm.fileExists(atPath: meta.path) { try fm.removeItem(at: meta) }
-        if fm.fileExists(atPath: delta.path) { try fm.removeItem(at: delta) }
+        let full   = urlFull(for: id)
+        let meta   = urlMeta(for: id)
+        let delta  = urlDelta(for: id)
+        let marker = urlMarker(for: id)
+        if fm.fileExists(atPath: full.path)   { try fm.removeItem(at: full) }
+        if fm.fileExists(atPath: meta.path)   { try fm.removeItem(at: meta) }
+        if fm.fileExists(atPath: delta.path)  { try fm.removeItem(at: delta) }
+        if fm.fileExists(atPath: marker.path) { _ = try? fm.removeItem(at: marker) }
     }
 
     // MARK: - Reads
@@ -210,6 +240,13 @@ final class JourneysFileStore {
             }
         }
 
+        // If this journey has no endTime but a completion marker exists, the async full-write
+        // hasn't landed yet (or was interrupted). Restore endTime from the marker so the
+        // journey is treated as completed rather than ongoing after a cold restart.
+        if out.endTime == nil, let markerTime = completionMarkerEndTime(for: id) {
+            out.endTime = markerTime
+        }
+
         // Ensure thumbnails exist even for older stored journeys.
         out.ensureThumbnail(maxPoints: 280)
         return out
@@ -248,6 +285,7 @@ final class JourneysFileStore {
             let name = file.lastPathComponent
             guard name.hasSuffix(".json"),
                   !name.contains(".meta."),
+                  !name.contains(".done."),
                   !name.hasSuffix(".tmp.json") else { continue }
             let id = String(name.dropLast(5)) // strip ".json"
             if !knownIDs.contains(id) {

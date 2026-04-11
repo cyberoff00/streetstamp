@@ -1,10 +1,28 @@
 import SwiftUI
 
 struct ProfilePostcardEntryCard: View {
+    let systemImage: String
+    let iconColor: Color
+    let iconBackground: Color
     let title: String
     let subtitle: String?
+    let badges: [String]
 
-    private let iconBackground = FigmaTheme.primary.opacity(0.10)
+    init(
+        systemImage: String = "envelope",
+        iconColor: Color = FigmaTheme.primary,
+        iconBackground: Color = FigmaTheme.primary.opacity(0.10),
+        title: String,
+        subtitle: String?,
+        badges: [String] = []
+    ) {
+        self.systemImage = systemImage
+        self.iconColor = iconColor
+        self.iconBackground = iconBackground
+        self.title = title
+        self.subtitle = subtitle
+        self.badges = badges
+    }
 
     var body: some View {
         HStack(spacing: 14) {
@@ -12,18 +30,33 @@ struct ProfilePostcardEntryCard: View {
                 .fill(iconBackground)
                 .frame(width: 46, height: 46)
                 .overlay {
-                    Image(systemName: "envelope")
+                    Image(systemName: systemImage)
                         .font(.system(size: 22, weight: .medium))
-                        .foregroundColor(FigmaTheme.primary)
+                        .foregroundColor(iconColor)
                 }
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: badges.isEmpty ? 3 : 8) {
                 Text(title)
                     .font(.system(size: 15, weight: .bold))
                     .foregroundColor(FigmaTheme.text)
                     .lineLimit(1)
 
-                if let subtitle, !subtitle.isEmpty {
+                if !badges.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(badges, id: \.self) { badge in
+                                Text(badge)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(FigmaTheme.primary)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 4)
+                                    .background(FigmaTheme.primary.opacity(0.10))
+                                    .clipShape(Capsule())
+                            }
+                        }
+                    }
+                    .scrollDisabled(true)
+                } else if let subtitle, !subtitle.isEmpty {
                     Text(subtitle)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(FigmaTheme.subtext)

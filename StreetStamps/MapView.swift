@@ -1219,6 +1219,7 @@ struct MapView: View {
     @State private var showFinishPendingMemoryWarning = false
     @State private var showExitWarning = false
     @State private var showModeSelector = false
+    @State private var showMapLayerPicker = false
     @State private var exitToastMessage: String = ""
 
     let cityName: String
@@ -1265,8 +1266,8 @@ struct MapView: View {
 
     // Camera
     @StateObject private var filmCameraDrop = FilmCameraDropManager()
-    @State private var showFilmCamera = false
     @State private var showDirectCamera = false
+    @State private var cameraInitialPreset: CameraPreset = .plain
     @State private var cameraPreloadedPaths: [String] = []
 
     private func mapCoord(_ c: CLLocationCoordinate2D) -> CLLocationCoordinate2D {
@@ -1291,6 +1292,62 @@ struct MapView: View {
     }
     private enum PersistReason { case coordsTick, memoryAdded, exitToHome, finish, sharingContinue, sharingComplete }
 
+    private func handleMemoryEditorSave(_ draft: JourneyMemory?) {
+        if draft == nil {
+            if let existingID = editingMemory?.id,
+               let idx = journeyRoute.memories.firstIndex(where: { $0.id == existingID }) {
+                let removed = journeyRoute.memories.remove(at: idx)
+                for path in removed.imagePaths {
+                    PhotoStore.delete(named: path, userID: sessionStore.currentUserID)
+                }
+                if journeyRoute.endTime == nil { persistSnapshot(.memoryAdded) }
+            }
+            editingMemory = nil
+            return
+        }
+        guard var m = draft else { return }
+        if let existingID = editingMemory?.id,
+           let idx = journeyRoute.memories.firstIndex(where: { $0.id == existingID }) {
+            m.id = existingID
+            m.timestamp = journeyRoute.memories[idx].timestamp
+            m.coordinate = journeyRoute.memories[idx].coordinate
+            m.type = .memory
+            m.locationStatus = journeyRoute.memories[idx].locationStatus
+            m.locationSource = journeyRoute.memories[idx].locationSource
+            journeyRoute.memories[idx] = m
+            if journeyRoute.endTime == nil { persistSnapshot(.memoryAdded) }
+            editingMemory = m
+            onboardingGuide.advance(.recordMemory)
+        } else {
+            m.id = UUID().uuidString
+            let memoryTimestamp = Date()
+            let locationResolution = JourneyMemoryLocationResolver.resolve(
+                memoryTimestamp: memoryTimestamp,
+                liveLocation: tracking.userLocation,
+                lastKnownLocation: tracking.latestReliableLocationForMemories,
+                recordedLocations: tracking.recordedLocationsForMemories
+            )
+            m.timestamp = memoryTimestamp
+            m.coordinate = locationResolution.coordinate
+            m.type = .memory
+            m.locationStatus = locationResolution.status
+            m.locationSource = locationResolution.source
+            let mid = m.id
+            journeyRoute.memories.append(m)
+            if journeyRoute.endTime == nil { persistSnapshot(.memoryAdded) }
+            if locationResolution.status != .pending {
+                assignCityToMemory(
+                    memoryID: mid,
+                    coordinate: CLLocationCoordinate2D(
+                        latitude: locationResolution.coordinate.0,
+                        longitude: locationResolution.coordinate.1
+                    )
+                )
+            }
+            onboardingGuide.advance(.recordMemory)
+        }
+    }
+
     private func persistSnapshot(_ reason: PersistReason) {
         guard journeyRoute.endTime == nil else {
             journeyStore.flushPersist()
@@ -1308,21 +1365,96 @@ struct MapView: View {
     }
 
     var body: some View {
+        mapRootWithPresentations
+            .onAppear { onMapViewAppear() }
+            .onDisappear { onMapViewDisappear() }
+            .onChange(of: journeyRoute.memories) { _ in groupedMemoriesCache = computeGroupedMemories() }
+            .onChange(of: showMemoryEditor) { visible in
+                if !visible { editingMemory = nil; cameraPreloadedPaths = [] }
+            }
+            .onChange(of: flow.pendingWidgetCaptureSignal) { signal in
+                guard signal > 0 else { return }
+                openCaptureFromWidget()
+            }
+            .onReceive(tracking.$coordVersion) { _ in onCoordsUpdated() }
+            .onReceive(tracking.$userLocation.compactMap { $0 }) { loc in
+                if followUser, !isUserInteractingWithMap { updateCamera(for: loc) }
+                if shouldResolveStartCity() { reverseGeocodeAndSetRouteCity(loc.coordinate) }
+                if journeyRoute.endTime == nil { tryBackfillPendingMemories(with: loc) }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .openAddMemoryFromWidget)) { _ in
+                guard tracking.isTracking && !tracking.isPaused else { return }
+                editingMemory = nil
+                MemoryDraftStore.clear(userID: sessionStore.currentUserID, memoryID: "new")
+                showMemoryEditor = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .openCaptureFromWidget)) { _ in
+                openCaptureFromWidget()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .togglePauseFromWidget)) { _ in
+                guard tracking.isTracking else { return }
+                if tracking.isPaused { tracking.resumeFromPause() } else { tracking.pauseJourney() }
+            }
+    }
+
+    // Alerts, sheets, and covers broken out to keep body type-checkable.
+    private var mapRootWithPresentations: some View {
+        mapRoot
+            .navigationBarBackButtonHidden(true)
+            .animation(.easeInOut(duration: 0.25), value: showExitWarning)
+            .animation(.spring(response: 0.5, dampingFraction: 0.72), value: filmCameraDrop.phase)
+            .animation(.spring(response: 0.3, dampingFraction: 0.78), value: showModeSelector)
+            .alert(L10n.t("finish_confirm_title"), isPresented: $showFinishConfirm) {
+                Button(L10n.t("finish_confirm_finish"), role: .destructive) { finishJourney() }
+                Button(L10n.t("finish_confirm_continue"), role: .cancel) {}
+            } message: {
+                Text(L10n.t("finish_confirm_message"))
+            }
+            .alert(L10n.t("finish_no_city_title"), isPresented: $showFinishNoCityWarning) {
+                Button(L10n.t("finish_no_city_finish_now"), role: .destructive) { finishJourney() }
+                Button(L10n.t("finish_no_city_continue"), role: .cancel) {}
+            } message: {
+                Text(L10n.t("finish_no_city_message"))
+            }
+            .alert(L10n.t("finish_pending_memory_title"), isPresented: $showFinishPendingMemoryWarning) {
+                Button(L10n.t("finish_pending_memory_finish_now"), role: .destructive) { finishJourney() }
+                Button(L10n.t("finish_pending_memory_wait_gps"), role: .cancel) {}
+            } message: {
+                Text(L10n.t("finish_pending_memory_message"))
+            }
+            .fullScreenCover(isPresented: $showDirectCamera) {
+                FilmCameraView(
+                    onCapture: { image in
+                        showDirectCamera = false
+                        cameraInitialPreset = .plain
+                        handleCameraCapture(image)
+                    },
+                    onDismiss: { showDirectCamera = false; cameraInitialPreset = .plain },
+                    availablePresets: availablePresetsForCamera,
+                    initialPreset: cameraInitialPreset
+                )
+                .ignoresSafeArea()
+            }
+            .sheet(isPresented: $showMapLayerPicker) {
+                MapLayerPickerView(isPresented: $showMapLayerPicker)
+                    .presentationDetents([.height(340)])
+                    .presentationDragIndicator(.visible)
+                    .presentationBackground(UITheme.bg)
+            }
+    }
+
+    // Core map + overlay stack, separated to keep body type-checkable.
+    // No .animation modifiers here — they must live in body, after .navigationBarBackButtonHidden,
+    // to avoid leaking into the navigation pop transition.
+    private var mapRoot: some View {
         ZStack {
             mapLayer
             overlayControls
         }
-        .overlay(alignment: .trailing) {
-            rightMiddleButtons
-        }
-
-        .navigationBarBackButtonHidden(true)
+        .overlay(alignment: .trailing) { rightMiddleButtons }
         .overlay(alignment: .top) { exitToast }
-        .animation(.easeInOut(duration: 0.25), value: showExitWarning)
         .overlay {
-            if showModeSelector {
-                modeSelectorOverlay
-            }
+            if showModeSelector { modeSelectorOverlay }
         }
         .overlay {
             if filmCameraDrop.phase == .center {
@@ -1333,146 +1465,23 @@ struct MapView: View {
                     ))
             }
         }
-        .animation(.spring(response: 0.5, dampingFraction: 0.72), value: filmCameraDrop.phase)
         .overlay {
-            if showMemoryEditor {
-                MemoryEditorSheet(
-                    isPresented: $showMemoryEditor,
-                    userID: sessionStore.currentUserID,
-                    existing: editingMemory,
-                    preloadedImagePaths: cameraPreloadedPaths,
-                    journeyOtherPhotosCount: journeyRoute.memories
-                        .filter { $0.id != editingMemory?.id }
-                        .reduce(0) { $0 + $1.imagePaths.count + $1.remoteImageURLs.count },
-                    onSave: { draft in
-                        if draft == nil {
-                            if let existingID = editingMemory?.id,
-                               let idx = journeyRoute.memories.firstIndex(where: { $0.id == existingID }) {
-                                let removed = journeyRoute.memories.remove(at: idx)
-                                for path in removed.imagePaths {
-                                    PhotoStore.delete(named: path, userID: sessionStore.currentUserID)
-                                }
-                                if journeyRoute.endTime == nil { persistSnapshot(.memoryAdded) }
-                            }
-                            editingMemory = nil
-                            return
-                        }
-                        guard var m = draft else { return }
-                        if let existingID = editingMemory?.id,
-                           let idx = journeyRoute.memories.firstIndex(where: { $0.id == existingID }) {
-                            m.id = existingID
-                            m.timestamp = journeyRoute.memories[idx].timestamp
-                            m.coordinate = journeyRoute.memories[idx].coordinate
-                            m.type = .memory
-                            m.locationStatus = journeyRoute.memories[idx].locationStatus
-                            m.locationSource = journeyRoute.memories[idx].locationSource
-                            journeyRoute.memories[idx] = m
-                            if journeyRoute.endTime == nil { persistSnapshot(.memoryAdded) }
-                            editingMemory = m
-                            onboardingGuide.advance(.recordMemory)
-                        } else {
-                            m.id = UUID().uuidString
-                            let memoryTimestamp = Date()
-                            let locationResolution = JourneyMemoryLocationResolver.resolve(
-                                memoryTimestamp: memoryTimestamp,
-                                liveLocation: tracking.userLocation,
-                                lastKnownLocation: tracking.latestReliableLocationForMemories,
-                                recordedLocations: tracking.recordedLocationsForMemories
-                            )
-                            m.timestamp = memoryTimestamp
-                            m.coordinate = locationResolution.coordinate
-                            m.type = .memory
-                            m.locationStatus = locationResolution.status
-                            m.locationSource = locationResolution.source
-                            let mid = m.id
-                            journeyRoute.memories.append(m)
-                            if journeyRoute.endTime == nil { persistSnapshot(.memoryAdded) }
-                            if locationResolution.status != .pending {
-                                assignCityToMemory(
-                                    memoryID: mid,
-                                    coordinate: CLLocationCoordinate2D(
-                                        latitude: locationResolution.coordinate.0,
-                                        longitude: locationResolution.coordinate.1
-                                    )
-                                )
-                            }
-                            onboardingGuide.advance(.recordMemory)
-                        }
-                    }
-                )
-                .transition(.opacity)
-            }
-        }
-        .animation(.spring(response: 0.3, dampingFraction: 0.78), value: showMemoryEditor)
-        .onChange(of: showMemoryEditor) { visible in
-            if !visible {
-                editingMemory = nil
-                cameraPreloadedPaths = []
-            }
-        }
-        .animation(.spring(response: 0.3, dampingFraction: 0.78), value: showModeSelector)
-        .alert(L10n.t("finish_confirm_title"), isPresented: $showFinishConfirm) {
-            Button(L10n.t("finish_confirm_finish"), role: .destructive) { finishJourney() }
-            Button(L10n.t("finish_confirm_continue"), role: .cancel) {}
-        } message: {
-            Text(L10n.t("finish_confirm_message"))
-        }
-        .alert(L10n.t("finish_no_city_title"), isPresented: $showFinishNoCityWarning) {
-            Button(L10n.t("finish_no_city_finish_now"), role: .destructive) { finishJourney() }
-            Button(L10n.t("finish_no_city_continue"), role: .cancel) {}
-        } message: {
-            Text(L10n.t("finish_no_city_message"))
-        }
-        .alert(L10n.t("finish_pending_memory_title"), isPresented: $showFinishPendingMemoryWarning) {
-            Button(L10n.t("finish_pending_memory_finish_now"), role: .destructive) { finishJourney() }
-            Button(L10n.t("finish_pending_memory_wait_gps"), role: .cancel) {}
-        } message: {
-            Text(L10n.t("finish_pending_memory_message"))
-        }
-        .fullScreenCover(isPresented: $showFilmCamera) {
-            FilmCameraView(
-                onCapture: { image in
-                    showFilmCamera = false
-                    handleFilmCameraCapture(image)
-                },
-                onDismiss: {
-                    showFilmCamera = false
-                }
-            )
-            .ignoresSafeArea()
-        }
-        .fullScreenCover(isPresented: $showDirectCamera) {
-            SystemCameraPicker(
-                preferredDevice: .rear,
-                mirrorOnCapture: false,
-                onImage: { image in
-                    showDirectCamera = false
-                    handleDirectCameraCapture(image)
-                },
-                onCancel: {
-                    showDirectCamera = false
-                }
-            )
-            .ignoresSafeArea()
-        }
-        .onAppear {
-            onAppearSetup()
-            filmCameraDrop.dropForJourney(journeyID: journeyRoute.id)
-            groupedMemoriesCache = computeGroupedMemories()
-            if flow.pendingWidgetCaptureSignal > 0 {
-                if WidgetCaptureLaunchPolicy.shouldOpenEditorOnMapAppear(
-                    pendingWidgetCaptureSignal: flow.pendingWidgetCaptureSignal,
-                    isTracking: tracking.isTracking,
-                    isPaused: tracking.isPaused
-                ) {
-                    openCaptureFromWidget()
-                } else {
-                    flow.consumeWidgetCapture()
+            Group {
+                if showMemoryEditor {
+                    MemoryEditorSheet(
+                        isPresented: $showMemoryEditor,
+                        userID: sessionStore.currentUserID,
+                        existing: editingMemory,
+                        preloadedImagePaths: cameraPreloadedPaths,
+                        journeyOtherPhotosCount: journeyRoute.memories
+                            .filter { $0.id != editingMemory?.id }
+                            .reduce(0) { $0 + $1.imagePaths.count + $1.remoteImageURLs.count },
+                        onSave: handleMemoryEditorSave
+                    )
+                    .transition(.opacity)
                 }
             }
-        }
-        .onChange(of: journeyRoute.memories) { _ in
-            groupedMemoriesCache = computeGroupedMemories()
+            .animation(.spring(response: 0.3, dampingFraction: 0.78), value: showMemoryEditor)
         }
         .overlay {
             if let hint = activeMapHint {
@@ -1480,47 +1489,30 @@ struct MapView: View {
                     .animation(.easeOut(duration: 0.3), value: activeMapHint)
             }
         }
-        .onDisappear {
-            mapHintTask?.cancel()
-            tracking.deactivateMapRenderingSurface()
-            filmCameraDrop.reset()
-            if journeyRoute.endTime == nil { flushSnapshot(.exitToHome) }
-        }
-        .onReceive(tracking.$coordVersion) { _ in onCoordsUpdated() }
-        .onReceive(tracking.$userLocation.compactMap { $0 }) { loc in
-            if followUser, !isUserInteractingWithMap {
-                updateCamera(for: loc)
-            }
-            if shouldResolveStartCity() {
-                reverseGeocodeAndSetRouteCity(loc.coordinate)
-            }
-            if journeyRoute.endTime == nil {
-                tryBackfillPendingMemories(with: loc)
-            }
-        }
-        // ✅ 监听从锁屏 Widget 触发的"添加记忆"操作
-        .onReceive(NotificationCenter.default.publisher(for: .openAddMemoryFromWidget)) { _ in
-            guard tracking.isTracking && !tracking.isPaused else { return }
-            editingMemory = nil
-            MemoryDraftStore.clear(userID: sessionStore.currentUserID, memoryID: "new")
-            showMemoryEditor = true
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .openCaptureFromWidget)) { _ in
-            openCaptureFromWidget()
-        }
-        // ✅ 监听从锁屏 Widget 触发的"暂停/继续"操作
-        .onReceive(NotificationCenter.default.publisher(for: .togglePauseFromWidget)) { _ in
-            guard tracking.isTracking else { return }
-            if tracking.isPaused {
-                tracking.resumeFromPause()
+    }
+
+    private func onMapViewAppear() {
+        onAppearSetup()
+        filmCameraDrop.dropForJourney(journeyID: journeyRoute.id)
+        groupedMemoriesCache = computeGroupedMemories()
+        if flow.pendingWidgetCaptureSignal > 0 {
+            if WidgetCaptureLaunchPolicy.shouldOpenEditorOnMapAppear(
+                pendingWidgetCaptureSignal: flow.pendingWidgetCaptureSignal,
+                isTracking: tracking.isTracking,
+                isPaused: tracking.isPaused
+            ) {
+                openCaptureFromWidget()
             } else {
-                tracking.pauseJourney()
+                flow.consumeWidgetCapture()
             }
         }
-        .onChange(of: flow.pendingWidgetCaptureSignal) { signal in
-            guard signal > 0 else { return }
-            openCaptureFromWidget()
-        }
+    }
+
+    private func onMapViewDisappear() {
+        mapHintTask?.cancel()
+        tracking.deactivateMapRenderingSurface()
+        filmCameraDrop.reset()
+        if journeyRoute.endTime == nil { flushSnapshot(.exitToHome) }
     }
 
     // =======================
@@ -1528,127 +1520,25 @@ struct MapView: View {
     // =======================
     private var rightMiddleButtons: some View {
         VStack(spacing: 12) {
-            // Film camera — shown in sidebar after user dismisses center drop
-            if filmCameraDrop.phase == .sidebar {
-                filmCameraButton
-                    .transition(.asymmetric(
-                        insertion: .scale(scale: 0.3).combined(with: .opacity).combined(with: .offset(y: -12)),
-                        removal: .opacity
-                    ))
-            }
-
-            floatingActionButton(icon: "camera", label: "CAPTURE", dark: true) {
+            floatingActionButton(icon: "camera", label: L10n.t("map_btn_capture"), dark: true) {
                 showDirectCamera = true
                 dismissMapHint(.mapMemoryIcon)
             }
 
-            floatingActionButton(icon: "note.text", label: "MEMORY", dark: false) {
+            floatingActionButton(icon: "note.text", label: L10n.t("map_btn_memory"), dark: false) {
                 editingMemory = nil
                 // Clear any stale "new" draft left by a previous debounce race
                 MemoryDraftStore.clear(userID: sessionStore.currentUserID, memoryID: "new")
                 showMemoryEditor = true
             }
 
-            floatingActionButton(icon: "scope", label: "LOCATE", dark: false) {
+            floatingActionButton(icon: "scope", label: L10n.t("map_btn_locate"), dark: false) {
                 followUser = false
                 if let loc = tracking.userLocation { updateCamera(for: loc) }
             }
         }
-        .animation(.spring(response: 0.5, dampingFraction: 0.7), value: filmCameraDrop.phase == .sidebar)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
         .padding(.trailing, 24)
-    }
-
-    private var filmCameraButton: some View {
-        Button {
-            showFilmCamera = true
-            UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-        } label: {
-            VStack(spacing: 6) {
-                // Mini film camera icon
-                ZStack {
-                    // Camera body
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color(red: 0.18, green: 0.18, blue: 0.20),
-                                    Color(red: 0.10, green: 0.10, blue: 0.12)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .frame(width: 48, height: 36)
-
-                    // Viewfinder bump (top center)
-                    RoundedRectangle(cornerRadius: 2.5, style: .continuous)
-                        .fill(Color(red: 0.14, green: 0.14, blue: 0.16))
-                        .frame(width: 16, height: 7)
-                        .offset(y: -21)
-
-                    // Chrome top edge
-                    Rectangle()
-                        .fill(
-                            LinearGradient(
-                                colors: [Color(white: 0.35), Color(white: 0.22)],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .frame(width: 48, height: 1.5)
-                        .offset(y: -17.5)
-
-                    // Lens
-                    Circle()
-                        .fill(Color(red: 0.06, green: 0.06, blue: 0.08))
-                        .frame(width: 20, height: 20)
-                    Circle()
-                        .stroke(Color(white: 0.30), lineWidth: 1)
-                        .frame(width: 20, height: 20)
-                    Circle()
-                        .fill(
-                            RadialGradient(
-                                colors: [
-                                    Color(red: 0.2, green: 0.25, blue: 0.4),
-                                    Color(red: 0.06, green: 0.08, blue: 0.14)
-                                ],
-                                center: .center,
-                                startRadius: 1,
-                                endRadius: 8
-                            )
-                        )
-                        .frame(width: 14, height: 14)
-
-                    // Lens glint
-                    Circle()
-                        .fill(Color.white.opacity(0.25))
-                        .frame(width: 4, height: 4)
-                        .offset(x: -3, y: -3)
-
-                    // Flash window (top-right)
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(Color(red: 0.95, green: 0.80, blue: 0.4).opacity(0.6))
-                        .frame(width: 5, height: 5)
-                        .offset(x: 15, y: -10)
-
-                    // Shutter button (top-right of body)
-                    Circle()
-                        .fill(Color(white: 0.35))
-                        .frame(width: 6, height: 6)
-                        .offset(x: 16, y: -21)
-                }
-                .frame(width: 48, height: 48)
-                .shadow(color: Color.black.opacity(0.25), radius: 10, x: 0, y: 3)
-
-                Text("FILM")
-                    .font(.system(size: 8, weight: .semibold))
-                    .tracking(0.5)
-                    .foregroundColor(Color(red: 1.0, green: 0.85, blue: 0.6).opacity(0.8))
-            }
-            .appFullSurfaceTapTarget(.rectangle)
-        }
-        .buttonStyle(.plain)
     }
 
     /// Film camera center drop overlay — shown when journey starts,
@@ -1738,7 +1628,8 @@ struct MapView: View {
                 // Action buttons
                 VStack(spacing: 12) {
                     Button {
-                        showFilmCamera = true
+                        cameraInitialPreset = .fujiCCD
+                        showDirectCamera = true
                         UIImpactFeedbackGenerator(style: .soft).impactOccurred()
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                             filmCameraDrop.dismissToSidebar()
@@ -1852,6 +1743,7 @@ struct MapView: View {
                 bottomTrackingButtons
             }
         }
+        .ignoresSafeArea(.keyboard)
     }
 
     private var topTrackingHeader: some View {
@@ -1942,14 +1834,13 @@ struct MapView: View {
         flow.consumeWidgetCapture()
     }
 
-    /// Film camera capture → save photo → auto-open MemoryEditor with image pre-loaded
-    private func handleFilmCameraCapture(_ image: UIImage) {
+    /// Camera capture → save photo → auto-open MemoryEditor with image pre-loaded
+    private func handleCameraCapture(_ image: UIImage) {
         guard let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) else { return }
         cameraPreloadedPaths = [filename]
         editingMemory = nil
         MemoryDraftStore.clear(userID: sessionStore.currentUserID, memoryID: "new")
 
-        // Also save to photo library
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
             guard status == .authorized || status == .limited else { return }
             PHPhotoLibrary.shared().performChanges({
@@ -1963,23 +1854,12 @@ struct MapView: View {
         }
     }
 
-    /// Direct camera capture → save photo → auto-open MemoryEditor with image pre-loaded
-    private func handleDirectCameraCapture(_ image: UIImage) {
-        guard let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) else { return }
-        cameraPreloadedPaths = [filename]
-        editingMemory = nil
-        MemoryDraftStore.clear(userID: sessionStore.currentUserID, memoryID: "new")
-
-        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
-            guard status == .authorized || status == .limited else { return }
-            PHPhotoLibrary.shared().performChanges({
-                PHAssetChangeRequest.creationRequestForAsset(from: image)
-            }, completionHandler: nil)
+    private var availablePresetsForCamera: [CameraPreset] {
+        var presets: [CameraPreset] = [.plain]
+        if filmCameraDrop.isFilmCameraUnlocked {
+            presets.append(.fujiCCD)
         }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            self.showMemoryEditor = true
-        }
+        return presets
     }
 
     private var gpsStatusChip: some View {
@@ -2004,43 +1884,110 @@ struct MapView: View {
         .shadow(color: Color.black.opacity(0.08), radius: 8, x: 0, y: 2)
     }
 
+    private var currentLayerStyle: MapLayerStyle {
+        MapLayerStyle(rawValue: layerStyleRaw) ?? .mutedDark
+    }
+
+    private var isDarkMap: Bool { currentLayerStyle.isDarkStyle }
+
+    /// Icon + label color for the two neutral buttons (layer, pause).
+    private var buttonContentColor: Color {
+        isDarkMap ? .white : Color(white: 0.15)
+    }
+
+    /// Circle background for the two neutral buttons.
+    private var buttonCircleBg: Color {
+        isDarkMap ? Color(white: 1.0, opacity: 0.18) : .white
+    }
+
+    /// Label color shown below each circle.
+    private var buttonLabelColor: Color {
+        isDarkMap ? .white.opacity(0.55) : Color(white: 0.15, opacity: 0.45)
+    }
+
     private var bottomTrackingButtons: some View {
-        HStack(spacing: 16) {
-            Button {
+        HStack(spacing: 0) {
+            Spacer()
+
+            // Map layer — left
+            trackingCircleButton(
+                icon: "square.3.layers.3d",
+                label: L10n.t("map_layer_title"),
+                iconColor: buttonContentColor,
+                circleBg: buttonCircleBg,
+                labelColor: buttonLabelColor
+            ) {
+                showMapLayerPicker.toggle()
+            }
+
+            Spacer()
+
+            // Finish — center, red
+            trackingCircleButton(
+                icon: nil,
+                label: L10n.t("finish_upper"),
+                iconColor: .white,
+                circleBg: Color(red: 1.0, green: 0.22, blue: 0.18),
+                labelColor: buttonLabelColor,
+                shadowColor: Color(red: 1.0, green: 0.22, blue: 0.18).opacity(0.40)
+            ) {
+                handleFinishTapped()
+            } customContent: {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.white)
+                    .frame(width: 22, height: 22)
+            }
+
+            Spacer()
+
+            // Pause / Resume — right
+            trackingCircleButton(
+                icon: tracking.isPaused ? "play.fill" : "pause.fill",
+                label: tracking.isPaused ? L10n.t("resume_upper") : L10n.t("pause_upper"),
+                iconColor: buttonContentColor,
+                circleBg: buttonCircleBg,
+                labelColor: buttonLabelColor
+            ) {
                 if tracking.isPaused { tracking.resumeFromPause() }
                 else { tracking.pauseJourney() }
-            } label: {
-                Text(tracking.isPaused ? "RESUME" : "PAUSE")
-                    .font(.system(size: 34 / 2, weight: .bold))
-                    .tracking(-0.85)
-                    .foregroundColor(FigmaTheme.text)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 60)
-                    .background(Color.white.opacity(0.95))
-                    .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-                    .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
             }
-            .buttonStyle(.plain)
 
-            Button { handleFinishTapped() } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 18, weight: .bold))
-                    Text(L10n.t("finish_upper"))
-                        .font(.system(size: 34 / 2, weight: .bold))
-                        .tracking(-0.85)
-                }
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .frame(height: 60)
-                .background(Color.black)
-                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-                .shadow(color: Color.black.opacity(0.30), radius: 14, x: 0, y: 4)
-            }
-            .buttonStyle(.plain)
+            Spacer()
         }
-        .padding(.horizontal, 24)
-        .padding(.bottom, 24)
+        .padding(.bottom, 36)
+    }
+
+    private func trackingCircleButton<Content: View>(
+        icon: String?,
+        label: String,
+        iconColor: Color,
+        circleBg: Color,
+        labelColor: Color,
+        shadowColor: Color = Color.black.opacity(0.14),
+        action: @escaping () -> Void,
+        @ViewBuilder customContent: () -> Content = { EmptyView() }
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Circle()
+                    .fill(circleBg)
+                    .frame(width: 60, height: 60)
+                    .shadow(color: shadowColor, radius: 14, x: 0, y: 5)
+                    .overlay {
+                        if let icon {
+                            Image(systemName: icon)
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundColor(iconColor)
+                        } else {
+                            customContent()
+                        }
+                    }
+                Text(label)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(labelColor)
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     private var gpsStatusLabel: String {
@@ -2059,26 +2006,27 @@ struct MapView: View {
 
     private func floatingActionButton(icon: String, label: String, dark: Bool, highlighted: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(dark ? .white : .black)
-                    .frame(width: 48, height: 48)
-                    .background(dark ? Color.black : Color.white.opacity(0.95))
-                    .clipShape(Circle())
-                    .shadow(color: Color.black.opacity(0.20), radius: 10, x: 0, y: 3)
+            VStack(spacing: 8) {
+                Circle()
+                    .fill(buttonCircleBg)
+                    .frame(width: 60, height: 60)
+                    .shadow(color: Color.black.opacity(0.14), radius: 14, x: 0, y: 5)
+                    .overlay {
+                        Image(systemName: icon)
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundColor(buttonContentColor)
+                    }
                     .overlay {
                         if highlighted {
                             Circle()
-                                .stroke(Color.white, lineWidth: 2.5)
+                                .stroke(buttonContentColor, lineWidth: 2.5)
                         }
                     }
                     .scaleEffect(highlighted ? 1.06 : 1.0)
 
                 Text(label)
-                    .font(.system(size: 8, weight: .semibold))
-                    .tracking(0.5)
-                    .foregroundColor(Color.white.opacity(0.6))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(buttonLabelColor)
             }
             .appFullSurfaceTapTarget(.rectangle)
         }
@@ -2160,7 +2108,8 @@ struct MapView: View {
                 cachedCitiesByKey: cachedCitiesByKey
             )
             Task {
-                if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key, parentRegionKey: parentRegionKey),
+                let locale = LanguagePreference.shared.displayLocale
+                if let cached = CityNameTranslationCache.shared.cachedName(cityKey: key, localeID: locale.identifier),
                    !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     await MainActor.run {
                         journeyRoute.cityName = cached
@@ -2170,8 +2119,10 @@ struct MapView: View {
                 }
 
                 if let start = journeyRoute.startCoordinate, start.isValid {
-                    let loc = CLLocation(latitude: start.latitude, longitude: start.longitude)
-                    if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key, parentRegionKey: parentRegionKey),
+                    let level = cachedCitiesByKey[key]?.identityLevel
+                        ?? CityPlacemarkResolver.inferIdentityLevel(cityKey: key, iso2: journeyRoute.countryISO2)
+                    let anchor = CLLocationCoordinate2D(latitude: start.latitude, longitude: start.longitude)
+                    if let title = await CityNameTranslationCache.shared.translate(cityKey: key, anchor: anchor, level: level, locale: locale),
                        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         await MainActor.run {
                             journeyRoute.cityName = title
@@ -2291,10 +2242,11 @@ struct MapView: View {
                     from: resolvedKey,
                     fallback: canon.cityName
                 )
-                let display = await ReverseGeocodeService.shared.displayTitle(
-                    for: loc,
+                let display = await CityNameTranslationCache.shared.translate(
                     cityKey: resolvedKey,
-                    parentRegionKey: canon.parentRegionKey
+                    anchor: loc.coordinate,
+                    level: canon.level,
+                    locale: LanguagePreference.shared.displayLocale
                 )
                 await MainActor.run {
                     // ✅ Record start city key once; keep cityKey aligned to start city.
@@ -2322,7 +2274,7 @@ struct MapView: View {
 
             let cityKey = await MainActor.run { journeyRoute.cityKey }
             if !cityKey.isEmpty,
-               let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: cityKey),
+               let cached = CityNameTranslationCache.shared.cachedName(cityKey: cityKey, localeID: LanguagePreference.shared.displayLocale.identifier),
                !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 await MainActor.run {
                     journeyRoute.cityName = cached

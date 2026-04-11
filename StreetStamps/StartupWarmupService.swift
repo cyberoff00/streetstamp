@@ -46,13 +46,21 @@ final class StartupWarmupService {
     nonisolated static func selectCities(from cities: [City], limit: Int) -> [City] {
         guard limit > 0 else { return [] }
 
-        return cities
+        // Journey-derived cities: top `limit` by explorations.
+        let journeyCities = cities
+            .filter { !$0.isPhotoDiscovered }
             .sorted { lhs, rhs in
                 if lhs.explorations != rhs.explorations { return lhs.explorations > rhs.explorations }
                 if lhs.memories != rhs.memories { return lhs.memories > rhs.memories }
                 return lhs.name < rhs.name
             }
             .prefix(limit)
-            .map { $0 }
+
+        // Photo-discovered cities have explorations == 0 so they are always cut by the
+        // sorted-prefix pass above. Include all of them unconditionally so they are
+        // warmed in the background at startup instead of relying on on-demand rendering.
+        let photoCities = cities.filter { $0.isPhotoDiscovered }
+
+        return Array(journeyCities) + photoCities
     }
 }

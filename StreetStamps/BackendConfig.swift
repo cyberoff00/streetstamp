@@ -23,6 +23,22 @@ enum BackendConfig {
         return isChineseMainlandDevice ? domesticBaseURL : globalBaseURL
     }
 
+    /// The other endpoint to try when the primary one fails with a network error.
+    static var fallbackBaseURL: String {
+        return isChineseMainlandDevice ? globalBaseURL : domesticBaseURL
+    }
+
+    /// When fallback succeeds, remember it so subsequent requests go there directly.
+    static func activateFallback() {
+        UserDefaults.standard.set(fallbackBaseURL, forKey: baseURLKey)
+        print("[BackendConfig] Activated fallback: \(fallbackBaseURL)")
+    }
+
+    /// Clear remembered URL on launch so it re-evaluates from scratch.
+    static func resetToDefault() {
+        UserDefaults.standard.removeObject(forKey: baseURLKey)
+    }
+
     static var baseURLString: String {
         get {
             let v = UserDefaults.standard.string(forKey: baseURLKey)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

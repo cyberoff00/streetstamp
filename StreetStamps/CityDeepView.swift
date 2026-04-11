@@ -43,11 +43,12 @@ struct CityDeepView: View {
     init(city: City) {
         self.city = city
         _displayTitle = State(initialValue: city.localizedName)
-        _activeCityKey = State(initialValue: city.sourceCityKeys.first ?? city.id)
+        _activeCityKey = State(initialValue: city.id)
     }
 
     @State private var displayTitle: String
     @State private var activeCityKey: String
+    @State private var cachedJourneys: [JourneyRoute] = []
 
     @State private var editingMemory: JourneyMemory? = nil
     @State private var showMemoriesOnMap = true
@@ -59,21 +60,10 @@ struct CityDeepView: View {
 
     private var activeCachedCity: CachedCity? {
         cache.cachedCities.first(where: { $0.id == activeCityKey && !($0.isTemporary ?? false) })
-            ?? sourceCachedCities.first
-    }
-
-    private var sourceCityKeys: [String] {
-        let keys = city.sourceCityKeys.isEmpty ? [city.id] : city.sourceCityKeys
-        return Array(Set(keys)).sorted()
-    }
-
-    private var sourceCachedCities: [CachedCity] {
-        let keySet = Set(sourceCityKeys)
-        return cache.cachedCities.filter { keySet.contains($0.id) && !($0.isTemporary ?? false) }
     }
 
     private var effectiveCountryISO2: String? {
-        activeCachedCity?.countryISO2 ?? sourceCachedCities.first?.countryISO2 ?? city.countryISO2
+        activeCachedCity?.countryISO2 ?? city.countryISO2
     }
 
     private var effectiveAnchor: CLLocationCoordinate2D? {
@@ -92,14 +82,13 @@ struct CityDeepView: View {
     }
 
     private var cityJourneyIDs: Set<String> {
-        let cachedIDs = sourceCachedCities.flatMap(\.journeyIds)
-        if !cachedIDs.isEmpty {
-            return Set(cachedIDs)
+        if let cached = activeCachedCity, !cached.journeyIds.isEmpty {
+            return Set(cached.journeyIds)
         }
         return Set(city.journeys.map { $0.id })
     }
 
-    private var currentJourneys: [JourneyRoute] {
+    private func buildCurrentJourneys() -> [JourneyRoute] {
         let byId = Dictionary(store.journeys.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
         let cachedIDs = Array(cityJourneyIDs)
         if !cachedIDs.isEmpty {
@@ -161,7 +150,7 @@ struct CityDeepView: View {
         let surface: RouteRenderSurface = currentEngine == .mapbox ? .mapbox : .mapKit
         return CityDeepRenderEngine
             .styledSegments(
-                journeys: currentJourneys,
+                journeys: cachedJourneys,
                 countryISO2: effectiveCountryISO2,
                 cityKey: activeCityKey,
                 surface: surface
@@ -193,7 +182,7 @@ struct CityDeepView: View {
 
     /// Coordinates where memories exist, used for glow-dot overlays
     private var memoryDotCoordinates: [CLLocationCoordinate2D] {
-        currentJourneys
+        cachedJourneys
             .flatMap { $0.memories }
             .filter { $0.locationStatus != .pending }
             .map { JourneyMemoryMapCoordinateResolver.mapCoordinate(for: $0, fallbackCountryISO2: effectiveCountryISO2, fallbackCityKey: activeCityKey, engine: currentEngine) }
@@ -207,7 +196,7 @@ struct CityDeepView: View {
     }
 
     private var groupedMemories: [MemoryGroup] {
-        let all = currentJourneys
+        let all = cachedJourneys
             .flatMap { $0.memories }
             .filter { $0.locationStatus != .pending }
         guard !all.isEmpty else { return [] }
@@ -319,7 +308,7 @@ struct CityDeepView: View {
         CityDeepRenderEngine.fittedRegion(
             cityKey: activeCityKey,
             countryISO2: effectiveCountryISO2,
-            journeys: currentJourneys,
+            journeys: cachedJourneys,
             anchorWGS: effectiveAnchor,
             effectiveBoundaryWGS: effectiveBoundaryPolygon,
             fetchedBoundaryWGS: fetchedBoundaryPolygon
@@ -328,8 +317,8 @@ struct CityDeepView: View {
 
     private var statsBadge: some View {
         let isDataLoading = !store.hasLoaded || store.isLoading
-        let journeyCount = currentJourneys.count
-        let memoryCount = currentJourneys.reduce(0) { $0 + $1.memories.count }
+        let journeyCount = cachedJourneys.count
+        let memoryCount = cachedJourneys.reduce(0) { $0 + $1.memories.count }
         return HStack(spacing: 10) {
             if isDataLoading {
                 ProgressView()
@@ -453,14 +442,19 @@ struct CityDeepView: View {
         }
         .onAppear {
             flow.pushSidebarButtonHidden(token: sidebarHideToken)
+            cachedJourneys = buildCurrentJourneys()
         }
         .onDisappear {
             flow.popSidebarButtonHidden(token: sidebarHideToken)
         }
         .onChange(of: activeCityKey) { _ in
             fetchedBoundaryPolygon = nil
+            cachedJourneys = buildCurrentJourneys()
             refreshRegionAndBoundary()
             refreshDisplayTitleFromCardKey()
+        }
+        .onChange(of: store.metadataRevision) { _ in
+            cachedJourneys = buildCurrentJourneys()
         }
         .onChange(of: locale) { _ in
             refreshDisplayTitleFromCardKey()
@@ -468,7 +462,14 @@ struct CityDeepView: View {
         .onChange(of: languagePreference.currentLanguage) { _ in
             refreshDisplayTitleFromCardKey()
         }
-        .onChange(of: currentJourneys.count) { _ in
+        .task(id: activeCityKey) {
+            guard let cached = activeCachedCity else { return }
+            let locale = LanguagePreference.shared.displayLocale
+            if let translated = await CityNameTranslationCache.shared.translateIfNeeded(cached, locale: locale) {
+                displayTitle = translated
+            }
+        }
+        .onChange(of: cachedJourneys.count) { _ in
             refreshRegionAndBoundary()
         }
         .onChange(of: layerStyleRaw) { _ in
@@ -532,7 +533,7 @@ struct CityDeepView: View {
                 cityKey: activeCityKey,
                 cityName: effectiveCityName,
                 countryISO2: effectiveCountryISO2,
-                anchor: effectiveAnchor ?? currentJourneys.first?.allCLCoords.first
+                anchor: effectiveAnchor ?? cachedJourneys.first?.allCLCoords.first
             )
             guard let boundary, !boundary.isEmpty else { return }
             await MainActor.run {

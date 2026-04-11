@@ -25,6 +25,30 @@ final class FilmCameraDropManager: ObservableObject {
 
     @Published private(set) var phase: Phase = .none
 
+    /// Whether the user has ever unlocked the film camera, across all journeys.
+    var isFilmCameraUnlocked: Bool { hasEverUnlocked }
+
+    /// Static helper — returns the presets available for the current user without
+    /// needing a manager instance. Used by PhotoInputFlowView and other callers
+    /// that don't have access to the MapView-owned FilmCameraDropManager.
+    static func availablePresets(defaults: UserDefaults = .standard) -> [CameraPreset] {
+        var presets: [CameraPreset] = [.plain]
+        if isUnlockedForCurrentUser(defaults: defaults) {
+            presets.append(.fujiCCD)
+        }
+        return presets
+    }
+
+    private static func isUnlockedForCurrentUser(defaults: UserDefaults = .standard) -> Bool {
+        let key: String
+        if let userID = UserScopedProfileStateStore.activeLocalProfileID(defaults: defaults) {
+            key = "\(everUnlockedKeyBase).user.\(userID)"
+        } else {
+            key = everUnlockedKeyBase
+        }
+        return defaults.bool(forKey: key)
+    }
+
     private let defaults: UserDefaults
     private let randomRoll: () -> Bool
     private let scheduleCenterDrop: (@escaping @MainActor () -> Void) -> Void

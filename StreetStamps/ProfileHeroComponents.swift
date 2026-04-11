@@ -17,31 +17,7 @@ struct ProfileHeroTopBackdrop<Content: View>: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            LinearGradient(
-                colors: [
-                    FigmaTheme.accent.opacity(0.20),
-                    FigmaTheme.primary.opacity(0.10)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            LinearGradient(
-                colors: [
-                    Color.black.opacity(0.10),
-                    Color.clear
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 128)
-            .frame(maxHeight: .infinity, alignment: .top)
-
-            RoundedRectangle(cornerRadius: max(topCornerRadius, 40), style: .continuous)
-                .fill(FigmaTheme.primary.opacity(0.17))
-                .frame(width: 360, height: 260)
-                .blur(radius: 36)
-                .offset(y: 28)
+            Color(red: 224.0 / 255.0, green: 241.0 / 255.0, blue: 237.0 / 255.0)
 
             content
         }

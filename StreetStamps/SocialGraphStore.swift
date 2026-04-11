@@ -331,6 +331,8 @@ final class SocialGraphStore: ObservableObject {
     func switchUser(_ userID: String) {
         guard activeUserID != userID else { return }
         activeUserID = userID
+        friends = []
+        cachedMyProfile = nil
         hasLoadedFromDisk = true
         Task { [weak self] in
             await self?.loadFromDiskAsync()

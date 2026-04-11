@@ -54,6 +54,7 @@ struct CityStampLibraryView: View {
     @State private var showPublicDetailUnavailableAlert = false
     @State private var activeCityDetail: City? = nil
     @State private var photoScanPulse = false
+    @State private var photoScanTask: Task<Void, Never>?
     @State private var showMembershipGate = false
     @State private var showPhotoScanConfirm = false
 
@@ -190,7 +191,11 @@ struct CityStampLibraryView: View {
         }
         .alert(L10n.t("photo_scan_confirm_title"), isPresented: $showPhotoScanConfirm) {
             Button(L10n.t("photo_scan_confirm_start")) {
-                triggerPhotoDiscoveryScan()
+                if MembershipStore.shared.isPremium {
+                    triggerPhotoDiscoveryScan()
+                } else {
+                    showMembershipGate = true
+                }
             }
             Button(L10n.t("cancel"), role: .cancel) {}
         } message: {
@@ -201,6 +206,11 @@ struct CityStampLibraryView: View {
                 photoScanPulse = true
             } else {
                 photoScanPulse = false
+            }
+            if case .completed = progress {
+                // Force full reload to ensure new photo cities appear immediately
+                vm.load(journeyStore: store, cityCache: cache)
+                digestByCityID = makeDigestMap(from: cache.cachedCities)
             }
         }
     }
@@ -230,7 +240,11 @@ struct CityStampLibraryView: View {
 
                 if !hasEverScannedPhotos || isScanning {
                     Button {
-                        if isScanning { return }
+                        if isScanning {
+                            photoScanTask?.cancel()
+                            photoScanTask = nil
+                            return
+                        }
                         showPhotoScanConfirm = true
                     } label: {
                         ZStack {
@@ -270,27 +284,7 @@ struct CityStampLibraryView: View {
                 spacing: rowGap
             ) {
                 ForEach(Array(displayCities.enumerated()), id: \.element.id) { index, city in
-                    let isLocked = city.isPhotoDiscovered
-                        && !MembershipStore.shared.isPremium
-                        && photoDiscoveredIndex(of: city) >= 3
-
-                    if isLocked {
-                        Button {
-                            showMembershipGate = true
-                        } label: {
-                            CityStampCard(city: city, cardWidth: cardW)
-                                .overlay(
-                                    ZStack {
-                                        Color.white.opacity(0.6)
-                                        Image(systemName: "lock.fill")
-                                            .font(.system(size: 22))
-                                            .foregroundColor(.gray)
-                                    }
-                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                                )
-                        }
-                        .buttonStyle(.plain)
-                    } else if allowCityDetailNavigation {
+                    if allowCityDetailNavigation {
                         Button {
                             activeCityDetail = city
                         } label: {
@@ -356,9 +350,12 @@ struct CityStampLibraryView: View {
             }
 
             if displayCities.isEmpty {
-                emptyCityGuide
-                    .padding(.top, 28)
-                    .padding(.bottom, 60)
+                emptyState(
+                    title: L10n.key("city_empty_title"),
+                    subtitle: L10n.key("city_empty_desc")
+                )
+                .padding(.top, 60)
+                .padding(.bottom, 60)
             }
         }
     }
@@ -418,13 +415,6 @@ struct CityStampLibraryView: View {
         }
     }
 
-    private var emptyCityGuide: some View {
-        Text(L10n.t("empty_city_guide_hint"))
-            .font(.system(size: 13))
-            .foregroundColor(UITheme.subText)
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 32)
-    }
 
     private var isScanning: Bool {
         if case .scanning = cache.photoDiscoveryProgress { return true }
@@ -437,7 +427,7 @@ struct CityStampLibraryView: View {
         cache.photoDiscoveryProgress = .scanning(done: 0, total: 0)
 
         let cityCache = cache
-        Task {
+        photoScanTask = Task {
             let previous = cityCache.loadPreviousPhotoScanResult()
             let result = await PhotoCityDiscoveryService.shared.scan(
                 previousResult: previous,
@@ -449,6 +439,7 @@ struct CityStampLibraryView: View {
             )
 
             photoScanPulse = false
+            photoScanTask = nil
             guard let result else {
                 cityCache.photoDiscoveryProgress = .idle
                 return
@@ -469,11 +460,6 @@ struct CityStampLibraryView: View {
         }
     }
 
-    /// Returns the index of this city among photo-discovered cities only (for membership gating).
-    private func photoDiscoveredIndex(of city: City) -> Int {
-        let photoCities = displayCities.filter { $0.isPhotoDiscovered }
-        return photoCities.firstIndex(where: { $0.id == city.id }) ?? 0
-    }
 }
 
 // =======================================================
@@ -565,7 +551,9 @@ struct CityStampCard: View {
 struct PhotoDiscoveryScanButton: View {
     @ObservedObject var cityCache: CityCache
     @State private var pulse = false
+    @State private var scanTask: Task<Void, Never>?
     @State private var showConfirm = false
+    @State private var showMembershipGate = false
 
     private var isScanning: Bool {
         if case .scanning = cityCache.photoDiscoveryProgress { return true }
@@ -574,7 +562,11 @@ struct PhotoDiscoveryScanButton: View {
 
     var body: some View {
         Button {
-            if isScanning { return }
+            if isScanning {
+                scanTask?.cancel()
+                scanTask = nil
+                return
+            }
             showConfirm = true
         } label: {
             Image(systemName: "sparkle.magnifyingglass")
@@ -596,11 +588,18 @@ struct PhotoDiscoveryScanButton: View {
         }
         .alert(L10n.t("photo_scan_confirm_title"), isPresented: $showConfirm) {
             Button(L10n.t("photo_scan_confirm_start")) {
-                triggerScan()
+                if MembershipStore.shared.isPremium {
+                    triggerScan()
+                } else {
+                    showMembershipGate = true
+                }
             }
             Button(L10n.t("cancel"), role: .cancel) {}
         } message: {
             Text(L10n.t("photo_scan_confirm_message"))
+        }
+        .sheet(isPresented: $showMembershipGate) {
+            MembershipGateView(feature: .photoCityDiscovery)
         }
     }
 
@@ -615,7 +614,7 @@ struct PhotoDiscoveryScanButton: View {
         cityCache.photoDiscoveryProgress = .scanning(done: 0, total: 0)
 
         let cache = cityCache
-        Task {
+        scanTask = Task {
             let previous = cache.loadPreviousPhotoScanResult()
             let result = await PhotoCityDiscoveryService.shared.scan(
                 previousResult: previous,
@@ -627,6 +626,7 @@ struct PhotoDiscoveryScanButton: View {
             )
 
             pulse = false
+            scanTask = nil
             guard let result else {
                 cache.photoDiscoveryProgress = .idle
                 return
@@ -1183,14 +1183,28 @@ final class CityThumbnailLoader: ObservableObject {
             countryISO2: city.countryISO2,
             anchor: city.anchor ?? city.journeys.first?.allCLCoords.first
         )
-        let img: UIImage
-        if let primary = await Self.makeSnapshot(city: city, appearanceRaw: appearanceRaw, fetchedBoundary: fetchedBoundary) {
-            img = primary
-        } else if let fallback = await Self.makeFallbackSnapshot(city: city, appearanceRaw: appearanceRaw) {
-            img = fallback
-        } else {
-            return
+
+        // MKMapSnapshotter can return a valid UIImage with blank tiles when the tile
+        // server rate-limits the request (error == nil, but all tiles are solid color).
+        // Retry up to 3 times with a 3s back-off before giving up.
+        var img: UIImage?
+        for attempt in 0..<3 {
+            if attempt > 0 {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                guard !Task.isCancelled else { return }
+            }
+            let candidate: UIImage?
+            if let primary = await Self.makeSnapshot(city: city, appearanceRaw: appearanceRaw, fetchedBoundary: fetchedBoundary) {
+                candidate = primary
+            } else {
+                candidate = await Self.makeFallbackSnapshot(city: city, appearanceRaw: appearanceRaw)
+            }
+            if let candidate, !Self.isBlankImage(candidate) {
+                img = candidate
+                break
+            }
         }
+        guard let img else { return }
 
         CityImageMemoryCache.shared.set(img, forKey: key)
         renderCacheStore.save(img, forKey: key)
@@ -1291,6 +1305,42 @@ final class CityThumbnailLoader: ObservableObject {
 
         var seen = Set<String>()
         return keys.filter { seen.insert($0).inserted }
+    }
+
+    /// Detect blank/unloaded map snapshots by sampling a few pixels.
+    /// A real map tile always has variation (roads, labels, terrain shading).
+    /// Blank tiles are a single solid color across the entire image.
+    nonisolated private static func isBlankImage(_ image: UIImage) -> Bool {
+        guard let cgImage = image.cgImage else { return true }
+        let w = cgImage.width, h = cgImage.height
+        guard w > 0, h > 0 else { return true }
+
+        // Sample 9 pixels spread across the image.
+        guard let data = cgImage.dataProvider?.data,
+              let ptr = CFDataGetBytePtr(data) else { return true }
+        let bpp = cgImage.bitsPerPixel / 8
+        guard bpp >= 3 else { return false }
+        let bpr = cgImage.bytesPerRow
+
+        func pixel(x: Int, y: Int) -> (UInt8, UInt8, UInt8) {
+            let offset = y * bpr + x * bpp
+            return (ptr[offset], ptr[offset + 1], ptr[offset + 2])
+        }
+
+        let ref = pixel(x: 0, y: 0)
+        let samples = [
+            (w / 4, h / 4), (w / 2, h / 4), (3 * w / 4, h / 4),
+            (w / 4, h / 2), (w / 2, h / 2), (3 * w / 4, h / 2),
+            (w / 4, 3 * h / 4), (w / 2, 3 * h / 4),
+        ]
+        for (x, y) in samples {
+            let p = pixel(x: min(x, w - 1), y: min(y, h - 1))
+            let dr = abs(Int(p.0) - Int(ref.0))
+            let dg = abs(Int(p.1) - Int(ref.1))
+            let db = abs(Int(p.2) - Int(ref.2))
+            if dr + dg + db > 12 { return false }
+        }
+        return true
     }
 
     nonisolated private static func mapType(for appearanceRaw: String) -> MKMapType {
@@ -1435,7 +1485,7 @@ final class CityThumbnailLoader: ObservableObject {
         if style.engine == .mapbox {
             return await makeMapboxSnapshot(city: city, style: style, fetchedBoundary: fetchedBoundary)
         }
-        return makeMapKitSnapshot(city: city, appearanceRaw: appearanceRaw, fetchedBoundary: fetchedBoundary)
+        return await makeMapKitSnapshot(city: city, appearanceRaw: appearanceRaw, fetchedBoundary: fetchedBoundary)
     }
 
     /// Fallback: forward-geocode the city name from the city key to get a center,
@@ -1478,15 +1528,11 @@ final class CityThumbnailLoader: ObservableObject {
         options.showsBuildings = false
         options.showsPointsOfInterest = false
 
-        let sem = DispatchSemaphore(value: 0)
-        var out: UIImage?
-        MKMapSnapshotter(options: options).start(with: .global(qos: .userInitiated)) { snapshot, _ in
-            defer { sem.signal() }
-            guard let snapshot else { return }
-            out = snapshot.image
+        return await withCheckedContinuation { cont in
+            MKMapSnapshotter(options: options).start(with: .global(qos: .userInitiated)) { snapshot, _ in
+                cont.resume(returning: snapshot?.image)
+            }
         }
-        _ = sem.wait(timeout: .now() + 15)
-        return out
     }
 
     // MARK: - MapKit snapshot (Apple Maps styles)
@@ -1495,7 +1541,7 @@ final class CityThumbnailLoader: ObservableObject {
         city: City,
         appearanceRaw: String,
         fetchedBoundary: [CLLocationCoordinate2D]?
-    ) -> UIImage? {
+    ) async -> UIImage? {
         guard let rawRegion = CityDeepRenderEngine.fittedRegion(
             cityKey: city.id,
             countryISO2: city.countryISO2,
@@ -1525,18 +1571,20 @@ final class CityThumbnailLoader: ObservableObject {
         options.showsBuildings = false
         options.showsPointsOfInterest = false
 
-        let sem = DispatchSemaphore(value: 0)
-        var out: UIImage?
-        MKMapSnapshotter(options: options).start(with: .global(qos: .userInitiated)) { snapshot, _ in
-            defer { sem.signal() }
-            guard let snapshot else { return }
-            out = UIGraphicsImageRenderer(size: options.size).image { renderer in
-                snapshot.image.draw(at: .zero)
-                CityDeepRenderEngine.drawStyledSegments(styledSegments, snapshot: snapshot, context: renderer.cgContext, appearanceRaw: appearanceRaw)
+        let snapshotSize = options.size
+        return await withCheckedContinuation { cont in
+            MKMapSnapshotter(options: options).start(with: .global(qos: .userInitiated)) { snapshot, _ in
+                guard let snapshot else {
+                    cont.resume(returning: nil)
+                    return
+                }
+                let img = UIGraphicsImageRenderer(size: snapshotSize).image { renderer in
+                    snapshot.image.draw(at: .zero)
+                    CityDeepRenderEngine.drawStyledSegments(styledSegments, snapshot: snapshot, context: renderer.cgContext, appearanceRaw: appearanceRaw)
+                }
+                cont.resume(returning: img)
             }
         }
-        _ = sem.wait(timeout: .now() + 15)
-        return out
     }
 
     // MARK: - Mapbox snapshot (Mapbox styles)

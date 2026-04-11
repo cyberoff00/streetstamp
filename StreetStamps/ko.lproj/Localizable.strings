@@ -213,6 +213,7 @@
 "finish_pending_memory_finish_now" = "바로 종료";
 "finish_pending_memory_wait_gps" = "GPS 복구 대기";
 "finish_upper" = "FINISH";
+"pause_upper" = "일시정지";
 "finished" = "완료";
 "first_city_prompt_desc" = "현재 위치를 기반으로 첫 도시 카드(도시 지도 포함)를 생성합니다.\n새 도시에서 여정을 한 번 완료하면 도시 카드가 자동으로 추가됩니다.";
 "first_city_prompt_generate" = "생성";
@@ -906,7 +907,7 @@
 "membership_welcome_bonus_ok" = "확인";
 "membership_products_unavailable" = "현재 상품을 이용할 수 없습니다. 잠시 후 다시 시도해 주세요.";
 "activity_record_title" = "활동 기록";
-"activity_ring_help" = "바깥: 레벨 진행도 (1km 이상 여정 카운트)\n중간: 기억 수집 (50개당 1바퀴)\n안쪽: 도시 해금 진행도 (10개당 1바퀴)";
+"activity_ring_help" = "바깥: 레벨 진행도 (1km 이상 여정 카운트)\n중간: 기억 수집 (50개당 1바퀴)\n안쪽: 도시 해금 진행도 (20개당 1바퀴)";
 "activity_ring_next_level_hint" = "다음 레벨까지 여정 %d개 남음";
 "activity_stat_cards" = "카드";
 "activity_stat_distance_km" = "거리 (km)";
@@ -918,7 +919,7 @@
 "friend_activity_record_entry" = "활동 기록";
 "friend_city_cards" = "도시 카드";
 "friend_journey_memories" = "여정 기록";
-"friend_collection" = "컬렉션";
+"friend_collection" = "발자취";
 "friend_collection_subtitle_format" = "%d 도시 · %d 기억";
 "friend_collection_title_format" = "%@의 컬렉션";
 "friend_postcards" = "엽서";
@@ -1048,6 +1049,9 @@
 "about_us_cyber_dog_content" = "一个朋友打算在装备里画了一只小狗，因为她想到她的小狗安迪以后死了，她散步的时候可以看到地图里自己带着赛博小狗一起，然后还没画她就痛哭一场。很萌，我想要做的就是这种很萌的东西。又有一天我在为生活的一切，为这款app焦虑的时候，骑着车记录着轨迹，我突然觉得没关系，即使最后是自娱自乐也没关系。我为朋友们建造了一个赛博空间，这个空间只有30个人也是另一种伟大的故事。";
 
 // MARK: - Mapbox Trial
+"map_btn_capture" = "촬영";
+"map_btn_memory" = "메모";
+"map_btn_locate" = "위치";
 "mapbox_trial_free_hint" = "24시간 무료 체험";
 "mapbox_trial_remaining_hours" = "%d시간 %d분 남음";
 "mapbox_trial_remaining_minutes" = "%d분 남음";
@@ -1070,3 +1074,5 @@
 "photo_scan_confirm_message" = "사진의 위치 정보를 스캔하여 방문한 도시를 시티 카드로 추가합니다.";
 "photo_scan_confirm_start" = "스캔 시작";
 "empty_city_guide_hint" = "아직 시티 카드가 없습니다. 여행을 시작하거나 오른쪽 상단 버튼으로 사진에서 가져오세요.";
+"city_empty_title" = "아직 시티 카드가 없습니다";
+"city_empty_desc" = "여행을 시작하여 도시를 잠금 해제하거나,\n오른쪽 상단에서 사진으로 가져오세요";

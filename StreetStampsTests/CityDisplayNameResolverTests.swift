@@ -14,33 +14,6 @@ final class CityDisplayNameResolverTests: XCTestCase {
         XCTAssertEqual(LanguagePreference.shared.displayLocale.identifier, "en")
     }
 
-    func test_cityLocalizedNameUsesAppDisplayLanguageInsteadOfSystemLocale() {
-        LanguagePreference.shared.currentLanguage = "en"
-        let city = City(
-            displayName: nil,
-            id: "Taipei|TW",
-            name: "Taipei",
-            countryISO2: "TW",
-            journeys: [],
-            boundaryPolygon: nil,
-            anchor: nil,
-            explorations: 1,
-            memories: 0,
-            thumbnailBasePath: nil,
-            thumbnailRoutePath: nil,
-            reservedLevelRaw: nil,
-            reservedParentRegionKey: nil,
-            reservedAvailableLevelNames: nil,
-            reservedAvailableLevelNamesLocaleID: nil,
-            localizedDisplayNameByLocale: [
-                "en": "Taipei",
-                "zh-Hans": "台北"
-            ]
-        )
-
-        XCTAssertEqual(city.localizedName, "Taipei")
-    }
-
     func test_cityLevelReconcilePolicy_skipsFreshProfileWhenCachedOptionsExist() {
         XCTAssertFalse(
             CityLevelReconcilePolicy.shouldFetchFreshProfile(
@@ -157,7 +130,7 @@ final class CityDisplayNameResolverTests: XCTestCase {
         XCTAssertEqual(title, "香港")
     }
 
-    func test_displayTitleIgnoresAsciiOnlyLocalizedCacheForChineseWhenLocalizedLevelsExist() {
+    func test_displayTitleUsesLevelNamesOverFallbackForChinese() {
         let title = CityPlacemarkResolver.displayTitle(
             cityKey: "Shanghai|CN",
             iso2: "CN",
@@ -166,14 +139,13 @@ final class CityDisplayNameResolverTests: XCTestCase {
                 .admin: "上海",
                 .locality: "上海"
             ],
-            localizedDisplayNameByLocale: ["zh_CN": "Shanghai"],
             locale: Locale(identifier: "zh_CN")
         )
 
         XCTAssertEqual(title, "上海")
     }
 
-    func test_displayTitleUsesPreferredLevelLocalizedNameWhenLocalizedCacheIsMismatched() {
+    func test_displayTitleUsesPreferredLevelLocalizedName() {
         let parentRegionKey = "resolver-test-jeju-\(UUID().uuidString)"
         CityLevelPreferenceStore.shared.setPreferredLevel(.admin, for: parentRegionKey)
 
@@ -187,14 +159,13 @@ final class CityDisplayNameResolverTests: XCTestCase {
             ],
             parentRegionKey: parentRegionKey,
             preferredLevel: .admin,
-            localizedDisplayNameByLocale: ["zh_CN": "Jeju Province"],
             locale: Locale(identifier: "zh_CN")
         )
 
         XCTAssertEqual(title, "济州特别自治道")
     }
 
-    func test_displayTitleSelectedLevelOverridesLocalizedCacheTitle() {
+    func test_displayTitleSelectedLevelOverridesFallback() {
         let parentRegionKey = "resolver-test-level-override-\(UUID().uuidString)"
         CityLevelPreferenceStore.shared.setPreferredLevel(.admin, for: parentRegionKey)
 
@@ -208,7 +179,6 @@ final class CityDisplayNameResolverTests: XCTestCase {
             ],
             parentRegionKey: parentRegionKey,
             preferredLevel: .admin,
-            localizedDisplayNameByLocale: ["zh-Hans": "济州市"],
             locale: Locale(identifier: "zh-Hans")
         )
 
@@ -230,80 +200,15 @@ final class CityDisplayNameResolverTests: XCTestCase {
         XCTAssertEqual(title, "上海")
     }
 
-    func test_displayTitleCanonicalizesRegionStyledCityKeyBeforeUsingLocalizedCache() {
+    func test_displayTitleCanonicalizesRegionStyledFallbackTitle() {
         let title = CityPlacemarkResolver.displayTitle(
             cityKey: "Taiwan|TW",
             iso2: "TW",
             fallbackTitle: "Taiwan",
-            localizedDisplayNameByLocale: ["zh_CN": "信义乡"],
             locale: Locale(identifier: "zh_CN")
         )
 
         XCTAssertEqual(title, "台湾")
-    }
-
-    func test_cityLibraryPrefetchNormalizesEnglishCandidateIntoChineseHierarchyTitle() {
-        let city = City(
-            displayName: "上海",
-            id: "Shanghai|CN",
-            name: "Shanghai",
-            countryISO2: "CN",
-            journeys: [],
-            boundaryPolygon: nil,
-            anchor: nil,
-            explorations: 1,
-            memories: 0,
-            thumbnailBasePath: nil,
-            thumbnailRoutePath: nil,
-            reservedLevelRaw: CityPlacemarkResolver.CardLevel.admin.rawValue,
-            reservedParentRegionKey: "Shanghai|CN",
-            reservedAvailableLevelNames: [
-                CityPlacemarkResolver.CardLevel.admin.rawValue: "上海",
-                CityPlacemarkResolver.CardLevel.locality.rawValue: "上海"
-            ],
-            reservedAvailableLevelNamesLocaleID: "zh_CN",
-            localizedDisplayNameByLocale: ["zh_CN": "Shanghai"]
-        )
-
-        let resolved = CityLibraryVM.normalizedPrefetchedDisplayTitle(
-            for: city,
-            candidateLocalizedTitle: "Shanghai",
-            locale: Locale(identifier: "zh_CN")
-        )
-
-        XCTAssertEqual(resolved, "上海")
-    }
-
-    func test_cityLibraryPrefetchNormalizesEnglishCandidateIntoChineseAdminTitleForJeju() {
-        let city = City(
-            displayName: "济州特别自治道",
-            id: "Jeju Province|KR",
-            name: "Jeju Province",
-            countryISO2: "KR",
-            journeys: [],
-            boundaryPolygon: nil,
-            anchor: nil,
-            explorations: 1,
-            memories: 0,
-            thumbnailBasePath: nil,
-            thumbnailRoutePath: nil,
-            reservedLevelRaw: CityPlacemarkResolver.CardLevel.admin.rawValue,
-            reservedParentRegionKey: "Jeju Province|KR",
-            reservedAvailableLevelNames: [
-                CityPlacemarkResolver.CardLevel.admin.rawValue: "济州特别自治道",
-                CityPlacemarkResolver.CardLevel.locality.rawValue: "济州市"
-            ],
-            reservedAvailableLevelNamesLocaleID: "zh_CN",
-            localizedDisplayNameByLocale: ["zh_CN": "Jeju Province"]
-        )
-
-        let resolved = CityLibraryVM.normalizedPrefetchedDisplayTitle(
-            for: city,
-            candidateLocalizedTitle: "Jeju Province",
-            locale: Locale(identifier: "zh_CN")
-        )
-
-        XCTAssertEqual(resolved, "济州特别自治道")
     }
 
     func test_stableCityKeyUsesCanonicalLevelNameInsteadOfLocalizedDisplayName() {
@@ -544,9 +449,8 @@ final class CityDisplayNameResolverTests: XCTestCase {
             anchor: nil,
             thumbnailBasePath: nil,
             thumbnailRoutePath: nil,
-            reservedLevelRaw: CityPlacemarkResolver.CardLevel.locality.rawValue,
-            reservedParentRegionKey: parentRegionKey,
-            reservedAvailableLevelNames: [
+            parentScopeKey: parentRegionKey,
+            availableLevelNamesEN: [
                 CityPlacemarkResolver.CardLevel.locality.rawValue: "Xinyi Township",
                 CityPlacemarkResolver.CardLevel.admin.rawValue: "Taiwan"
             ],
@@ -560,8 +464,166 @@ final class CityDisplayNameResolverTests: XCTestCase {
             locale: Locale(identifier: "en_US")
         )
 
-        XCTAssertEqual(title, "Taiwan")
+        // displayTitle now returns canonicalNameEN directly; locale hierarchy is handled at render time
+        XCTAssertEqual(title, "Xinyi Township")
     }
+
+    // MARK: - Level inference & admin suffix tests (locale-independent)
+
+    func test_inferIdentityLevel_tokyoIsAdmin() {
+        XCTAssertEqual(
+            CityPlacemarkResolver.inferIdentityLevel(cityKey: "Tokyo|JP", iso2: "JP"),
+            .admin
+        )
+    }
+
+    func test_inferIdentityLevel_seoulIsAdmin() {
+        XCTAssertEqual(
+            CityPlacemarkResolver.inferIdentityLevel(cityKey: "Seoul|KR", iso2: "KR"),
+            .admin
+        )
+    }
+
+    func test_inferIdentityLevel_busanIsAdmin() {
+        XCTAssertEqual(
+            CityPlacemarkResolver.inferIdentityLevel(cityKey: "Busan|KR", iso2: "KR"),
+            .admin
+        )
+    }
+
+    func test_inferIdentityLevel_bangkokIsAdmin() {
+        XCTAssertEqual(
+            CityPlacemarkResolver.inferIdentityLevel(cityKey: "Bangkok|TH", iso2: "TH"),
+            .admin
+        )
+    }
+
+    func test_inferIdentityLevel_shanghaiIsAdmin() {
+        XCTAssertEqual(
+            CityPlacemarkResolver.inferIdentityLevel(cityKey: "Shanghai|CN", iso2: "CN"),
+            .admin
+        )
+    }
+
+    func test_inferIdentityLevel_beijingIsAdmin() {
+        XCTAssertEqual(
+            CityPlacemarkResolver.inferIdentityLevel(cityKey: "Beijing|CN", iso2: "CN"),
+            .admin
+        )
+    }
+
+    func test_inferIdentityLevel_shenzhenIsSubAdmin() {
+        XCTAssertEqual(
+            CityPlacemarkResolver.inferIdentityLevel(cityKey: "Shenzhen|CN", iso2: "CN"),
+            .subAdmin
+        )
+    }
+
+    func test_inferIdentityLevel_xiamenIsSubAdmin() {
+        XCTAssertEqual(
+            CityPlacemarkResolver.inferIdentityLevel(cityKey: "Xiamen|CN", iso2: "CN"),
+            .subAdmin
+        )
+    }
+
+    func test_isChineseMunicipality_matchesStrippedNames() {
+        // After stripAdminSuffix removes "市", "北京市" → "北京"
+        XCTAssertTrue(CityPlacemarkResolver.isChineseMunicipality("北京"))
+        XCTAssertTrue(CityPlacemarkResolver.isChineseMunicipality("上海"))
+        XCTAssertTrue(CityPlacemarkResolver.isChineseMunicipality("天津"))
+        XCTAssertTrue(CityPlacemarkResolver.isChineseMunicipality("重庆"))
+        XCTAssertTrue(CityPlacemarkResolver.isChineseMunicipality("重慶"))
+    }
+
+    func test_isChineseMunicipality_matchesWithSuffix() {
+        XCTAssertTrue(CityPlacemarkResolver.isChineseMunicipality("北京市"))
+        XCTAssertTrue(CityPlacemarkResolver.isChineseMunicipality("上海市"))
+    }
+
+    func test_isChineseMunicipality_rejectsProvinces() {
+        XCTAssertFalse(CityPlacemarkResolver.isChineseMunicipality("广东"))
+        XCTAssertFalse(CityPlacemarkResolver.isChineseMunicipality("福建"))
+        XCTAssertFalse(CityPlacemarkResolver.isChineseMunicipality("浙江"))
+    }
+
+    func test_isChineseMunicipality_matchesEnglish() {
+        XCTAssertTrue(CityPlacemarkResolver.isChineseMunicipality("Beijing"))
+        XCTAssertTrue(CityPlacemarkResolver.isChineseMunicipality("Shanghai"))
+        XCTAssertTrue(CityPlacemarkResolver.isChineseMunicipality("Chongqing"))
+    }
+
+    func test_displayTitle_xiamenFallsBackToEnglishNotProvince() {
+        // Simulates: no availableLevelNames — should fall back to "Xiamen", never "Fujian"
+        LanguagePreference.shared.currentLanguage = "zh-Hans"
+        let title = CityPlacemarkResolver.displayTitle(
+            cityKey: "Xiamen|CN",
+            iso2: "CN",
+            fallbackTitle: "Xiamen",
+            locale: Locale(identifier: "zh-Hans")
+        )
+        // Should be "Xiamen" (English fallback), not "Fujian"
+        XCTAssertFalse(title.contains("福建"), "Should never show province name for a subAdmin city")
+        XCTAssertFalse(title.contains("Fujian"), "Should never show province name for a subAdmin city")
+    }
+
+    func test_displayTitle_tokyoWithAdminLevelShowsCorrectName() {
+        // When availableLevelNames has Chinese admin name, should use it
+        let title = CityPlacemarkResolver.displayTitle(
+            cityKey: "Tokyo|JP",
+            iso2: "JP",
+            fallbackTitle: "Tokyo",
+            availableLevelNames: [.admin: "东京", .locality: "文京"],
+            preferredLevel: .admin,
+            locale: Locale(identifier: "zh-Hans")
+        )
+        XCTAssertEqual(title, "东京")
+    }
+
+    func test_displayTitle_tokyoNeverShowsBunkyo() {
+        // Even without availableLevelNames, should never show 文京区
+        let title = CityPlacemarkResolver.displayTitle(
+            cityKey: "Tokyo|JP",
+            iso2: "JP",
+            fallbackTitle: "Tokyo",
+            locale: Locale(identifier: "zh-Hans")
+        )
+        XCTAssertFalse(title.contains("文京"), "Should never show locality name for an admin-level city")
+    }
+
+    // MARK: - Script detection tests
+
+    func test_isLikelyWrongScript_thaiForChineseLocale() {
+        XCTAssertTrue(
+            ReverseGeocodeService.isLikelyWrongScript("กรุงเทพมหานคร", for: Locale(identifier: "zh-Hans"))
+        )
+    }
+
+    func test_isLikelyWrongScript_chineseForChineseLocale() {
+        XCTAssertFalse(
+            ReverseGeocodeService.isLikelyWrongScript("东京", for: Locale(identifier: "zh-Hans"))
+        )
+    }
+
+    func test_isLikelyWrongScript_englishForChineseLocale() {
+        XCTAssertFalse(
+            ReverseGeocodeService.isLikelyWrongScript("Tokyo", for: Locale(identifier: "zh-Hans"))
+        )
+    }
+
+    func test_isLikelyWrongScript_latinForEnglishLocaleIsAccepted() {
+        // Vietnamese uses Latin script — cannot be detected as "wrong" for English locale
+        XCTAssertFalse(
+            ReverseGeocodeService.isLikelyWrongScript("Hà Nội", for: Locale(identifier: "en"))
+        )
+    }
+
+    func test_isLikelyWrongScript_arabicForEnglishLocale() {
+        XCTAssertTrue(
+            ReverseGeocodeService.isLikelyWrongScript("الرياض", for: Locale(identifier: "en"))
+        )
+    }
+
+    // MARK: - Existing tests
 
     func test_journeyPresentationExposesParentRegionKeyFromCachedCity() {
         let journey = JourneyRoute(
@@ -588,9 +650,7 @@ final class CityDisplayNameResolverTests: XCTestCase {
             anchor: nil,
             thumbnailBasePath: nil,
             thumbnailRoutePath: nil,
-            reservedLevelRaw: nil,
-            reservedParentRegionKey: "Taiwan Province|TW",
-            reservedAvailableLevelNames: nil,
+            parentScopeKey: "Taiwan Province|TW",
             isTemporary: false
         )
 

@@ -232,23 +232,15 @@ enum TrackRenderAdapter {
             }
         }
 
-        let nonPassiveFiltered = segments
-            .filter { $0.sourceType != .passive && $0.coordinates.count >= 2 }
-        let nonPassiveCoords = globeDownsample(nonPassiveFiltered.map(\.coordinates))
-        let nonPassiveRoutes = nonPassiveCoords.enumerated().map { index, coords in
-            makeGlobeJourney(
-                id: "track.tile.segment.journey.\(index)",
-                lifelogName: lifelogName,
-                countryISO2: countryISO2,
-                coordinates: coords
-            )
-        }
-
-        let passiveCoordArrays: [[CoordinateCodable]] = validCountryRuns.map { run in
+        // Country runs already include archived journey coordinates, so
+        // combining them with non-passive tile segments would duplicate
+        // journey routes (once detailed, once RDP-simplified → straight line).
+        // Use only country runs when this path is active.
+        let allCoordArrays: [[CoordinateCodable]] = validCountryRuns.map { run in
             run.coordsWGS84.map { CoordinateCodable(lat: $0.latitude, lon: $0.longitude) }
         }
-        let passiveCapped = globeDownsample(passiveCoordArrays)
-        let passiveRoutes = passiveCapped.enumerated().map { index, coords in
+        let capped = globeDownsample(allCoordArrays)
+        return capped.enumerated().map { index, coords in
             makeGlobeJourney(
                 id: "track.tile.segment.passive.\(index)",
                 lifelogName: lifelogName,
@@ -256,30 +248,67 @@ enum TrackRenderAdapter {
                 coordinates: coords
             )
         }
-
-        return nonPassiveRoutes + passiveRoutes
     }
 
     /// Downsamples coordinate arrays so total points stay under globeMaxTotalCoords.
-    /// Each array keeps at least 2 points (start + end). Evenly thins when over budget.
+    /// Uses Ramer-Douglas-Peucker to preserve route shape instead of uniform sampling.
     private static func globeDownsample(_ arrays: [[CoordinateCodable]]) -> [[CoordinateCodable]] {
         let total = arrays.reduce(0) { $0 + $1.count }
         guard total > globeMaxTotalCoords else { return arrays }
-        // Every-N sampling: keep 1 in every `step` points.
-        let step = max(2, Int(ceil(Double(total) / Double(globeMaxTotalCoords))))
-        return arrays.map { coords in
-            guard coords.count > step else { return coords }
-            var out: [CoordinateCodable] = []
-            out.reserveCapacity(coords.count / step + 2)
-            for i in stride(from: 0, to: coords.count, by: step) {
-                out.append(coords[i])
-            }
-            // Always keep the last point for continuity
-            if let last = coords.last, out.last != last {
-                out.append(last)
-            }
-            return out
+
+        // Iteratively increase epsilon until the total point count fits the budget.
+        // Start with a small epsilon (in degrees, ~0.001° ≈ 111m) and double each round.
+        var epsilon = 0.001
+        var result = arrays
+        for _ in 0..<20 {
+            result = arrays.map { rdpSimplify($0, epsilon: epsilon) }
+            let count = result.reduce(0) { $0 + $1.count }
+            if count <= globeMaxTotalCoords { break }
+            epsilon *= 1.8
         }
+        return result
+    }
+
+    /// Ramer-Douglas-Peucker line simplification. Epsilon is in degrees.
+    private static func rdpSimplify(_ coords: [CoordinateCodable], epsilon: Double) -> [CoordinateCodable] {
+        guard coords.count > 2 else { return coords }
+
+        // Find the point with maximum perpendicular distance from the line (first→last).
+        var maxDist = 0.0
+        var maxIdx = 0
+        let first = coords.first!, last = coords.last!
+        for i in 1..<(coords.count - 1) {
+            let d = perpendicularDistance(coords[i], lineStart: first, lineEnd: last)
+            if d > maxDist {
+                maxDist = d
+                maxIdx = i
+            }
+        }
+
+        if maxDist > epsilon {
+            let left = rdpSimplify(Array(coords[...maxIdx]), epsilon: epsilon)
+            let right = rdpSimplify(Array(coords[maxIdx...]), epsilon: epsilon)
+            return left.dropLast() + right
+        } else {
+            return [first, last]
+        }
+    }
+
+    private static func perpendicularDistance(_ point: CoordinateCodable, lineStart: CoordinateCodable, lineEnd: CoordinateCodable) -> Double {
+        let dx = lineEnd.lon - lineStart.lon
+        let dy = lineEnd.lat - lineStart.lat
+        let lengthSq = dx * dx + dy * dy
+        guard lengthSq > 0 else {
+            let px = point.lon - lineStart.lon
+            let py = point.lat - lineStart.lat
+            return sqrt(px * px + py * py)
+        }
+        let t = max(0, min(1, ((point.lon - lineStart.lon) * dx + (point.lat - lineStart.lat) * dy) / lengthSq))
+        let projLon = lineStart.lon + t * dx
+        let projLat = lineStart.lat + t * dy
+        let ex = point.lon - projLon
+        let ey = point.lat - projLat
+        return sqrt(ex * ex + ey * ey)
     }
 
     static func polylineCoordinates(

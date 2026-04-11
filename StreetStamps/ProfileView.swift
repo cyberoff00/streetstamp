@@ -49,26 +49,34 @@ struct ProfileView: View {
     }
 
     
-    // Computed stats
-    private var totalJourneys: Int {
-        store.journeys.count
-    }
-    
-    private var citiesVisited: Int {
-        cityCache.cachedCities.count
-    }
+    // Cheap O(1) counts — fine to keep as computed properties.
+    private var totalJourneys: Int { store.journeys.count }
+    private var citiesVisited: Int { cityCache.cachedCities.count }
 
-    private var totalMemories: Int {
-        store.journeys.reduce(0) { $0 + $1.memories.count }
-    }
-
-    private var levelProgress: UserLevelProgress {
-        UserLevelProgress.from(journeys: store.journeys)
-    }
+    // Cached stats — O(n) reductions that must not run on every render.
+    // Updated by .task(id: store.metadataRevision) below.
+    @State private var cachedTotalMemories: Int = 0
+    @State private var cachedTotalDistance: Double = 0
+    @State private var cachedJourneyDates: [Date] = []
+    @State private var cachedLevelProgress: UserLevelProgress = UserLevelProgress.from(journeys: [])
 
     private var displayName: String {
         let value = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
         return value.isEmpty ? L10n.t("explorer_fallback") : value
+    }
+
+    private var profileSinceDateText: String {
+        let formatter = DateFormatter()
+        formatter.locale = languagePreference.displayLocale
+        formatter.dateFormat = "yyyy/M/d"
+        return formatter.string(from: cachedJourneyDates.min() ?? Date())
+    }
+
+    private var collectionBadges: [String] {
+        [
+            "\(totalJourneys) \(L10n.t("activity_stat_journeys"))",
+            String(format: "%.0f KM", cachedTotalDistance / 1000.0)
+        ]
     }
 
     var body: some View {
@@ -144,6 +152,14 @@ struct ProfileView: View {
             if featureFlags.socialEnabled {
                 await notificationStore.refresh(token: sessionStore.currentAccessToken, showToastCallback: { msg in showToastMessage(msg) })
             }
+        }
+        .task(id: store.metadataRevision) {
+            // Recompute O(n) stats only when journey data actually changes, not on
+            // every unrelated render triggered by other EnvironmentObjects.
+            cachedTotalMemories  = store.journeys.reduce(0) { $0 + $1.memories.count }
+            cachedTotalDistance  = store.journeys.reduce(0) { $0 + $1.distance }
+            cachedJourneyDates   = store.journeys.compactMap { $0.endTime ?? $0.startTime }
+            cachedLevelProgress  = UserLevelProgress.from(journeys: store.journeys)
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
@@ -269,42 +285,7 @@ struct ProfileView: View {
                     .padding(6)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
-
-                NavigationLink {
-                    EquipmentView(loadout: $loadout)
-                } label: {
-                    Image(systemName: "tshirt")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(FigmaTheme.primary)
-                        .frame(width: 30, height: 30)
-                        .background(Color.white.opacity(0.95))
-                        .clipShape(Circle())
-                        .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
-                        .appMinTapTarget()
-                }
-                .buttonStyle(.plain)
-                .padding(6)
             }
-
-            Button {
-                nameDraft = displayName == L10n.t("explorer_fallback") ? "" : displayName
-                nameError = ""
-                showNameEditor = true
-            } label: {
-                HStack(spacing: 6) {
-                    Text(displayName)
-                        .font(.system(size: 22, weight: .bold, design: .rounded))
-                        .tracking(-0.4)
-                        .foregroundColor(FigmaTheme.text)
-
-                    Image(systemName: "pencil")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(FigmaTheme.text.opacity(0.45))
-                }
-            }
-            .buttonStyle(.plain)
-            .padding(.top, 20)
-            .padding(.bottom, 14)
         }
         .frame(maxWidth: .infinity)
         .background(Color.white)
@@ -318,6 +299,67 @@ struct ProfileView: View {
 
     private var topActionRow: some View {
         VStack(spacing: 20) {
+            ProfileHeroInfoStatsSection(stats: []) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Button {
+                        nameDraft = displayName == L10n.t("explorer_fallback") ? "" : displayName
+                        nameError = ""
+                        showNameEditor = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(displayName)
+                                .font(.system(size: 22, weight: .bold, design: .rounded))
+                                .tracking(-0.4)
+                                .foregroundColor(FigmaTheme.text)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.72)
+                                .layoutPriority(1)
+
+                            Image(systemName: "pencil")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(FigmaTheme.text.opacity(0.45))
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            ProfileHeroLevelPill(level: cachedLevelProgress.level)
+
+                            Text(profileSinceDateText)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(FigmaTheme.subtext)
+                                .lineLimit(1)
+                        }
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            ProfileHeroLevelPill(level: cachedLevelProgress.level)
+
+                            Text(profileSinceDateText)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(FigmaTheme.subtext)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } trailingContent: {
+                NavigationLink {
+                    EquipmentView(loadout: $loadout)
+                } label: {
+                    Image(systemName: "tshirt")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(width: 54, height: 54)
+                        .background(FigmaTheme.primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .shadow(color: FigmaTheme.primary.opacity(0.22), radius: 10, x: 0, y: 6)
+                        .appMinTapTarget()
+                }
+                .buttonStyle(.plain)
+            }
+
             if featureFlags.socialEnabled {
                 NavigationLink {
                     PostcardInboxView()
@@ -327,23 +369,19 @@ struct ProfileView: View {
                 .buttonStyle(.plain)
             }
 
-            CompactActivityRingCard(
-                stats: ProfileStatsSnapshot(
-                    totalJourneys: totalJourneys,
-                    totalDistance: store.journeys.reduce(0) { $0 + $1.distance },
-                    totalMemories: totalMemories,
-                    totalUnlockedCities: citiesVisited
-                ),
-                levelProgress: levelProgress,
-                journeyDates: store.journeys.compactMap { $0.endTime ?? $0.startTime },
-                onCardsTap: {
-                    flow.requestSelectCollectionPage(0)
-                    flow.requestSelectTab(.cities)
-                },
-                onMemoriesTap: {
-                    flow.requestSelectCollectionPage(1)
-                    flow.requestSelectTab(.cities)
-                }
+            Button {
+                flow.requestSelectCollectionPage(0)
+                flow.requestSelectTab(.cities)
+            } label: {
+                collectionTile
+            }
+            .buttonStyle(.plain)
+
+            ProfileHeroActivitySummarySection(
+                levelProgress: cachedLevelProgress,
+                citiesCount: citiesVisited,
+                memoriesCount: cachedTotalMemories,
+                journeyDates: cachedJourneyDates
             )
         }
     }
@@ -402,6 +440,17 @@ struct ProfileView: View {
         ProfilePostcardEntryCard(
             title: L10n.t("postcard_profile_title"),
             subtitle: L10n.t("postcard_profile_subtitle")
+        )
+    }
+
+    private var collectionTile: some View {
+        ProfilePostcardEntryCard(
+            systemImage: "square.on.square",
+            iconColor: FigmaTheme.primary,
+            iconBackground: FigmaTheme.primary.opacity(0.10),
+            title: L10n.t("friend_collection"),
+            subtitle: nil,
+            badges: collectionBadges
         )
     }
 

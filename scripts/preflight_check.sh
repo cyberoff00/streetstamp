@@ -15,7 +15,6 @@ echo "Project root: $ROOT"
 pass "xcode project exists"
 
 [[ -f "StreetStamps/BackendConfig.swift" ]] || fail "missing BackendConfig.swift"
-[[ -f "StreetStamps/AccountCenterView.swift" ]] || fail "missing AccountCenterView.swift"
 [[ -f "StreetStamps/FriendsHubView.swift" ]] || fail "missing FriendsHubView.swift"
 pass "core app files exist"
 

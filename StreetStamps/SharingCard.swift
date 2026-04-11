@@ -754,10 +754,13 @@ struct PopSharingCard: View {
             )
 
             Task {
-                if let title = await ReverseGeocodeService.shared.displayTitle(
-                    for: endLoc,
+                let level = cachedCitiesByKey[key]?.identityLevel
+                    ?? CityPlacemarkResolver.inferIdentityLevel(cityKey: key, iso2: journey.countryISO2)
+                if let title = await CityNameTranslationCache.shared.translate(
                     cityKey: key,
-                    parentRegionKey: parentRegionKey
+                    anchor: endLoc.coordinate,
+                    level: level,
+                    locale: LanguagePreference.shared.displayLocale
                 ) {
                     let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !t.isEmpty {
@@ -1260,10 +1263,13 @@ struct ShareCardGenerator {
             )
 
             Task {
-                let title = await ReverseGeocodeService.shared.displayTitle(
-                    for: endLoc,
+                let level = cachedCitiesByKey[key]?.identityLevel
+                    ?? CityPlacemarkResolver.inferIdentityLevel(cityKey: key, iso2: journey.countryISO2)
+                let title = await CityNameTranslationCache.shared.translate(
                     cityKey: key,
-                    parentRegionKey: parentRegionKey
+                    anchor: endLoc.coordinate,
+                    level: level,
+                    locale: LanguagePreference.shared.displayLocale
                 )
                 let t = title?.trimmingCharacters(in: .whitespacesAndNewlines)
                 await MainActor.run { done((t?.isEmpty ?? true) ? nil : t) }

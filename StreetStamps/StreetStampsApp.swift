@@ -240,6 +240,7 @@ struct StreetStampsApp: App {
     }
 
     init() {
+        BackendConfig.resetToDefault()
         #if DEBUG
         UserDefaults.standard.set(true, forKey: "streetstamps.debug.lifelog.mapDiagnosticsEnabled")
         #endif
@@ -394,6 +395,9 @@ struct StreetStampsApp: App {
                 // Ensure city cache decode finished before reading cachedCities
                 await cityCacheLoad
 
+                // Both journeys and cities are loaded — safe to run identity repair
+                cityCache.repairAllCityIdentityData()
+
                 // Phase 2: Bind and reduced warmup (4 cities now, rest deferred)
                 lifelogStore.bind(to: locationHub)
                 lifelogRenderCache.reset()
@@ -490,6 +494,7 @@ struct StreetStampsApp: App {
                     // Load journey, lifelog, city cache, and track tiles in parallel.
                     // All four do heavy disk I/O — running them concurrently avoids
                     // serializing the stall on the main thread during profile switch.
+                    CityNameTranslationCache.shared.clearAll()
                     async let journeyLoad: () = journeyStore.loadAsync()
                     async let lifelogLoad: () = lifelogStore.loadAsync()
                     async let cityCacheLoad: () = cityCache.rebindAsync(paths: paths)

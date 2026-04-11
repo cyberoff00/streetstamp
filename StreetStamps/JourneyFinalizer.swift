@@ -132,58 +132,95 @@ enum JourneyFinalizer {
             return
         }
 
+        // ✅ 短路优化：tracking 阶段已经 geocode 过 startCityKey，无需重复网络请求。
+        // cityCache.onJourneyCompleted 只读 startCityKey，不依赖 endCityKey，可以直接触发。
+        let existingKey = r.startCityKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !existingKey.isEmpty && existingKey != "Unknown|" && existingKey.contains("|") {
+            persistAndReturn(r, notify: {
+                Task { @MainActor in
+                    cityCache.onJourneyCompleted(r)
+                }
+            })
+            return
+        }
+
         let fixedLocale = Locale(identifier: "en_US")
         let geocoder = CLGeocoder()
 
         let startLoc = CLLocation(latitude: startWgs.latitude, longitude: startWgs.longitude)
         let endLoc   = CLLocation(latitude: endWgs.latitude,  longitude: endWgs.longitude)
 
+        // Helper: wrap a Canonical into CanonicalResult
+        let makeResult: (CityPlacemarkResolver.Canonical) -> ReverseGeocodeService.CanonicalResult = { c in
+            ReverseGeocodeService.CanonicalResult(
+                cityName: c.city,
+                iso2: c.iso2,
+                cityKey: c.cityKey,
+                level: c.level,
+                parentRegionKey: c.parentRegionKey,
+                availableLevels: c.availableLevelNames,
+                localeIdentifier: fixedLocale.identifier
+            )
+        }
+
+        // Pick a nearby-start retry coordinate: ~10% into the journey.
+        // Close enough to be the same city, far enough to be a different geocode cell.
+        let retryIndex = max(1, r.coordinates.count / 10)
+        let retryCoord: CLLocationCoordinate2D? = retryIndex < r.coordinates.count
+            ? r.coordinates[retryIndex].cl
+            : nil
+
         geocoder.reverseGeocodeLocation(startLoc, preferredLocale: fixedLocale) { startPMs, _ in
             let startCanon = startPMs?.first.map { CityPlacemarkResolver.resolveCanonical(from: $0) }
 
-            geocoder.reverseGeocodeLocation(endLoc, preferredLocale: fixedLocale) { endPMs, _ in
-                let endCanon = endPMs?.first.map { CityPlacemarkResolver.resolveCanonical(from: $0) }
-                let startCanonical = startCanon.map {
-                    ReverseGeocodeService.CanonicalResult(
-                        cityName: $0.city,
-                        iso2: $0.iso2,
-                        cityKey: $0.cityKey,
-                        level: $0.level,
-                        parentRegionKey: $0.parentRegionKey,
-                        availableLevels: $0.availableLevelNames,
-                        localeIdentifier: fixedLocale.identifier
+            // Check if the start result fell back to a coarser level than expected
+            // (e.g. got "Yunnan" province instead of "Kunming" city for CN).
+            let startMatchesStrategy: Bool = {
+                guard let c = startCanon else { return false }
+                return c.level == CityPlacemarkResolver.inferIdentityLevel(cityKey: c.cityKey, iso2: c.iso2)
+            }()
+
+            let finalize = { (bestStartCanon: CityPlacemarkResolver.Canonical?) in
+                geocoder.reverseGeocodeLocation(endLoc, preferredLocale: fixedLocale) { endPMs, _ in
+                    let endCanon = endPMs?.first.map { CityPlacemarkResolver.resolveCanonical(from: $0) }
+
+                    r = resolveCompletedRouteCityFields(
+                        route: r,
+                        startCanonical: bestStartCanon.map(makeResult),
+                        endCanonical: endCanon.map(makeResult)
                     )
-                }
-                let endCanonical = endCanon.map {
-                    ReverseGeocodeService.CanonicalResult(
-                        cityName: $0.city,
-                        iso2: $0.iso2,
-                        cityKey: $0.cityKey,
-                        level: $0.level,
-                        parentRegionKey: $0.parentRegionKey,
-                        availableLevels: $0.availableLevelNames,
-                        localeIdentifier: fixedLocale.identifier
-                    )
-                }
 
-                r = resolveCompletedRouteCityFields(
-                    route: r,
-                    startCanonical: startCanonical,
-                    endCanonical: endCanonical
-                )
+                    r.exploreMode = .city
 
-                // ✅ Always use city mode (intercity concept removed)
-                // All journeys belong to their starting city
-                r.exploreMode = .city
-
-                // 通知CityCache - always use onJourneyCompleted
-                let notify: () -> Void = {
-                    Task { @MainActor in
-                        cityCache.onJourneyCompleted(r)
+                    let notify: () -> Void = {
+                        Task { @MainActor in
+                            cityCache.onJourneyCompleted(r)
+                        }
                     }
-                }
 
-                persistAndReturn(r, notify: notify)
+                    persistAndReturn(r, notify: notify)
+                }
+            }
+
+            // If start result is good, proceed immediately.
+            if startMatchesStrategy {
+                finalize(startCanon)
+                return
+            }
+
+            // Retry once with a nearby-start coordinate.
+            guard let retryCoord, CLLocationCoordinate2DIsValid(retryCoord) else {
+                finalize(startCanon)
+                return
+            }
+            let retryLoc = CLLocation(latitude: retryCoord.latitude, longitude: retryCoord.longitude)
+            geocoder.reverseGeocodeLocation(retryLoc, preferredLocale: fixedLocale) { retryPMs, _ in
+                let retryCanon = retryPMs?.first.map { CityPlacemarkResolver.resolveCanonical(from: $0) }
+                let retryMatchesStrategy: Bool = {
+                    guard let c = retryCanon else { return false }
+                    return c.level == CityPlacemarkResolver.inferIdentityLevel(cityKey: c.cityKey, iso2: c.iso2)
+                }()
+                finalize(retryMatchesStrategy ? retryCanon : startCanon)
             }
         }
     }

@@ -94,7 +94,7 @@
 "friend_city_cards_title" = "CITY CARDS";
 "friend_city_cards" = "CITY CARDS";
 "friend_journey_memories" = "JOURNEY MEMORY";
-"friend_collection" = "COLLECTION";
+"friend_collection" = "FOOTPRINTS";
 "friend_collection_subtitle_format" = "%d cities · %d memories";
 "friend_collection_title_format" = "%@'s Collection";
 "friend_postcards" = "POSTCARD";
@@ -358,6 +358,7 @@
 "explore" = "EXPLORE";
 "explorer_fallback" = "USER";
 "finish_upper" = "FINISH";
+"pause_upper" = "PAUSE";
 "friends_active_ago" = "Active %@";
 "friends_recent_journey_ago" = "Recent journey %@";
 "friends_add_failed" = "Failed to add friend: %@";
@@ -808,6 +809,9 @@
 "map_layer_dark" = "Dark";
 "map_layer_satellite" = "Satellite";
 "map_layer_hybrid" = "Hybrid";
+"map_btn_capture" = "CAPTURE";
+"map_btn_memory" = "MEMORY";
+"map_btn_locate" = "LOCATE";
 "settings_import_gpx_row" = "IMPORT GPX";
 "settings_section_services" = "SERVICES";
 "settings_section_utilities" = "UTILITIES";
@@ -960,8 +964,15 @@
 "profile_summary_stats_format" = "%d Cities  %d Memories";
 "profile_activity_record" = "ACTIVITY RECORD";
 "profile_stats_format" = "%d journeys · %d memories · %d cards";
-"activity_ring_help" = "Outer: Level Progress (journeys ≥1km count)\nMiddle: Memory Collection (50 memories per ring)\nInner: City Unlock Progress (10 cities per ring)";
+"activity_ring_help" = "Outer: Level Progress (journeys ≥1km count)\nMiddle: Memory Collection (50 memories per ring)\nInner: City Unlock Progress (20 cities per ring)";
 "activity_ring_next_level_hint" = "%d more journeys to unlock the next level";
+"activity_rings" = "Activity Rings";
+"ring_outer_title" = "Outer Ring";
+"ring_outer_desc" = "Level progress (journeys ≥1 km)";
+"ring_middle_title" = "Middle Ring";
+"ring_middle_desc" = "Memory collection (50 per ring)";
+"ring_inner_title" = "Inner Ring";
+"ring_inner_desc" = "Cities unlocked (20 per ring)";
 "settings_icloud_sync_title" = "ICLOUD SYNC";
 "settings_icloud_sync_desc" = "Automatically sync and restore your journeys, lifelog, and key settings via iCloud.";
 "settings_icloud_sync_unavailable_desc" = "iCloud is unavailable. Sign in to iCloud in system settings to enable cloud sync.";
@@ -1244,3 +1255,5 @@
 "photo_scan_confirm_message" = "Scan location data in your photos to add visited cities as city cards.";
 "photo_scan_confirm_start" = "Start Scanning";
 "empty_city_guide_hint" = "No city cards yet. Start a journey or tap the top-right button to import from your photos.";
+"city_empty_title" = "No city cards yet";
+"city_empty_desc" = "Start a journey to unlock cities,\nor import from photos via top-right";

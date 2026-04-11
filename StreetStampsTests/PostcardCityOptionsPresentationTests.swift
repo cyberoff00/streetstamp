@@ -2,10 +2,11 @@ import XCTest
 @testable import StreetStamps
 
 final class PostcardCityOptionsPresentationTests: XCTestCase {
-    func test_buildOptions_prefersFreshResolvedNameOverStalePrefetchCache() {
+    func test_buildOptions_returnsEnglishName() {
         let city = CachedCity(
             id: "Seoul|KR",
             name: "Seoul",
+            canonicalNameEN: "Seoul",
             countryISO2: "KR",
             journeyIds: [],
             explorations: 1,
@@ -14,26 +15,20 @@ final class PostcardCityOptionsPresentationTests: XCTestCase {
             anchor: nil,
             thumbnailBasePath: nil,
             thumbnailRoutePath: nil,
-            reservedLevelRaw: CityPlacemarkResolver.CardLevel.locality.rawValue,
-            reservedParentRegionKey: "Seoul Special City|KR",
-            reservedAvailableLevelNames: [
+            parentScopeKey: "Seoul Special City|KR",
+            availableLevelNamesEN: [
                 CityPlacemarkResolver.CardLevel.locality.rawValue: "Seoul",
                 CityPlacemarkResolver.CardLevel.admin.rawValue: "Seoul Special City"
             ],
-            isTemporary: false,
-            reservedAvailableLevelNamesLocaleID: "en_US",
-            localizedDisplayNameByLocale: ["en_US": "Seoul Special City"]
+            isTemporary: false
         )
 
         let options = PostcardCityOptionsPresentation.buildOptions(
             cachedCities: [city],
-            journeyCandidates: [],
-            localizedCityNamesByID: ["Seoul|KR": "首尔"],
-            locale: Locale(identifier: "en_US")
+            journeyCandidates: []
         )
 
         XCTAssertEqual(options.count, 1)
         XCTAssertEqual(options.first?.id, "Seoul|KR")
-        XCTAssertEqual(options.first?.name, "Seoul Special City")
     }
 }

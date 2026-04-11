@@ -408,7 +408,7 @@ struct MapKitEngineView: UIViewRepresentable {
         private func syncMemoryAnnotation(on map: MKMapView, key: String, coordinate: CLLocationCoordinate2D, items: [JourneyMemory]) {
             func itemsSignature(_ items: [JourneyMemory]) -> String {
                 items.sorted { $0.id < $1.id }
-                    .map { "\($0.id)|t:\($0.title.count)|n:\($0.notes.count)|p:\($0.imagePaths.count)|rp:\($0.remoteImageURLs.count)" }
+                    .map { "\($0.id)|t:\($0.title)|n:\($0.notes)|p:\($0.imagePaths.joined())|rp:\($0.remoteImageURLs.joined())" }
                     .joined(separator: ";")
             }
 

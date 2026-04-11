@@ -213,6 +213,7 @@
 "finish_pending_memory_finish_now" = "今すぐ終了";
 "finish_pending_memory_wait_gps" = "GPSを待つ";
 "finish_upper" = "FINISH";
+"pause_upper" = "一時停止";
 "finished" = "完了";
 "first_city_prompt_desc" = "現在地をもとに最初の都市カード（都市地図付き）を生成します。\n新しい都市で旅を完了すると、都市カードが自動で追加されます。";
 "first_city_prompt_generate" = "生成";
@@ -906,8 +907,15 @@
 "membership_welcome_bonus_ok" = "了解";
 "membership_products_unavailable" = "現在ご利用いただけません。しばらくしてからお試しください。";
 "activity_record_title" = "アクティビティ記録";
-"activity_ring_help" = "外側：レベル進捗（1km以上の旅がカウント）\n中央：記憶収集（50個で1周）\n内側：都市解放進捗（10都市で1周）";
+"activity_ring_help" = "外側：レベル進捗（1km以上の旅がカウント）\n中央：記憶収集（50個で1周）\n内側：都市解放進捗（20都市で1周）";
 "activity_ring_next_level_hint" = "次のレベルまであと %d 旅";
+"activity_rings" = "アクティビティリング";
+"ring_outer_title" = "外側リング";
+"ring_outer_desc" = "レベル進捗（1km以上の旅がカウント）";
+"ring_middle_title" = "中央リング";
+"ring_middle_desc" = "記憶収集（50個で1周）";
+"ring_inner_title" = "内側リング";
+"ring_inner_desc" = "都市解放進捗（20都市で1周）";
 "activity_stat_cards" = "カード";
 "activity_stat_distance_km" = "距離（km）";
 "activity_stat_journeys" = "旅程";
@@ -918,7 +926,7 @@
 "friend_activity_record_entry" = "アクティビティ記録";
 "friend_city_cards" = "都市カード";
 "friend_journey_memories" = "旅の記憶";
-"friend_collection" = "コレクション";
+"friend_collection" = "足跡";
 "friend_collection_subtitle_format" = "%d 都市 · %d 記憶";
 "friend_collection_title_format" = "%@のコレクション";
 "friend_postcards" = "ポストカード";
@@ -1048,6 +1056,9 @@
 "about_us_cyber_dog_content" = "一个朋友打算在装备里画了一只小狗，因为她想到她的小狗安迪以后死了，她散步的时候可以看到地图里自己带着赛博小狗一起，然后还没画她就痛哭一场。很萌，我想要做的就是这种很萌的东西。又有一天我在为生活的一切，为这款app焦虑的时候，骑着车记录着轨迹，我突然觉得没关系，即使最后是自娱自乐也没关系。我为朋友们建造了一个赛博空间，这个空间只有30个人也是另一种伟大的故事。";
 
 // MARK: - Mapbox Trial
+"map_btn_capture" = "撮影";
+"map_btn_memory" = "メモ";
+"map_btn_locate" = "現在地";
 "mapbox_trial_free_hint" = "24時間無料体験";
 "mapbox_trial_remaining_hours" = "残り %d時間%d分";
 "mapbox_trial_remaining_minutes" = "残り %d分";
@@ -1070,3 +1081,5 @@
 "photo_scan_confirm_message" = "写真の位置情報をスキャンして、訪問した都市をシティカードとして追加します。";
 "photo_scan_confirm_start" = "スキャン開始";
 "empty_city_guide_hint" = "シティカードがまだありません。旅を始めるか、右上のボタンから写真で取り込みましょう。";
+"city_empty_title" = "シティカードがまだありません";
+"city_empty_desc" = "旅を始めて都市を解除するか、\n右上から写真で取り込みましょう";

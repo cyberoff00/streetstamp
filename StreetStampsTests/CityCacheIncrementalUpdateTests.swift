@@ -80,13 +80,13 @@ final class CityCacheIncrementalUpdateTests: XCTestCase {
                 .locality: "Xinyi Township",
                 .admin: "Taiwan"
             ],
-            anchor: journey.startCoordinate,
-            force: true
+            anchor: journey.startCoordinate
         )
 
         let payload = cache.payload(for: "Xinyi Township|TW")
 
-        XCTAssertEqual(payload?.title, "Taiwan")
+        // displayTitle now returns canonicalNameEN; locale hierarchy is handled at render time
+        XCTAssertEqual(payload?.title, "Xinyi Township")
     }
 
     @MainActor
@@ -109,8 +109,7 @@ final class CityCacheIncrementalUpdateTests: XCTestCase {
                 .locality: "London",
                 .admin: "England"
             ],
-            anchor: journey.startCoordinate,
-            force: true
+            anchor: journey.startCoordinate
         )
 
         cache.updateCityLevelReserveProfile(
@@ -121,44 +120,14 @@ final class CityCacheIncrementalUpdateTests: XCTestCase {
                 .locality: "伦敦",
                 .admin: "英格兰"
             ],
-            anchor: journey.startCoordinate,
-            force: false
+            anchor: journey.startCoordinate
         )
 
         let cached = try XCTUnwrap(cache.cachedCities.first(where: { $0.id == "London|GB" }))
-        XCTAssertEqual(cached.reservedLevelRaw, CityPlacemarkResolver.CardLevel.locality.rawValue)
-        XCTAssertEqual(cached.reservedAvailableLevelNames?[CityPlacemarkResolver.CardLevel.locality.rawValue], "伦敦")
-        XCTAssertEqual(cached.reservedAvailableLevelNames?[CityPlacemarkResolver.CardLevel.admin.rawValue], "英格兰")
-        XCTAssertEqual(cached.reservedAvailableLevelNamesLocaleID, Locale.current.identifier)
-    }
-
-    @MainActor
-    func test_updateCityLevelReserveProfilePersistsExplicitSourceLocaleForCanonicalLabels() throws {
-        let (cache, _) = try makeCache(userID: "citycache-reserve-locale-\(UUID().uuidString)")
-        let journey = makeJourney(
-            id: "journey-1",
-            cityKey: "Shanghai|CN",
-            cityName: "Shanghai",
-            iso: "CN",
-            memoryCount: 0
-        )
-
-        cache.applyJourneyMutation(oldJourney: nil, newJourney: journey)
-        cache.updateCityLevelReserveProfile(
-            cityKey: "Shanghai|CN",
-            level: .admin,
-            parentRegionKey: "Shanghai|CN",
-            availableLevels: [
-                .admin: "Shanghai",
-                .locality: "Shanghai"
-            ],
-            availableLevelsLocaleIdentifier: "en_US",
-            anchor: journey.startCoordinate,
-            force: true
-        )
-
-        let cached = try XCTUnwrap(cache.cachedCities.first(where: { $0.id == "Shanghai|CN" }))
-        XCTAssertEqual(cached.reservedAvailableLevelNamesLocaleID, "en_US")
+        XCTAssertEqual(cached.parentScopeKey, "England|GB")
+        // Second call overwrites availableLevelNamesEN
+        XCTAssertEqual(cached.availableLevelNamesEN?[CityPlacemarkResolver.CardLevel.locality.rawValue], "伦敦")
+        XCTAssertEqual(cached.availableLevelNamesEN?[CityPlacemarkResolver.CardLevel.admin.rawValue], "英格兰")
     }
 
     @MainActor

@@ -155,6 +155,7 @@ private struct LifelogGlobeCoverView: View {
 struct LifelogCameraCommand {
     let id: UUID
     let region: MKCoordinateRegion
+    var animated: Bool = true
 }
 
 struct LifelogView: View {
@@ -437,7 +438,7 @@ struct LifelogView: View {
                     showEnableHint = true
                 }
             }
-            centerOnCurrent(force: true)
+            centerOnCurrent(force: true, animated: false)
             if !mapContentReady {
                 // If a disk-cached snapshot exists, skip the 150ms defer —
                 // the cached data is light enough to render immediately.
@@ -540,7 +541,7 @@ struct LifelogView: View {
         .ignoresSafeArea()
         .onChange(of: cameraCommand?.id) { _ in
             if let cmd = cameraCommand {
-                unifiedCameraCommand = .setRegion(cmd.region)
+                unifiedCameraCommand = .setRegion(cmd.region, animated: cmd.animated)
             }
         }
     }
@@ -1027,7 +1028,7 @@ struct LifelogView: View {
         }
     }
 
-    private func centerOnCurrent(force: Bool) {
+    private func centerOnCurrent(force: Bool, animated: Bool = true) {
         if !force && !isViewingToday {
             return
         }
@@ -1038,9 +1039,9 @@ struct LifelogView: View {
                 Calendar.current.isDate($0, inSameDayAs: selectedDay ?? Date())
             } == true
             if snapshotMatchesDay, let region = regionFittingRoute(renderSnapshot.farRouteSegments) {
-                cameraCommand = LifelogCameraCommand(id: UUID(), region: region)
+                cameraCommand = LifelogCameraCommand(id: UUID(), region: region, animated: animated)
             } else if let center = centerCoordinateForSelectedDay() {
-                cameraCommand = LifelogCameraCommand(id: UUID(), region: MKCoordinateRegion(center: center, span: MKCoordinateSpan(latitudeDelta: 0.03, longitudeDelta: 0.03)))
+                cameraCommand = LifelogCameraCommand(id: UUID(), region: MKCoordinateRegion(center: center, span: MKCoordinateSpan(latitudeDelta: 0.03, longitudeDelta: 0.03)), animated: animated)
             }
             return
         }
@@ -1048,7 +1049,7 @@ struct LifelogView: View {
         guard force || !didCenterOnEnter else { return }
         guard let current = currentCoordinateForCentering() else { return }
         didCenterOnEnter = true
-        cameraCommand = LifelogCameraCommand(id: UUID(), region: MKCoordinateRegion(center: current, span: MKCoordinateSpan(latitudeDelta: 0.03, longitudeDelta: 0.03)))
+        cameraCommand = LifelogCameraCommand(id: UUID(), region: MKCoordinateRegion(center: current, span: MKCoordinateSpan(latitudeDelta: 0.03, longitudeDelta: 0.03)), animated: animated)
     }
 
     private func currentCoordinateForCentering() -> CLLocationCoordinate2D? {

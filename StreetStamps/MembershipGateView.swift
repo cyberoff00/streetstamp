@@ -22,6 +22,7 @@ enum MembershipGatedFeature: Identifiable {
     case iCloudSync
     case gpxExport
     case mapAppearance
+    case photoCityDiscovery
 
     var id: String {
         switch self {
@@ -34,6 +35,7 @@ enum MembershipGatedFeature: Identifiable {
         case .iCloudSync:       return "iCloudSync"
         case .gpxExport:        return "gpxExport"
         case .mapAppearance:    return "mapAppearance"
+        case .photoCityDiscovery: return "photoCityDiscovery"
         }
     }
 }

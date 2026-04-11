@@ -347,15 +347,18 @@ struct JourneyRouteDetailView: View {
         // Fallback for journeys without a city card: async geocode
         let parentRegionKey = JourneyCityNamePresentation.parentRegionKey(for: journey, cachedCitiesByKey: cachedCitiesByKey)
 
-        if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key, parentRegionKey: parentRegionKey),
+        let locale = LanguagePreference.shared.displayLocale
+        if let cached = CityNameTranslationCache.shared.cachedName(cityKey: key, localeID: locale.identifier),
            !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             await MainActor.run { localizedCityTitle = cached }
             return
         }
 
         guard let start = journey.startCoordinate, start.isValid else { return }
-        let loc = CLLocation(latitude: start.latitude, longitude: start.longitude)
-        if let title = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key, parentRegionKey: parentRegionKey),
+        let level = cachedCitiesByKey[key]?.identityLevel
+            ?? CityPlacemarkResolver.inferIdentityLevel(cityKey: key, iso2: journey.countryISO2)
+        let anchor = CLLocationCoordinate2D(latitude: start.latitude, longitude: start.longitude)
+        if let title = await CityNameTranslationCache.shared.translate(cityKey: key, anchor: anchor, level: level, locale: locale),
            !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             await MainActor.run { localizedCityTitle = title }
         }

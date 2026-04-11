@@ -1,7 +1,7 @@
 import Foundation
 import MapKit
 import SwiftUI
-import Combine   // ✅ 必须：ObservableObject / @Published
+import Combine
 
 enum CityDisplayResolver {
     static func title(
@@ -9,14 +9,12 @@ enum CityDisplayResolver {
         fallbackTitle: String,
         locale: Locale = LanguagePreference.shared.displayLocale
     ) -> String {
-        let trimmedKey = cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedKey.isEmpty else { return fallbackTitle }
-        return CityDisplayTitlePresentation.title(
-            cityKey: trimmedKey,
-            iso2: iso2(from: trimmedKey),
-            fallbackTitle: fallbackTitle,
-            locale: locale
-        )
+        let localeID = locale.identifier
+        if localeID.hasPrefix("en") { return fallbackTitle }
+        if let translated = CityNameTranslationCache.shared.cachedName(cityKey: cityKey, localeID: localeID) {
+            return translated
+        }
+        return fallbackTitle
     }
 
     static func iso2(from cityKey: String) -> String? {
@@ -45,12 +43,12 @@ struct City: Identifiable {
     var thumbnailBasePath: String?
     var thumbnailRoutePath: String?
     var sourceCityKeys: [String] = []
-    var identityLevelRaw: String? = nil
-    var selectedDisplayLevelRaw: String? = nil
     var parentScopeKey: String? = nil
-    var availableLevelNames: [String: String]? = nil
-    var availableLevelNamesLocaleID: String? = nil
-    var localizedDisplayNameByLocale: [String: String]? = nil
+    var availableLevelNamesEN: [String: String]? = nil
+    var identityLevelRaw: String? = nil
+    var isPhotoDiscovered: Bool = false
+    var photoCount: Int? = nil
+    var photoDateRange: String? = nil
 
     var allCoordinates: [CLLocationCoordinate2D] {
         let coords = journeys.flatMap { $0.allCLCoords }
@@ -58,25 +56,15 @@ struct City: Identifiable {
     }
 
     var effectiveBoundary: [CLLocationCoordinate2D]? {
-        boundaryPolygon ?? bboxPolygon(for: allCoordinates)  // ✅ 现在来自 CityMapUtils.swift
+        boundaryPolygon ?? bboxPolygon(for: allCoordinates)
     }
 
-    /// Best localized display name for the current locale.
-    /// Priority: displayName → localizedDisplayNameByLocale → name
-    /// `displayName` is already normalized through `CityPlacemarkResolver.displayTitle`,
-    /// so it should win over any stale persisted localized cache.
     var localizedName: String {
-        let localeID = LanguagePreference.shared.effectiveLocaleIdentifier
-        if let displayName,
-           !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return displayName
-        }
-        if let localized = localizedDisplayNameByLocale?[localeID]?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           !localized.isEmpty {
-            return localized
-        }
         return displayName ?? name
+    }
+
+    var identityLevel: CityPlacemarkResolver.CardLevel {
+        identityLevelRaw.flatMap { CityPlacemarkResolver.CardLevel(rawValue: $0) } ?? .locality
     }
 }
 
@@ -84,48 +72,62 @@ struct City: Identifiable {
 final class CityLibraryVM: ObservableObject {
     @Published var cities: [City] = []
     private weak var cityCache: CityCache?
-
-    nonisolated static func normalizedPrefetchedDisplayTitle(
-        for city: City,
-        candidateLocalizedTitle: String?,
-        locale: Locale = LanguagePreference.shared.displayLocale
-    ) -> String {
-        let trimmedCandidate = candidateLocalizedTitle?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let localeID = locale.identifier
-        var localizedMap = city.localizedDisplayNameByLocale ?? [:]
-        if let trimmedCandidate, !trimmedCandidate.isEmpty {
-            localizedMap[localeID] = trimmedCandidate
-        }
-
-        return CityPlacemarkResolver.displayTitle(
-            cityKey: city.id,
-            iso2: city.countryISO2,
-            fallbackTitle: city.displayName ?? city.name,
-            availableLevelNamesRaw: city.availableLevelNames,
-            storedAvailableLevelNamesLocaleID: city.availableLevelNamesLocaleID,
-            parentRegionKey: city.parentScopeKey,
-            preferredLevel: nil,
-            localizedDisplayNameByLocale: localizedMap,
-            locale: locale
-        )
-    }
+    private var networkObserver: AnyCancellable?
+    private var retryTask: Task<Void, Never>?
 
     func load(journeyStore: JourneyStore, cityCache: CityCache) {
         self.cityCache = cityCache
         self.cities = Self.buildCities(journeyStore: journeyStore, cityCache: cityCache)
-        Task {
+        retryTask?.cancel()
+        retryTask = Task {
             await prefetchDisplayNamesDetached()
+        }
+        observeNetworkChanges()
+    }
+
+    /// On network path change (VPN toggle, reconnect), retry untranslated cities.
+    private func observeNetworkChanges() {
+        // Only subscribe once
+        guard networkObserver == nil else { return }
+        networkObserver = NotificationCenter.default
+            .publisher(for: ReverseGeocodeService.networkPathDidChange)
+            .debounce(for: .seconds(2), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.retryUntranslatedCities()
+            }
+    }
+
+    private func retryUntranslatedCities() {
+        let localeID = LanguagePreference.shared.effectiveLocaleIdentifier
+        guard !localeID.hasPrefix("en") else { return }
+        // Only retry cities whose displayName still equals the English fallback name
+        let untranslated = cities.filter { $0.displayName == nil || $0.displayName == $0.name }
+        guard !untranslated.isEmpty else { return }
+        retryTask?.cancel()
+        retryTask = Task {
+            await retryPrefetchDetached(cityIDs: Set(untranslated.map(\.id)))
         }
     }
 
     func upsertCity(cityKey: String, journeyStore: JourneyStore, cityCache: CityCache) {
         self.cityCache = cityCache
         let trimmedKey = cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        let nextCities = Self.buildCities(
-            journeys: journeyStore.journeys,
-            cachedCities: cityCache.cachedCities
-        )
+
+        // Only process data for this specific city key — avoids O(all_cities × all_journeys)
+        // rebuild that the full buildCities would do. buildCities' merge logic (multiple
+        // CachedCity entries sharing the same key) still works correctly on this subset.
+        let relevantCached = cityCache.cachedCities.filter {
+            $0.cityKey.trimmingCharacters(in: .whitespacesAndNewlines) == trimmedKey
+        }
+        guard !relevantCached.isEmpty else {
+            removeCity(cityKey: trimmedKey)
+            sortCities()
+            return
+        }
+        let relevantJourneyIDs = Set(relevantCached.flatMap { $0.journeyIds })
+        let relevantJourneys = journeyStore.journeys.filter { relevantJourneyIDs.contains($0.id) }
+        let nextCities = Self.buildCities(journeys: relevantJourneys, cachedCities: relevantCached)
 
         if let next = nextCities.first(where: { $0.id == trimmedKey }) {
             if let idx = cities.firstIndex(where: { $0.id == trimmedKey }) {
@@ -161,17 +163,18 @@ final class CityLibraryVM: ObservableObject {
             thumbnailBasePath: cached.thumbnailBasePath,
             thumbnailRoutePath: cached.thumbnailRoutePath,
             sourceCityKeys: [cached.cityKey],
-            identityLevelRaw: cached.identityLevelRaw,
-            selectedDisplayLevelRaw: cached.selectedDisplayLevelRaw,
             parentScopeKey: cached.parentScopeKey,
-            availableLevelNames: cached.availableLevelNames,
-            availableLevelNamesLocaleID: cached.availableLevelNamesLocaleID,
-            localizedDisplayNameByLocale: cached.localizedDisplayNameByLocale
+            availableLevelNamesEN: cached.availableLevelNamesEN,
+            identityLevelRaw: cached.identityLevelRaw
         )
     }
 
     private func sortCities() {
         cities.sort {
+            // Journey-derived first, then photo-discovered
+            if $0.isPhotoDiscovered != $1.isPhotoDiscovered {
+                return !$0.isPhotoDiscovered
+            }
             if $0.explorations != $1.explorations { return $0.explorations > $1.explorations }
             return $0.name < $1.name
         }
@@ -202,14 +205,12 @@ final class CityLibraryVM: ObservableObject {
             var memories: Int
             var thumbnailBasePath: String?
             var thumbnailRoutePath: String?
-            var identityLevelRaw: String?
-            var selectedDisplayLevelRaw: String?
             var parentScopeKey: String?
-            var availableLevelNames: [String: String]?
-            var availableLevelNamesLocaleID: String?
-            var localizedDisplayNameByLocale: [String: String]?
-            var resolvedDisplayName: String?
-            var resolvedDisplayNameLocaleID: String?
+            var identityLevelRaw: String?
+            var availableLevelNamesEN: [String: String]?
+            var isPhotoDiscovered: Bool
+            var photoCount: Int?
+            var photoDateRange: String?
         }
 
         var grouped: [String: Aggregate] = [:]
@@ -231,14 +232,9 @@ final class CityLibraryVM: ObservableObject {
                 existing.anchor = existing.anchor ?? c.anchor?.cl
                 existing.thumbnailBasePath = existing.thumbnailBasePath ?? c.thumbnailBasePath
                 existing.thumbnailRoutePath = existing.thumbnailRoutePath ?? c.thumbnailRoutePath
-                existing.identityLevelRaw = existing.identityLevelRaw ?? c.identityLevelRaw
-                existing.selectedDisplayLevelRaw = existing.selectedDisplayLevelRaw ?? c.selectedDisplayLevelRaw
                 existing.parentScopeKey = existing.parentScopeKey ?? c.parentScopeKey
-                existing.availableLevelNames = existing.availableLevelNames ?? c.availableLevelNames
-                existing.availableLevelNamesLocaleID = existing.availableLevelNamesLocaleID ?? c.availableLevelNamesLocaleID
-                existing.localizedDisplayNameByLocale = existing.localizedDisplayNameByLocale ?? c.localizedDisplayNameByLocale
-                existing.resolvedDisplayName = existing.resolvedDisplayName ?? c.resolvedDisplayName
-                existing.resolvedDisplayNameLocaleID = existing.resolvedDisplayNameLocaleID ?? c.resolvedDisplayNameLocaleID
+                existing.identityLevelRaw = existing.identityLevelRaw ?? c.identityLevelRaw
+                existing.availableLevelNamesEN = existing.availableLevelNamesEN ?? c.availableLevelNamesEN
                 grouped[key] = existing
             } else {
                 grouped[key] = Aggregate(
@@ -253,30 +249,23 @@ final class CityLibraryVM: ObservableObject {
                     memories: c.memories,
                     thumbnailBasePath: c.thumbnailBasePath,
                     thumbnailRoutePath: c.thumbnailRoutePath,
-                    identityLevelRaw: c.identityLevelRaw,
-                    selectedDisplayLevelRaw: c.selectedDisplayLevelRaw,
                     parentScopeKey: c.parentScopeKey,
-                    availableLevelNames: c.availableLevelNames,
-                    availableLevelNamesLocaleID: c.availableLevelNamesLocaleID,
-                    localizedDisplayNameByLocale: c.localizedDisplayNameByLocale,
-                    resolvedDisplayName: c.resolvedDisplayName,
-                    resolvedDisplayNameLocaleID: c.resolvedDisplayNameLocaleID
+                    identityLevelRaw: c.identityLevelRaw,
+                    availableLevelNamesEN: c.availableLevelNamesEN,
+                    isPhotoDiscovered: c.isPhotoDiscovered == true,
+                    photoCount: c.photoCount,
+                    photoDateRange: c.photoDateRange
                 )
             }
         }
 
         var out: [City] = grouped.values.map { aggregate in
-            let currentLocaleID = LanguagePreference.shared.effectiveLocaleIdentifier
-            let resolvedName: String = {
-                if let resolved = aggregate.resolvedDisplayName,
-                   !resolved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                   aggregate.resolvedDisplayNameLocaleID == currentLocaleID {
-                    return resolved
-                }
-                return aggregate.fallbackName
-            }()
-            return City(
-                displayName: resolvedName,
+            City(
+                displayName: {
+                    let localeID = LanguagePreference.shared.effectiveLocaleIdentifier
+                    if localeID.hasPrefix("en") { return aggregate.fallbackName }
+                    return CityNameTranslationCache.shared.cachedName(cityKey: aggregate.cityKey, localeID: localeID) ?? aggregate.fallbackName
+                }(),
                 id: aggregate.cityKey,
                 name: aggregate.fallbackName,
                 countryISO2: aggregate.countryISO2 ?? CityDisplayResolver.iso2(from: aggregate.cityKey),
@@ -288,16 +277,20 @@ final class CityLibraryVM: ObservableObject {
                 thumbnailBasePath: aggregate.thumbnailBasePath,
                 thumbnailRoutePath: aggregate.thumbnailRoutePath,
                 sourceCityKeys: aggregate.sourceCityKeys.sorted(),
-                identityLevelRaw: aggregate.identityLevelRaw,
-                selectedDisplayLevelRaw: aggregate.selectedDisplayLevelRaw,
                 parentScopeKey: aggregate.parentScopeKey,
-                availableLevelNames: aggregate.availableLevelNames,
-                availableLevelNamesLocaleID: aggregate.availableLevelNamesLocaleID,
-                localizedDisplayNameByLocale: aggregate.localizedDisplayNameByLocale
+                availableLevelNamesEN: aggregate.availableLevelNamesEN,
+                identityLevelRaw: aggregate.identityLevelRaw,
+                isPhotoDiscovered: aggregate.isPhotoDiscovered,
+                photoCount: aggregate.photoCount,
+                photoDateRange: aggregate.photoDateRange
             )
         }
 
+        // Sort: journey-derived first (by explorations desc), then photo-discovered (by name)
         out.sort {
+            if $0.isPhotoDiscovered != $1.isPhotoDiscovered {
+                return !$0.isPhotoDiscovered // journey-derived first
+            }
             if $0.explorations != $1.explorations { return $0.explorations > $1.explorations }
             return $0.name < $1.name
         }
@@ -305,95 +298,59 @@ final class CityLibraryVM: ObservableObject {
     }
 
     // MARK: - City name localization
-    /// Resolve localized city names for city cards.
-    /// Keeps `name` as canonical (stable, English) while `displayName` follows the current locale.
+    /// Resolve localized city names for city cards via CityNameTranslationCache.
+    /// English names are already available from CachedCity.canonicalNameEN.
+    /// For non-English locales, we async-translate through the translation cache.
+    /// After first pass, automatically retries failed cities once after a delay.
     private nonisolated func prefetchDisplayNamesDetached() async {
-        // Snapshot on MainActor
+        let failedIDs = await translateCities(cityIDs: nil)
+        guard !failedIDs.isEmpty, !Task.isCancelled else { return }
+
+        // Delayed retry for cities that failed (e.g. geocoder throttle, VPN routing issue)
+        try? await Task.sleep(nanoseconds: 8_000_000_000) // 8s
+        guard !Task.isCancelled else { return }
+        _ = await translateCities(cityIDs: failedIDs)
+    }
+
+    /// Retry translation for specific untranslated cities (called on network path change).
+    private nonisolated func retryPrefetchDetached(cityIDs: Set<String>) async {
+        _ = await translateCities(cityIDs: cityIDs)
+    }
+
+    /// Translate a set of cities (or all if cityIDs is nil). Returns IDs that failed.
+    private nonisolated func translateCities(cityIDs: Set<String>?) async -> Set<String> {
         let snapshot: [City] = await MainActor.run { self.cities }
-        var localizedUpdates: [(cityKey: String, displayName: String)] = []
+        let displayLocale = LanguagePreference.shared.displayLocale
+        let localeID = displayLocale.identifier
 
-        for city in snapshot {
-            let displayLocale = LanguagePreference.shared.displayLocale
-            let coord = city.anchor ?? city.allCoordinates.first
-            guard let coord,
-                  CLLocationCoordinate2DIsValid(coord),
-                  abs(coord.latitude) <= 90,
-                  abs(coord.longitude) <= 180
-            else { continue }
+        if localeID.hasPrefix("en") { return [] }
 
-            let loc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
-            let key = city.id
+        let targets = cityIDs == nil ? snapshot : snapshot.filter { cityIDs!.contains($0.id) }
+        var failed = Set<String>()
 
-            // Use resolvedDisplayName from CachedCity as immediate display value.
-            let cached = await MainActor.run {
-                self.cityCache?.cachedCities.first(where: { $0.id == city.id && !($0.isTemporary ?? false) })
+        for city in targets {
+            guard !Task.isCancelled else { break }
+            let level: CityPlacemarkResolver.CardLevel = await MainActor.run {
+                self.cityCache?.cachedCities.first(where: { $0.cityKey == city.id })?.identityLevel ?? city.identityLevel
             }
-            let unified = cached?.displayTitle ?? city.localizedName
-            if !unified.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let translated = await CityNameTranslationCache.shared.translate(
+                cityKey: city.id,
+                anchor: city.anchor,
+                level: level,
+                locale: displayLocale
+            )
+            if let translated, !translated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 await MainActor.run {
                     if let idx = self.cities.firstIndex(where: { $0.id == city.id }) {
-                        self.cities[idx].displayName = unified
+                        self.cities[idx].displayName = translated
                     }
                 }
-            }
-
-            if ["HK", "MO", "TW"].contains((city.countryISO2 ?? "").uppercased()) {
-                continue
-            }
-
-            // 1) Use cached value first (no rate-limit hit)
-            if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key, parentRegionKey: city.parentScopeKey) {
-                let t = Self.normalizedPrefetchedDisplayTitle(
-                    for: city,
-                    candidateLocalizedTitle: cached,
-                    locale: displayLocale
-                ).trimmingCharacters(in: .whitespacesAndNewlines)
-                if !t.isEmpty {
-                    CityLocalizationDebugLogger.log(
-                        "cityCardPrefetch",
-                        "cityKey=\(city.id) locale=\(displayLocale.identifier) source=cachedDisplayTitle candidate=\(cached) resolved=\(t)"
-                    )
-                    await MainActor.run {
-                        if let idx = self.cities.firstIndex(where: { $0.id == city.id }) {
-                            self.cities[idx].displayName = t
-                        }
-                    }
-                    localizedUpdates.append((cityKey: key, displayName: t))
-                }
-                continue
-            }
-
-            // 2) Fetch with rate-limit friendly pacing
-            let fetched = await ReverseGeocodeService.shared.displayTitleWithRetry(for: loc, cityKey: key, parentRegionKey: city.parentScopeKey)
-
-            if let fetched {
-                let t = Self.normalizedPrefetchedDisplayTitle(
-                    for: city,
-                    candidateLocalizedTitle: fetched,
-                    locale: displayLocale
-                ).trimmingCharacters(in: .whitespacesAndNewlines)
-                if !t.isEmpty {
-                    CityLocalizationDebugLogger.log(
-                        "cityCardPrefetch",
-                        "cityKey=\(city.id) locale=\(displayLocale.identifier) source=displayTitle candidate=\(fetched) resolved=\(t)"
-                    )
-                    await MainActor.run {
-                        if let idx = self.cities.firstIndex(where: { $0.id == city.id }) {
-                            self.cities[idx].displayName = t
-                        }
-                    }
-                    localizedUpdates.append((cityKey: key, displayName: t))
-                }
-            }
-
-        }
-
-        // Batch-persist localized names to CityCache for cold-start access
-        if !localizedUpdates.isEmpty {
-            await MainActor.run {
-                self.cityCache?.updateLocalizedDisplayNames(localizedUpdates, locale: LanguagePreference.shared.displayLocale)
+            } else if CityNameTranslationCache.isTranslatable(cityKey: city.id, localeID: localeID) {
+                // Only count as "failed" if the city SHOULD have been translated but wasn't
+                failed.insert(city.id)
             }
         }
+        return failed
     }
 
     private nonisolated func prefetchDisplayNameDetached(cityID: String) async {
@@ -402,69 +359,24 @@ final class CityLibraryVM: ObservableObject {
         }
         guard let city else { return }
         let displayLocale = LanguagePreference.shared.displayLocale
+        let localeID = displayLocale.identifier
 
-        let coord = city.anchor ?? city.allCoordinates.first
-        guard let coord,
-              CLLocationCoordinate2DIsValid(coord),
-              abs(coord.latitude) <= 90,
-              abs(coord.longitude) <= 180
-        else { return }
+        // If current locale is English, name is already correct
+        if localeID.hasPrefix("en") { return }
 
-        let key = city.id
-        let cached = await MainActor.run {
-            self.cityCache?.cachedCities.first(where: { $0.id == key && !($0.isTemporary ?? false) })
+        let level: CityPlacemarkResolver.CardLevel = await MainActor.run {
+            self.cityCache?.cachedCities.first(where: { $0.cityKey == city.id })?.identityLevel ?? city.identityLevel
         }
-        let unified = cached?.displayTitle ?? city.displayName ?? city.name
-        if !unified.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        let translated = await CityNameTranslationCache.shared.translate(
+            cityKey: city.id,
+            anchor: city.anchor,
+            level: level,
+            locale: displayLocale
+        )
+        if let translated, !translated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             await MainActor.run {
                 if let idx = self.cities.firstIndex(where: { $0.id == cityID }) {
-                    self.cities[idx].displayName = unified
-                }
-            }
-        }
-
-        if ["HK", "MO", "TW"].contains((city.countryISO2 ?? "").uppercased()) {
-            return
-        }
-
-        if let cached = await ReverseGeocodeService.shared.cachedDisplayTitle(cityKey: key, parentRegionKey: city.parentScopeKey) {
-            let t = Self.normalizedPrefetchedDisplayTitle(
-                for: city,
-                candidateLocalizedTitle: cached,
-                locale: displayLocale
-            ).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !t.isEmpty {
-                CityLocalizationDebugLogger.log(
-                    "cityCardPrefetch",
-                    "cityKey=\(city.id) locale=\(displayLocale.identifier) source=cachedDisplayTitle.single candidate=\(cached) resolved=\(t)"
-                )
-                await MainActor.run {
-                    if let idx = self.cities.firstIndex(where: { $0.id == cityID }) {
-                        self.cities[idx].displayName = t
-                    }
-                    self.cityCache?.updateLocalizedDisplayName(cityKey: key, locale: displayLocale, displayName: t)
-                }
-            }
-            return
-        }
-
-        let loc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
-        if let fetched = await ReverseGeocodeService.shared.displayTitle(for: loc, cityKey: key, parentRegionKey: city.parentScopeKey) {
-            let t = Self.normalizedPrefetchedDisplayTitle(
-                for: city,
-                candidateLocalizedTitle: fetched,
-                locale: displayLocale
-            ).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !t.isEmpty {
-                CityLocalizationDebugLogger.log(
-                    "cityCardPrefetch",
-                    "cityKey=\(city.id) locale=\(displayLocale.identifier) source=displayTitle.single candidate=\(fetched) resolved=\(t)"
-                )
-                await MainActor.run {
-                    if let idx = self.cities.firstIndex(where: { $0.id == cityID }) {
-                        self.cities[idx].displayName = t
-                    }
-                    self.cityCache?.updateLocalizedDisplayName(cityKey: key, locale: displayLocale, displayName: t)
+                    self.cities[idx].displayName = translated
                 }
             }
         }

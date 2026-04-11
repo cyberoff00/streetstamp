@@ -41,17 +41,15 @@ struct PhotoInputFlowView: View {
             .transition(.opacity)
         } else {
             switch mode {
-            case .camera(let mirror):
-                SystemCameraPicker(
-                    preferredDevice: .rear,
-                    mirrorOnCapture: mirror,
-                    skipDismiss: true,
-                    onImage: { image in
+            case .camera:
+                FilmCameraView(
+                    onCapture: { image in
                         withAnimation(.easeInOut(duration: 0.25)) {
                             pickedImages = [image]
                         }
                     },
-                    onCancel: onCancel
+                    onDismiss: onCancel,
+                    availablePresets: FilmCameraDropManager.availablePresets()
                 )
                 .ignoresSafeArea()
             case .library(let limit):

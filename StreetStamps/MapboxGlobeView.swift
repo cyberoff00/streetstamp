@@ -39,6 +39,10 @@ struct MapboxGlobeView: View {
 
     @StateObject private var mapHolder = GlobeMapViewHolder()
     @State private var didSetup = false
+    /// Precomputed render token — updated via change observers, not on every render.
+    /// Replaces the former computed `renderInputSignature` that did O(n)+O(n log n)
+    /// work on every SwiftUI render pass.
+    @State private var cachedRenderToken: String = ""
 
     @EnvironmentObject private var cityCache: CityCache
 
@@ -60,9 +64,14 @@ struct MapboxGlobeView: View {
     private let citiesGlowLayerId  = "ss-cities-glow"
     private let citiesLayerId      = "ss-cities-symbol"
     private let cityIconId         = "ss-city-pin"
-    private var renderInputSignature: String { "\(journeysRefreshToken)||\(cityRefreshToken)" }
+    /// O(1) summary used by .onChange to cheaply detect journey changes:
+    /// covers count changes, last journey completion, and active-tracking coordinate growth.
+    private var journeysQuickSummary: String {
+        let last = journeys.last
+        return "\(journeys.count)|\(last?.id ?? "")|\(last?.coordinates.count ?? 0)|\(last?.endTime?.timeIntervalSince1970 ?? 0)"
+    }
 
-    private var journeysRefreshToken: String {
+    private func buildJourneysToken() -> String {
         journeys.map {
             let end = $0.endTime?.timeIntervalSince1970 ?? 0
             let iso = ($0.countryISO2 ?? "").uppercased()
@@ -71,7 +80,7 @@ struct MapboxGlobeView: View {
         .joined(separator: "||")
     }
 
-    private var cityRefreshToken: String {
+    private func buildCityToken() -> String {
         cityCache.cachedCities
             .sorted { $0.id < $1.id }
             .map { city in
@@ -84,6 +93,10 @@ struct MapboxGlobeView: View {
             .joined(separator: "||")
     }
 
+    private func buildRenderToken() -> String {
+        "\(buildJourneysToken())||\(buildCityToken())"
+    }
+
     var body: some View {
         ZStack {
             MapboxViewContainer(mapView: mapHolder.mapView)
@@ -91,16 +104,28 @@ struct MapboxGlobeView: View {
                 .onAppear {
                     guard !didSetup else { return }
                     didSetup = true
+                    cachedRenderToken = buildRenderToken()
                     setup()
                 }
-                .task(id: renderInputSignature) {
-                    print("🔵 [Globe] task renderInputSignature: \(renderInputSignature.prefix(80))...")
+                .task(id: cachedRenderToken) {
+                    print("🔵 [Globe] task renderToken: \(cachedRenderToken.prefix(80))...")
                     mapHolder.syncRenderPayload(
                         journeys: journeys,
                         cachedCities: cityCache.cachedCities
                     )
                     refreshData()
                     updateCountryGlow()
+                }
+                .onChange(of: journeysQuickSummary) { _ in
+                    // Cheaply detects count/completion/active-tracking coordinate changes.
+                    cachedRenderToken = buildRenderToken()
+                }
+                .onReceive(cityCache.objectWillChange) { _ in
+                    // objectWillChange fires before the update is applied; dispatch to next
+                    // run-loop tick so we read the already-updated cachedCities.
+                    Task { @MainActor in
+                        cachedRenderToken = buildRenderToken()
+                    }
                 }
                 .onChange(of: mapHolder.styleLoadRevision) { rev in
                     print("🔵 [Globe] onChange styleLoadRevision: \(rev)")
@@ -829,6 +854,7 @@ private func makeRoutesFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
                         .distance(from: CLLocation(latitude: b.latitude, longitude: b.longitude))
                 }()
                 let isFlight = isDashed && spanMeters >= 120_000
+
                 let lineCoords: [CLLocationCoordinate2D]
                 if isFlight, let a = seg.coords.first, let b = seg.coords.last {
                     lineCoords = greatCircleArc(a, b)

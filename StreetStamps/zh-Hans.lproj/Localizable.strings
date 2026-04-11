@@ -356,6 +356,7 @@
 "explore" = "探索";
 "explorer_fallback" = "用户";
 "finish_upper" = "结束";
+"pause_upper" = "暂停";
 "friends_active_ago" = "活跃于%@";
 "friends_recent_journey_ago" = "最近旅程：%@";
 "friends_add_failed" = "添加失败：%@";
@@ -793,6 +794,9 @@
 "settings_section_general" = "通用";
 "settings_map_engine" = "地图样式";
 "map_layer_title" = "地图样式";
+"map_btn_capture" = "拍摄";
+"map_btn_memory" = "记录";
+"map_btn_locate" = "定位";
 "map_layer_standard" = "标准";
 "map_layer_dark" = "暗色";
 "map_layer_satellite" = "卫星";
@@ -943,8 +947,15 @@
 "profile_summary_stats_format" = "%d 城市  %d 记忆";
 "profile_activity_record" = "活动记录";
 "profile_stats_format" = "%d 旅程 · %d 记忆 · %d 卡片";
-"activity_ring_help" = "外圈：等级进度（完成1公里以上的旅程升级）\n中圈：记忆收集进度（每50个记忆满环）\n内圈：城市解锁进度（每10个城市满环）";
+"activity_ring_help" = "外圈：等级进度（完成1公里以上的旅程升级）\n中圈：记忆收集进度（每50个记忆满环）\n内圈：城市解锁进度（每20个城市满环）";
 "activity_ring_next_level_hint" = "还差 %d 个旅程解锁下一级";
+"activity_rings" = "活动圆环";
+"ring_outer_title" = "外圈";
+"ring_outer_desc" = "等级进度（≥1公里的旅程计入）";
+"ring_middle_title" = "中圈";
+"ring_middle_desc" = "记忆收集（每50个满环）";
+"ring_inner_title" = "内圈";
+"ring_inner_desc" = "城市解锁进度（每20个满环）";
 "settings_icloud_sync_title" = "iCloud 同步";
 "settings_icloud_sync_desc" = "自动同步并恢复你的旅程、足迹和关键设置。";
 "settings_icloud_sync_unavailable_desc" = "iCloud 当前不可用，请先在系统设置登录 iCloud。";
@@ -996,7 +1007,7 @@
 "friend_stats_summary_format" = "%d 旅程 · %d 记忆 · %d 卡片";
 "friend_city_cards" = "城市卡";
 "friend_journey_memories" = "旅程记忆";
-"friend_collection" = "收藏集";
+"friend_collection" = "足迹";
 "friend_collection_subtitle_format" = "%d 城市 · %d 记忆";
 "friend_collection_title_format" = "%@的收藏";
 "friend_postcards" = "明信片";
@@ -1238,3 +1249,5 @@
 "photo_scan_confirm_message" = "扫描照片中的位置信息，将未记录旅程的城市添加为城市卡片。";
 "photo_scan_confirm_start" = "开始扫描";
 "empty_city_guide_hint" = "暂无城市卡，开启旅程解锁城市或右上角通过相册导入历史城市";
+"city_empty_title" = "暂无城市卡";
+"city_empty_desc" = "开启旅程解锁城市，\n或右上角通过相册导入";

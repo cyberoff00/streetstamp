@@ -262,6 +262,7 @@ final class JourneyStore: ObservableObject {
 
         // Completed journey: always finalize immediately (overwrite full file and clean up any delta/meta).
         if j.endTime != nil {
+            metadataRevision &+= 1  // Notify observers (CityDeepView, CollectionTabView, ProfileView) of metadata changes.
             flushPersist(journey: j, force: true)
             return
         }
@@ -351,23 +352,24 @@ final class JourneyStore: ObservableObject {
             lastDeltaPersistAt = now
         }
 
-        // Finalized journeys: write synchronously so the caller can be sure the
-        // data is durable before the process exits. This prevents the scenario
-        // where the UI reports success but the app is killed before the async
-        // write reaches disk, causing the journey to revert to "ongoing" on
-        // next cold start. Delta files only contain coordinates, not endTime or
-        // metadata — so delta replay alone cannot recover the completed state.
-        // ioQueue is a serial utility queue; the caller is on @MainActor, so
-        // ioQueue.sync will not deadlock (but will block UI for the duration
-        // of JSON encode + write).
-        // TODO: To reduce the main-thread stall, consider writing a lightweight
-        // "completed marker" file synchronously (just endTime + id), then doing
-        // the full finalize asynchronously. loadJourney would check the marker
-        // to restore completed state even if the full file wasn't written yet.
+        // Finalized journeys: write the index + a tiny completion marker (~20 bytes)
+        // synchronously so the caller can be sure completion state is durable before
+        // the process exits. The full JSON encode of route coordinates is expensive
+        // (can block the UI for hundreds of ms on large routes), so it runs async.
+        // On cold-start, loadJourney checks the marker and restores endTime even if
+        // the full file hasn't landed yet; delta replay provides coordinates.
         if snapshot.endTime != nil {
             ioQueue.sync { [self] in
                 do {
                     try self.indexStore.upsertIDFirst(snapshot.id)
+                    try self.fileStore.writeCompletionMarker(for: snapshot)
+                } catch {
+                    print("❌ completion marker save failed:", error)
+                }
+            }
+            ioQueue.async { [weak self] in
+                guard let self else { return }
+                do {
                     try self.fileStore.finalizeJourney(snapshot)
                 } catch {
                     print("❌ finalize save failed:", error)

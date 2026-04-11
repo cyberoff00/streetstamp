@@ -54,9 +54,10 @@ final class CityLocationManager: ObservableObject {
             if Task.isCancelled { return }
 
             // Best-effort localized title: cached only (no new request here)
-            let cachedTitle = await ReverseGeocodeService.shared.cachedDisplayTitle(
+            let locale = LanguagePreference.shared.displayLocale
+            let cachedTitle = CityNameTranslationCache.shared.cachedName(
                 cityKey: canon.cityKey,
-                parentRegionKey: canon.parentRegionKey
+                localeID: locale.identifier
             )
 
             // Update canonical fields + ensure display updates immediately when cityKey changes
@@ -88,10 +89,11 @@ final class CityLocationManager: ObservableObject {
             displayTask = Task { [weak self] in
                 guard let self else { return }
                 if Task.isCancelled { return }
-                let title = await ReverseGeocodeService.shared.displayTitle(
-                    for: loc,
+                let title = await CityNameTranslationCache.shared.translate(
                     cityKey: canon.cityKey,
-                    parentRegionKey: canon.parentRegionKey
+                    anchor: loc.coordinate,
+                    level: canon.level,
+                    locale: LanguagePreference.shared.displayLocale
                 )
                 if Task.isCancelled { return }
                 guard let title else { return }

@@ -55,6 +55,10 @@ struct MapboxEngineView: UIViewRepresentable {
         mapView.mapboxMap.loadStyle(styleURI) { error in
             if let error {
                 print("[MapboxEngine] style load FAILED uri=\(layerStyle.mapboxStyleURI) error=\(error)")
+                // Revert persisted selection so a bad style doesn't cause a crash loop on next launch
+                MapLayerStyle.apply(.mutedDark)
+                context.coordinator.currentLayerStyle = .mutedDark
+                return
             }
             context.coordinator.styleLoaded = true
             context.coordinator.setupSourcesAndLayers()
@@ -96,12 +100,17 @@ struct MapboxEngineView: UIViewRepresentable {
 
         // Style switch when layer changes
         if context.coordinator.currentLayerStyle != layerStyle {
+            let previousLayerStyle = context.coordinator.currentLayerStyle
             context.coordinator.currentLayerStyle = layerStyle
             context.coordinator.styleLoaded = false
             let styleURI = StyleURI(rawValue: layerStyle.mapboxStyleURI) ?? .dark
             mapView.mapboxMap.loadStyle(styleURI) { error in
                 if let error {
                     print("[MapboxEngine] style reload FAILED uri=\(layerStyle.mapboxStyleURI) error=\(error)")
+                    // Revert persisted selection so a bad style doesn't cause a crash loop on next launch
+                    MapLayerStyle.apply(previousLayerStyle)
+                    context.coordinator.currentLayerStyle = previousLayerStyle
+                    return
                 }
                 context.coordinator.styleLoaded = true
                 context.coordinator.setupSourcesAndLayers()
@@ -435,7 +444,19 @@ struct MapboxEngineView: UIViewRepresentable {
                 mapboxMap.updateGeoJSONSource(withId: ev.circleSourceId, geoJSON: .featureCollection(fc))
             }
 
-            let annSig = ev.annotations.map { "\($0.id):\(Int($0.coordinate.latitude * 10000))_\(Int($0.coordinate.longitude * 10000))" }.joined(separator: "|")
+            let annSig = ev.annotations.map { ann -> String in
+                var base = "\(ann.id):\(Int(ann.coordinate.latitude * 10000))_\(Int(ann.coordinate.longitude * 10000))"
+                switch ann.kind {
+                case let .memoryGroup(_, memories):
+                    let memSig = memories.map { "\($0.id)|\($0.title)|\($0.notes)|\($0.imagePaths.count)|\($0.remoteImageURLs.count)" }.joined(separator: ";")
+                    base += ":m:" + memSig
+                case let .lifelogAvatar(showMood):
+                    base += ":l:\(showMood)"
+                case .robot:
+                    break
+                }
+                return base
+            }.joined(separator: "|")
             if annSig != lastAnnotationsSignature {
                 lastAnnotationsSignature = annSig
                 syncViewAnnotations(items: ev.annotations)
@@ -501,13 +522,21 @@ struct MapboxEngineView: UIViewRepresentable {
             }
 
             for item in items {
-                let existingView = viewAnnotations[item.id]
-                if existingView != nil {
-                    try? mapView.viewAnnotations.update(existingView!, options: ViewAnnotationOptions(
-                        geometry: Turf.Point(item.coordinate),
-                        allowOverlap: true
-                    ))
-                    continue
+                if let existingView = viewAnnotations[item.id] {
+                    switch item.kind {
+                    case .robot:
+                        // Robot: position-only update, no mutable content
+                        try? mapView.viewAnnotations.update(existingView, options: ViewAnnotationOptions(
+                            geometry: Turf.Point(item.coordinate),
+                            allowOverlap: true
+                        ))
+                        continue
+                    case .memoryGroup, .lifelogAvatar:
+                        // Content may have changed (memory text/photos, mood state) — rebuild
+                        try? mapView.viewAnnotations.remove(existingView)
+                        viewAnnotations.removeValue(forKey: item.id)
+                        // fall through to creation below
+                    }
                 }
 
                 let hostView: UIView

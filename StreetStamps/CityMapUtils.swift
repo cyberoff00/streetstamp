@@ -311,7 +311,9 @@ enum CityDeepRenderEngine {
 
         if let anchorWGS = derivedAnchorWGS {
             let anchor = adapt(anchorWGS)
-            if let region = regionByFitting(focusedForMap), !focusedForMap.isEmpty { return region }
+            // Require at least 2 coords for regionByFitting — a single anchor point produces
+            // an ~0.01° span which is too small for MapSnapshotter to render tiles reliably.
+            if focusedForMap.count >= 2, let region = regionByFitting(focusedForMap) { return region }
             return MKCoordinateRegion(center: anchor, span: MKCoordinateSpan(latitudeDelta: 0.18, longitudeDelta: 0.18))
         }
 

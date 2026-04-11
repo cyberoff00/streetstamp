@@ -584,6 +584,7 @@ final class BackendAPIClient {
         }
 
         var lastError: Error?
+        var usedFallback = false
         for attempt in 0..<2 {
             do {
                 let (data, resp) = try await transport(req)
@@ -610,6 +611,7 @@ final class BackendAPIClient {
                     guard let retryHTTP = retryResp as? HTTPURLResponse else {
                         throw BackendAPIError.invalidResponse
                     }
+                    if usedFallback { BackendConfig.activateFallback() }
                     return try validateResponse(
                         data: retryData,
                         http: retryHTTP,
@@ -618,6 +620,7 @@ final class BackendAPIClient {
                     )
                 }
 
+                if usedFallback { BackendConfig.activateFallback() }
                 return try validateResponse(
                     data: data,
                     http: http,
@@ -633,7 +636,23 @@ final class BackendAPIClient {
                      nsError.code == NSURLErrorNetworkConnectionLost)
 
                 if attempt == 0 && isNetworkError {
-                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    // Retry with fallback domain instead of same URL
+                    let currentBase = BackendConfig.baseURLString
+                    let fallback = BackendConfig.fallbackBaseURL
+                    guard currentBase != fallback,
+                          let originalURL = req.url
+                    else {
+                        try? await Task.sleep(nanoseconds: 500_000_000)
+                        continue
+                    }
+                    let swapped = originalURL.absoluteString.replacingOccurrences(of: currentBase, with: fallback)
+                    guard let retryURL = URL(string: swapped) else {
+                        try? await Task.sleep(nanoseconds: 500_000_000)
+                        continue
+                    }
+                    print("[BackendAPI] Primary \(currentBase) failed, trying fallback \(fallback)")
+                    req.url = retryURL
+                    usedFallback = true
                     continue
                 }
                 throw error

@@ -82,6 +82,7 @@ struct EquipmentView: View {
         // Trend tones
         "#A8ADB7", // ash gray
         "#C8D0DB", // silver blonde
+        "#4CAF50", // leafy green
         "#B28DFF", // lavender
         "#5AA2FF", // denim blue
         "#F17BAA", // rose pink
@@ -95,10 +96,6 @@ struct EquipmentView: View {
 
             VStack(spacing: 0) {
                 header
-                tryOnRow
-                    .padding(.horizontal, 20)
-                    .padding(.top, 8)
-                    .padding(.bottom, 10)
                 VStack(spacing: 18) {
                     avatarPreviewCard
                     categoryIconRow
@@ -263,66 +260,92 @@ struct EquipmentView: View {
         .zIndex(2)
     }
 
-    private var tryOnRow: some View {
-        HStack(spacing: 10) {
-            Toggle(isOn: $isTryOnMode) {
-                Text(L10n.t("equipment_try_on_mode"))
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(FigmaTheme.text)
-            }
-            .toggleStyle(.switch)
-
-            Spacer()
-
-            if isTryOnMode, let tryOnLoadout, tryOnLoadout != loadout {
-                Button(L10n.t("equipment_apply_try_on")) {
-                    let missing = missingItemsForTryOn(loadout: tryOnLoadout)
-                    guard !missing.isEmpty else {
-                        loadout = tryOnLoadout
-                        self.tryOnLoadout = nil
-                        isTryOnMode = false
-                        showFeedback(L10n.t("apply"))
-                        return
-                    }
-                    pendingTryOnPurchase = TryOnPurchasePlan(targetLoadout: tryOnLoadout, missingItems: missing)
-                    showTryOnPurchaseDialog = true
-                }
-                .font(.system(size: 12, weight: .semibold))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(FigmaTheme.primary.opacity(0.16))
-                .clipShape(Capsule())
-                .buttonStyle(.plain)
-
-                Button(L10n.t("cancel")) {
-                    self.tryOnLoadout = nil
-                }
-                .font(.system(size: 12, weight: .semibold))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(Color.black.opacity(0.06))
-                .clipShape(Capsule())
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.white.opacity(0.88))
-        .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .stroke(FigmaTheme.border, lineWidth: 1)
-        )
-    }
-
     private var avatarPreviewCard: some View {
         RoundedRectangle(cornerRadius: 36, style: .continuous)
-            .fill(Color(red: 216.0 / 255.0, green: 240.0 / 255.0, blue: 227.0 / 255.0))
+            .fill(Color(red: 224.0 / 255.0, green: 241.0 / 255.0, blue: 237.0 / 255.0))
             .frame(height: 216)
             .overlay {
                 RobotRendererView(size: 176, face: .front, loadout: effectiveLoadout)
             }
+            .overlay(alignment: .topTrailing) {
+                tryOnCornerControl
+                    .padding(.top, 14)
+                    .padding(.trailing, 14)
+            }
             .shadow(color: Color.black.opacity(0.06), radius: 24, x: 0, y: 6)
+    }
+
+    @ViewBuilder
+    private var tryOnCornerControl: some View {
+        if isTryOnMode {
+            if hasPendingTryOnChanges {
+                HStack(spacing: 8) {
+                    Button(L10n.t("equipment_apply_try_on")) {
+                        applyTryOnSelection()
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .frame(height: 34)
+                    .background(FigmaTheme.primary)
+                    .clipShape(Capsule())
+                    .buttonStyle(.plain)
+
+                    Button(L10n.t("cancel")) {
+                        cancelTryOnChanges()
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(FigmaTheme.text)
+                    .padding(.horizontal, 12)
+                    .frame(height: 34)
+                    .background(Color.white.opacity(0.94))
+                    .clipShape(Capsule())
+                    .overlay(
+                        Capsule()
+                            .stroke(FigmaTheme.border, lineWidth: 1)
+                    )
+                    .buttonStyle(.plain)
+                }
+            } else {
+                Button {
+                    isTryOnMode = false
+                } label: {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(FigmaTheme.primary)
+                        .frame(width: 38, height: 38)
+                        .background(Color.white.opacity(0.94))
+                        .clipShape(Circle())
+                        .overlay(
+                            Circle()
+                                .stroke(FigmaTheme.border, lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        } else {
+            Button {
+                beginTryOnMode()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text(L10n.t("equipment_try_on_mode"))
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
+                }
+                .foregroundColor(FigmaTheme.primary)
+                .padding(.horizontal, 12)
+                .frame(height: 34)
+                .background(Color.white.opacity(0.94))
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(FigmaTheme.border, lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     @ViewBuilder
@@ -590,8 +613,7 @@ struct EquipmentView: View {
             showFeedback(L10n.t("equipment_equipped_feedback"))
         case .locked:
             if !isTryOnMode {
-                isTryOnMode = true
-                tryOnLoadout = loadout
+                beginTryOnMode()
             }
             applySelection(category: category, item: item)
             showFeedback(L10n.t("equipment_trying_on"))
@@ -788,6 +810,35 @@ struct EquipmentView: View {
         showTryOnPurchaseDialog = false
         showFeedback(L10n.t("equipment_purchased_and_applied"))
         self.pendingTryOnPurchase = nil
+    }
+
+    private var hasPendingTryOnChanges: Bool {
+        guard let tryOnLoadout else { return false }
+        return tryOnLoadout != loadout
+    }
+
+    private func beginTryOnMode() {
+        isTryOnMode = true
+        tryOnLoadout = loadout
+    }
+
+    private func cancelTryOnChanges() {
+        tryOnLoadout = nil
+        isTryOnMode = false
+    }
+
+    private func applyTryOnSelection() {
+        guard let tryOnLoadout else { return }
+        let missing = missingItemsForTryOn(loadout: tryOnLoadout)
+        guard !missing.isEmpty else {
+            loadout = tryOnLoadout
+            self.tryOnLoadout = nil
+            isTryOnMode = false
+            showFeedback(L10n.t("apply"))
+            return
+        }
+        pendingTryOnPurchase = TryOnPurchasePlan(targetLoadout: tryOnLoadout, missingItems: missing)
+        showTryOnPurchaseDialog = true
     }
 
     private func isSelected(category: GearCategory, item: GearItem) -> Bool {

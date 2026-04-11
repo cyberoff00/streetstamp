@@ -323,7 +323,10 @@ final class LifelogRenderCacheCoordinator: ObservableObject {
     /// that replaces it.
     private func buildFallbackFromRawPoints(for key: LifelogDaySnapshotKey) -> LifelogSegmentedDaySnapshot? {
         guard let lifelogStore else { return nil }
-        let rawCoords = lifelogStore.rawCoordsForDay(key.day)
+        // Use sorted variant: journey-archived points may be appended out of
+        // chronological order in today's shard, which causes a transient line
+        // connecting distant route sections when rendered as a single segment.
+        let rawCoords = lifelogStore.rawCoordsSortedForDay(key.day)
         guard rawCoords.count >= 2 else { return nil }
         let segment = TrackTileSegment(
             sourceType: .passive,

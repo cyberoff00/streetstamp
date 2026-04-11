@@ -29,8 +29,7 @@ final class StartupMainThreadBlockingTests: XCTestCase {
             ],
             anchor: LatLon(lat: 30.05 + Double(index) * 0.1, lon: 121.05),
             thumbnailBasePath: nil,
-            thumbnailRoutePath: nil,
-            localizedDisplayNameByLocale: ["en": "City\(index)", "zh-Hans": "城市\(index)"]
+            thumbnailRoutePath: nil
         )
     }
 

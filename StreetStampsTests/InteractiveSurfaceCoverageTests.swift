@@ -21,7 +21,6 @@ final class InteractiveSurfaceCoverageTests: XCTestCase {
             "SidebarNavigation.swift",
             "EquipmentView.swift",
             "FriendsHubView.swift",
-            "AccountCenterView.swift",
             "FirstProfileSetupView.swift",
             "CollectionTabView.swift",
             "SharedJourneySheets.swift",
@@ -106,6 +105,30 @@ final class InteractiveSurfaceCoverageTests: XCTestCase {
         XCTAssertFalse(
             contents.contains("case \"suit\":\n            return 28"),
             "Expected EquipmentView to avoid a suit-only icon size override once the asset matches Figma"
+        )
+    }
+
+    func test_equipmentPreviewUsesCornerTryOnControlsAndMintBackdrop() throws {
+        let url = projectRoot()
+            .appendingPathComponent("StreetStamps", isDirectory: true)
+            .appendingPathComponent("EquipmentView.swift")
+        let contents = try String(contentsOf: url, encoding: .utf8)
+
+        XCTAssertTrue(
+            contents.contains("Color(red: 224.0 / 255.0, green: 241.0 / 255.0, blue: 237.0 / 255.0)"),
+            "Expected EquipmentView preview card to use the shared mint backdrop"
+        )
+        XCTAssertFalse(
+            contents.contains("tryOnRow\n"),
+            "Expected EquipmentView to stop placing a standalone try-on row in the top stack"
+        )
+        XCTAssertTrue(
+            contents.contains("tryOnCornerControl"),
+            "Expected EquipmentView preview card to expose a compact corner try-on control"
+        )
+        XCTAssertTrue(
+            contents.contains("#4CAF50"),
+            "Expected EquipmentView hair color options to include a green swatch"
         )
     }
 }
