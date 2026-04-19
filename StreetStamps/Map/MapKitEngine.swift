@@ -538,8 +538,8 @@ struct MapKitEngineView: UIViewRepresentable {
                 // Static widths for city/detail/lifelog views
                 if isGap {
                     mainWidth = config.travelMode == nil && config.liveTail == nil && !config.useAltitudeDependentWidths
-                        ? (config.useZoomAwareVisibility ? 1.4 : 1.4) // CityDeep and JourneyDetail use 1.4
-                        : 1.8 // Lifelog uses 1.8
+                        ? (config.useZoomAwareVisibility ? 1.65 : 1.65) // CityDeep and JourneyDetail (solid base 2.2 × 0.75)
+                        : 2.1 // Lifelog (solid base 2.8 × 0.75)
                     glowWidth = mainWidth * 2.2
                     highlightWidth = 0
                 } else {
@@ -549,34 +549,10 @@ struct MapKitEngineView: UIViewRepresentable {
                 }
             }
 
-            // Glow alpha differs slightly between views — pick the right one
-            let glowAlpha: CGFloat
-            if isGap {
-                glowAlpha = config.useAltitudeDependentWidths ? 0.06 : (config.useZoomAwareVisibility ? 0.06 : 0.10)
-            } else {
-                glowAlpha = isDark ? 0.25 : 0.12
-            }
+            let glowAlpha: CGFloat = isDark ? 0.25 : 0.12
+            let mainAlpha: CGFloat = isGap ? 0.85 : 1.0
 
-            let mainAlpha: CGFloat
-            if isGap {
-                // CityDeep/JourneyDetail: 0.50, Lifelog: 0.70, JourneyTracking: 0.56
-                if config.useAltitudeDependentWidths { mainAlpha = 0.56 }
-                else if config.useZoomAwareVisibility { mainAlpha = 0.50 }
-                else if config.liveTail != nil { mainAlpha = 0.56 }
-                else { mainAlpha = 0.70 }
-            } else {
-                mainAlpha = 1.0
-            }
-
-            // Layer 1: Glow
-            let glowLayer = MKPolylineRenderer(polyline: styled)
-            glowLayer.lineWidth = glowWidth
-            glowLayer.lineCap = .round
-            glowLayer.lineJoin = .round
-            glowLayer.strokeColor = glowTint.withAlphaComponent(glowAlpha)
-            if isGap { glowLayer.lineDashPattern = gapDash }
-
-            // Layer 2: Main
+            // Main layer (dashed for gap segments)
             let mainLayer = MKPolylineRenderer(polyline: styled)
             mainLayer.lineWidth = mainWidth
             mainLayer.lineCap = .round
@@ -584,12 +560,25 @@ struct MapKitEngineView: UIViewRepresentable {
             mainLayer.strokeColor = base.withAlphaComponent(mainAlpha)
             if isGap { mainLayer.lineDashPattern = gapDash }
 
-            // Layer 3: Highlight
+            // Dashed signal-loss segments render the main layer only. Glow + shadow
+            // diffuse color into the dash gaps and make the "gap" look continuous.
+            if isGap {
+                return LayeredPolylineRenderer(renderers: [mainLayer])
+            }
+
+            // Glow layer
+            let glowLayer = MKPolylineRenderer(polyline: styled)
+            glowLayer.lineWidth = glowWidth
+            glowLayer.lineCap = .round
+            glowLayer.lineJoin = .round
+            glowLayer.strokeColor = glowTint.withAlphaComponent(glowAlpha)
+
+            // Highlight layer
             let highlightLayer = MKPolylineRenderer(polyline: styled)
             highlightLayer.lineWidth = highlightWidth
             highlightLayer.lineCap = .round
             highlightLayer.lineJoin = .round
-            highlightLayer.strokeColor = isGap ? .clear : UIColor.white.withAlphaComponent(isDark ? 0.45 : 0.25)
+            highlightLayer.strokeColor = UIColor.white.withAlphaComponent(isDark ? 0.45 : 0.25)
 
             let lr = LayeredPolylineRenderer(renderers: [glowLayer, mainLayer, highlightLayer])
             if isDark {

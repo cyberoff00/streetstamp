@@ -16,15 +16,101 @@ import MapKit
 import MapboxMaps
 import Turf
 import Photos
+import CommonCrypto
 
 // MARK: - Route Thumbnail Cache
 
+/// Two-tier cache for per-journey route snapshot images.
+/// Memory layer (NSCache) gives instant hits while the app is alive.
+/// Disk layer (JPEG in Application Support, LRU-evicted at 100 MB) survives relaunch
+/// so cold opens skip the 100–300 ms MKMapSnapshotter / Mapbox Snapshotter round-trip.
+/// Key is just `journey.id` — we intentionally accept that a map-style switch
+/// keeps the old thumbnail until `set(...)` overwrites it (matches pre-existing behavior).
 private final class RouteThumbnailCache {
     static let shared = RouteThumbnailCache()
-    private let cache = NSCache<NSString, UIImage>()
-    init() { cache.countLimit = 60 }
-    func get(_ journeyID: String) -> UIImage? { cache.object(forKey: journeyID as NSString) }
-    func set(_ image: UIImage, for journeyID: String) { cache.setObject(image, forKey: journeyID as NSString) }
+
+    private let memoryCache = NSCache<NSString, UIImage>()
+    private let directory: URL
+    private let maxBytes: Int = 100 * 1024 * 1024
+    private let ioQueue = DispatchQueue(label: "RouteThumbnailDiskCache.io", qos: .utility)
+
+    init() {
+        memoryCache.countLimit = 200
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        directory = appSupport.appendingPathComponent("RouteThumbnailCache", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+
+    func get(_ journeyID: String) async -> UIImage? {
+        if let img = memoryCache.object(forKey: journeyID as NSString) {
+            return img
+        }
+        let path = filePath(for: journeyID)
+        let img: UIImage? = await withCheckedContinuation { (cont: CheckedContinuation<UIImage?, Never>) in
+            ioQueue.async {
+                guard let data = FileManager.default.contents(atPath: path.path) else {
+                    cont.resume(returning: nil)
+                    return
+                }
+                try? FileManager.default.setAttributes(
+                    [.modificationDate: Date()], ofItemAtPath: path.path
+                )
+                cont.resume(returning: UIImage(data: data))
+            }
+        }
+        if let img {
+            memoryCache.setObject(img, forKey: journeyID as NSString)
+        }
+        return img
+    }
+
+    func set(_ image: UIImage, for journeyID: String) {
+        memoryCache.setObject(image, forKey: journeyID as NSString)
+        guard let data = image.jpegData(compressionQuality: 0.85) else { return }
+        let path = filePath(for: journeyID)
+        ioQueue.async { [directory, maxBytes] in
+            try? data.write(to: path, options: .atomic)
+            Self.evictIfNeeded(directory: directory, maxBytes: maxBytes)
+        }
+    }
+
+    private func filePath(for journeyID: String) -> URL {
+        directory.appendingPathComponent(Self.sha256(journeyID))
+    }
+
+    private static func evictIfNeeded(directory: URL, maxBytes: Int) {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey]
+        ) else { return }
+
+        var entries: [(url: URL, size: Int, date: Date)] = []
+        var totalSize = 0
+        for file in files {
+            guard let values = try? file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]),
+                  let size = values.fileSize else { continue }
+            let date = values.contentModificationDate ?? .distantPast
+            entries.append((file, size, date))
+            totalSize += size
+        }
+
+        guard totalSize > maxBytes else { return }
+        entries.sort { $0.date < $1.date }
+        for entry in entries {
+            guard totalSize > maxBytes else { break }
+            try? fm.removeItem(at: entry.url)
+            totalSize -= entry.size
+        }
+    }
+
+    private static func sha256(_ string: String) -> String {
+        let data = Data(string.utf8)
+        var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+        data.withUnsafeBytes { ptr in
+            _ = CC_SHA256(ptr.baseAddress, CC_LONG(data.count), &hash)
+        }
+        return hash.map { String(format: "%02x", $0) }.joined()
+    }
 }
 
 // =======================================================
@@ -146,6 +232,7 @@ struct JourneyMemoryMainView: View {
     private let headerTitle: String?
     private let emptyTitleKey: String
     private let emptySubtitleKey: String
+    private let friendLoadout: RobotLoadout?
     var onSelectJourney: ((JourneyMemoryDetailDestination) -> Void)?
 
     init(
@@ -156,6 +243,7 @@ struct JourneyMemoryMainView: View {
         emptyTitleKey: String = "no_memories_yet",
         emptySubtitleKey: String = "memory_empty_desc",
         filterState: MemoryFilterState? = nil,
+        friendLoadout: RobotLoadout? = nil,
         onSelectJourney: ((JourneyMemoryDetailDestination) -> Void)? = nil
     ) {
         self.hideLeadingControl = hideLeadingControl
@@ -165,6 +253,7 @@ struct JourneyMemoryMainView: View {
         self.emptyTitleKey = emptyTitleKey
         self.emptySubtitleKey = emptySubtitleKey
         self.filterState = filterState ?? MemoryFilterState()
+        self.friendLoadout = friendLoadout
         self.onSelectJourney = onSelectJourney
     }
 
@@ -225,6 +314,7 @@ struct JourneyMemoryMainView: View {
                                 city: city,
                                 isExpanded: expandedCities.contains(city.cityKey),
                                 readOnly: readOnly,
+                                friendLoadout: friendLoadout,
                                 onToggle: {
                                     withAnimation(.easeInOut(duration: 0.25)) {
                                         if expandedCities.contains(city.cityKey) {
@@ -741,6 +831,7 @@ private struct CitySection: View {
     let city: CityGroupData
     let isExpanded: Bool
     let readOnly: Bool
+    let friendLoadout: RobotLoadout?
     let onToggle: () -> Void
     let onSelectJourney: (JourneyMemoryDetailDestination) -> Void
 
@@ -793,7 +884,7 @@ private struct CitySection: View {
                                 cityName: city.cityName,
                                 countryName: city.countryName,
                                 readOnly: readOnly,
-                                friendLoadout: nil
+                                friendLoadout: friendLoadout
                             ))
                         } label: {
                             JourneyEntryRow(
@@ -1236,7 +1327,7 @@ struct JourneyMemoryDetailView: View {
         }
         .animation(.easeInOut(duration: 0.3), value: showJourneyPhotoLimitToast)
         .task {
-            if let cached = RouteThumbnailCache.shared.get(journey.id) {
+            if let cached = await RouteThumbnailCache.shared.get(journey.id) {
                 routeThumbnail = cached
             } else {
                 await generateRouteThumbnail()
@@ -1584,9 +1675,11 @@ struct JourneyMemoryDetailView: View {
                         memory: $draftMemories[index],
                         userID: sessionStore.currentUserID,
                         maxPhotos: membership.maxPhotosPerMemory,
+                        isJourneyLimitReached: journeyTotalPhotoCount >= journeyPhotoLimit,
                         focusedMemoryID: $focusedMemoryID,
                         onOpenCamera: { openCamera(for: index) },
-                        onOpenPhotoLibrary: { openPhotoLibrary(for: index) }
+                        onOpenPhotoLibrary: { openPhotoLibrary(for: index) },
+                        onPhotoLimitReached: { showPhotoLimitFeedback() }
                     )
                     .id("editable_memory_\(index)_\(draftMemories[index].id)")
                 } else {
@@ -1663,7 +1756,11 @@ struct JourneyMemoryDetailView: View {
 
                 HStack(spacing: 12) {
                     Button {
-                        openCameraForOverallMemory()
+                        if overallMemoryTotalPhotoCount >= photoLimit || journeyTotalPhotoCount >= journeyPhotoLimit {
+                            showPhotoLimitFeedback()
+                        } else {
+                            openCameraForOverallMemory()
+                        }
                     } label: {
                         Image(systemName: "camera.fill")
                             .font(.system(size: 15, weight: .semibold))
@@ -1673,11 +1770,14 @@ struct JourneyMemoryDetailView: View {
                             .clipShape(Circle())
                             .appMinTapTarget()
                     }
-                    .disabled(overallMemoryTotalPhotoCount >= photoLimit)
-                    .opacity(overallMemoryTotalPhotoCount >= photoLimit ? 0.35 : 1.0)
+                    .opacity(overallMemoryTotalPhotoCount >= photoLimit || journeyTotalPhotoCount >= journeyPhotoLimit ? 0.35 : 1.0)
 
                     Button {
-                        openPhotoLibraryForOverallMemory()
+                        if overallMemoryTotalPhotoCount >= photoLimit || journeyTotalPhotoCount >= journeyPhotoLimit {
+                            showPhotoLimitFeedback()
+                        } else {
+                            openPhotoLibraryForOverallMemory()
+                        }
                     } label: {
                         Image(systemName: "photo.on.rectangle.angled")
                             .font(.system(size: 15, weight: .semibold))
@@ -1687,8 +1787,7 @@ struct JourneyMemoryDetailView: View {
                             .clipShape(Circle())
                             .appMinTapTarget()
                     }
-                    .disabled(overallMemoryTotalPhotoCount >= photoLimit)
-                    .opacity(overallMemoryTotalPhotoCount >= photoLimit ? 0.35 : 1.0)
+                    .opacity(overallMemoryTotalPhotoCount >= photoLimit || journeyTotalPhotoCount >= journeyPhotoLimit ? 0.35 : 1.0)
 
                     Text(String(format: L10n.t("photo_count"), overallMemoryTotalPhotoCount, photoLimit))
                         .font(.system(size: 11, weight: .medium))
@@ -1919,8 +2018,10 @@ struct JourneyMemoryDetailView: View {
     private var photoLimit: Int { membership.maxPhotosPerMemory }
     private var journeyPhotoLimit: Int { membership.maxJourneyPhotos }
     private var journeyTotalPhotoCount: Int {
-        let overallCount = draftOverallMemoryImagePaths.count + draftOverallMemoryRemoteImageURLs.count
-        let memoriesCount = draftMemories.reduce(0) { $0 + $1.imagePaths.count + $1.remoteImageURLs.count }
+        // imagePaths and remoteImageURLs are parallel arrays for the same photos;
+        // count max, not sum, to avoid double-counting published photos.
+        let overallCount = max(draftOverallMemoryImagePaths.count, draftOverallMemoryRemoteImageURLs.count)
+        let memoriesCount = draftMemories.reduce(0) { $0 + max($1.imagePaths.count, $1.remoteImageURLs.count) }
         return overallCount + memoriesCount
     }
 
@@ -1929,14 +2030,22 @@ struct JourneyMemoryDetailView: View {
         let perMemoryRemaining: Int
         switch activePhotoTarget {
         case .overallMemory:
-            perMemoryRemaining = photoLimit - draftOverallMemoryImagePaths.count - draftOverallMemoryRemoteImageURLs.count
+            perMemoryRemaining = photoLimit - max(draftOverallMemoryImagePaths.count, draftOverallMemoryRemoteImageURLs.count)
         case .memory(let idx):
             guard draftMemories.indices.contains(idx) else { return min(journeyRemaining, photoLimit) }
-            perMemoryRemaining = photoLimit - draftMemories[idx].imagePaths.count - draftMemories[idx].remoteImageURLs.count
+            perMemoryRemaining = photoLimit - max(draftMemories[idx].imagePaths.count, draftMemories[idx].remoteImageURLs.count)
         case nil:
             return min(journeyRemaining, photoLimit)
         }
         return min(journeyRemaining, perMemoryRemaining)
+    }
+
+    private func showPhotoLimitFeedback() {
+        if membership.tier == .free {
+            showMembershipGate = .journeyPhotos
+        } else {
+            withAnimation { showJourneyPhotoLimitToast = true }
+        }
     }
 
     private func openCamera(for index: Int) {
@@ -1992,10 +2101,10 @@ struct JourneyMemoryDetailView: View {
         let remainingSlots: Int
         switch target {
         case .overallMemory:
-            remainingSlots = min(journeyRemaining, max(0, photoLimit - draftOverallMemoryImagePaths.count - draftOverallMemoryRemoteImageURLs.count))
+            remainingSlots = min(journeyRemaining, max(0, photoLimit - max(draftOverallMemoryImagePaths.count, draftOverallMemoryRemoteImageURLs.count)))
         case .memory(let idx):
             guard draftMemories.indices.contains(idx) else { return }
-            remainingSlots = min(journeyRemaining, max(0, photoLimit - draftMemories[idx].imagePaths.count - draftMemories[idx].remoteImageURLs.count))
+            remainingSlots = min(journeyRemaining, max(0, photoLimit - max(draftMemories[idx].imagePaths.count, draftMemories[idx].remoteImageURLs.count)))
         }
 
         let trimmed = Array(images.prefix(remainingSlots))
@@ -2013,7 +2122,7 @@ struct JourneyMemoryDetailView: View {
         case .memory(let idx):
             guard draftMemories.indices.contains(idx) else { return }
             for image in trimmed {
-                if (draftMemories[idx].imagePaths.count + draftMemories[idx].remoteImageURLs.count) >= photoLimit { break }
+                if max(draftMemories[idx].imagePaths.count, draftMemories[idx].remoteImageURLs.count) >= photoLimit { break }
                 if journeyTotalPhotoCount >= journeyPhotoLimit { break }
                 if let filename = try? PhotoStore.saveJPEG(image, userID: sessionStore.currentUserID) {
                     draftMemories[idx].imagePaths.append(filename)
@@ -2575,7 +2684,11 @@ struct JourneyMemoryDetailView: View {
         guard currentJourney.endTime != nil else { return }
         let target = pendingVisibility
         let journey = currentJourney
-        guard target != journey.visibility else {
+        // Compare against the *effective* visibility: unconfirmed friends-only
+        // (sharedAt == nil) counts as private so the user can retry by picking
+        // friends-only again without being blocked by the no-op guard.
+        let effective: JourneyVisibility = (journey.sharedAt != nil) ? journey.visibility : .private
+        guard target != effective else {
             activeJourneySheet = nil
             return
         }
@@ -2649,7 +2762,11 @@ struct JourneyMemoryDetailView: View {
             return
         }
 
-        pendingVisibility = journey.visibility
+        // Show the picker reflecting the *confirmed* state (sharedAt != nil).
+        // An unconfirmed friends-only intent (persisted locally but never
+        // successfully published) should be treated as private in the UI —
+        // otherwise the picker lies about a status friends will never see.
+        pendingVisibility = (journey.sharedAt != nil) ? journey.visibility : .private
         activeJourneySheet = .visibility
     }
 
@@ -3048,9 +3165,11 @@ private struct EditableMemoryTimelineItem: View {
     @Binding var memory: JourneyMemory
     let userID: String
     let maxPhotos: Int
+    let isJourneyLimitReached: Bool
     let focusedMemoryID: FocusState<String?>.Binding
     let onOpenCamera: () -> Void
     let onOpenPhotoLibrary: () -> Void
+    var onPhotoLimitReached: (() -> Void)? = nil
 
     private var timeText: String {
         let formatter = DateFormatter()
@@ -3064,6 +3183,10 @@ private struct EditableMemoryTimelineItem: View {
             : memory.imagePaths.count
     }
 
+    private var isPhotoLimitReached: Bool {
+        totalPhotoCount >= maxPhotos || isJourneyLimitReached
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(timeText)
@@ -3072,7 +3195,13 @@ private struct EditableMemoryTimelineItem: View {
                 .foregroundColor(Color(red: 0.60, green: 0.63, blue: 0.69))
 
             HStack(spacing: 12) {
-                Button(action: onOpenCamera) {
+                Button {
+                    if isPhotoLimitReached {
+                        onPhotoLimitReached?()
+                    } else {
+                        onOpenCamera()
+                    }
+                } label: {
                     Image(systemName: "camera.fill")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
@@ -3080,10 +3209,15 @@ private struct EditableMemoryTimelineItem: View {
                         .background(Color.black.opacity(0.05))
                         .clipShape(Circle())
                 }
-                .disabled(totalPhotoCount >= maxPhotos)
-                .opacity(totalPhotoCount >= maxPhotos ? 0.35 : 1.0)
+                .opacity(isPhotoLimitReached ? 0.35 : 1.0)
 
-                Button(action: onOpenPhotoLibrary) {
+                Button {
+                    if isPhotoLimitReached {
+                        onPhotoLimitReached?()
+                    } else {
+                        onOpenPhotoLibrary()
+                    }
+                } label: {
                     Image(systemName: "photo.on.rectangle.angled")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(Color(red: 0.04, green: 0.04, blue: 0.04))
@@ -3091,8 +3225,7 @@ private struct EditableMemoryTimelineItem: View {
                         .background(Color.black.opacity(0.05))
                         .clipShape(Circle())
                 }
-                .disabled(totalPhotoCount >= maxPhotos)
-                .opacity(totalPhotoCount >= maxPhotos ? 0.35 : 1.0)
+                .opacity(isPhotoLimitReached ? 0.35 : 1.0)
 
                 Text(String(format: L10n.t("photo_count"), totalPhotoCount, maxPhotos))
                     .font(.system(size: 11, weight: .medium))

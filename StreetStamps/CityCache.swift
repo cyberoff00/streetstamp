@@ -1262,17 +1262,56 @@ final class CityCache: ObservableObject {
     @MainActor
     func deleteCity(id: String) {
         guard let idx = cachedCities.firstIndex(where: { $0.id == id }) else { return }
+        let isPhoto = cachedCities[idx].isPhotoDiscovered == true
         let journeyIDs = cachedCities[idx].journeyIds
 
         if !journeyIDs.isEmpty {
             journeyStore.discardJourneys(ids: journeyIDs)
             rebuildFromJourneyStore()
+            // Photo-discovered city that also has journeys — still purge from
+            // the separate photo file so it won't resurrect on next load.
+            if isPhoto { removeFromPhotoDiscoveredFile(id: id) }
             return
         }
 
         cachedCities.remove(at: idx)
         saveToDisk()
         notifyCitiesChanged()
+        if isPhoto { removeFromPhotoDiscoveredFile(id: id) }
+    }
+
+    /// Remove a single city from the persisted photo-discovered cities file
+    /// and the scan result, so it does not reappear on next
+    /// `loadPhotoDiscoveredFromDisk()` or after a subsequent photo scan.
+    private func removeFromPhotoDiscoveredFile(id: String) {
+        // 1. Remove from the photo-discovered cities list
+        let citiesURL = paths.photoDiscoveredCitiesURL
+        if fm.fileExists(atPath: citiesURL.path),
+           let data = try? Data(contentsOf: citiesURL),
+           var decoded = try? JSONDecoder().decode([CachedCity].self, from: data) {
+            let before = decoded.count
+            decoded.removeAll { $0.id == id }
+            if decoded.count != before {
+                if decoded.isEmpty {
+                    try? fm.removeItem(at: citiesURL)
+                } else if let updated = try? JSONEncoder().encode(decoded) {
+                    try? updated.write(to: citiesURL, options: .atomic)
+                }
+            }
+        }
+
+        // 2. Remove from the scan result so a future scan won't carry it forward
+        let scanURL = paths.photoScanResultURL
+        if fm.fileExists(atPath: scanURL.path),
+           let data = try? Data(contentsOf: scanURL),
+           var result = try? JSONDecoder().decode(PhotoScanResult.self, from: data) {
+            let before = result.cities.count
+            result.cities.removeAll { $0.cityKey == id }
+            if result.cities.count != before,
+               let updated = try? JSONEncoder().encode(result) {
+                try? updated.write(to: scanURL, options: .atomic)
+            }
+        }
     }
 
     @MainActor

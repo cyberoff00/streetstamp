@@ -202,6 +202,10 @@
 "export_long_image" = "導出長图";
 "finish_confirm_continue" = "繼續旅程";
 "finish_confirm_finish" = "確認結束";
+"journey_finalizing" = "旅程儲存中…";
+"journey_complete_title" = "旅程完成！";
+"journey_stat_distance" = "距離";
+"journey_stat_duration" = "時長";
 "finish_confirm_message" = "如果你是不小心点到結束，可以選擇繼續旅程。";
 "finish_confirm_title" = "結束旅程？";
 "finish_no_city_title" = "無法識別城市";
@@ -322,6 +326,7 @@
 "gpx_import_detected_cities" = "根据采样逆地理检测到：";
 "gpx_import_entry_desc" = "先上傳 GPX 文件，再从识别出的城市候选中選擇一个作为導入目标。";
 "gpx_import_entry_title" = "導入你的 GPX 軌跡";
+"gpx_import_source_hint" = "把其他運動 App 匯出的 GPX 軌跡檔案匯入 Worldo，過往的運動記錄會補到你的足跡地圖上。";
 "gpx_import_existing_city_card" = "已有城市卡";
 "gpx_import_no_detected_city" = "未从该 GPX 軌跡识别到城市。";
 "gpx_import_not_enough_points" = "GPX 軌跡点不足（至少需要 2 个点）。";
@@ -427,13 +432,13 @@
 "lockscreen_mode_sport_short" = "運動";
 "lockscreen_sport_mode" = "運動模式";
 "lockscreen_tracking_active" = "追蹤中";
-"long_stationary_reminder_body" = "過去 1.5 小時內旅程幾乎沒有移動。點擊繼續保持追蹤，否則旅程將自動結束。";
+"long_stationary_reminder_body" = "過去 1.5 小時內旅程幾乎沒有移動。點擊繼續保持追蹤，否則旅程將自動暫停。";
 "long_stationary_reminder_title" = "仍在追蹤中";
 "long_stationary_continue_action" = "繼續追蹤";
-"auto_end_notification_title" = "旅程已自動結束";
-"auto_end_notification_body" = "由於長時間靜止，旅程已自動結束並保存。";
-"auto_end_alert_title" = "旅程已自動結束";
-"auto_end_alert_message" = "由於長時間靜止未操作，旅程已自動保存。";
+"auto_pause_notification_title" = "旅程已自動暫停";
+"auto_pause_notification_body" = "由於長時間靜止，旅程已自動暫停。打開App可恢復或結束旅程。";
+"auto_pause_alert_title" = "旅程已自動暫停";
+"auto_pause_alert_message" = "由於長時間靜止未操作，旅程已自動暫停。你可以選擇恢復或手動結束。";
 "main_resume_onboarding" = "繼續引导";
 "main_unlock_new_journey" = "開啟我的Worldo旅程";
 "mem_short" = "%d 记";
@@ -664,6 +669,11 @@
 "settings_logout" = "退出登入";
 "settings_logout_confirm_message" = "退出后将切回游客模式，本地数据会保留在当前设备。";
 "settings_logout_confirm_title" = "確認退出登入？";
+"settings_delete_account" = "刪除帳號";
+"settings_delete_account_confirm_title" = "確認刪除帳號？";
+"settings_delete_account_confirm_message" = "此操作將永久刪除你的帳號及伺服器上的所有資料（旅程、好友、明信片等）。本機裝置上的資料不受影響。此操作無法撤銷。";
+"settings_delete_account_success" = "帳號已刪除";
+"settings_delete_account_failed" = "刪除帳號失敗，請稍後重試。";
 "settings_logout_subtitle" = "退出当前账号并切回游客模式";
 "settings_map_appearance_desc" = "应用到所有地圖与路線渲染";
 "settings_map_dark_mode" = "地圖深色模式";
@@ -873,18 +883,20 @@
 "membership_gate_coin_desc" = "Premium 會員每萬步獲得 5 倍金幣。";
 "membership_gate_icloud_title" = "iCloud 同步";
 "membership_gate_icloud_desc" = "升級 Premium，跨裝置同步旅程、生活紀錄與設定。";
-"membership_gate_gpx_title" = "GPX 匯出";
-"membership_gate_gpx_desc" = "升級 Premium，將旅程匯出為 GPX 檔案。";
+"membership_gate_gpx_title" = "GPX 匯入";
+"membership_gate_gpx_desc" = "升級 Premium，從其他應用匯入 GPX 軌跡檔案。";
 "membership_gate_map_title" = "地圖主題";
 "membership_gate_map_desc" = "升級 Premium 解鎖更多地圖外觀樣式。";
 "membership_benefit_photos" = "每段旅程最多 12 張照片";
 "membership_benefit_friends" = "無限好友";
 "membership_benefit_globe" = "完整全球視圖體驗";
 "membership_benefit_icloud" = "iCloud 同步與還原";
-"membership_benefit_gpx" = "GPX 匯出";
+"membership_benefit_gpx" = "GPX 匯入";
 "membership_benefit_postcard" = "每座城市更多明信片";
 "membership_benefit_map" = "全部地圖主題";
 "membership_benefit_coins" = "5 倍金幣獎勵";
+"membership_benefit_equipment_coins" = "1500 裝備金幣獎勵";
+"membership_benefit_more_features" = "更多未來功能待解鎖";
 "membership_page_title" = "Premium";
 "membership_status_active" = "Premium 已啟用";
 "membership_status_free" = "免費版";
@@ -897,17 +909,19 @@
 "membership_compare_premium" = "Premium";
 "membership_compare_photos" = "照片 / 旅程";
 "membership_info_photos" = "每段旅程最多可添加的照片數，每條記憶最多 2 張。免費 6 張，Premium 12 張。";
-"journey_photo_limit_toast" = "本段旅程最多可添加 %d 張照片";
+"journey_photo_limit_toast" = "為了留下最精彩瞬間，每次行程最多 %d 張照片";
 "membership_info_postcard" = "每個城市：可向每位好友發 1 張(免費)/2 張(Premium)明信片，最多 3 位(免費)/10 位(Premium)好友。該城市每多一段旅程，每位好友 +1 張，可發好友數也增加。";
 "membership_compare_friends" = "好友";
 "membership_compare_unlimited" = "無限";
 "membership_compare_globe" = "全球視圖";
 "membership_compare_icloud" = "iCloud 同步";
-"membership_compare_gpx" = "GPX 匯出";
+"membership_compare_gpx" = "GPX 匯入";
 "membership_compare_republish" = "重新發佈";
 "membership_compare_postcard" = "明信片";
 "membership_compare_map_theme" = "地圖主題";
 "membership_compare_coins" = "金幣 / 萬步";
+"membership_compare_equipment_coins" = "1500 裝備金幣獎勵";
+"membership_compare_more_features" = "更多未來功能待解鎖";
 "membership_plan_monthly" = "月訂";
 "membership_plan_yearly" = "年訂";
 "membership_period_monthly" = "每月";
@@ -1096,3 +1110,129 @@
 "empty_city_guide_hint" = "暫無城市卡，去開啟旅程或點擊右上角從相簿匯入歷史造訪城市";
 "city_empty_title" = "暫無城市卡";
 "city_empty_desc" = "開啟旅程解鎖城市，\n或點擊右上角從相簿匯入";
+"postcard_no_city_hint" = "開啟旅程解鎖城市，才能獲得對應城市的明信片發送機會";
+
+// MARK: - Missing keys aligned with en/zh-Hans
+
+// About
+"about_worldo_header" = "關於 WORLDO";
+
+// Activity Rings
+"activity_rings" = "活動圓環";
+"ring_outer_title" = "外圈";
+"ring_outer_desc" = "等級進度（≥1公里的旅程計入）";
+"ring_middle_title" = "中圈";
+"ring_middle_desc" = "記憶收集（每50個滿環）";
+"ring_inner_title" = "內圈";
+"ring_inner_desc" = "城市解鎖進度（每20個滿環）";
+
+// Auth / Password
+"auth_confirm_new_password" = "確認新密碼";
+"auth_confirm_password" = "確認密碼";
+"auth_enter_confirm_new_password" = "請輸入並確認新密碼";
+"auth_new_password" = "新密碼";
+"auth_password_hint" = "至少8位，需包含字母、數字和特殊字符";
+"auth_password_updated" = "密碼已更新，請使用新密碼登入";
+"auth_reenter_credentials" = "請重新輸入郵箱和密碼後再繼續";
+"auth_reset_email_sent" = "重置密碼郵件已發送";
+"auth_reset_link_invalid" = "重置連結缺失或無效";
+"auth_reset_password" = "重置密碼";
+"auth_reset_subtitle" = "為你的帳號設置一個新密碼";
+
+// Brand
+"brand_tagline_journey_memory" = "旅程記憶";
+"brand_wordmark" = "worldo";
+
+// Error Messages
+"error_account_not_found" = "帳號不存在";
+"error_already_friends" = "你們已經是好友了";
+"error_cannot_add_self" = "不能添加自己為好友";
+"error_display_name_taken" = "該暱稱已被佔用";
+"error_email_exists" = "該郵箱已被註冊";
+"error_email_not_verified" = "郵箱未驗證，請查收驗證郵件";
+"error_exclusive_id_taken" = "該ID已被佔用";
+"error_invalid_display_name" = "暱稱格式不正確";
+"error_invalid_email" = "郵箱地址格式不正確";
+"error_too_many_requests" = "請求太頻繁，請稍等一下";
+"error_weak_password" = "密碼至少8位，需包含字母、數字和特殊字符";
+"error_wrong_credentials" = "郵箱或密碼錯誤";
+
+// FAQ
+"faq_title" = "常見問題";
+"faq_subtitle" = "關於 Worldo 的常見問題解答";
+"faq_q_overview" = "Worldo 怎麼玩？";
+"faq_a_overview" = "Worldo 是一款融合旅程記錄與地圖社交的產品。你可以：\n• 開啟旅程記錄跑步、騎行、徒步或城市探索的軌跡，沿途拍照寫下心情，留住每一段真實的出行記憶。\n• 開啟始終追蹤模式，即使不主動開始旅程，每天的足跡也會自動記錄。\n• 看著自己的足跡在 Worldo 地圖和 3D 地球上逐漸繪成，每到一座新城市就解鎖一張城市卡片。\n• 關注朋友，在動態中看到他們正在探索的城市、走過的路線和旅途記憶。\n• 給好友寄明信片，收集獨特裝備來個性化你的檔案。";
+"faq_q_sport_vs_daily" = "運動模式和日常模式有什麼區別？";
+"faq_a_sport_vs_daily" = "運動模式以高精度錄製，帶路線平滑處理 — 適合跑步、騎行或徒步等需要精確軌跡的場景。日常模式為省電優化，會根據出行方式自動調整 — 適合通勤或全天記錄等更看重續航的場景。";
+"faq_q_battery" = "Worldo 耗電嗎？";
+"faq_a_battery" = "Worldo 在耗電方面做了大量優化。運動模式為了 GPS 和軌跡更精確，相對較為耗電；但 Worldo 預設使用日常模式，比同類軌跡軟體省電很多。不追蹤旅程時，後台追蹤使用低精度定位更新，耗電量極小。你還可以在設定中進一步調整精度以節省電量。";
+"faq_q_track_accuracy" = "為什麼軌跡不準？";
+"faq_a_track_accuracy" = "GPS 精度取決於你所處的環境。高樓密集區、隧道和室內會削弱 GPS 信號，導致定位漂移和軌跡偏移。在 GPS 信號丟失的地方（如地鐵、隧道、建築物內），Worldo 的軌跡會出現跳點，連成直線或顯示為虛線，這是所有 GPS 應用的正常現象。此外，手機的效能狀態和電量也會影響 GPS 晶片的工作精度。建議將定位權限設為「始終允許」，盡量在開闊區域使用。運動模式下 GPS 取樣更精確，軌跡會更準確，但在信號盲區仍無法完全避免。";
+"faq_q_city_unlock" = "城市卡片是怎麼解鎖的？";
+"faq_a_city_unlock" = "每條旅程會根據起點位置，通過 Apple 的地理編碼服務被歸屬到一座城市。第一次在新城市完成旅程時，這座城市就會加入你的收藏，城市卡片會出現在 Worldo 城市庫裡。之後你在這座城市的所有旅程都會累積到同一張卡片上，逐步疊加這座城市的總距離、總時長和沿途記憶。";
+"faq_q_postcard_rules" = "明信片有什麼規則？";
+"faq_a_postcard_rules" = "你可以從任何去過的城市給好友寄明信片。每在一座城市完成一次 1 公里以上的有效旅程，就會為這座城市解鎖一次發送額度 — 對每位好友單獨計數，同時也有城市總額度。明信片包含你上傳的照片、最多 80 字的留言、城市名和你的頭像，通過推播通知送達。送達後你和收件人都可以用表情或文字進行回應。";
+"faq_q_location_permission" = "Worldo 需要什麼定位權限？";
+"faq_a_location_permission" = "為獲得最佳體驗，建議授予「始終允許」定位權限。這樣可以啟用後台追蹤和追蹤旅程時的即時動態。「使用期間」可以用於主動追蹤，但會停用後台功能。你可以隨時在 iOS 設定 → Worldo → 定位 中更改。";
+"faq_q_data_storage" = "我的資料存在哪裡？";
+"faq_a_data_storage" = "所有資料首先儲存在本機裝置上。公開旅程登入帳號後會通過伺服器同步，方便好友查看你的足跡；私密旅程、記憶照片和後台追蹤資料僅存在本機，可通過 iCloud 備份。你的資料會被加密保護，不會被用作任何商業用途。";
+"faq_q_icloud_sync" = "iCloud 同步怎麼運作？";
+"faq_a_icloud_sync" = "公開旅程登入後通過 Worldo 伺服器同步，好友可以看到你的足跡。私密旅程、記憶照片、後台追蹤資料和設定會同步到你的個人 iCloud 儲存，使用你自己的 iCloud 配額。你也可以在 設定 → 資料管理 → iCloud 備份 中手動觸發完整備份或還原。";
+"faq_q_gpx_import" = "什麼是 GPX？";
+"faq_a_gpx_import" = "GPX（GPS Exchange Format）是一種通用的 GPS 資料交換格式，被大多數運動和地圖應用支援。你可以將其他應用（如 Strava、佳明等）的運動軌跡匯出為 GPX 檔案，然後匯入到 Worldo，將之前的運動記錄整合到你的足跡地圖裡。";
+"faq_q_phone_migration" = "我要換手機，資料怎麼辦？";
+"faq_a_phone_migration" = "設定中有專門的「資料遷移」功能。公開旅程登入帳號後通過伺服器同步，換機後登入同一帳號即可恢復。對於本機私密旅程、記憶照片和後台追蹤資料，可以使用「裝置遷移」功能：兩台裝置連接同一 Wi-Fi，舊裝置產生二維碼，新裝置掃碼即可將資料通過區域網路直接傳輸，無需上傳雲端。建議換機前先在設定 → 資料遷移中完成遷移操作。";
+
+// Feedback
+"feedback_email_subject" = "Worldo 意見回饋 (v%@)";
+"feedback_email_body" = "\n\n---\n裝置: %@\niOS: %@\nApp: v%@";
+
+// Film Camera
+"film_camera_drop_message" = "本趟旅程你獲得了一台底片相機（50%機率）";
+"film_camera_try_later" = "之後再試";
+"film_camera_try_now" = "試試";
+
+// Map Layer
+"map_layer_title" = "地圖樣式";
+"map_layer_standard" = "標準";
+"map_layer_dark" = "暗色";
+"map_layer_satellite" = "衛星";
+"map_layer_hybrid" = "混合";
+
+// Membership
+"membership_hero_title" = "解鎖你的旅程";
+"membership_your_benefits" = "你的權益";
+"membership_compare_features_title" = "功能對比";
+"membership_compare_premium_only" = "專屬功能";
+"membership_cta_monthly" = "開始月度會員";
+"membership_cta_yearly" = "開始年度會員";
+"membership_indie_note" = "你的訂閱直接支持獨立開發者。無廣告。不出售任何資料。";
+
+// Photo Edit
+"photo_edit_button" = "編輯";
+"photo_edit_crop" = "裁剪";
+"photo_edit_rotate" = "旋轉";
+"photo_edit_skip" = "跳過";
+"photo_edit_done" = "完成";
+"photo_edit_done_all" = "全部完成";
+"photo_edit_text_tool" = "文字";
+"photo_edit_text_placeholder" = "輸入文字...";
+"photo_edit_add_text" = "新增文字";
+"photo_edit_edit_text" = "編輯文字";
+"photo_edit_delete_text" = "刪除文字";
+
+// Postcard
+"postcard_add_button" = "新增";
+"postcard_add_recipient" = "新增收件人";
+"postcard_change_recipient" = "更換";
+"postcard_select_recipient_title" = "選擇收件人";
+
+// Settings
+"settings_faq_title" = "常見問題";
+"settings_feedback_title" = "傳送意見回饋";
+"settings_map_engine" = "地圖樣式";
+"settings_rate_app_title" = "去 APP STORE 評分";
+
+// Misc
+"resume_upper" = "繼續";
+"tab_memory" = "記憶";

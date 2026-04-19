@@ -66,6 +66,12 @@ struct EquipmentView: View {
     @State private var pendingTryOnPurchase: TryOnPurchasePlan?
     @State private var feedbackMessage: String?
     @State private var expandedColorCategoryId: String?
+    @State private var unlockCelebration: UnlockCelebration?
+
+    private struct UnlockCelebration: Equatable {
+        let id = UUID()
+        let message: String
+    }
 
     private func itemPrice(for categoryId: String) -> Int {
         GearPricingConfig.price(for: categoryId)
@@ -181,7 +187,59 @@ struct EquipmentView: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .center)))
             }
         }
+        .overlay {
+            if let unlockCelebration {
+                unlockCelebrationCard(unlockCelebration)
+                    .transition(.scale(scale: 0.35).combined(with: .opacity))
+            }
+        }
         .animation(.spring(response: 0.3, dampingFraction: 0.78), value: showTryOnPurchaseDialog)
+        .animation(.spring(response: 0.42, dampingFraction: 0.58), value: unlockCelebration)
+    }
+
+    private func unlockCelebrationCard(_ celebration: UnlockCelebration) -> some View {
+        ZStack {
+            Color.black.opacity(0.12).ignoresSafeArea()
+
+            VStack(spacing: 12) {
+                Text("🎉")
+                    .font(.system(size: 52))
+                Text(celebration.message)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(FigmaTheme.text)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 28)
+            .padding(.vertical, 26)
+            .frame(maxWidth: 300)
+            .background(Color.white)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(
+                        LinearGradient(
+                            colors: [Color.yellow.opacity(0.55), Color.orange.opacity(0.35)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 2
+                    )
+            )
+            .shadow(color: Color.orange.opacity(0.32), radius: 28, x: 0, y: 0)
+            .shadow(color: Color.black.opacity(0.18), radius: 14, x: 0, y: 8)
+            .padding(.horizontal, 24)
+        }
+    }
+
+    private func showUnlockCelebration(_ message: String) {
+        Haptics.success()
+        let next = UnlockCelebration(message: message)
+        unlockCelebration = next
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            if unlockCelebration?.id == next.id {
+                unlockCelebration = nil
+            }
+        }
     }
 
     private var effectiveLoadout: RobotLoadout {
@@ -267,10 +325,10 @@ struct EquipmentView: View {
             .overlay {
                 RobotRendererView(size: 176, face: .front, loadout: effectiveLoadout)
             }
-            .overlay(alignment: .topTrailing) {
+            .overlay(alignment: .bottomLeading) {
                 tryOnCornerControl
-                    .padding(.top, 14)
-                    .padding(.trailing, 14)
+                    .padding(.leading, 14)
+                    .padding(.bottom, 14)
             }
             .shadow(color: Color.black.opacity(0.06), radius: 24, x: 0, y: 6)
     }
@@ -691,8 +749,7 @@ struct EquipmentView: View {
         economy.coins -= price
         economy.markOwned(categoryId: category.id, itemId: item.id)
         applySelection(category: category, item: item)
-        Haptics.success()
-        showFeedback(L10n.t("equipment_unlocked_and_equipped"))
+        showUnlockCelebration(L10n.t("equipment_unlocked_and_equipped"))
         self.pendingPurchase = nil
     }
 
@@ -808,7 +865,7 @@ struct EquipmentView: View {
         tryOnLoadout = nil
         isTryOnMode = false
         showTryOnPurchaseDialog = false
-        showFeedback(L10n.t("equipment_purchased_and_applied"))
+        showUnlockCelebration(L10n.t("equipment_purchased_and_applied"))
         self.pendingTryOnPurchase = nil
     }
 

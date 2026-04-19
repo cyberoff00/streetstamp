@@ -6,9 +6,9 @@ enum BackendConfig {
     private static let firebaseInfoPlistName = "GoogleService-Info"
     private static let firebaseBackupEnabledKey = "streetstamps.firebase.backup_runtime_enabled"
 
-    /// Domestic (China mainland) users connect directly to Shanghai server (gray-cloud, no Cloudflare proxy).
-    /// Overseas users go through Cloudflare CDN (orange-cloud) for edge caching.
-    private static let domesticBaseURL = "https://api.streetstamps.cyberkkk.cn"
+    /// Domestic (China mainland) users connect directly to Tokyo server (gray-cloud, no Cloudflare proxy).
+    /// Overseas users go through Cloudflare CDN (orange-cloud), origin now points to Tokyo.
+    private static let domesticBaseURL = "https://jp-api.cyberkkk.cn"
     private static let globalBaseURL = "https://worldo-api.cyberkkk.cn"
 
     static var isChineseMainlandDevice: Bool {

@@ -196,6 +196,8 @@ final class LifelogRenderCacheCoordinator: ObservableObject {
     }
 
     func markTodayDirty(countryISO2: String?) {
+        invalidateDaySnapshots(day: Date())
+        restoredDiskSnapshot = nil
         hasDirtyToday = true
         todayDirtyCountryISO2 = countryISO2
         guard todayRefreshTask == nil else { return }

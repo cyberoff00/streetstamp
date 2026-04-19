@@ -8,16 +8,16 @@ final class AppSettingsICloudSyncTests: XCTestCase {
         UserDefaults.standard.removeObject(forKey: AppSettings.iCloudAutomaticRestoreEnabledKey)
     }
 
-    func test_iCloudSyncEnabled_defaultsToTrueWhenUnset() {
+    func test_iCloudSyncEnabled_defaultsToFalseWhenUnset() {
         UserDefaults.standard.removeObject(forKey: AppSettings.iCloudSyncEnabledKey)
 
-        XCTAssertTrue(AppSettings.isICloudSyncEnabled)
+        XCTAssertFalse(AppSettings.isICloudSyncEnabled)
     }
 
-    func test_iCloudSyncEnabled_respectsStoredFalseValue() {
-        UserDefaults.standard.set(false, forKey: AppSettings.iCloudSyncEnabledKey)
+    func test_iCloudSyncEnabled_respectsStoredTrueValue() {
+        UserDefaults.standard.set(true, forKey: AppSettings.iCloudSyncEnabledKey)
 
-        XCTAssertFalse(AppSettings.isICloudSyncEnabled)
+        XCTAssertTrue(AppSettings.isICloudSyncEnabled)
     }
 
     func test_automaticICloudRestore_defaultsToFalseWhenUnset() {

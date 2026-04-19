@@ -15,7 +15,7 @@ final class PostcardNotificationBridge {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: askedPermissionKey) else { return }
         defaults.set(true, forKey: askedPermissionKey)
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
     }
 
     func surfaceUnreadPostcardNotifications(_ items: [BackendNotificationItem]) {
@@ -62,6 +62,7 @@ final class PostcardNotificationBridge {
             content.title = title
             content.body = body
             content.sound = .default
+            content.badge = 1
             content.userInfo = ["deepLink": deepLink]
 
             let request = UNNotificationRequest(
@@ -95,7 +96,6 @@ final class PostcardNotificationBridge {
 }
 
 final class AppNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
-    private static let lastUploadedTokenKey = "streetstamps.apns.last_uploaded_token"
 
     func application(
         _ application: UIApplication,
@@ -148,26 +148,21 @@ final class AppNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNoti
     }
 
     /// Call this whenever an access token becomes available (login, app activate, etc.)
+    /// Unconditionally re-uploads the current device token on every call. The register
+    /// endpoint is an idempotent upsert, and unconditional upload is the only reliable
+    /// way to recover from server-side token deletion (e.g., APNs BadDeviceToken cleanup).
     static func uploadPendingPushTokenIfNeeded(accessToken: String?) {
         let defaults = UserDefaults.standard
         guard let hex = defaults.string(forKey: pendingTokenKey), !hex.isEmpty else { return }
-        // Already uploaded this exact token
-        if defaults.string(forKey: lastUploadedTokenKey) == hex { return }
         guard BackendConfig.isEnabled, let accessToken, !accessToken.isEmpty else { return }
 
         Task {
             do {
                 try await BackendAPIClient.shared.registerPushToken(token: accessToken, pushToken: hex)
-                defaults.set(hex, forKey: lastUploadedTokenKey)
             } catch {
                 print("[APNs] token upload failed: \(error.localizedDescription)")
             }
         }
-    }
-
-    /// Clear cached token on logout so the next login re-uploads.
-    static func clearCachedPushToken() {
-        UserDefaults.standard.removeObject(forKey: lastUploadedTokenKey)
     }
 
     // MARK: - UNUserNotificationCenterDelegate
@@ -177,7 +172,7 @@ final class AppNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .sound])
+        completionHandler([.banner, .sound, .list])
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {

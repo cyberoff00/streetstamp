@@ -310,7 +310,7 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         manager.activityType = .otherNavigation
 
         manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
-        manager.distanceFilter = 80
+        manager.distanceFilter = 40
 
         manager.startUpdatingLocation()
         requestImmediateLocationRefresh()

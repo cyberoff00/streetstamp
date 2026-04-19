@@ -265,7 +265,7 @@ struct SettingsView: View {
     @AppStorage(AppSettings.longStationaryReminderEnabledKey) private var longStationaryReminderEnabled = true
     @AppStorage(AppSettings.liveActivityEnabledKey) private var liveActivityEnabled = true
     @AppStorage(AppSettings.dailyTrackingPrecisionKey) private var dailyTrackingPrecisionRaw = DailyTrackingPrecision.defaultPrecision.rawValue
-    @AppStorage(AppSettings.iCloudSyncEnabledKey) private var iCloudSyncEnabled = true
+    @AppStorage(AppSettings.iCloudSyncEnabledKey) private var iCloudSyncEnabled = false
 
     @State private var systemNotificationEnabled = true
     @State private var showComingSoon = false
@@ -291,6 +291,8 @@ struct SettingsView: View {
     @State private var showAuthSheet = false
     @State private var authSheetMode: AuthEntryMode = .signIn
     @State private var showLogoutConfirmation = false
+    @State private var showDeleteAccountConfirmation = false
+    @State private var isDeletingAccount = false
     @State private var showLinkEmailSheet = false
     @State private var showBackgroundModeInfo = false
     @State private var showVoiceBroadcastInfo = false
@@ -300,6 +302,8 @@ struct SettingsView: View {
     @State private var isRestoringFromICloud = false
     @State private var showRestoreConfirmation = false
     @State private var showMembershipGate: MembershipGatedFeature? = nil
+    @State private var detailMessage = ""
+    @State private var showDetailMessage = false
 
     private enum SettingsNavDest: String, Identifiable {
         case subscription, dataMigration, gpxImport
@@ -427,18 +431,20 @@ struct SettingsView: View {
         } message: {
             Text(L10n.t("settings_logout_confirm_message"))
         }
+        .alert(L10n.t("settings_delete_account_confirm_title"), isPresented: $showDeleteAccountConfirmation) {
+            Button(L10n.t("cancel"), role: .cancel) {}
+            Button(L10n.t("settings_delete_account"), role: .destructive) {
+                Task { await performAccountDeletion() }
+            }
+        } message: {
+            Text(L10n.t("settings_delete_account_confirm_message"))
+        }
         .task {
             await refreshAccountIfPossible()
             await refreshICloudAvailability()
         }
-        .onChange(of: iCloudSyncEnabled) { _, enabled in
-            Task { await handleICloudSyncToggleChanged(enabled: enabled) }
-        }
         .sheet(isPresented: $showDisplayNameEditor) {
             displayNameEditorSheet
-        }
-        .sheet(item: $showMembershipGate) { feature in
-            MembershipGateView(feature: feature)
         }
         .sheet(isPresented: $showAuthSheet) {
             AuthEntryView(
@@ -460,6 +466,17 @@ struct SettingsView: View {
         .fullScreenCover(item: $activeNavDest) { dest in
             NavigationStack {
                 settingsNavDestView(for: dest)
+            }
+            .onChange(of: iCloudSyncEnabled) { _, enabled in
+                Task { await handleICloudSyncToggleChanged(enabled: enabled) }
+            }
+            .sheet(item: $showMembershipGate) { feature in
+                MembershipGateView(feature: feature)
+            }
+            .alert(L10n.t("prompt"), isPresented: $showDetailMessage) {
+                Button(L10n.t("ok"), role: .cancel) {}
+            } message: {
+                Text(detailMessage)
             }
         }
     }
@@ -1317,12 +1334,44 @@ struct SettingsView: View {
                 .appFullSurfaceTapTarget(.roundedRect(34))
             }
             .buttonStyle(.plain)
+
+            Button {
+                showDeleteAccountConfirmation = true
+            } label: {
+                HStack(spacing: 14) {
+                    Image(systemName: "person.crop.circle.badge.minus")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(.red.opacity(0.6))
+                        .frame(width: 20)
+
+                    if isDeletingAccount {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                    } else {
+                        Text(L10n.t("settings_delete_account"))
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.red.opacity(0.6))
+                    }
+
+                    Spacer(minLength: 8)
+                }
+                .padding(.horizontal, 20)
+                .frame(minHeight: 52)
+            }
+            .buttonStyle(.plain)
+            .disabled(isDeletingAccount)
         }
     }
 
     private var gpxImportEntryView: some View {
         SettingsDetailPage(title: L10n.t("import_gpx_title")) {
             VStack(alignment: .leading, spacing: 14) {
+                Text(L10n.t("gpx_import_source_hint"))
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundColor(FigmaTheme.subtext)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
+
                 VStack(alignment: .leading, spacing: 12) {
                     Text(L10n.t("gpx_import_upload_block_title"))
                         .font(.system(size: 14, weight: .semibold))
@@ -1671,11 +1720,11 @@ struct SettingsView: View {
                 forceFullJourneyUpload: true,
                 forceFullLifelogUpload: true
             )
-            accountMessage = L10n.t("settings_icloud_sync_enabled_hint")
-            showAccountMessage = true
+            detailMessage = L10n.t("settings_icloud_sync_enabled_hint")
+            showDetailMessage = true
         } else {
-            accountMessage = L10n.t("settings_icloud_sync_disabled_hint")
-            showAccountMessage = true
+            detailMessage = L10n.t("settings_icloud_sync_disabled_hint")
+            showDetailMessage = true
         }
     }
 
@@ -1700,16 +1749,16 @@ struct SettingsView: View {
             try? await Task.sleep(nanoseconds: 500_000_000)
             print("🔄 iCloud restore: journeys=\(restoreResult.restoredJourneyCount), photos=\(restoreResult.restoredPhotoCount), lifelog=\(restoreResult.restoredLifelogCount), failures=j:\(restoreResult.journeyFailed) l:\(restoreResult.lifelogFailed) p:\(restoreResult.photoFailed)")
             if restoreResult.hasAnyFailure && restoreResult.totalCount > 0 {
-                accountMessage = L10n.t("settings_restore_partial_success")
+                detailMessage = L10n.t("settings_restore_partial_success")
             } else if restoreResult.hasAnyFailure {
-                accountMessage = L10n.t("settings_restore_all_failed")
+                detailMessage = L10n.t("settings_restore_all_failed")
             } else {
-                accountMessage = L10n.t("settings_restore_from_icloud_success")
+                detailMessage = L10n.t("settings_restore_from_icloud_success")
             }
         } else {
-            accountMessage = L10n.t("settings_restore_from_icloud_no_backup")
+            detailMessage = L10n.t("settings_restore_from_icloud_no_backup")
         }
-        showAccountMessage = true
+        showDetailMessage = true
     }
 
     private func iCloudStatusLine(status: String?, at date: Date?) -> String {
@@ -1802,6 +1851,27 @@ struct SettingsView: View {
     private func toastAccount(_ text: String) {
         accountMessage = text
         showAccountMessage = true
+    }
+
+    private func performAccountDeletion() async {
+        guard let token = sessionStore.currentAccessToken else {
+            toastAccount(L10n.t("settings_delete_account_failed"))
+            return
+        }
+        isDeletingAccount = true
+        defer { isDeletingAccount = false }
+        do {
+            try await BackendAPIClient.shared.deleteAccount(token: token)
+            sessionStore.logoutToGuest()
+            displayNameDraft = ""
+            displayNameInput = ""
+            exclusiveIDDraft = ""
+            accountEmail = ""
+            didLoadAccountProfile = false
+            toastAccount(L10n.t("settings_delete_account_success"))
+        } catch {
+            toastAccount(L10n.t("settings_delete_account_failed"))
+        }
     }
 
     private func handleGPXFileSelection(_ result: Result<[URL], Error>) {
@@ -2030,6 +2100,7 @@ private struct SettingsDebugToolsEntryView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var lifelogStore: LifelogStore
     @ObservedObject private var weatherService = WeatherService.shared
+    @State private var showingFogGlobeDemo = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -2037,8 +2108,15 @@ private struct SettingsDebugToolsEntryView: View {
                 lifelogStore.diagnosePassiveGaps()
             }
             .padding()
+            Button("Fog Globe Demo (flicker test)") {
+                showingFogGlobeDemo = true
+            }
+            .padding(.bottom)
             DebugChinaTestModule()
             DebugWeatherOverrideSection(weatherService: weatherService)
+        }
+        .fullScreenCover(isPresented: $showingFogGlobeDemo) {
+            FogGlobeDemoView()
         }
             .safeAreaInset(edge: .top, spacing: 0) {
                 UnifiedNavigationHeader(

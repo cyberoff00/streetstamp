@@ -20,11 +20,6 @@ enum FAQContent {
                 answer: L10n.t("faq_a_track_accuracy")
             ),
             FAQItem(
-                id: "passive_tracking",
-                question: L10n.t("faq_q_passive_tracking"),
-                answer: L10n.t("faq_a_passive_tracking")
-            ),
-            FAQItem(
                 id: "battery",
                 question: L10n.t("faq_q_battery"),
                 answer: L10n.t("faq_a_battery")
@@ -55,9 +50,14 @@ enum FAQContent {
                 answer: L10n.t("faq_a_gpx_import")
             ),
             FAQItem(
-                id: "city_wrong",
-                question: L10n.t("faq_q_city_wrong"),
-                answer: L10n.t("faq_a_city_wrong")
+                id: "city_unlock",
+                question: L10n.t("faq_q_city_unlock"),
+                answer: L10n.t("faq_a_city_unlock")
+            ),
+            FAQItem(
+                id: "postcard_rules",
+                question: L10n.t("faq_q_postcard_rules"),
+                answer: L10n.t("faq_a_postcard_rules")
             ),
             FAQItem(
                 id: "location_permission",

@@ -86,6 +86,33 @@ enum FriendFeedLogic {
         return max(memoryDate, journey.endTime ?? journey.startTime ?? .distantPast)
     }
 
+    /// Detail-page image URLs for the most-recent N eligible feed journeys.
+    /// The detail view renders `overallMemoryImageURLs` plus every `memories[].imageURLs`,
+    /// so we prewarm the first `perJourneyLimit` of that combined list to cover above-the-fold.
+    static func prewarmURLsForRecentFeed(
+        from snapshots: [FriendProfileSnapshot],
+        journeyLimit: Int,
+        perJourneyLimit: Int
+    ) -> [URL] {
+        let topJourneys = snapshots
+            .flatMap { $0.journeys }
+            .filter { isJourneyEligible($0) }
+            .sorted { feedTimestamp(for: $0) > feedTimestamp(for: $1) }
+            .prefix(journeyLimit)
+
+        var urls: [URL] = []
+        for journey in topJourneys {
+            var candidates = journey.overallMemoryImageURLs
+            for memory in journey.memories {
+                candidates.append(contentsOf: memory.imageURLs)
+            }
+            for raw in candidates.prefix(perJourneyLimit) {
+                if let url = URL(string: raw) { urls.append(url) }
+            }
+        }
+        return urls
+    }
+
     static func eventTitle(
         kind: FriendFeedKind,
         cityName: String,
@@ -178,8 +205,8 @@ struct FriendsHubView: View {
     @State private var activeRoute: FriendsRoute?
     @State private var toastText = ""
     @State private var showToast = false
-    @State private var feedLikeStats: [String: (likes: Int, likedByMe: Bool)] = [:]
-    @State private var feedLikeLoadingKeys: Set<String> = []
+    // Like state moved to FeedActivityListView to avoid re-evaluating
+    // the entire FriendsHubView body on every like toggle.
     @State private var feedJourneyLikers: [JourneyLiker] = []
     @State private var feedJourneyLikersLoading = false
     @State private var feedJourneyLikersErrorMessage: String?
@@ -521,15 +548,7 @@ struct FriendsHubView: View {
                 Task { await refreshRemoteFriends(force: true) }
             }
         }
-        .task(id: feedLikeSignature) {
-            // Minimal debounce: just coalesces sub-frame changes.
-            // Previously 300ms, which caused cold-start like stats to be
-            // repeatedly cancelled (disk load → network refresh → each
-            // cancels the prior .task and restarts the debounce).
-            try? await Task.sleep(nanoseconds: 50_000_000)
-            guard !Task.isCancelled else { return }
-            await loadFeedLikeStatsIfNeeded()
-        }
+        // .task(id: feedLikeSignature) moved to FeedActivityListView
         .onReceive(deepLinkStore.$pendingFriendInvite) { invite in
             guard let invite else { return }
             tab = .allFriends
@@ -580,94 +599,19 @@ struct FriendsHubView: View {
                 .padding(.top, 6)
             }
 
-            ScrollView(showsIndicators: false) {
-                LazyVStack(spacing: 16) {
-                    if feedEvents.isEmpty {
-                        emptyState(L10n.t("friends_empty_activity"))
-                    } else {
-                        ForEach(feedEvents) { event in
-                            if let friend = feedProfileByID[event.friendID] {
-                                FriendActivityCard(
-                                    friend: friend,
-                                    event: event,
-                                    likeCount: likeCountForEvent(event),
-                                    likedByMe: likedByMeForEvent(event),
-                                    likeLoading: likeLoadingForEvent(event),
-                                    likeActionMode: FriendsFeedLikePresentation.actionMode(
-                                        currentUserID: currentUserID,
-                                        eventFriendID: event.friendID,
-                                        hasJourney: event.journeyID != nil
-                                    ),
-                                    onLikeTap: {
-                                        guard let journeyID = event.journeyID else { return }
-                                        switch FriendsFeedLikePresentation.actionMode(
-                                            currentUserID: currentUserID,
-                                            eventFriendID: event.friendID,
-                                            hasJourney: true
-                                        ) {
-                                        case .toggleLike:
-                                            Task {
-                                                await toggleFeedLike(friendID: friend.id, journeyID: journeyID)
-                                            }
-                                        case .showLikers:
-                                            presentFeedLikes(friendID: friend.id, journeyID: journeyID, title: event.location.isEmpty ? event.title : event.location)
-                                        case nil:
-                                            break
-                                        }
-                                    },
-                                    onOpenProfile: {
-                                        if FriendsFeedNavigationPolicy.opensCurrentUserProfile(
-                                            currentUserID: currentUserID,
-                                            targetFriendID: friend.id
-                                        ) {
-                                            activeRoute = .myProfile
-                                        } else {
-                                            activeRoute = .profile(friend.id)
-                                        }
-                                    },
-                                    onOpenEvent: {
-                                        if let jid = event.journeyID {
-                                            if FriendsFeedNavigationPolicy.opensCurrentUserJourneyDetail(
-                                                currentUserID: currentUserID,
-                                                targetFriendID: friend.id
-                                            ) {
-                                                activeRoute = .myJourney(jid)
-                                            } else {
-                                                activeRoute = .journey(friendID: friend.id, snapshot: friend, journeyID: jid)
-                                            }
-                                        } else {
-                                            if FriendsFeedNavigationPolicy.opensCurrentUserProfile(
-                                                currentUserID: currentUserID,
-                                                targetFriendID: friend.id
-                                            ) {
-                                                activeRoute = .myProfile
-                                            } else {
-                                                activeRoute = .profile(friend.id)
-                                            }
-                                        }
-                                    }
-                                )
-                                .id(event.id)
-                                .scrollTransition(.animated(.spring(response: 0.4, dampingFraction: 0.85))) { content, phase in
-                                    content
-                                        .opacity(phase.isIdentity ? 1 : 0.3)
-                                        .scaleEffect(phase.isIdentity ? 1 : 0.95)
-                                        .offset(y: phase.isIdentity ? 0 : 20)
-                                }
-                            }
-                        }
-
-                        feedEndFooter
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.top, 12)
-                .padding(.bottom, 54)
-            }
-            .scrollPosition(id: $feedScrollPosition)
-            .refreshable {
-                await refreshRemoteFriends(force: true)
-            }
+            FeedActivityListView(
+                feedEvents: feedEvents,
+                feedProfileByID: feedProfileByID,
+                currentUserID: currentUserID,
+                feedLikeSignature: feedLikeSignature,
+                feedScrollPosition: $feedScrollPosition,
+                onNavigate: { activeRoute = $0 },
+                onShowToast: { showFeedToast($0, duration: $1) },
+                onPresentLikes: { friendID, journeyID, title in
+                    presentFeedLikes(friendID: friendID, journeyID: journeyID, title: title)
+                },
+                onRefresh: { await refreshRemoteFriends(force: true) }
+            )
         }
         .background(FigmaTheme.background)
     }
@@ -1009,109 +953,7 @@ struct FriendsHubView: View {
             return "\(h)h \(m)m"
         }
 
-        private func feedLikeKey(friendID: String, journeyID: String) -> String {
-            "\(friendID)|\(journeyID)"
-        }
-
-        private func likeCountForEvent(_ event: FriendFeedEvent) -> Int {
-            guard let journeyID = event.journeyID else { return 0 }
-            return feedLikeStats[feedLikeKey(friendID: event.friendID, journeyID: journeyID)]?.likes ?? 0
-        }
-
-        private func likedByMeForEvent(_ event: FriendFeedEvent) -> Bool {
-            guard let journeyID = event.journeyID else { return false }
-            return feedLikeStats[feedLikeKey(friendID: event.friendID, journeyID: journeyID)]?.likedByMe ?? false
-        }
-
-        private func likeLoadingForEvent(_ event: FriendFeedEvent) -> Bool {
-            guard let journeyID = event.journeyID else { return false }
-            return feedLikeLoadingKeys.contains(feedLikeKey(friendID: event.friendID, journeyID: journeyID))
-        }
-
-        // MARK: - Feed Like Stats Cache
-
-        private var likeStatsCacheKey: String {
-            let userID = sessionStore.accountUserID ?? sessionStore.currentUserID
-            return "streetstamps.feedLikeStatsCache.\(userID)"
-        }
-
-        private func saveLikeStatsToCache(_ stats: [String: (likes: Int, likedByMe: Bool)]) {
-            let encoded = stats.mapValues { ["l": $0.likes, "m": $0.likedByMe ? 1 : 0] }
-            UserDefaults.standard.set(encoded, forKey: likeStatsCacheKey)
-        }
-
-        private func loadLikeStatsFromCache() -> [String: (likes: Int, likedByMe: Bool)] {
-            guard let raw = UserDefaults.standard.dictionary(forKey: likeStatsCacheKey) else { return [:] }
-            var result: [String: (likes: Int, likedByMe: Bool)] = [:]
-            for (key, value) in raw {
-                guard let dict = value as? [String: Int],
-                      let likes = dict["l"],
-                      let m = dict["m"] else { continue }
-                result[key] = (likes: likes, likedByMe: m != 0)
-            }
-            return result
-        }
-
-        @MainActor
-        private func loadFeedLikeStatsIfNeeded() async {
-            let t0 = CFAbsoluteTimeGetCurrent()
-            guard BackendConfig.isEnabled,
-                  let token = sessionStore.currentAccessToken,
-                  !token.isEmpty else {
-                feedLikeStats = [:]
-                return
-            }
-
-            let pairs = FriendsFeedLikePresentation.statsPairs(
-                from: feedEvents.map { ($0.friendID, $0.journeyID) }
-            )
-            guard !pairs.isEmpty else {
-                feedLikeStats = [:]
-                return
-            }
-
-            // Restore cached stats immediately so UI is not blank
-            if feedLikeStats.isEmpty {
-                let cached = loadLikeStatsFromCache()
-                if !cached.isEmpty {
-                    feedLikeStats = cached
-                    print("⏱ [FriendsHub] loadFeedLikeStats CACHED: \(cached.count) entries")
-                }
-            }
-
-            print("⏱ [FriendsHub] loadFeedLikeStats START pairs=\(pairs.count)")
-
-            let grouped = Dictionary(grouping: pairs, by: \.friendID)
-            await withTaskGroup(of: [(String, (likes: Int, likedByMe: Bool))]?.self) { group in
-                for (friendID, items) in grouped {
-                    let ids = Array(Set(items.map(\.journeyID)))
-                    group.addTask {
-                        do {
-                            let stats = try await BackendAPIClient.shared.fetchJourneyLikeStats(
-                                token: token,
-                                journeyIDs: ids,
-                                ownerUserID: friendID
-                            )
-                            return stats.map { (journeyID, value) in
-                                ("\(friendID)|\(journeyID)", value)
-                            }
-                        } catch {
-                            return nil
-                        }
-                    }
-                }
-                // Merge each batch as it arrives — progressive display
-                for await batch in group {
-                    guard let batch else { continue }
-                    for (key, value) in batch {
-                        feedLikeStats[key] = value
-                    }
-                }
-            }
-            // Persist for next cold start
-            saveLikeStatsToCache(feedLikeStats)
-            print("⏱ [FriendsHub] loadFeedLikeStats DONE: \(Int((CFAbsoluteTimeGetCurrent()-t0)*1000))ms  groups=\(grouped.count)")
-        }
+        // Like state helpers moved to FeedActivityListView.
 
         private var feedLikesSheetDetents: Set<PresentationDetent> {
             let compactHeight = min(520, max(276, 194 + CGFloat(max(feedJourneyLikers.count, 1)) * 56))
@@ -1168,42 +1010,7 @@ struct FriendsHubView: View {
             }
         }
 
-        @MainActor
-        private func toggleFeedLike(friendID: String, journeyID: String) async {
-            guard BackendConfig.isEnabled else {
-                showFeedToast(L10n.t("friends_backend_not_configured"), duration: 2.0)
-                return
-            }
-            guard let token = sessionStore.currentAccessToken, !token.isEmpty else {
-                showFeedToast(L10n.t("please_sign_in_to_access_your_account"), duration: 2.0)
-                return
-            }
-
-            let key = feedLikeKey(friendID: friendID, journeyID: journeyID)
-            guard !feedLikeLoadingKeys.contains(key) else { return }
-
-            let current = feedLikeStats[key] ?? (likes: 0, likedByMe: false)
-            let liked = current.likedByMe
-
-            feedLikeStats[key] = (likes: liked ? max(0, current.likes - 1) : current.likes + 1, likedByMe: !liked)
-
-            feedLikeLoadingKeys.insert(key)
-            defer { feedLikeLoadingKeys.remove(key) }
-
-            do {
-                let resp: JourneyLikeActionResponse
-                if liked {
-                    resp = try await BackendAPIClient.shared.unlikeJourney(token: token, ownerUserID: friendID, journeyID: journeyID)
-                } else {
-                    resp = try await BackendAPIClient.shared.likeJourney(token: token, ownerUserID: friendID, journeyID: journeyID)
-                }
-                feedLikeStats[key] = (likes: max(0, resp.likes), likedByMe: resp.likedByMe)
-            } catch {
-                print("[FriendsHub] toggleFeedLike FAILED: friendID=\(friendID) journeyID=\(journeyID) error=\(error)")
-                feedLikeStats[key] = current
-                showFeedToast(LocalizedErrorHelper.message(for: error))
-            }
-        }
+        // toggleFeedLike moved to FeedActivityListView.
 
         private static let refreshCooldownSeconds: TimeInterval = 60
 
@@ -1232,6 +1039,13 @@ struct FriendsHubView: View {
                 socialStore.replaceFriends(remoteSnapshots)
                 print("⏱ [FriendsHub] replaceFriends: \(Int((CFAbsoluteTimeGetCurrent()-t1)*1000))ms")
                 pendingFeedRefreshProfiles = nil
+                RemoteImageFetcher.shared.prewarm(
+                    FriendFeedLogic.prewarmURLsForRecentFeed(
+                        from: remoteSnapshots,
+                        journeyLimit: 10,
+                        perJourneyLimit: 5
+                    )
+                )
             } else {
                 print("⏱ [FriendsHub] fetchFriendSnapshots returned nil: \(Int((CFAbsoluteTimeGetCurrent()-t0)*1000))ms")
                 socialStore.restoreFriendsIfEmpty(previousFriends)
@@ -1514,6 +1328,276 @@ struct FriendsHubView: View {
         }
 
     }
+
+// MARK: - FeedActivityListView
+// Owns like state separately from FriendsHubView so that toggling a like
+// only re-evaluates this lightweight list, not the entire parent with all
+// its sheets, overlays, and modifiers.
+
+private struct FeedActivityListView: View {
+    let feedEvents: [FriendFeedEvent]
+    let feedProfileByID: [String: FriendProfileSnapshot]
+    let currentUserID: String
+    let feedLikeSignature: String
+    @Binding var feedScrollPosition: String?
+    let onNavigate: (FriendsRoute) -> Void
+    let onShowToast: (String, TimeInterval) -> Void
+    let onPresentLikes: (_ friendID: String, _ journeyID: String, _ title: String) -> Void
+    let onRefresh: () async -> Void
+
+    @EnvironmentObject private var sessionStore: UserSessionStore
+
+    @State private var feedLikeStats: [String: (likes: Int, likedByMe: Bool)] = [:]
+    @State private var feedLikeLoadingKeys: Set<String> = []
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            LazyVStack(spacing: 16) {
+                if feedEvents.isEmpty {
+                    Text(L10n.t("friends_empty_activity"))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.top, 28)
+                } else {
+                    ForEach(feedEvents) { event in
+                        if let friend = feedProfileByID[event.friendID] {
+                            FriendActivityCard(
+                                friend: friend,
+                                event: event,
+                                likeCount: likeCountForEvent(event),
+                                likedByMe: likedByMeForEvent(event),
+                                likeLoading: likeLoadingForEvent(event),
+                                likeActionMode: FriendsFeedLikePresentation.actionMode(
+                                    currentUserID: currentUserID,
+                                    eventFriendID: event.friendID,
+                                    hasJourney: event.journeyID != nil
+                                ),
+                                onLikeTap: {
+                                    guard let journeyID = event.journeyID else { return }
+                                    switch FriendsFeedLikePresentation.actionMode(
+                                        currentUserID: currentUserID,
+                                        eventFriendID: event.friendID,
+                                        hasJourney: true
+                                    ) {
+                                    case .toggleLike:
+                                        Task {
+                                            await toggleFeedLike(friendID: friend.id, journeyID: journeyID)
+                                        }
+                                    case .showLikers:
+                                        onPresentLikes(friend.id, journeyID, event.location.isEmpty ? event.title : event.location)
+                                    case nil:
+                                        break
+                                    }
+                                },
+                                onOpenProfile: {
+                                    if FriendsFeedNavigationPolicy.opensCurrentUserProfile(
+                                        currentUserID: currentUserID,
+                                        targetFriendID: friend.id
+                                    ) {
+                                        onNavigate(.myProfile)
+                                    } else {
+                                        onNavigate(.profile(friend.id))
+                                    }
+                                },
+                                onOpenEvent: {
+                                    if let jid = event.journeyID {
+                                        if FriendsFeedNavigationPolicy.opensCurrentUserJourneyDetail(
+                                            currentUserID: currentUserID,
+                                            targetFriendID: friend.id
+                                        ) {
+                                            onNavigate(.myJourney(jid))
+                                        } else {
+                                            onNavigate(.journey(friendID: friend.id, snapshot: friend, journeyID: jid))
+                                        }
+                                    } else {
+                                        if FriendsFeedNavigationPolicy.opensCurrentUserProfile(
+                                            currentUserID: currentUserID,
+                                            targetFriendID: friend.id
+                                        ) {
+                                            onNavigate(.myProfile)
+                                        } else {
+                                            onNavigate(.profile(friend.id))
+                                        }
+                                    }
+                                }
+                            )
+                            .id(event.id)
+                            .scrollTransition(.animated(.spring(response: 0.4, dampingFraction: 0.85))) { content, phase in
+                                content
+                                    .opacity(phase.isIdentity ? 1 : 0.3)
+                                    .scaleEffect(phase.isIdentity ? 1 : 0.95)
+                                    .offset(y: phase.isIdentity ? 0 : 20)
+                            }
+                        }
+                    }
+
+                    VStack(spacing: 6) {
+                        Text(L10n.t("friends_feed_end"))
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.secondary)
+                        Text(L10n.t("friends_feed_end_hint"))
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary.opacity(0.7))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top, 20)
+                    .padding(.bottom, 8)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            .padding(.bottom, 54)
+        }
+        .scrollPosition(id: $feedScrollPosition)
+        .refreshable {
+            await onRefresh()
+        }
+        .task(id: feedLikeSignature) {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            guard !Task.isCancelled else { return }
+            await loadFeedLikeStatsIfNeeded()
+        }
+    }
+
+    // MARK: - Like State Helpers
+
+    private func feedLikeKey(friendID: String, journeyID: String) -> String {
+        "\(friendID)|\(journeyID)"
+    }
+
+    private func likeCountForEvent(_ event: FriendFeedEvent) -> Int {
+        guard let journeyID = event.journeyID else { return 0 }
+        return feedLikeStats[feedLikeKey(friendID: event.friendID, journeyID: journeyID)]?.likes ?? 0
+    }
+
+    private func likedByMeForEvent(_ event: FriendFeedEvent) -> Bool {
+        guard let journeyID = event.journeyID else { return false }
+        return feedLikeStats[feedLikeKey(friendID: event.friendID, journeyID: journeyID)]?.likedByMe ?? false
+    }
+
+    private func likeLoadingForEvent(_ event: FriendFeedEvent) -> Bool {
+        guard let journeyID = event.journeyID else { return false }
+        return feedLikeLoadingKeys.contains(feedLikeKey(friendID: event.friendID, journeyID: journeyID))
+    }
+
+    private var likeStatsCacheKey: String {
+        let userID = sessionStore.accountUserID ?? sessionStore.currentUserID
+        return "streetstamps.feedLikeStatsCache.\(userID)"
+    }
+
+    private func saveLikeStatsToCache(_ stats: [String: (likes: Int, likedByMe: Bool)]) {
+        let encoded = stats.mapValues { ["l": $0.likes, "m": $0.likedByMe ? 1 : 0] }
+        UserDefaults.standard.set(encoded, forKey: likeStatsCacheKey)
+    }
+
+    private func loadLikeStatsFromCache() -> [String: (likes: Int, likedByMe: Bool)] {
+        guard let raw = UserDefaults.standard.dictionary(forKey: likeStatsCacheKey) else { return [:] }
+        var result: [String: (likes: Int, likedByMe: Bool)] = [:]
+        for (key, value) in raw {
+            guard let dict = value as? [String: Int],
+                  let likes = dict["l"],
+                  let m = dict["m"] else { continue }
+            result[key] = (likes: likes, likedByMe: m != 0)
+        }
+        return result
+    }
+
+    @MainActor
+    private func loadFeedLikeStatsIfNeeded() async {
+        let t0 = CFAbsoluteTimeGetCurrent()
+        guard BackendConfig.isEnabled,
+              let token = sessionStore.currentAccessToken,
+              !token.isEmpty else {
+            feedLikeStats = [:]
+            return
+        }
+
+        let pairs = FriendsFeedLikePresentation.statsPairs(
+            from: feedEvents.map { ($0.friendID, $0.journeyID) }
+        )
+        guard !pairs.isEmpty else {
+            feedLikeStats = [:]
+            return
+        }
+
+        if feedLikeStats.isEmpty {
+            let cached = loadLikeStatsFromCache()
+            if !cached.isEmpty {
+                feedLikeStats = cached
+                print("⏱ [FriendsHub] loadFeedLikeStats CACHED: \(cached.count) entries")
+            }
+        }
+
+        print("⏱ [FriendsHub] loadFeedLikeStats START pairs=\(pairs.count)")
+
+        let grouped = Dictionary(grouping: pairs, by: \.friendID)
+        await withTaskGroup(of: [(String, (likes: Int, likedByMe: Bool))]?.self) { group in
+            for (friendID, items) in grouped {
+                let ids = Array(Set(items.map(\.journeyID)))
+                group.addTask {
+                    do {
+                        let stats = try await BackendAPIClient.shared.fetchJourneyLikeStats(
+                            token: token,
+                            journeyIDs: ids,
+                            ownerUserID: friendID
+                        )
+                        return stats.map { (journeyID, value) in
+                            ("\(friendID)|\(journeyID)", value)
+                        }
+                    } catch {
+                        return nil
+                    }
+                }
+            }
+            for await batch in group {
+                guard let batch else { continue }
+                for (key, value) in batch {
+                    feedLikeStats[key] = value
+                }
+            }
+        }
+        saveLikeStatsToCache(feedLikeStats)
+        print("⏱ [FriendsHub] loadFeedLikeStats DONE: \(Int((CFAbsoluteTimeGetCurrent()-t0)*1000))ms  groups=\(grouped.count)")
+    }
+
+    @MainActor
+    private func toggleFeedLike(friendID: String, journeyID: String) async {
+        guard BackendConfig.isEnabled else {
+            onShowToast(L10n.t("friends_backend_not_configured"), 2.0)
+            return
+        }
+        guard let token = sessionStore.currentAccessToken, !token.isEmpty else {
+            onShowToast(L10n.t("please_sign_in_to_access_your_account"), 2.0)
+            return
+        }
+
+        let key = feedLikeKey(friendID: friendID, journeyID: journeyID)
+        guard !feedLikeLoadingKeys.contains(key) else { return }
+
+        let current = feedLikeStats[key] ?? (likes: 0, likedByMe: false)
+        let liked = current.likedByMe
+
+        feedLikeStats[key] = (likes: liked ? max(0, current.likes - 1) : current.likes + 1, likedByMe: !liked)
+
+        feedLikeLoadingKeys.insert(key)
+        defer { feedLikeLoadingKeys.remove(key) }
+
+        do {
+            let resp: JourneyLikeActionResponse
+            if liked {
+                resp = try await BackendAPIClient.shared.unlikeJourney(token: token, ownerUserID: friendID, journeyID: journeyID)
+            } else {
+                resp = try await BackendAPIClient.shared.likeJourney(token: token, ownerUserID: friendID, journeyID: journeyID)
+            }
+            feedLikeStats[key] = (likes: max(0, resp.likes), likedByMe: resp.likedByMe)
+        } catch {
+            print("[FriendsHub] toggleFeedLike FAILED: friendID=\(friendID) journeyID=\(journeyID) error=\(error)")
+            feedLikeStats[key] = current
+            onShowToast(LocalizedErrorHelper.message(for: error), 2.2)
+        }
+    }
+}
 
 private struct FriendActivityCard: View {
     let friend: FriendProfileSnapshot
@@ -3091,6 +3175,9 @@ private struct FriendCollectionScreen: View {
                 readOnly: destination.readOnly,
                 friendLoadout: destination.friendLoadout
             )
+            .environmentObject(mirror.journeyStore)
+            .environmentObject(mirror.cityCache)
+            .environmentObject(sessionStore)
         }
         .onAppear {
             flow.pushSidebarButtonHidden(token: sidebarHideToken)
@@ -3176,6 +3263,7 @@ private struct FriendCollectionScreen: View {
                     readOnly: true,
                     emptyTitleKey: "friend_memories_empty_title",
                     emptySubtitleKey: "friend_memories_empty_subtitle",
+                    friendLoadout: friend.loadout,
                     onSelectJourney: { activeJourneyDetail = $0 }
                 )
                 .environmentObject(mirror.journeyStore)
@@ -3279,6 +3367,7 @@ private struct FriendPublicMemoriesScreen: View {
                     headerTitle: FriendSectionTitleFormatter.sectionTitle(for: .journeyMemories, friendName: friend.displayName, locale: locale),
                     emptyTitleKey: "friend_memories_empty_title",
                     emptySubtitleKey: "friend_memories_empty_subtitle",
+                    friendLoadout: friend.loadout,
                     onSelectJourney: { activeJourneyDetail = $0 }
                 )
                     .environmentObject(mirror.journeyStore)
@@ -3309,6 +3398,9 @@ private struct FriendPublicMemoriesScreen: View {
                     readOnly: destination.readOnly,
                     friendLoadout: destination.friendLoadout
                 )
+                .environmentObject(mirror.journeyStore)
+                .environmentObject(mirror.cityCache)
+                .environmentObject(sessionStore)
             }
         }
         .task {

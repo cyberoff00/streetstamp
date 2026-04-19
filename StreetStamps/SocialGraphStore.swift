@@ -539,7 +539,7 @@ final class SocialGraphStore: ObservableObject {
             ),
             journeys: dto.journeys,
             unlockedCityCards: dto.unlockedCityCards,
-            createdAt: Date()
+            createdAt: dto.createdAtDate ?? Date()
         )
     }
 }

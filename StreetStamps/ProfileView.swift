@@ -58,6 +58,7 @@ struct ProfileView: View {
     @State private var cachedTotalMemories: Int = 0
     @State private var cachedTotalDistance: Double = 0
     @State private var cachedJourneyDates: [Date] = []
+    @State private var accountCreatedAt: Date?
     @State private var cachedLevelProgress: UserLevelProgress = UserLevelProgress.from(journeys: [])
 
     private var displayName: String {
@@ -69,7 +70,8 @@ struct ProfileView: View {
         let formatter = DateFormatter()
         formatter.locale = languagePreference.displayLocale
         formatter.dateFormat = "yyyy/M/d"
-        return formatter.string(from: cachedJourneyDates.min() ?? Date())
+        let date = accountCreatedAt ?? cachedJourneyDates.min() ?? Date()
+        return formatter.string(from: date)
     }
 
     private var collectionBadges: [String] {
@@ -710,6 +712,9 @@ struct ProfileView: View {
             }
             if !me.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 profileName = me.displayName
+            }
+            if let date = me.createdAtDate {
+                accountCreatedAt = date
             }
         } catch {
             // Keep profile editable even if backend request fails.

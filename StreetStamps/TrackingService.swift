@@ -184,7 +184,7 @@ final class TrackingService: ObservableObject {
     var weakAccuracyThreshold: Double = 35
 
     var gapSecondsThreshold: TimeInterval = 12
-    var gapDistanceThreshold: Double = 120
+    var gapDistanceThreshold: Double = 600
 
     var backgroundGapSecondsThreshold: TimeInterval = 180
     var backgroundGapDistanceThreshold: Double = 600
@@ -223,6 +223,9 @@ final class TrackingService: ObservableObject {
     private var pendingStylePointCount: Int = 0
     private let segmentConfirmMinSeconds: TimeInterval = 4
     private let segmentConfirmMinPoints: Int = 2
+    /// Set on pause so the first point recorded after resume starts a fresh segment
+    /// instead of bridging across the pause location gap.
+    private var forceNewSegmentOnNextAppend: Bool = false
 
     // MARK: - Mode inference
 
@@ -526,6 +529,7 @@ final class TrackingService: ObservableObject {
         internalSegments.removeAll()
         internalSegmentsForMap.removeAll()
         resetSegmentSwitchState()
+        forceNewSegmentOnNextAppend = false
 
         latestRenderSegmentsForMap.removeAll()
         latestRenderUnifiedSegmentsForMap.removeAll()
@@ -715,6 +719,8 @@ final class TrackingService: ObservableObject {
         isPaused = true
         lastLocation = nil
         lastRecordedLocationForStationary = nil
+        resetSegmentSwitchState()
+        forceNewSegmentOnNextAppend = true
         deferredWeakDriftJump = nil
         recentSignalInterruption = nil
         resetLongStationaryReminderState()
@@ -1400,7 +1406,7 @@ final class TrackingService: ObservableObject {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: longStationaryNotificationPermissionAskedKey) else { return }
         defaults.set(true, forKey: longStationaryNotificationPermissionAskedKey)
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
 
         // Register the "Continue" action category so users can tap Continue
         // directly from the notification.
@@ -1473,11 +1479,11 @@ final class TrackingService: ObservableObject {
             return
         }
 
-        // Auto-end: if the first trigger was > grace period ago and user never
-        // tapped "Continue", auto-end the journey.
+        // Auto-pause: if the first trigger was > grace period ago and user never
+        // tapped "Continue", auto-pause the journey so they can resume later.
         if let firstTrigger = longStationaryFirstTriggeredAt,
            now.timeIntervalSince(firstTrigger) >= longStationaryAutoEndGrace {
-            requestAutoEndJourney()
+            requestAutoPauseJourney()
             return
         }
 
@@ -1503,6 +1509,7 @@ final class TrackingService: ObservableObject {
             content.title = L10n.t("long_stationary_reminder_title")
             content.body = L10n.t("long_stationary_reminder_body")
             content.sound = .default
+            content.badge = 1
             content.categoryIdentifier = categoryID
 
             let request = UNNotificationRequest(
@@ -1515,32 +1522,29 @@ final class TrackingService: ObservableObject {
         }
     }
 
-    /// Auto-end the journey when the user has been stationary too long with
-    /// no response to reminders. The journey is saved as a private trip.
-    /// `onAutoEnd` is set by the app at startup to wire in JourneyStore/CityCache.
-    var onAutoEnd: (() -> Void)?
-
-    private func requestAutoEndJourney() {
-        guard isTracking else { return }
-        stopJourney()
+    /// Auto-pause the journey when the user has been stationary too long with
+    /// no response to reminders. The journey stays alive so the user can resume later.
+    private func requestAutoPauseJourney() {
+        guard isTracking, !isPaused else { return }
+        pauseJourney()
         pendingAutoEndedNotice = AutoEndedJourneyNotice(
-            journeyID: "", // filled by the caller via onAutoEnd
+            journeyID: "",
             endedAt: Date()
         )
-        onAutoEnd?()
-        scheduleAutoEndNotification()
+        scheduleAutoPauseNotification()
     }
 
-    private func scheduleAutoEndNotification() {
+    private func scheduleAutoPauseNotification() {
         let center = UNUserNotificationCenter.current()
         center.getNotificationSettings { settings in
             guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { return }
             let content = UNMutableNotificationContent()
-            content.title = L10n.t("auto_end_notification_title")
-            content.body = L10n.t("auto_end_notification_body")
+            content.title = L10n.t("auto_pause_notification_title")
+            content.body = L10n.t("auto_pause_notification_body")
             content.sound = .default
+            content.badge = 1
             let request = UNNotificationRequest(
-                identifier: "streetstamps.auto_end_notice",
+                identifier: "streetstamps.auto_pause_notice",
                 content: content,
                 trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
             )
@@ -1637,6 +1641,18 @@ final class TrackingService: ObservableObject {
             internalSegments = [RouteSegment(id: id, style: preferredStyle, coords: [coord])]
             internalSegmentsForMap = [RouteSegment(id: id, style: preferredStyle, coords: [mapCoord])]
             resetSegmentSwitchState()
+            forceNewSegmentOnNextAppend = false
+            return
+        }
+
+        // After a pause, the next point starts a fresh segment so the polyline
+        // does not connect the pre-pause tail to the post-resume head.
+        if forceNewSegmentOnNextAppend {
+            let id = UUID().uuidString
+            internalSegments.append(RouteSegment(id: id, style: preferredStyle, coords: [coord]))
+            internalSegmentsForMap.append(RouteSegment(id: id, style: preferredStyle, coords: [mapCoord]))
+            resetSegmentSwitchState()
+            forceNewSegmentOnNextAppend = false
             return
         }
 

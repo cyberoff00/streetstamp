@@ -289,6 +289,7 @@ struct BackendProfileDTO: Codable {
     var stats: ProfileStatsSnapshot?
     var journeys: [FriendSharedJourney]
     var unlockedCityCards: [FriendCityCard]
+    var createdAt: TimeInterval?
 
     var resolvedExclusiveID: String? {
         if let exclusiveID, !exclusiveID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -302,6 +303,11 @@ struct BackendProfileDTO: Codable {
             return canUpdateHandleOneTime
         }
         return !(handleChangeUsed ?? false)
+    }
+
+    var createdAtDate: Date? {
+        guard let createdAt, createdAt > 0 else { return nil }
+        return Date(timeIntervalSince1970: createdAt)
     }
 
     init(
@@ -1025,11 +1031,8 @@ final class BackendAPIClient {
     }
 
     func uploadMedia(token: String, data: Data, fileName: String, mimeType: String) async throws -> BackendMediaUploadResponse {
-        // CN devices always upload via server — skip presign round trip.
-        if BackendConfig.isChineseMainlandDevice {
-            return try await uploadMediaViaServer(token: token, data: data, fileName: fileName, mimeType: mimeType)
-        }
-        // International: ask server whether to upload directly to R2 or via server (fallback).
+        // All devices: ask server to presign a direct-to-R2 PUT.
+        // Server only returns strategy=server as fallback (R2 unavailable).
         let hash = data.md5HexString
         let rawExt = (fileName as NSString).pathExtension
         let ext = rawExt.isEmpty ? ".jpg" : ".\(rawExt)"
@@ -1041,7 +1044,7 @@ final class BackendAPIClient {
             try await putDirectToR2(presignedURL: presignedURL, data: data, mimeType: mimeType)
             return BackendMediaUploadResponse(objectKey: objectKey, url: publicURL)
         }
-        // Fallback: upload through server.
+        // Fallback: upload through server (only when R2 is misconfigured or presign fails).
         return try await uploadMediaViaServer(token: token, data: data, fileName: fileName, mimeType: mimeType)
     }
 
@@ -1209,6 +1212,12 @@ final class BackendAPIClient {
     func registerPushToken(token: String, pushToken: String, platform: String = "ios") async throws {
         let body = try encoder.encode(["token": pushToken, "platform": platform])
         _ = try await request(path: "/v1/push-token", method: "PUT", token: token, jsonBody: body)
+    }
+
+    // MARK: - Account Deletion
+
+    func deleteAccount(token: String) async throws {
+        _ = try await request(path: "/v1/account", method: "DELETE", token: token)
     }
 
     // MARK: - Block / Report

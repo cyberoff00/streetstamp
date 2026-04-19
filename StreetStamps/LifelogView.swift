@@ -68,6 +68,8 @@ private struct LifelogBottomCardView: View {
     let onOpenEquipment: () -> Void
     let onShare: () -> Void
 
+    @State private var avatarLoadout: RobotLoadout = AvatarLoadoutStore.load()
+
     var body: some View {
         let totalMemories = store.journeys.reduce(0) { $0 + $1.memories.count }
         let cityCount = cityCache.cachedCities.filter { !($0.isTemporary ?? false) }.count
@@ -86,7 +88,7 @@ private struct LifelogBottomCardView: View {
                         .fill(Color(red: 200.0 / 255.0, green: 232.0 / 255.0, blue: 221.0 / 255.0))
                         .frame(width: 68, height: 68)
 
-                    RobotRendererView(size: 56, face: .front, loadout: AvatarLoadoutStore.load())
+                    RobotRendererView(size: 56, face: .front, loadout: avatarLoadout)
                 }
             }
             .buttonStyle(.plain)
@@ -134,6 +136,9 @@ private struct LifelogBottomCardView: View {
                 .stroke(Color.black.opacity(0.06), lineWidth: 1)
         }
         .shadow(color: Color.black.opacity(0.10), radius: 16, x: 0, y: 8)
+        .onReceive(NotificationCenter.default.publisher(for: .avatarLoadoutDidChange)) { _ in
+            avatarLoadout = AvatarLoadoutStore.load()
+        }
     }
 }
 
@@ -299,7 +304,8 @@ struct LifelogView: View {
 
                 WeatherOverlayView(
                     weatherService: weatherService,
-                    location: locationHub.currentLocation
+                    location: locationHub.currentLocation,
+                    lightBackground: !(MapLayerStyle(rawValue: layerStyleRaw) ?? .mutedDark).useWhiteWeatherParticles
                 )
 #if DEBUG
                 if mapDiagnosticsEnabled {
@@ -365,22 +371,27 @@ struct LifelogView: View {
                 if isStepModalVisible {
                     stepMilestoneModal
                 }
+                if showAlwaysLocationGuide {
+                    AlwaysLocationGuideView(
+                        isPresented: $showAlwaysLocationGuide,
+                        onEnable: {
+                            alwaysLocationGuideShown = true
+                            locationHub.requestAlwaysPermissionIfNeeded()
+                        },
+                        onSkip: {
+                            alwaysLocationGuideShown = true
+                        }
+                    )
+                }
             }
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.78), value: isMoodPopupVisible)
+        .animation(.easeInOut(duration: 0.2), value: showAlwaysLocationGuide)
         .fullScreenCover(isPresented: $showGlobe) {
             LifelogGlobeCoverView()
         }
         .sheet(item: $shareItem) { item in
             ShareSheet(activityItems: [item.image])
-        }
-        .sheet(isPresented: $showAlwaysLocationGuide) {
-            AlwaysLocationGuideView(isPresented: $showAlwaysLocationGuide, onEnable: {
-                alwaysLocationGuideShown = true
-                locationHub.requestAlwaysPermissionIfNeeded()
-            }, onSkip: {
-                alwaysLocationGuideShown = true
-            })
         }
         .alert(L10n.t("lifelog_disable_title"), isPresented: $showDisableConfirm) {
             Button(L10n.t("lifelog_continue_recording"), role: .cancel) {}
@@ -398,7 +409,7 @@ struct LifelogView: View {
         } message: {
             Text(L10n.t("lifelog_permission_settings_message"))
         }
-        .overlay(alignment: .bottom) {
+        .overlay(alignment: .top) {
             if let hint = activeLifelogHint {
                 ContextualHintBar(
                     icon: hint.icon,
@@ -406,14 +417,13 @@ struct LifelogView: View {
                     onDismiss: { dismissLifelogHintSequence() }
                 )
                 .padding(.horizontal, 18)
-                .padding(.bottom, 16)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .padding(.top, 60)
+                .transition(.opacity)
                 .id(hint.id)
             }
         }
         .animation(.easeInOut(duration: 0.3), value: activeLifelogHint?.id)
         .onAppear {
-            startLifelogHintSequence()
 #if DEBUG
             if mapDiagnosticsEnabled {
                 diagnosticsAppearAt = Date()
@@ -460,19 +470,17 @@ struct LifelogView: View {
             } else {
                 scheduleRenderSnapshotRefresh()
             }
-            Task {
-                await refreshHealthPermissionState()
-                await requestHealthPermissionIfNeeded()
-                await captureStepSnapshotIfNeeded(for: Calendar.current.startOfDay(for: Date()), force: true)
-                if stepBadgePromptedDay != todayKey() {
-                    stepBadgePromptedDay = todayKey()
-                    isStepPopupVisible = true
-                }
-                await presentStepModalIfNeeded()
-                if !isStepModalVisible {
-                    presentMoodPopupIfNeeded()
-                }
+            // Defer the health/step/mood flow while the Always location guide
+                // card is up, so the system HealthKit prompt and app-side sheets
+                // don't stack. onChange(showAlwaysLocationGuide) picks it up as
+                // soon as the user dismisses the guide in the same session.
+            if !showAlwaysLocationGuide {
+                Task { await runHealthAndPopupFlow() }
             }
+        }
+        .onChange(of: showAlwaysLocationGuide) { isShown in
+            guard !isShown else { return }
+            Task { await runHealthAndPopupFlow() }
         }
         .onDisappear {
             renderTask?.cancel()
@@ -727,7 +735,10 @@ struct LifelogView: View {
     ]
 
     private var hasActivePopup: Bool {
-        showAlwaysLocationGuide || isMoodPopupVisible || isStepPopupVisible || isStepModalVisible || showPermissionSettingsPrompt || showDisableConfirm
+        // isStepPopupVisible is intentionally excluded: it's the persistent
+        // top-right step count badge, not a blocking modal. Including it would
+        // keep the hint sequence waiting forever once the daily badge appears.
+        showAlwaysLocationGuide || isMoodPopupVisible || isStepModalVisible || showPermissionSettingsPrompt || showDisableConfirm
     }
 
     private func startLifelogHintSequence() {
@@ -1585,6 +1596,24 @@ struct LifelogView: View {
         return "--"
     }
 
+    private func runHealthAndPopupFlow() async {
+        await refreshHealthPermissionState()
+        await requestHealthPermissionIfNeeded()
+        await captureStepSnapshotIfNeeded(for: Calendar.current.startOfDay(for: Date()), force: true)
+        if stepBadgePromptedDay != todayKey() {
+            stepBadgePromptedDay = todayKey()
+            isStepPopupVisible = true
+        }
+        await presentStepModalIfNeeded()
+        if !isStepModalVisible {
+            presentMoodPopupIfNeeded()
+        }
+        // Only start the lifelog tour hints after every competing popup has
+        // been scheduled — otherwise the hint sequence races with mood/step
+        // popups that are being set up in parallel.
+        startLifelogHintSequence()
+    }
+
     private func presentMoodPopupIfNeeded() {
         guard !isStepModalVisible else { return }
         let today = Calendar.current.startOfDay(for: Date())
@@ -1836,56 +1865,88 @@ private struct AlwaysLocationGuideView: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.85).ignoresSafeArea()
+            Color.black.opacity(0.36)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    isPresented = false
+                    onSkip?()
+                }
 
-            VStack(spacing: 24) {
-                Spacer()
+            VStack(alignment: .center, spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [FigmaTheme.primary.opacity(0.2), FigmaTheme.primary.opacity(0.08)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 60, height: 60)
 
-                Image(systemName: "location.circle.fill")
-                    .font(.system(size: 72))
-                    .foregroundColor(.white)
+                    Image(systemName: "location.circle.fill")
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundColor(FigmaTheme.primary)
+                }
+                .frame(maxWidth: .infinity)
 
-                VStack(spacing: 12) {
-                    Text(L10n.t("lifelog_always_guide_title"))
-                        .font(.system(size: 24, weight: .bold))
+                Text(L10n.t("lifelog_always_guide_title"))
+                    .font(.system(size: 20, weight: .black, design: .rounded))
+                    .foregroundColor(FigmaTheme.text)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .multilineTextAlignment(.center)
+
+                Text(L10n.t("lifelog_always_guide_message"))
+                    .font(.system(size: 14))
+                    .foregroundColor(FigmaTheme.subtext)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, alignment: .center)
+
+                Button {
+                    isPresented = false
+                    onEnable()
+                } label: {
+                    Text(L10n.t("lifelog_always_guide_enable"))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(.white)
-
-                    Text(L10n.t("lifelog_always_guide_message"))
-                        .font(.system(size: 16))
-                        .foregroundColor(.white.opacity(0.85))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 32)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(FigmaTheme.primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
-
-                Spacer()
-
-                VStack(spacing: 12) {
-                    Button {
-                        isPresented = false
-                        onEnable()
-                    } label: {
-                        Text(L10n.t("lifelog_always_guide_enable"))
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundColor(.black)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
-                            .background(Color.white)
-                            .clipShape(RoundedRectangle(cornerRadius: 14))
-                    }
-
-                    Button {
-                        isPresented = false
-                        onSkip?()
-                    } label: {
-                        Text(L10n.t("lifelog_always_guide_skip"))
-                            .font(.system(size: 15))
-                            .foregroundColor(.white.opacity(0.7))
-                    }
-                }
-                .padding(.horizontal, 32)
-                .padding(.bottom, 48)
+                .buttonStyle(.plain)
+                .padding(.top, 4)
             }
+            .padding(.top, 14)
+            .padding(.horizontal, 22)
+            .padding(.bottom, 22)
+            .background(FigmaTheme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(FigmaTheme.border, lineWidth: 1)
+            )
+            .overlay(alignment: .topTrailing) {
+                Button {
+                    isPresented = false
+                    onSkip?()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(FigmaTheme.subtext)
+                        .frame(width: 28, height: 28)
+                        .background(FigmaTheme.background.opacity(0.92))
+                        .clipShape(Circle())
+                        .appMinTapTarget()
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
+                .padding(.trailing, 4)
+            }
+            .shadow(color: Color.black.opacity(0.16), radius: 20, x: 0, y: 8)
+            .padding(.horizontal, 20)
         }
+        .transition(.opacity)
     }
 }
 
@@ -1895,6 +1956,8 @@ struct LifelogAvatarAnnotationContent: View {
     let shouldShowMoodQuestion: Bool
     let onMoodTap: () -> Void
     let onDoubleTap: () -> Void
+
+    @State private var avatarLoadout: RobotLoadout = AvatarLoadoutStore.load()
 
     var body: some View {
         VStack(spacing: 2) {
@@ -1912,12 +1975,15 @@ struct LifelogAvatarAnnotationContent: View {
             RobotRendererView(
                 size: AvatarMapMarkerStyle.visualSize,
                 face: .front,
-                loadout: AvatarLoadoutStore.load()
+                loadout: avatarLoadout
             )
             .frame(width: AvatarMapMarkerStyle.annotationSize, height: AvatarMapMarkerStyle.annotationSize)
             .shadow(color: .black.opacity(0.24), radius: 8, y: 2)
             .contentShape(Rectangle())
             .onTapGesture(count: 2, perform: onDoubleTap)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .avatarLoadoutDidChange)) { _ in
+            avatarLoadout = AvatarLoadoutStore.load()
         }
     }
 }

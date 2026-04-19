@@ -356,19 +356,24 @@ bash scripts/readonly_prod_check.sh
 - Avoid "simple" user ID substitutions. In this repo, replacing `currentUserID` with `accountUserID` or vice versa can silently move data across ownership boundaries.
 
 ### Production Deployment
-- Server: `101.132.159.73` (Alibaba Cloud Shanghai)
+- **Primary server (live)**: `jp-api` = `13.193.6.71` (Tokyo). This is the production server the iOS app hits.
+- **Legacy server**: `101.132.159.73` (Alibaba Cloud Shanghai). Previously primary; may still be running during migration. Confirm with user before deploying here.
+- Public API: `https://worldo-api.cyberkkk.cn` (fronted by Cloudflare; origin currently points to Tokyo)
 - Remote app dir: `/opt/streetstamps/backend-node-v1`
 - Compose file: `/opt/streetstamps/backend-node-v1/docker-compose.yml`
 - Env file: `/opt/streetstamps/backend-node-v1/.env`
-- API container: `streetstamps-node-v1`
-- DB container: `streetstamps-postgres`
+- API container: `streetstamps-node-v1` (compose service name: `api`)
+- DB container: `streetstamps-postgres` (compose service name: `postgres`)
 - Internal health: `http://127.0.0.1:18080/v1/health`
-- Public API: `https://worldo-api.cyberkkk.cn`
-- Deploy command: `./backend-node-v1/deploy-safe.sh` (the only supported entry point)
+- Deploy command (Tokyo, default override): `SERVER_HOST=root@13.193.6.71 ./backend-node-v1/deploy-safe.sh`
+- Deploy command (Shanghai, legacy default): `./backend-node-v1/deploy-safe.sh`
+- `deploy-safe.sh` defaults `SERVER_HOST=root@101.132.159.73` — **must override for Tokyo**. Consider updating the default when Shanghai is fully retired.
+- Deploy requires clean working tree by default; set `ALLOW_DIRTY=1` to deploy from dirty tree.
 - Rollback: `./backend-node-v1/rollback.sh /opt/streetstamps/backups/release/<timestamp>`
 - Production check: `BASE_URL=https://worldo-api.cyberkkk.cn EXPECTED_AUTH_MODE=backend_jwt_only EXPECTED_FIREBASE_COMPAT=false EXPECTED_WRITE_FROZEN=false ./scripts/readonly_prod_check.sh`
 - Full workflow docs: `docs/ops/PRODUCTION_WORKFLOW.md`, `docs/ops/SERVER_BOOTSTRAP.md`
 - No silent production syncs — always report changes and wait for approval before deploying.
+- When in doubt which server is live, ask the user. DNS of `worldo-api.cyberkkk.cn` resolves to Cloudflare — not directly useful for origin detection.
 
 ### Practical Reminders
 - Use `rg` for search and `rg --files` for file discovery.

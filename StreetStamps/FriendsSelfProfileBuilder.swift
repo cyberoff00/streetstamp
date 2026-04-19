@@ -30,7 +30,7 @@ enum FriendsSelfProfileBuilder {
                 ),
                 journeys: remoteProfile.journeys,
                 unlockedCityCards: remoteProfile.unlockedCityCards,
-                createdAt: Date()
+                createdAt: remoteProfile.createdAtDate ?? Date()
             )
         }
 

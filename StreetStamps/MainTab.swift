@@ -194,12 +194,12 @@ struct MainTabView: View {
         } message: {
             Text(L10n.t("resume_prompt_message"))
         }
-        .alert(L10n.t("auto_end_alert_title"), isPresented: $showAutoEndedAlert) {
+        .alert(L10n.t("auto_pause_alert_title"), isPresented: $showAutoEndedAlert) {
             Button(L10n.t("ok"), role: .cancel) {
                 tracking.clearAutoEndedNotice()
             }
         } message: {
-            Text(L10n.t("auto_end_alert_message"))
+            Text(L10n.t("auto_pause_alert_message"))
         }
         .onChange(of: tracking.pendingAutoEndedNotice) { notice in
             if notice != nil {

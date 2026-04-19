@@ -418,7 +418,6 @@ final class UserSessionStore: ObservableObject {
         hasEmailPassword = false
         persistSession()
         persistFirebaseAccountState()
-        AppNotificationDelegate.clearCachedPushToken()
         if requireReauthenticationPrompt {
             reauthenticationPromptVersion &+= 1
         }

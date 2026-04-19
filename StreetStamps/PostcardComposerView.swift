@@ -350,14 +350,21 @@ struct PostcardComposerView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(FigmaTheme.subtext)
 
-            Picker(L10n.t("postcard_city"), selection: $selectedCityID) {
-                ForEach(cityOptions, id: \.id) { option in
-                    Text(option.name).tag(option.id)
+            if cityOptions.isEmpty {
+                Text(L10n.t("postcard_no_city_hint"))
+                    .font(.system(size: 13))
+                    .foregroundColor(FigmaTheme.subtext.opacity(0.7))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Picker(L10n.t("postcard_city"), selection: $selectedCityID) {
+                    ForEach(cityOptions, id: \.id) { option in
+                        Text(option.name).tag(option.id)
+                    }
                 }
-            }
-            .pickerStyle(.menu)
-            .onChange(of: selectedCityID) { _, newID in
-                selectedCityName = cityOptions.first(where: { $0.id == newID })?.name ?? ""
+                .pickerStyle(.menu)
+                .onChange(of: selectedCityID) { _, newID in
+                    selectedCityName = cityOptions.first(where: { $0.id == newID })?.name ?? ""
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

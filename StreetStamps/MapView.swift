@@ -717,7 +717,8 @@ struct MapViewRouteRenderStyle {
         let base = coreWidth(forAltitude: altitude, mode: mode)
 
         if isGap {
-            let main = max(1.2, base * 0.64)
+            // Dashed main width is 0.75× the solid core (solid uses base × 1.05).
+            let main = max(1.5, base * 0.79)
             return LayerWidths(glow: main * 2.2, main: main, highlight: 0)
         }
 
@@ -1217,6 +1218,7 @@ struct MapView: View {
     @State private var showFinishConfirm = false
     @State private var showFinishNoCityWarning = false
     @State private var showFinishPendingMemoryWarning = false
+    @State private var isFinalizingJourney = false
     @State private var showExitWarning = false
     @State private var showModeSelector = false
     @State private var showMapLayerPicker = false
@@ -1422,6 +1424,20 @@ struct MapView: View {
             } message: {
                 Text(L10n.t("finish_pending_memory_message"))
             }
+            .overlay {
+                if isFinalizingJourney {
+                    JourneyCompletionOverlay(
+                        distance: journeyRoute.distance,
+                        startTime: journeyRoute.startTime,
+                        endTime: journeyRoute.endTime,
+                        coordinates: journeyRoute.correctedCoordinates.isEmpty
+                            ? journeyRoute.coordinates
+                            : journeyRoute.correctedCoordinates
+                    )
+                    .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.25), value: isFinalizingJourney)
             .fullScreenCover(isPresented: $showDirectCamera) {
                 FilmCameraView(
                     onCapture: { image in
@@ -1475,7 +1491,7 @@ struct MapView: View {
                         preloadedImagePaths: cameraPreloadedPaths,
                         journeyOtherPhotosCount: journeyRoute.memories
                             .filter { $0.id != editingMemory?.id }
-                            .reduce(0) { $0 + $1.imagePaths.count + $1.remoteImageURLs.count },
+                            .reduce(0) { $0 + max($1.imagePaths.count, $1.remoteImageURLs.count) },
                         onSave: handleMemoryEditorSave
                     )
                     .transition(.opacity)
@@ -2489,6 +2505,7 @@ struct MapView: View {
         syncTimingFields()
         journeyRoute.endTime = Date()
         hasOngoingJourney = false
+        isFinalizingJourney = true
         tracking.stopJourney()
 
         let engine = (MapLayerStyle(rawValue: layerStyleRaw) ?? .mutedDark).engine
@@ -2503,9 +2520,37 @@ struct MapView: View {
             source: .userConfirmedFinish,
             recordedLocations: tracking.recordedLocationsForMemories,
             lastKnownLocation: tracking.latestReliableLocationForMemories
-        ) { updated in
+        ) { [finalizingStartedAt = Date()] updated in
+            // If safety timeout already dismissed us, just persist the update silently.
+            guard isFinalizingJourney else {
+                journeyRoute = updated
+                return
+            }
+
             journeyRoute = updated
             sharingJourney = updated
+
+            // Ensure the celebration overlay is visible for at least 2.2s
+            // so the user sees the full W-draw + title + stats animation.
+            let elapsed = Date().timeIntervalSince(finalizingStartedAt)
+            let remaining = max(0, 2.2 - elapsed)
+            DispatchQueue.main.asyncAfter(deadline: .now() + remaining) {
+                guard isFinalizingJourney else { return }
+                isFinalizingJourney = false
+                showSharingCard = true
+                selectedTab = 0
+                isPresented = false
+            }
+        }
+
+        // Safety timeout: if finalizer takes too long (e.g. geocoder hangs),
+        // dismiss after 15s so the user isn't stuck.
+        // The journey is already persisted by JourneyFinalizer.persistAndReturn
+        // even without geocode results, so no data loss.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [journeyID = journeyRoute.id] in
+            guard isFinalizingJourney, journeyRoute.id == journeyID else { return }
+            sharingJourney = journeyRoute
+            isFinalizingJourney = false
             showSharingCard = true
             selectedTab = 0
             isPresented = false
@@ -3253,7 +3298,7 @@ private var hasUnsavedChanges: Bool {
         remoteImageURLs != initialRemoteImageURLs ||
         mirrorSelfie != initialMirrorSelfie
     }
-    private var totalPhotoCount: Int { imagePaths.count + remoteImageURLs.count }
+    private var totalPhotoCount: Int { max(imagePaths.count, remoteImageURLs.count) }
     private var canAddPhoto: Bool {
         totalPhotoCount < maxPhotos && journeyTotalPhotoCount < journeyPhotoLimit
     }

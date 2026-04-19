@@ -724,11 +724,17 @@ enum AvatarLoadoutStore {
     static func save(_ loadout: RobotLoadout) {
         guard let data = try? JSONEncoder().encode(loadout.normalizedForCurrentAvatar()) else { return }
         UserDefaults.standard.set(data, forKey: key)
+        NotificationCenter.default.post(name: .avatarLoadoutDidChange, object: nil)
     }
 
     static func reset() {
         UserDefaults.standard.removeObject(forKey: key)
+        NotificationCenter.default.post(name: .avatarLoadoutDidChange, object: nil)
     }
+}
+
+extension Notification.Name {
+    static let avatarLoadoutDidChange = Notification.Name("streetstamps.avatarLoadoutDidChange")
 }
 
 extension Color {

@@ -60,11 +60,26 @@ struct SelectableTextView: UIViewRepresentable {
         uiView.layoutIfNeeded()
     }
 
-    /// ✅ iOS 16+：直接告诉 SwiftUI 这个 UITextView 需要的尺寸
+    /// iOS 16+：直接基于当前 text 独立计算高度，避免依赖 uiView 首次布局时序。
+    /// uiView 在首次调用 sizeThatFits 时，内容与 frame 都可能还未就位，
+    /// 直接 sizeThatFits(uiView) 会返回 ~1 行高度并被 SwiftUI 缓存。
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
         let width = proposal.width ?? UIScreen.main.bounds.width
-        let target = CGSize(width: width, height: .greatestFiniteMagnitude)
-        let fitted = uiView.sizeThatFits(target)
-        return CGSize(width: width, height: fitted.height)
+        let para = NSMutableParagraphStyle()
+        para.lineSpacing = lineSpacing
+        para.alignment = .natural
+        let attr = NSAttributedString(
+            string: text,
+            attributes: [
+                .font: font,
+                .paragraphStyle: para
+            ]
+        )
+        let rect = attr.boundingRect(
+            with: CGSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            context: nil
+        )
+        return CGSize(width: width, height: ceil(rect.height))
     }
 }

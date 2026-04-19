@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import CoreImage
+import CoreMotion
 
 // =======================================================
 // MARK: - Camera Preset
@@ -92,12 +93,10 @@ struct FilmCameraView: View {
         }
         .statusBarHidden()
         .onAppear {
-            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
             camera.startSession()
         }
         .onDisappear {
             camera.stopSession()
-            UIDevice.current.endGeneratingDeviceOrientationNotifications()
         }
     }
 
@@ -501,7 +500,10 @@ struct FilmCameraView: View {
         let screenW = geo.size.width
         let frameW = screenW - 32
         let photoW = frameW - 24
-        let photoH = photoW * (4.0 / 3.0)
+        let isLandscape = image.size.width > image.size.height
+        let photoH = isLandscape
+            ? photoW * (3.0 / 4.0)   // landscape: 4:3 wide
+            : photoW * (4.0 / 3.0)   // portrait: 3:4 tall
 
         return ZStack {
             bodyColor.ignoresSafeArea()
@@ -628,7 +630,13 @@ final class FilmCameraEngine: NSObject, ObservableObject {
     private var captureCompletion: ((UIImage?) -> Void)?
     private let sessionQueue = DispatchQueue(label: "film.camera.session")
 
+    // Use accelerometer to detect device orientation — UIDevice.current.orientation
+    // is unreliable in portrait-locked apps.
+    private let motionManager = CMMotionManager()
+    private var motionOrientation: UIDeviceOrientation = .portrait
+
     func startSession() {
+        startMotionUpdates()
         sessionQueue.async { [weak self] in
             guard let self else { return }
             self.configureSession()
@@ -638,9 +646,26 @@ final class FilmCameraEngine: NSObject, ObservableObject {
     }
 
     func stopSession() {
+        motionManager.stopAccelerometerUpdates()
         sessionQueue.async { [weak self] in
             self?.captureSession.stopRunning()
             DispatchQueue.main.async { self?.isSessionReady = false }
+        }
+    }
+
+    private func startMotionUpdates() {
+        guard motionManager.isAccelerometerAvailable else { return }
+        motionManager.accelerometerUpdateInterval = 0.15
+        motionManager.startAccelerometerUpdates(to: .main) { [weak self] data, _ in
+            guard let self, let accel = data?.acceleration else { return }
+            // Determine orientation from gravity vector.
+            // x positive = tilted right, x negative = tilted left
+            // y positive = upside down, y negative = upright portrait
+            if abs(accel.x) > abs(accel.y) {
+                self.motionOrientation = accel.x > 0 ? .landscapeRight : .landscapeLeft
+            } else {
+                self.motionOrientation = accel.y > 0 ? .portraitUpsideDown : .portrait
+            }
         }
     }
 
@@ -672,8 +697,8 @@ final class FilmCameraEngine: NSObject, ObservableObject {
     }
 
     func capturePhoto(completion: @escaping (UIImage?) -> Void) {
-        // Read device orientation on the calling (main) thread before dispatching.
-        let deviceOrientation = UIDevice.current.orientation
+        // Read physical orientation from accelerometer (reliable even in portrait-locked apps).
+        let deviceOrientation = motionOrientation
         sessionQueue.async { [weak self] in
             guard let self, self.captureSession.isRunning else {
                 DispatchQueue.main.async { completion(nil) }
@@ -747,11 +772,32 @@ extension FilmCameraEngine: AVCapturePhotoCaptureDelegate {
             return
         }
 
+        // Bake EXIF orientation into actual pixels so width/height reflect the
+        // real image dimensions (landscape photos get width > height).
+        image = image.bakeOrientation()
+
         if isUsingFrontCamera {
             image = image.horizontallyFlipped()
         }
 
         DispatchQueue.main.async { self.captureCompletion?(image) }
+    }
+}
+
+extension UIImage {
+    /// Redraws the image with orientation applied to the pixel buffer, returning
+    /// an `.up`-oriented image whose cgImage dimensions match the display size.
+    func bakeOrientation() -> UIImage {
+        guard imageOrientation != .up else { return self }
+        let displaySize = CGSize(width: size.width * scale, height: size.height * scale)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: displaySize, format: format)
+        let baked = renderer.image { _ in
+            self.draw(in: CGRect(origin: .zero, size: displaySize))
+        }
+        return baked
     }
 }
 

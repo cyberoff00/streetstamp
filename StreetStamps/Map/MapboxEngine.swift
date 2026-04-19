@@ -20,7 +20,6 @@ struct MapboxEngineView: UIViewRepresentable {
     private let routeGlowLayerId = "um-routes-glow"
     private let routeMainLayerId = "um-routes-main"
     private let routeHighlightLayerId = "um-routes-highlight"
-    private let routeDashedGlowLayerId = "um-routes-dashed-glow"
     private let routeDashedMainLayerId = "um-routes-dashed-main"
     private let tailSourceId = "um-tail-source"
     private let tailLayerId = "um-tail-line"
@@ -331,38 +330,23 @@ struct MapboxEngineView: UIViewRepresentable {
                 try? mapboxMap.addLayer(highlight)
             }
 
-            if !mapboxMap.layerExists(withId: ev.routeDashedGlowLayerId) {
-                var dglow = LineLayer(id: ev.routeDashedGlowLayerId, source: ev.routeSourceId)
-                dglow.filter = Exp(.eq) { Exp(.get) { "isGap" }; true }
-                dglow.lineColor = .constant(StyleColor(glowColor))
-                dglow.lineCap = .constant(.round)
-                dglow.lineJoin = .constant(.round)
-                dglow.lineOpacity = .constant(0.06)
-                dglow.lineDasharray = .constant([10, 10])
-                dglow.lineWidth = .expression(Exp(.interpolate) {
-                    Exp(.linear); Exp(.zoom)
-                    8;  3.0
-                    12; 5.0
-                    16; 8.0
-                    20; 12.0
-                })
-                try? mapboxMap.addLayer(dglow)
-            }
-
+            // Dashed signal-loss segments render the main layer only. A glow layer would
+            // scale its [10,10] dasharray by its own (larger) line width, putting solid
+            // glow color inside the main layer's dash gaps.
             if !mapboxMap.layerExists(withId: ev.routeDashedMainLayerId) {
                 var dmain = LineLayer(id: ev.routeDashedMainLayerId, source: ev.routeSourceId)
                 dmain.filter = Exp(.eq) { Exp(.get) { "isGap" }; true }
                 dmain.lineColor = .constant(StyleColor(baseColor))
                 dmain.lineCap = .constant(.round)
                 dmain.lineJoin = .constant(.round)
-                dmain.lineOpacity = .constant(0.56)
+                dmain.lineOpacity = .constant(0.85)
                 dmain.lineDasharray = .constant([10, 10])
                 dmain.lineWidth = .expression(Exp(.interpolate) {
                     Exp(.linear); Exp(.zoom)
-                    8;  1.0
-                    12; 1.5
-                    16; 2.5
-                    20; 4.0
+                    8;  1.5
+                    12; 2.6
+                    16; 3.75
+                    20; 6.0
                 })
                 try? mapboxMap.addLayer(dmain)
             }

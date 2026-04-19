@@ -121,9 +121,11 @@ enum MapLayerStyle: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Route color: light maps = blue, dark maps = ice-white
+    /// Route color: light maps = blue, dark maps = ice-white, satellite/hybrid = globe-style yellow-green
     var routeBaseColor: UIColor {
-        if isDarkStyle {
+        if isSatelliteStyle {
+            return UIColor(red: 221.0/255.0, green: 247.0/255.0, blue: 161.0/255.0, alpha: 1.0)
+        } else if isDarkStyle {
             return UIColor(red: 220.0/255.0, green: 235.0/255.0, blue: 255.0/255.0, alpha: 1.0)
         } else {
             return UIColor(red: 30.0/255.0, green: 60.0/255.0, blue: 220.0/255.0, alpha: 1.0)
@@ -131,7 +133,9 @@ enum MapLayerStyle: String, CaseIterable, Identifiable {
     }
 
     var routeGlowColor: UIColor {
-        if isDarkStyle {
+        if isSatelliteStyle {
+            return UIColor(red: 180.0/255.0, green: 220.0/255.0, blue: 100.0/255.0, alpha: 1.0)
+        } else if isDarkStyle {
             return UIColor(red: 80.0/255.0, green: 160.0/255.0, blue: 255.0/255.0, alpha: 1.0)
         } else {
             return UIColor(red: 20.0/255.0, green: 40.0/255.0, blue: 180.0/255.0, alpha: 1.0)
@@ -140,7 +144,27 @@ enum MapLayerStyle: String, CaseIterable, Identifiable {
 
     var isDarkStyle: Bool {
         switch self {
-        case .mutedDark, .satellite, .hybrid, .mapboxDark:
+        case .mutedDark, .mapboxDark:
+            return true
+        default:
+            return false
+        }
+    }
+
+    var isSatelliteStyle: Bool {
+        switch self {
+        case .satellite, .hybrid:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Whether weather particles should use light (white) colors.
+    /// True for dark maps AND satellite/hybrid (dark background), false for light-background maps.
+    var useWhiteWeatherParticles: Bool {
+        switch self {
+        case .mutedDark, .mapboxDark, .satellite, .hybrid:
             return true
         default:
             return false

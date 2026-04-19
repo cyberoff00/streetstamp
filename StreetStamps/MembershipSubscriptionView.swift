@@ -13,6 +13,7 @@ import StoreKit
 struct MembershipSubscriptionView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var membership: MembershipStore
+    @ObservedObject private var featureFlags = FeatureFlagStore.shared
     @State private var products: [Product] = []
     @State private var isPurchasing = false
     @State private var errorMessage: String?
@@ -206,16 +207,24 @@ struct MembershipSubscriptionView: View {
         let key: String
     }
 
-    private let benefitRows: [BenefitRow] = [
-        BenefitRow(icon: "camera.fill",               key: "membership_benefit_photos"),
-        BenefitRow(icon: "person.2.fill",             key: "membership_benefit_friends"),
-        BenefitRow(icon: "globe",                     key: "membership_benefit_globe"),
-        BenefitRow(icon: "icloud.fill",               key: "membership_benefit_icloud"),
-        BenefitRow(icon: "square.and.arrow.up",       key: "membership_benefit_gpx"),
-        BenefitRow(icon: "envelope.fill",             key: "membership_benefit_postcard"),
-        BenefitRow(icon: "map.fill",                  key: "membership_benefit_map"),
-        BenefitRow(icon: "star.fill",                 key: "membership_benefit_coins"),
-    ]
+    // Social-gated entries are filtered out in restricted storefront regions
+    // (e.g. mainland China). Order mirrors the comparison table.
+    private var benefitRows: [BenefitRow] {
+        let socialEnabled = featureFlags.socialEnabled
+        var rows: [BenefitRow] = []
+        if socialEnabled {
+            rows.append(BenefitRow(icon: "camera.fill",         key: "membership_benefit_photos"))
+            rows.append(BenefitRow(icon: "person.2.fill",       key: "membership_benefit_friends"))
+            rows.append(BenefitRow(icon: "envelope.fill",       key: "membership_benefit_postcard"))
+        }
+        rows.append(BenefitRow(icon: "globe",                   key: "membership_benefit_globe"))
+        rows.append(BenefitRow(icon: "icloud.fill",             key: "membership_benefit_icloud"))
+        rows.append(BenefitRow(icon: "square.and.arrow.up",     key: "membership_benefit_gpx"))
+        rows.append(BenefitRow(icon: "map.fill",                key: "membership_benefit_map"))
+        rows.append(BenefitRow(icon: "bag.fill",                key: "membership_benefit_equipment_coins"))
+        rows.append(BenefitRow(icon: "sparkles",                key: "membership_benefit_more_features"))
+        return rows
+    }
 
     private var activeBenefitsCard: some View {
         VStack(spacing: 0) {
@@ -292,46 +301,33 @@ struct MembershipSubscriptionView: View {
     // MARK: - Comparison Table (free users)
 
     private var comparisonTable: some View {
-        VStack(spacing: 0) {
+        // Social-gated rows (friends / postcard / photos-per-journey) are hidden
+        // in restricted storefront regions (e.g. mainland China) where those
+        // features are not offered.
+        let socialEnabled = featureFlags.socialEnabled
+        return VStack(spacing: 0) {
             comparisonHeader
-            // — Unlimited upgrades first —
-            comparisonRow(
-                feature: L10n.t("membership_compare_friends"),
-                freeValue: "5",
-                premiumValue: L10n.t("membership_compare_unlimited")
-            )
-            comparisonRow(
-                feature: L10n.t("membership_compare_postcard"),
-                freeValue: "1/3",
-                premiumValue: L10n.t("membership_compare_unlimited"),
-                infoKey: "postcard"
-            )
-            // — Other numeric limits —
-            comparisonRow(
-                feature: L10n.t("membership_compare_photos"),
-                freeValue: "6",
-                premiumValue: "12",
-                infoKey: "photos"
-            )
-            comparisonRow(
-                feature: L10n.t("membership_compare_coins"),
-                freeValue: "10",
-                premiumValue: "50"
-            )
-            // — Premium-only section divider —
-            HStack {
-                Text(L10n.t("membership_compare_premium_only"))
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(FigmaTheme.primary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(FigmaTheme.primary.opacity(0.1))
-                    .clipShape(Capsule())
-                Spacer()
+            if socialEnabled {
+                // — Unlimited upgrades first —
+                comparisonRow(
+                    feature: L10n.t("membership_compare_friends"),
+                    freeValue: "5",
+                    premiumValue: L10n.t("membership_compare_unlimited")
+                )
+                comparisonRow(
+                    feature: L10n.t("membership_compare_postcard"),
+                    freeValue: "1/3",
+                    premiumValue: L10n.t("membership_compare_unlimited"),
+                    infoKey: "postcard"
+                )
+                // — Other numeric limits —
+                comparisonRow(
+                    feature: L10n.t("membership_compare_photos"),
+                    freeValue: "6",
+                    premiumValue: "12",
+                    infoKey: "photos"
+                )
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(FigmaTheme.mutedBackground)
             // — Premium-only features —
             comparisonRow(
                 feature: L10n.t("membership_compare_globe"),
@@ -355,6 +351,16 @@ struct MembershipSubscriptionView: View {
             )
             comparisonRow(
                 feature: L10n.t("membership_compare_map_theme"),
+                freeValue: nil,
+                premiumValue: "check"
+            )
+            comparisonRow(
+                feature: L10n.t("membership_compare_equipment_coins"),
+                freeValue: nil,
+                premiumValue: "check"
+            )
+            comparisonRow(
+                feature: L10n.t("membership_compare_more_features"),
                 freeValue: nil,
                 premiumValue: "check",
                 isLast: true
@@ -413,7 +419,9 @@ struct MembershipSubscriptionView: View {
                         Image(systemName: "questionmark.circle")
                             .font(.system(size: 13))
                             .foregroundColor(FigmaTheme.subtext.opacity(0.5))
-                            .appMinTapTarget()
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 4)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }

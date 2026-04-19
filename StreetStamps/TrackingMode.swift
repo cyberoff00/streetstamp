@@ -118,10 +118,13 @@ struct TrackingModeConfig {
     static let daily = TrackingModeConfig(
         foregroundMinDistance: 12,          // 12米采一次（低密度）
         backgroundMinDistance: 25,
-        maxAcceptableAccuracy: 80,          // 允许更低精度
+        maxAcceptableAccuracy: 50,          // 收紧精度门槛，过滤噪声点
         lockAccuracy: 35,
-        
-        enableOneEuroFilter: false,         // 日常不需要高精度平滑
+
+        // 开启 OneEuro 平滑：即使是日常模式也要平滑，
+        // 否则慢走（公园、散步）场景 GPS 抖动会形成 zigzag。
+        // OneEuro CPU 开销可忽略（<0.1%），对续航无影响。
+        enableOneEuroFilter: true,
         oneEuroMinCutoff: 1.2,
         oneEuroBeta: 0.08,
         
@@ -160,18 +163,20 @@ extension TrackingModeConfig {
         
         switch travelMode {
         case .walk:
+            // 慢走（公园、散步）场景：GPS 抖动易在树荫下形成 zigzag。
+            // 参数整体收紧 —— 拒绝低精度点 + OneEuro 更强平滑 + 静止阈值更大。
             return TrackingModeConfig(
                 foregroundMinDistance: 8,
                 backgroundMinDistance: 15,
-                maxAcceptableAccuracy: 60,
-                lockAccuracy: 30,
+                maxAcceptableAccuracy: 45,     // 60 → 45：拒绝精度差点
+                lockAccuracy: 25,              // 30 → 25：首次锁定要求更严
                 enableOneEuroFilter: true,
-                oneEuroMinCutoff: 1.3,
+                oneEuroMinCutoff: 0.9,         // 1.3 → 0.9：慢走更强平滑
                 oneEuroBeta: 0.04,
                 turnKeepAngle: 22,
                 gapSecondsThreshold: 45,
                 gapDistanceThreshold: 800,
-                stationaryMinMoveMeters: 10,
+                stationaryMinMoveMeters: 12,   // 10 → 12：抑制 GPS 小抖动
                 stationarySpeedThreshold: 0.6,
                 stationaryHoldSeconds: 8,
                 deltaPersistInterval: deltaPersistInterval,

@@ -8,6 +8,7 @@ import CoreLocation
 struct WeatherOverlayView: View {
     @ObservedObject var weatherService: WeatherService
     let location: CLLocation?
+    var lightBackground: Bool = false  // true = light map, particles should be dark
 
     @State private var didAppear = false
 
@@ -16,7 +17,7 @@ struct WeatherOverlayView: View {
         let condition = weatherService.effectiveCondition
 
         ZStack {
-            // Atmospheric tint
+            // Atmospheric tint — heavier on light maps for contrast
             if condition.isRaining || condition.isSnowing {
                 Color.black
                     .opacity(atmosphericDarkening(for: condition))
@@ -28,7 +29,8 @@ struct WeatherOverlayView: View {
             if condition.isRaining {
                 RainEffectView(
                     intensity: condition.rainIntensity,
-                    windAngle: windAngleDegrees(from: weather)
+                    windAngle: windAngleDegrees(from: weather),
+                    lightBackground: lightBackground
                 )
             }
 
@@ -36,7 +38,8 @@ struct WeatherOverlayView: View {
             if condition.isSnowing {
                 SnowEffectView(
                     intensity: 0.7,
-                    windAngle: windAngleDegrees(from: weather)
+                    windAngle: windAngleDegrees(from: weather),
+                    lightBackground: lightBackground
                 )
             }
 
@@ -61,12 +64,14 @@ struct WeatherOverlayView: View {
     }
 
     private func atmosphericDarkening(for condition: WeatherCondition) -> Double {
+        // Light maps need heavier darkening so particles stand out
+        let boost: Double = lightBackground ? 0.06 : 0.0
         switch condition {
-        case .drizzle:      return 0.06
-        case .rain:         return 0.10
-        case .heavyRain:    return 0.15
-        case .thunderstorm: return 0.20
-        case .snow:         return 0.05
+        case .drizzle:      return 0.06 + boost
+        case .rain:         return 0.10 + boost
+        case .heavyRain:    return 0.15 + boost
+        case .thunderstorm: return 0.20 + boost
+        case .snow:         return 0.05 + boost
         default:            return 0.0
         }
     }
@@ -86,9 +91,9 @@ struct WeatherOverlayView: View {
 // MARK: - Convenience modifier
 
 extension View {
-    func weatherOverlay(service: WeatherService, location: CLLocation?) -> some View {
+    func weatherOverlay(service: WeatherService, location: CLLocation?, lightBackground: Bool = false) -> some View {
         self.overlay {
-            WeatherOverlayView(weatherService: service, location: location)
+            WeatherOverlayView(weatherService: service, location: location, lightBackground: lightBackground)
         }
     }
 }

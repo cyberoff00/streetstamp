@@ -151,6 +151,7 @@ private final class StormEngine {
 struct RainEffectView: View {
     let intensity: CGFloat  // 0...1
     let windAngle: CGFloat  // degrees from vertical (positive = right)
+    var lightBackground: Bool = false
 
     @State private var engine = StormEngine()
 
@@ -177,13 +178,25 @@ struct RainEffectView: View {
                     path.addLine(to: CGPoint(x: x - dx, y: y - dy))
 
                     let color: Color
-                    switch drop.layer {
-                    case 0:
-                        color = Color.white.opacity(drop.opacity * 0.7)
-                    case 1:
-                        color = Color(white: 0.85).opacity(drop.opacity)
-                    default:
-                        color = Color(white: 0.9).opacity(drop.opacity)
+                    if lightBackground {
+                        // Dark blue-gray rain on light maps
+                        switch drop.layer {
+                        case 0:
+                            color = Color(red: 0.35, green: 0.40, blue: 0.50).opacity(drop.opacity * 0.8)
+                        case 1:
+                            color = Color(red: 0.30, green: 0.35, blue: 0.48).opacity(drop.opacity * 1.1)
+                        default:
+                            color = Color(red: 0.25, green: 0.30, blue: 0.45).opacity(drop.opacity * 1.2)
+                        }
+                    } else {
+                        switch drop.layer {
+                        case 0:
+                            color = Color.white.opacity(drop.opacity * 0.7)
+                        case 1:
+                            color = Color(white: 0.85).opacity(drop.opacity)
+                        default:
+                            color = Color(white: 0.9).opacity(drop.opacity)
+                        }
                     }
 
                     context.stroke(
@@ -199,7 +212,9 @@ struct RainEffectView: View {
                     let alpha = (1.0 - progress) * 0.4
                     let radius = 2 + progress * 6
 
-                    let splashColor = Color.white.opacity(alpha)
+                    let splashColor = lightBackground
+                        ? Color(red: 0.30, green: 0.35, blue: 0.48).opacity(alpha)
+                        : Color.white.opacity(alpha)
 
                     // Center splash
                     let center = CGPoint(x: splash.splashX, y: splash.splashY)
@@ -366,6 +381,7 @@ private final class SnowEngine {
 struct SnowEffectView: View {
     let intensity: CGFloat  // 0...1
     let windAngle: CGFloat
+    var lightBackground: Bool = false
 
     @State private var engine = SnowEngine()
 
@@ -385,43 +401,80 @@ struct SnowEffectView: View {
                     // Draw a soft circle snowflake with glow
                     let center = CGPoint(x: x, y: y)
 
-                    // Outer glow
-                    let glowRect = CGRect(
-                        x: center.x - r * 1.5,
-                        y: center.y - r * 1.5,
-                        width: r * 3,
-                        height: r * 3
-                    )
-                    context.fill(
-                        Path(ellipseIn: glowRect),
-                        with: .color(Color.white.opacity(flake.opacity * 0.15))
-                    )
-
-                    // Core snowflake
-                    let coreRect = CGRect(
-                        x: center.x - r,
-                        y: center.y - r,
-                        width: flake.size,
-                        height: flake.size
-                    )
-                    context.fill(
-                        Path(ellipseIn: coreRect),
-                        with: .color(Color.white.opacity(flake.opacity))
-                    )
-
-                    // Bright center dot for near-layer flakes
-                    if flake.layer == 2 {
-                        let dotR = r * 0.4
-                        let dotRect = CGRect(
-                            x: center.x - dotR,
-                            y: center.y - dotR,
-                            width: dotR * 2,
-                            height: dotR * 2
+                    if lightBackground {
+                        // Light map: dark outline ring for visibility, pale blue-gray core
+                        let outlineRect = CGRect(
+                            x: center.x - r * 1.4,
+                            y: center.y - r * 1.4,
+                            width: r * 2.8,
+                            height: r * 2.8
                         )
                         context.fill(
-                            Path(ellipseIn: dotRect),
-                            with: .color(Color.white.opacity(min(flake.opacity + 0.2, 1.0)))
+                            Path(ellipseIn: outlineRect),
+                            with: .color(Color(red: 0.55, green: 0.60, blue: 0.70).opacity(flake.opacity * 0.35))
                         )
+
+                        let coreRect = CGRect(
+                            x: center.x - r,
+                            y: center.y - r,
+                            width: flake.size,
+                            height: flake.size
+                        )
+                        context.fill(
+                            Path(ellipseIn: coreRect),
+                            with: .color(Color(red: 0.75, green: 0.80, blue: 0.88).opacity(flake.opacity * 0.9))
+                        )
+
+                        if flake.layer == 2 {
+                            let dotR = r * 0.4
+                            let dotRect = CGRect(
+                                x: center.x - dotR,
+                                y: center.y - dotR,
+                                width: dotR * 2,
+                                height: dotR * 2
+                            )
+                            context.fill(
+                                Path(ellipseIn: dotRect),
+                                with: .color(Color(red: 0.65, green: 0.70, blue: 0.80).opacity(min(flake.opacity + 0.15, 1.0)))
+                            )
+                        }
+                    } else {
+                        // Dark map: original white particles
+                        let glowRect = CGRect(
+                            x: center.x - r * 1.5,
+                            y: center.y - r * 1.5,
+                            width: r * 3,
+                            height: r * 3
+                        )
+                        context.fill(
+                            Path(ellipseIn: glowRect),
+                            with: .color(Color.white.opacity(flake.opacity * 0.15))
+                        )
+
+                        let coreRect = CGRect(
+                            x: center.x - r,
+                            y: center.y - r,
+                            width: flake.size,
+                            height: flake.size
+                        )
+                        context.fill(
+                            Path(ellipseIn: coreRect),
+                            with: .color(Color.white.opacity(flake.opacity))
+                        )
+
+                        if flake.layer == 2 {
+                            let dotR = r * 0.4
+                            let dotRect = CGRect(
+                                x: center.x - dotR,
+                                y: center.y - dotR,
+                                width: dotR * 2,
+                                height: dotR * 2
+                            )
+                            context.fill(
+                                Path(ellipseIn: dotRect),
+                                with: .color(Color.white.opacity(min(flake.opacity + 0.2, 1.0)))
+                            )
+                        }
                     }
                 }
             }

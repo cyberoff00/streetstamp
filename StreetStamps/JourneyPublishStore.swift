@@ -118,6 +118,28 @@ final class JourneyPublishStore: ObservableObject {
         }
     }
 
+    /// Restores a .failed banner state for a journey whose local visibility was
+    /// set to friends-only/public but whose backend publish never confirmed
+    /// (sharedAt == nil). No network work is started — the user decides whether
+    /// to Retry or Save Private via the banner buttons. Intended for app
+    /// kill/relaunch recovery where the in-memory publish state was lost.
+    func restoreUnconfirmedPublish(
+        journey: JourneyRoute,
+        sessionStore: UserSessionStore,
+        cityCache: CityCache,
+        journeyStore: JourneyStore
+    ) {
+        guard case .idle = status else { return }
+        let title = journey.customTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? (journey.customTitle ?? journey.displayCityName)
+            : journey.displayCityName
+        lastFailedJourney = journey
+        lastFailedSessionStore = sessionStore
+        lastFailedCityCache = cityCache
+        lastFailedJourneyStore = journeyStore
+        status = .failed(journeyID: journey.id, title: title, errorMessage: "")
+    }
+
     /// Call when the app returns to foreground. If publishing has been stuck for over
     /// 60 seconds (e.g. app was suspended mid-upload and background session failed),
     /// cancels and retries automatically.

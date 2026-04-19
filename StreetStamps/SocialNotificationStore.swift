@@ -9,6 +9,30 @@ final class SocialNotificationStore: ObservableObject {
 
     private static let cutoffInterval: TimeInterval = 3 * 24 * 60 * 60
     private var lastPromptNotificationID: String?
+    private var pollingTask: Task<Void, Never>?
+
+    // MARK: - Foreground Polling
+
+    /// Poll the backend every `interval` seconds while the app is foregrounded.
+    /// Safe to call repeatedly; it cancels any existing polling task first.
+    func startPolling(tokenProvider: @escaping @MainActor () -> String?, interval: TimeInterval = 30) {
+        stopPolling()
+        pollingTask = Task { [weak self] in
+            // The first refresh is done by the caller on scene activation,
+            // so sleep before the first poll to avoid doubling up.
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+                if Task.isCancelled { break }
+                let token = await tokenProvider()
+                await self?.refresh(token: token)
+            }
+        }
+    }
+
+    func stopPolling() {
+        pollingTask?.cancel()
+        pollingTask = nil
+    }
 
     // MARK: - Fetch
 

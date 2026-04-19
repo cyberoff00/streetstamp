@@ -1,6 +1,7 @@
 import Combine
 import SwiftUI
 import UIKit
+import UserNotifications
 #if canImport(FirebaseCore)
 import FirebaseCore
 #endif
@@ -160,6 +161,34 @@ struct StreetStampsApp: App {
         )
     }
 
+    // Journeys whose local visibility is friends-only/public but whose backend
+    // publish never confirmed (sharedAt == nil) are recovery candidates after
+    // an app kill mid-upload. Restore the most recent one as a .failed banner
+    // so the user can decide (Retry or Save Private); demote the rest to
+    // .private so their UI no longer claims friends-visible.
+    @MainActor
+    private func recoverUnconfirmedJourneyPublishes() {
+        let pending = journeyStore.journeys
+            .filter { $0.visibility != .private && $0.sharedAt == nil && $0.endTime != nil }
+            .sorted { ($0.endTime ?? .distantPast) > ($1.endTime ?? .distantPast) }
+        guard let mostRecent = pending.first else { return }
+        publishStore.restoreUnconfirmedPublish(
+            journey: mostRecent,
+            sessionStore: sessionStore,
+            cityCache: cityCache,
+            journeyStore: journeyStore
+        )
+        let rest = pending.dropFirst()
+        guard !rest.isEmpty else { return }
+        var demoted: [JourneyRoute] = []
+        for j in rest {
+            var updated = j
+            updated.visibility = .private
+            demoted.append(updated)
+        }
+        journeyStore.applyBulkCompletedUpdates(demoted)
+    }
+
     private static func makeJourneySyncHooks(
         sessionStore: UserSessionStore,
         cityCache: CityCache,
@@ -195,30 +224,8 @@ struct StreetStampsApp: App {
 
     @MainActor
     private func setupAutoEndHandler() {
-        let store = journeyStore
-        let cache = cityCache
-        let lStore = lifelogStore
-        TrackingService.shared.onAutoEnd = { [weak store, weak cache, weak lStore] in
-            Task { @MainActor in
-                guard let store, let cache, let lStore else { return }
-                guard let ongoing = store.latestOngoing ?? store.journeys.first(where: { $0.endTime == nil }) else { return }
-                var ended = ongoing
-                ended.endTime = Date()
-                ended.isTooShort = true // treat as private/stationary trip
-                JourneyFinalizer.finalize(
-                    route: ended,
-                    journeyStore: store,
-                    cityCache: cache,
-                    lifelogStore: lStore,
-                    source: .resumeDeclined
-                ) { updated in
-                    TrackingService.shared.setAutoEndedNotice(TrackingService.AutoEndedJourneyNotice(
-                        journeyID: updated.id,
-                        endedAt: updated.endTime ?? Date()
-                    ))
-                }
-            }
-        }
+        // Auto-pause does not finalize the journey — no handler needed.
+        // The journey stays alive in paused state until the user resumes or ends manually.
     }
 
     private func setupBackgroundPersistHandler() {
@@ -390,6 +397,7 @@ struct StreetStampsApp: App {
                 }
                 setupAutoEndHandler()
                 setupBackgroundPersistHandler()
+                recoverUnconfirmedJourneyPublishes()
                 await lifelogMigrationThenLoad
 
                 // Ensure city cache decode finished before reading cachedCities
@@ -502,6 +510,11 @@ struct StreetStampsApp: App {
                     _ = await (journeyLoad, lifelogLoad, cityCacheLoad, trackTileLoad)
                     guard !Task.isCancelled else { return }
 
+                    // Profile-switch may leave stale publish state from the previous
+                    // profile; clear before scanning the newly-bound journey store.
+                    publishStore.dismiss()
+                    recoverUnconfirmedJourneyPublishes()
+
                     onboardingGuide.markExistingUserIfNeeded(hasJourneys: !journeyStore.journeys.isEmpty)
                     lifelogStore.bind(to: locationHub)
                     lifelogRenderCache.reset()
@@ -569,6 +582,7 @@ struct StreetStampsApp: App {
                 if phase == .background || phase == .inactive {
                     journeyStore.flushPersist()
                     lifelogStore.flushPersistNow()
+                    notificationStore.stopPolling()
                     Task {
                         await syncPendingCloudChanges(
                             userID: sessionStore.accountUserID ?? sessionStore.activeLocalProfileID,
@@ -577,15 +591,25 @@ struct StreetStampsApp: App {
                     }
                 }
                 if phase == .active {
+                    UNUserNotificationCenter.current().setBadgeCount(0)
                     publishStore.handleSceneActivation()
                     applyIdleLocationPolicy(requestSingleRefreshWhenIdle: true)
                     syncMotionActivityPolicy()
+                    lifelogRenderCache.markTodayDirty(
+                        countryISO2: lifelogStore.countryISO2 ?? locationHub.countryISO2
+                    )
                     scheduleTrackTileRebuild(delay: 0.10, force: false)
                     if sessionStore.isLoggedIn {
                         AppNotificationDelegate.registerForRemoteNotificationsIfAuthorized()
                         AppNotificationDelegate.uploadPendingPushTokenIfNeeded(
                             accessToken: sessionStore.currentAccessToken
                         )
+                        Task { @MainActor in
+                            await notificationStore.refresh(token: sessionStore.currentAccessToken)
+                        }
+                        notificationStore.startPolling { [sessionStore] in
+                            sessionStore.currentAccessToken
+                        }
                     }
                 }
             }

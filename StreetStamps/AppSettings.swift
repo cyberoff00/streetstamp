@@ -67,7 +67,7 @@ enum AppSettings {
     static var isICloudSyncEnabled: Bool {
         let defaults = UserDefaults.standard
         if defaults.object(forKey: iCloudSyncEnabledKey) == nil {
-            return true
+            return false
         }
         return defaults.bool(forKey: iCloudSyncEnabledKey)
     }

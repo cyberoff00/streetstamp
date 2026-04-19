@@ -438,7 +438,7 @@ enum LifelogRenderSnapshotBuilder {
         let input = RouteRenderingPipeline.Input(
             coordsWGS84: sampled,
             applyGCJForChina: false,
-            gapDistanceMeters: 8_000,
+            gapDistanceMeters: 2_000,
             countryISO2: countryISO2,
             cityKey: cityKey
         )

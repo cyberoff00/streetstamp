@@ -420,6 +420,7 @@ private struct PostcardCardRow: View {
     @State private var showEmojiPicker = false
     @State private var showCommentInput = false
     @State private var reactionExpanded = false
+    @State private var tappedEmoji: String? = nil
 
     var body: some View {
         VStack(spacing: 10) {
@@ -530,11 +531,24 @@ private struct PostcardCardRow: View {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 12) {
                                 ForEach(["❤️", "👍", "😂", "😮", "🔥", "👏", "🎉", "😍", "🤔", "👀"], id: \.self) { emoji in
-                                    Button(emoji) {
+                                    Button {
+                                        Haptics.medium()
+                                        withAnimation(.spring(response: 0.28, dampingFraction: 0.45)) {
+                                            tappedEmoji = emoji
+                                        }
                                         Task { await sendReaction(emoji) }
-                                        withAnimation { showEmojiPicker = false }
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                                            withAnimation {
+                                                showEmojiPicker = false
+                                                tappedEmoji = nil
+                                            }
+                                        }
+                                    } label: {
+                                        Text(emoji)
+                                            .font(.system(size: 24))
+                                            .scaleEffect(tappedEmoji == emoji ? 1.4 : 1.0)
                                     }
-                                    .font(.system(size: 24))
+                                    .buttonStyle(.plain)
                                 }
                                 Button {
                                     showCommentInput = true
@@ -558,6 +572,7 @@ private struct PostcardCardRow: View {
                 Text(saveToastText)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.green)
+                    .transition(.scale(scale: 0.6).combined(with: .opacity))
             }
         }
         .sheet(isPresented: $showFullImage) {
@@ -578,12 +593,16 @@ private struct PostcardCardRow: View {
         do {
             try await BackendAPIClient.shared.reactToPostcard(token: token, messageID: messageID, req: req)
             await MainActor.run {
-                saveToastText = String(format: L10n.t("reaction_sent"), emoji)
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) {
+                    saveToastText = String(format: L10n.t("reaction_sent"), emoji)
+                }
                 clearSaveToastSoon()
             }
         } catch {
             await MainActor.run {
-                saveToastText = L10n.t("postcard_send_failed")
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) {
+                    saveToastText = L10n.t("postcard_send_failed")
+                }
                 clearSaveToastSoon()
             }
         }
@@ -592,7 +611,9 @@ private struct PostcardCardRow: View {
     private func saveCurrentFaceToPhotos() async {
         guard #available(iOS 16.0, *) else {
             await MainActor.run {
-                saveToastText = L10n.t("save_failed")
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) {
+                    saveToastText = L10n.t("save_failed")
+                }
                 clearSaveToastSoon()
             }
             return
@@ -610,7 +631,9 @@ private struct PostcardCardRow: View {
 
         guard let image = renderFaceImage(isFront: isFront, photoSource: loadedSource) else {
             await MainActor.run {
-                saveToastText = L10n.t("save_failed")
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) {
+                    saveToastText = L10n.t("save_failed")
+                }
                 clearSaveToastSoon()
             }
             return
@@ -618,7 +641,9 @@ private struct PostcardCardRow: View {
 
         await MainActor.run {
             UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
-            saveToastText = isFront ? L10n.t("postcard_saved_front") : L10n.t("postcard_saved_back")
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) {
+                saveToastText = isFront ? L10n.t("postcard_saved_front") : L10n.t("postcard_saved_back")
+            }
             clearSaveToastSoon()
         }
     }
@@ -663,7 +688,9 @@ private struct PostcardCardRow: View {
 
     private func clearSaveToastSoon() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            saveToastText = nil
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) {
+                saveToastText = nil
+            }
         }
     }
 }

@@ -53,6 +53,7 @@ enum UserScopedProfileStateStore {
 
         defaults.set(data, forKey: globalAvatarLoadoutKey)
         defaults.set(data, forKey: avatarLoadoutKey(for: userID))
+        NotificationCenter.default.post(name: .avatarLoadoutDidChange, object: nil)
     }
 
     static func saveCurrentEconomy(_ economy: EquipmentEconomy, for userID: String, defaults: UserDefaults = .standard) {

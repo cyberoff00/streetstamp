@@ -6,10 +6,37 @@ import UIKit
 
 typealias MBMapView = MapboxMaps.MapView
 
+/// Per-(journey, day) build artefacts. Same day-bucket with same content-hash
+/// produces the same artefacts; we cache keyed by `(journeyId, dayKey)` and
+/// avoid rebuilding anything that hasn't changed since the last refresh. This
+/// matches the granularity of `LifelogRenderSnapshotBuilder.mergeDaySnapshot`:
+/// a passive country run spanning a year is split into ~365 day buckets, and
+/// adding a single point today only invalidates today's bucket.
+struct GlobeJourneyArtefact: Sendable {
+    let hash: String
+    let solids: [Solid]
+    let arcs: [Turf.LineString]
+    let footprints: [Turf.Feature]
+    let distanceKm: Double
+    let memoryCount: Double
+
+    struct Solid: Sendable {
+        let signature: String
+        let line: Turf.LineString
+    }
+}
+
+struct GlobeCacheKey: Hashable, Sendable {
+    let journeyId: String
+    let dayKey: String   // UTC day index, or "no-time" for legacy points
+}
+
 private final class GlobeMapViewHolder: ObservableObject {
     let mapView: MBMapView
     @Published var styleLoadRevision: Int = 0
     var renderPayload = GlobeRenderPayload()
+    var journeyCache: [GlobeCacheKey: GlobeJourneyArtefact] = [:]
+
     init() {
         self.mapView = MBMapView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
     }
@@ -39,10 +66,6 @@ struct MapboxGlobeView: View {
 
     @StateObject private var mapHolder = GlobeMapViewHolder()
     @State private var didSetup = false
-    /// Precomputed render token — updated via change observers, not on every render.
-    /// Replaces the former computed `renderInputSignature` that did O(n)+O(n log n)
-    /// work on every SwiftUI render pass.
-    @State private var cachedRenderToken: String = ""
 
     @EnvironmentObject private var cityCache: CityCache
 
@@ -55,46 +78,21 @@ struct MapboxGlobeView: View {
     private let footprintsLayerId  = "ss-footprints-heat"
 
     private let routesSourceId     = "ss-routes-source"
-    private let routesGlowLayerId  = "ss-routes-glow"     // ✅ new (faint glow at far zoom)
-    private let routesLayerId      = "ss-routes-line"     // main route
-    private let routesFlightLayerId = "ss-routes-flight"  // dashed flight (start→end)
-    private let routesFlightGlowLayerId = "ss-routes-flight-glow" // glow under dashed flight
+    private let routesGlowLayerId  = "ss-routes-glow"     // faint glow under routes
+    private let routesLayerId      = "ss-routes-line"     // main route (solid + cross-city arcs)
 
     private let citiesSourceId     = "ss-cities-source"
     private let citiesGlowLayerId  = "ss-cities-glow"
     private let citiesLayerId      = "ss-cities-symbol"
     private let cityIconId         = "ss-city-pin"
-    /// O(1) summary used by .onChange to cheaply detect journey changes:
-    /// covers count changes, last journey completion, and active-tracking coordinate growth.
-    private var journeysQuickSummary: String {
+
+    /// O(1) render signature — SwiftUI evaluates this each render pass and
+    /// `.task(id:)` re-fires whenever the value changes. Captures journey
+    /// count/identity changes and city count changes without O(n) string building.
+    private var renderInputSignature: String {
         let last = journeys.last
-        return "\(journeys.count)|\(last?.id ?? "")|\(last?.coordinates.count ?? 0)|\(last?.endTime?.timeIntervalSince1970 ?? 0)"
-    }
-
-    private func buildJourneysToken() -> String {
-        journeys.map {
-            let end = $0.endTime?.timeIntervalSince1970 ?? 0
-            let iso = ($0.countryISO2 ?? "").uppercased()
-            return "\($0.id)|\(Int(end))|\($0.coordinates.count)|\($0.thumbnailCoordinates.count)|\(iso)|\($0.distance)"
-        }
-        .joined(separator: "||")
-    }
-
-    private func buildCityToken() -> String {
-        cityCache.cachedCities
-            .sorted { $0.id < $1.id }
-            .map { city in
-                let anchorLat = city.anchor?.lat ?? 0
-                let anchorLon = city.anchor?.lon ?? 0
-                let iso = (city.countryISO2 ?? "").uppercased()
-                let isTemporary = city.isTemporary == true ? "1" : "0"
-                return "\(city.id)|\(iso)|\(isTemporary)|\(anchorLat)|\(anchorLon)"
-            }
-            .joined(separator: "||")
-    }
-
-    private func buildRenderToken() -> String {
-        "\(buildJourneysToken())||\(buildCityToken())"
+        let jSig = "\(journeys.count)|\(last?.id ?? "")|\(last?.coordinates.count ?? 0)|\(last?.endTime?.timeIntervalSince1970 ?? 0)"
+        return "\(jSig)||\(cityCache.cachedCities.count)"
     }
 
     var body: some View {
@@ -104,32 +102,20 @@ struct MapboxGlobeView: View {
                 .onAppear {
                     guard !didSetup else { return }
                     didSetup = true
-                    cachedRenderToken = buildRenderToken()
                     setup()
                 }
-                .task(id: cachedRenderToken) {
-                    print("🔵 [Globe] task renderToken: \(cachedRenderToken.prefix(80))...")
+                .task(id: renderInputSignature) {
+                    print("🔵 [Globe] task sig: \(renderInputSignature)")
                     mapHolder.syncRenderPayload(
                         journeys: journeys,
                         cachedCities: cityCache.cachedCities
                     )
-                    refreshData()
+                    await refreshData()
                     updateCountryGlow()
-                }
-                .onChange(of: journeysQuickSummary) { _ in
-                    // Cheaply detects count/completion/active-tracking coordinate changes.
-                    cachedRenderToken = buildRenderToken()
-                }
-                .onReceive(cityCache.objectWillChange) { _ in
-                    // objectWillChange fires before the update is applied; dispatch to next
-                    // run-loop tick so we read the already-updated cachedCities.
-                    Task { @MainActor in
-                        cachedRenderToken = buildRenderToken()
-                    }
                 }
                 .onChange(of: mapHolder.styleLoadRevision) { rev in
                     print("🔵 [Globe] onChange styleLoadRevision: \(rev)")
-                    refreshData()
+                    Task { await refreshData() }
                     updateCountryGlow()
                     flyToJourneysIfPossible()
                 }
@@ -352,9 +338,6 @@ struct MapboxGlobeView: View {
             var glow = LineLayer(id: routesGlowLayerId, source: routesSourceId)
             glow.minZoom = 1.0
 
-            // Solid routes only (exclude flight dashed)
-            glow.filter = Exp(.eq) { Exp(.get) { "isFlight" }; false }
-
             glow.lineColor = .constant(StyleColor(UIColor(red: 221.0 / 255.0, green: 247.0 / 255.0, blue: 161.0 / 255.0, alpha: 1.0)))
             glow.lineCap = .constant(.round)
             glow.lineJoin = .constant(.round)
@@ -389,98 +372,10 @@ struct MapboxGlobeView: View {
             try? map.addLayer(glow)
         }
 
-        // --- Flight glow (make dashed flight visible at far zoom) ---
-        if !map.layerExists(withId: routesFlightGlowLayerId) {
-            var fglow = LineLayer(id: routesFlightGlowLayerId, source: routesSourceId)
-            fglow.minZoom = 1.0
-
-            fglow.filter = Exp(.eq) { Exp(.get) { "isFlight" }; true }
-
-            fglow.lineColor = .constant(StyleColor(UIColor(red: 221.0 / 255.0, green: 247.0 / 255.0, blue: 161.0 / 255.0, alpha: 1.0)))
-            fglow.lineCap = .constant(.round)
-            fglow.lineJoin = .constant(.round)
-
-            // Stronger at far zoom so the dashed line doesn't disappear on dark globe
-            fglow.lineOpacity = .expression(Exp(.interpolate) {
-                Exp(.linear); Exp(.zoom)
-                1.0;  0.16
-                3.0;  0.16
-                7.0;  0.14
-                10.0; 0.11
-                14.0; 0.08
-            })
-
-            fglow.lineWidth = .expression(Exp(.interpolate) {
-                Exp(.linear); Exp(.zoom)
-                1.0;  2.6
-                5.0;  3.8
-                10.0; 7.8
-                14.0; 11.0
-            })
-
-            fglow.lineBlur = .expression(Exp(.interpolate) {
-                Exp(.linear); Exp(.zoom)
-                1.0;  1.6
-                5.0;  2.0
-                10.0; 2.6
-                14.0; 3.4
-            })
-
-            try? map.addLayer(fglow)
-        }
-
-        // --- Flight routes: ONLY start→end, dashed ---
-        if !map.layerExists(withId: routesFlightLayerId) {
-            var flight = LineLayer(id: routesFlightLayerId, source: routesSourceId)
-            flight.minZoom = 1.0
-
-            flight.filter = Exp(.eq) { Exp(.get) { "isFlight" }; true }
-
-            flight.lineColor = .constant(StyleColor(UIColor(red: 221.0 / 255.0, green: 247.0 / 255.0, blue: 161.0 / 255.0, alpha: 1.0)))
-            flight.lineCap = .constant(.round)
-            flight.lineJoin = .constant(.round)
-
-            // Visible at far zoom; zoom in becomes crisp
-            flight.lineOpacity = .expression(Exp(.interpolate) {
-                Exp(.linear); Exp(.zoom)
-                1.0;  0.62
-                3.0;  0.62
-                7.0;  0.66
-                10.0; 0.76
-                14.0; 0.84
-            })
-
-            // Dash pattern (flight)
-            // Denser dash reads brighter at far zoom
-            flight.lineDasharray = .constant([6, 4])
-
-            flight.lineWidth = .expression(Exp(.interpolate) {
-                Exp(.linear); Exp(.zoom)
-                1.0;  1.5
-                5.0;  2.0
-                10.0; 3.2
-                14.0; 5.4
-            })
-
-            // A bit of blur to read on globe (still dashed)
-            flight.lineBlur = .expression(Exp(.interpolate) {
-                Exp(.linear); Exp(.zoom)
-                1.0;  0.7
-                8.0;  0.6
-                14.0; 0.5
-            })
-
-            try? map.addLayer(flight)
-        }
-
-
         // --- Routes main (always visible; zoom in becomes clearer; never disappears) ---
         if !map.layerExists(withId: routesLayerId) {
             var line = LineLayer(id: routesLayerId, source: routesSourceId)
             line.minZoom = 1.0
-
-            // Solid routes only (exclude flight dashed)
-            line.filter = Exp(.eq) { Exp(.get) { "isFlight" }; false }
 
             line.lineColor = .constant(StyleColor(UIColor(red: 221.0 / 255.0, green: 247.0 / 255.0, blue: 161.0 / 255.0, alpha: 1.0)))
             line.lineCap = .constant(.round)
@@ -675,7 +570,7 @@ struct MapboxGlobeView: View {
 
     // MARK: - Data
 
-    private func refreshData() {
+    private func refreshData() async {
         let map: MapboxMap = mapView.mapboxMap
         guard mapHolder.styleLoadRevision > 0,
               map.sourceExists(withId: footprintsSourceId),
@@ -685,15 +580,246 @@ struct MapboxGlobeView: View {
         }
 
         let payload = mapHolder.renderPayload
-        let footprintsFC = makeFootprintsFC(journeys: payload.journeys)
-        let routesFC = makeRoutesFC(journeys: payload.journeys)
-        let citiesFC = makeCitiesFC(from: payload.cachedCities)
+        let cacheSnapshot = mapHolder.journeyCache
 
-        print("🟢 [Globe] refreshData: journeys=\(payload.journeys.count) footprints=\(footprintsFC.features.count) routes=\(routesFC.features.count) cities=\(citiesFC.features.count)")
+        // True per-day incremental: each (journeyId, dayKey) bucket is
+        // independently hashed. Adding a single point today only rebuilds
+        // today's bucket; every other day for that same journey is reused.
+        let result: (fcs: (Turf.FeatureCollection, Turf.FeatureCollection, Turf.FeatureCollection), cache: [GlobeCacheKey: GlobeJourneyArtefact], stats: (reused: Int, rebuilt: Int)) = await Task.detached(priority: .userInitiated) {
+            var cache = cacheSnapshot
+            var reused = 0
+            var rebuilt = 0
 
-        updateGeoJSONSource(id: footprintsSourceId, fc: footprintsFC)
-        updateGeoJSONSource(id: routesSourceId, fc: routesFC)
-        updateGeoJSONSource(id: citiesSourceId, fc: citiesFC)
+            var seenJourneyIds = Set<String>()
+            var seenCacheKeys = Set<GlobeCacheKey>()
+            var allFootprints: [Turf.Feature] = []
+            var allArcs: [(journeyId: String, distanceKm: Double, memoryCount: Double, line: Turf.LineString)] = []
+
+            struct SolidBucket {
+                var line: Turf.LineString
+                var count: Int
+                var journeyId: String
+                var distanceKm: Double
+                var memoryCount: Double
+            }
+            var solidsBySig: [String: SolidBucket] = [:]
+
+            for j in payload.journeys {
+                guard !seenJourneyIds.contains(j.id) else { continue }
+                seenJourneyIds.insert(j.id)
+
+                let pts = (!j.coordinates.isEmpty ? j.coordinates : j.thumbnailCoordinates)
+                guard !pts.isEmpty else { continue }
+
+                let dayBuckets = MapboxGlobeView.partitionCoordsByDay(pts)
+                let distanceKm = max(0, j.distance / 1000.0)
+                let memoryCount = Double(j.memories.count)
+
+                for (dayKey, dayCoords) in dayBuckets {
+                    let key = GlobeCacheKey(journeyId: j.id, dayKey: dayKey)
+                    seenCacheKeys.insert(key)
+
+                    let hash = MapboxGlobeView.dayContentHash(dayCoords)
+                    let artefact: GlobeJourneyArtefact
+                    if let cached = cache[key], cached.hash == hash {
+                        artefact = cached
+                        reused += 1
+                    } else {
+                        artefact = MapboxGlobeView.buildArtefactForDay(
+                            journeyId: j.id,
+                            coords: dayCoords,
+                            distanceKm: distanceKm,
+                            memoryCount: memoryCount,
+                            hash: hash
+                        )
+                        cache[key] = artefact
+                        rebuilt += 1
+                    }
+
+                    for fp in artefact.footprints { allFootprints.append(fp) }
+                    for arc in artefact.arcs {
+                        allArcs.append((j.id, artefact.distanceKm, artefact.memoryCount, arc))
+                    }
+                    for s in artefact.solids {
+                        if var bucket = solidsBySig[s.signature] {
+                            bucket.count += 1
+                            solidsBySig[s.signature] = bucket
+                        } else {
+                            solidsBySig[s.signature] = SolidBucket(
+                                line: s.line,
+                                count: 1,
+                                journeyId: j.id,
+                                distanceKm: artefact.distanceKm,
+                                memoryCount: artefact.memoryCount
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Drop cache entries for (journey, day) buckets no longer present.
+            cache = cache.filter { seenCacheKeys.contains($0.key) }
+
+            // Compute repeat weight across the deduped solid set.
+            let p95 = max(1.0, MapboxGlobeView.quantile(solidsBySig.values.map { $0.count }, p: 0.95))
+
+            var routeFeats: [Turf.Feature] = []
+            routeFeats.reserveCapacity(solidsBySig.count + allArcs.count)
+            for (_, bucket) in solidsBySig {
+                let w = min(1.0, log(1.0 + Double(bucket.count)) / log(1.0 + p95))
+                var f = Turf.Feature(geometry: .lineString(bucket.line))
+                f.properties = [
+                    "journeyId": .string(bucket.journeyId),
+                    "distanceKm": .number(bucket.distanceKm),
+                    "memoryCount": .number(bucket.memoryCount),
+                    "repeatWeight": .number(w)
+                ]
+                routeFeats.append(f)
+            }
+            for arc in allArcs {
+                var f = Turf.Feature(geometry: .lineString(arc.line))
+                f.properties = [
+                    "journeyId": .string(arc.journeyId),
+                    "distanceKm": .number(arc.distanceKm),
+                    "memoryCount": .number(arc.memoryCount),
+                    "repeatWeight": .number(0.5)
+                ]
+                routeFeats.append(f)
+            }
+
+            let routesFC = Turf.FeatureCollection(features: routeFeats)
+            let footprintsFC = Turf.FeatureCollection(features: allFootprints)
+            let citiesFC = MapboxGlobeView.makeCitiesFC(from: payload.cachedCities)
+
+            return ((footprintsFC, routesFC, citiesFC), cache, (reused, rebuilt))
+        }.value
+
+        guard !Task.isCancelled else { return }
+
+        print("🟢 [Globe] refreshData: journeys=\(payload.journeys.count) reused=\(result.stats.reused) rebuilt=\(result.stats.rebuilt) footprints=\(result.fcs.0.features.count) routes=\(result.fcs.1.features.count) cities=\(result.fcs.2.features.count)")
+
+        mapHolder.journeyCache = result.cache
+        updateGeoJSONSource(id: footprintsSourceId, fc: result.fcs.0)
+        updateGeoJSONSource(id: routesSourceId, fc: result.fcs.1)
+        updateGeoJSONSource(id: citiesSourceId, fc: result.fcs.2)
+    }
+
+    /// UTC day index since epoch — stable, locale-independent, cheap to compute,
+    /// and groups into 24-hour buckets that align with most users' "what did I
+    /// do today" mental model.
+    private static func dayKey(for t: Date) -> String {
+        String(Int(t.timeIntervalSince1970 / 86_400))
+    }
+
+    /// Partition a coordinate stream into contiguous per-day buckets. Coords
+    /// are assumed to be in time order (which is the standard invariant for
+    /// recorded GPS streams). Points without `.t` all bucket under "no-time".
+    /// Each bucket carries enough overlap for the renderer to draw clean
+    /// boundaries — but we accept that a walk crossing midnight will register
+    /// as two separate solid runs at the day boundary.
+    private static func partitionCoordsByDay(_ pts: [CoordinateCodable]) -> [(dayKey: String, coords: [CoordinateCodable])] {
+        guard !pts.isEmpty else { return [] }
+
+        var groups: [(String, [CoordinateCodable])] = []
+        var currentKey: String = pts[0].t.map { dayKey(for: $0) } ?? "no-time"
+        var current: [CoordinateCodable] = [pts[0]]
+
+        for i in 1..<pts.count {
+            let p = pts[i]
+            let key = p.t.map { dayKey(for: $0) } ?? "no-time"
+            if key == currentKey {
+                current.append(p)
+            } else {
+                groups.append((currentKey, current))
+                currentKey = key
+                current = [p]
+            }
+        }
+        groups.append((currentKey, current))
+        return groups
+    }
+
+    /// Content hash for a single day's coord slice.
+    private static func dayContentHash(_ pts: [CoordinateCodable]) -> String {
+        guard let first = pts.first, let last = pts.last else { return "empty" }
+        let firstT = first.t.map { "\(Int($0.timeIntervalSince1970))" } ?? "nil"
+        let lastT = last.t.map { "\(Int($0.timeIntervalSince1970))" } ?? "nil"
+        return "\(pts.count)|\(first.lat),\(first.lon),\(firstT)|\(last.lat),\(last.lon),\(lastT)"
+    }
+
+    /// Build artefacts for one day's coord slice of one journey. Same expensive
+    /// per-point work as before, just scoped to a single bucket so we can cache
+    /// stale days indefinitely.
+    private static func buildArtefactForDay(
+        journeyId: String,
+        coords pts: [CoordinateCodable],
+        distanceKm: Double,
+        memoryCount: Double,
+        hash: String
+    ) -> GlobeJourneyArtefact {
+        guard pts.count >= 2 else {
+            return GlobeJourneyArtefact(
+                hash: hash,
+                solids: [],
+                arcs: [],
+                footprints: [],
+                distanceKm: distanceKm,
+                memoryCount: memoryCount
+            )
+        }
+
+        // --- Routes (solids + arcs) via time-aware classifyTransition -----
+        var solidRuns: [[CLLocationCoordinate2D]] = []
+        var arcPairs: [(CLLocationCoordinate2D, CLLocationCoordinate2D)] = []
+        var current: [CLLocationCoordinate2D] = [pts[0].cl]
+
+        for i in 1..<pts.count {
+            let prev = pts[i - 1]
+            let cur = pts[i]
+            let dd = CLLocation(latitude: prev.lat, longitude: prev.lon)
+                .distance(from: CLLocation(latitude: cur.lat, longitude: cur.lon))
+
+            switch classifyTransition(prev: prev, cur: cur, distanceMeters: dd) {
+            case .continueSolid:
+                current.append(cur.cl)
+            case .breakSolid:
+                if current.count >= 2 { solidRuns.append(current) }
+                current = [cur.cl]
+            case .arcThenContinue:
+                if current.count >= 2 { solidRuns.append(current) }
+                arcPairs.append((prev.cl, cur.cl))
+                current = [cur.cl]
+            }
+        }
+        if current.count >= 2 { solidRuns.append(current) }
+
+        let solids: [GlobeJourneyArtefact.Solid] = solidRuns.map { run in
+            GlobeJourneyArtefact.Solid(signature: routeSignature(run), line: Turf.LineString(run))
+        }
+        let arcs: [Turf.LineString] = arcPairs.map { (a, b) in
+            Turf.LineString(greatCircleArc(a, b))
+        }
+
+        // --- Footprints (heatmap ambience) -------------------------------
+        var footprints: [Turf.Feature] = []
+        let step = max(1, pts.count / 180)
+        var i = 0
+        while i < pts.count {
+            let c = pts[i]
+            var f = Turf.Feature(geometry: .point(Turf.Point(CLLocationCoordinate2D(latitude: c.lat, longitude: c.lon))))
+            f.properties = ["journeyId": .string(journeyId)]
+            footprints.append(f)
+            i += step
+        }
+
+        return GlobeJourneyArtefact(
+            hash: hash,
+            solids: solids,
+            arcs: arcs,
+            footprints: footprints,
+            distanceKm: distanceKm,
+            memoryCount: memoryCount
+        )
     }
 
     private func updateGeoJSONSource(id: String, fc: Turf.FeatureCollection) {
@@ -701,35 +827,9 @@ struct MapboxGlobeView: View {
         map.updateGeoJSONSource(withId: id, geoJSON: .featureCollection(fc))
     }
 
-    private func makeFootprintsFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
-        var feats: [Turf.Feature] = []
-
-        for j in journeys {
-            let coords = (j.thumbnailCoordinates.isEmpty ? j.coordinates : j.thumbnailCoordinates)
-            guard !coords.isEmpty else { continue }
-
-            // Globe only needs ambience; keep sampling
-            let step = max(1, coords.count / 180)
-
-            var i = 0
-            while i < coords.count {
-                let c = coords[i]
-                let p = Turf.Point(CLLocationCoordinate2D(latitude: c.lat, longitude: c.lon))
-                var f = Turf.Feature(geometry: .point(p))
-                f.properties = [
-                    "journeyId": .string(j.id)
-                ]
-                feats.append(f)
-                i += step
-            }
-        }
-
-        return Turf.FeatureCollection(features: feats)
-    }
-
     // MARK: - Route helpers
 
-    private func routeSignature(_ coords: [CLLocationCoordinate2D]) -> String {
+    private static func routeSignature(_ coords: [CLLocationCoordinate2D]) -> String {
         guard let first = coords.first, let last = coords.last else { return UUID().uuidString }
         let stride = max(1, coords.count / 6)
         var samples: [CLLocationCoordinate2D] = [first]
@@ -753,159 +853,112 @@ struct MapboxGlobeView: View {
         return min(forward, backward)
     }
 
-    private func quantile(_ values: [Int], p: Double) -> Double {
+    private static func quantile(_ values: [Int], p: Double) -> Double {
         guard !values.isEmpty else { return 1.0 }
         let sorted = values.sorted()
         let index = Int((Double(sorted.count - 1) * p).rounded())
         return Double(sorted[max(0, min(sorted.count - 1, index))])
     }
 
-    private func greatCircleArc(_ start: CLLocationCoordinate2D, _ end: CLLocationCoordinate2D, points: Int = 32) -> [CLLocationCoordinate2D] {
+    /// Great-circle arc between two points, sampled into `points` intermediate coords.
+    /// Used to render cross-city jumps as smooth curves along the globe.
+    private static func greatCircleArc(_ start: CLLocationCoordinate2D, _ end: CLLocationCoordinate2D, points: Int = 32) -> [CLLocationCoordinate2D] {
         let total = max(2, points)
 
         func toVec(_ c: CLLocationCoordinate2D) -> (Double, Double, Double) {
             let lat = c.latitude * .pi / 180
             let lon = c.longitude * .pi / 180
-            let x = cos(lat) * cos(lon)
-            let y = cos(lat) * sin(lon)
-            let z = sin(lat)
-            return (x, y, z)
+            return (cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat))
         }
-
         func toCoord(_ v: (Double, Double, Double)) -> CLLocationCoordinate2D {
             let lon = atan2(v.1, v.0)
-            let hyp = sqrt(v.0 * v.0 + v.1 * v.1)
-            let lat = atan2(v.2, hyp)
+            let lat = atan2(v.2, sqrt(v.0 * v.0 + v.1 * v.1))
             return CLLocationCoordinate2D(latitude: lat * 180 / .pi, longitude: lon * 180 / .pi)
         }
 
-        let a = toVec(start)
-        let b = toVec(end)
-        let dotRaw = a.0 * b.0 + a.1 * b.1 + a.2 * b.2
-        let dot = min(1.0, max(-1.0, dotRaw))
+        let a = toVec(start); let b = toVec(end)
+        let dot = min(1.0, max(-1.0, a.0 * b.0 + a.1 * b.1 + a.2 * b.2))
         let omega = acos(dot)
-
-        if omega < 1e-6 {
-            return [start, end]
-        }
+        if omega < 1e-6 { return [start, end] }
+        let sinOmega = sin(omega)
 
         var out: [CLLocationCoordinate2D] = []
         out.reserveCapacity(total)
         for idx in 0..<total {
             let t = Double(idx) / Double(total - 1)
-            let sinOmega = sin(omega)
             let s0 = sin((1 - t) * omega) / sinOmega
             let s1 = sin(t * omega) / sinOmega
-            let v = (
+            out.append(toCoord((
                 s0 * a.0 + s1 * b.0,
                 s0 * a.1 + s1 * b.1,
                 s0 * a.2 + s1 * b.2
-            )
-            out.append(toCoord(v))
+            )))
         }
         return out
     }
 
-private func makeRoutesFC(journeys: [JourneyRoute]) -> Turf.FeatureCollection {
-        var feats: [Turf.Feature] = []
-        var seen = Set<String>()
-        var solidCounts: [String: Int] = [:]
+    /// Time-aware gap detection thresholds.
+    ///
+    /// The key realisation: globe coords are heavily downsampled (RDP via
+    /// `TrackRenderAdapter.globeDownsample`). Consecutive kept points can be
+    /// minutes apart in time even on a continuously-walked route. So we must NOT
+    /// assume "long dt ⇒ gap"; we decide by *velocity*.
+    ///
+    /// - Any plausible human locomotion speed (slow walk 1 km/h → plane 1000 km/h)
+    ///   ⇒ connect (solid) or arc (cross-city), regardless of dt.
+    /// - Velocity above plausible max ⇒ GPS error, break.
+    /// - Velocity below walking speed with non-trivial dt ⇒ stationary period,
+    ///   break so we don't bridge through a coffee-shop sit.
+    private static let locomotionMinVelocityMps: Double = 0.3      // 1.08 km/h — slower than this ⇒ stationary
+    private static let implausibleVelocityMps: Double = 280        // 1000 km/h — faster than this ⇒ GPS error
+    private static let rapidSamplingDtSeconds: Double = 60         // bridge short dt unconditionally
+    private static let crossCityArcMeters: Double = 50_000         // ≥50 km jump ⇒ render as great-circle arc
+    private static let fallbackConnectMeters: Double = 2_000       // no-timestamp: connect only if <2km (matches lifelog gapDistanceMeters)
 
-        struct PendingRouteFeature {
-            let line: Turf.LineString
-            let journeyId: String
-            let isDashed: Bool
-            let isFlight: Bool
-            let distanceKm: Double
-            let memoryCount: Double
-            let signature: String?
-        }
-
-        var pending: [PendingRouteFeature] = []
-
-        for j in journeys {
-            // Avoid duplicate rendering if the same route appears multiple times in the array.
-            guard !seen.contains(j.id) else { continue }
-            seen.insert(j.id)
-
-            let src = (!j.coordinates.isEmpty ? j.coordinates : j.thumbnailCoordinates)
-            guard src.count >= 2 else { continue }
-
-            let coords = src.map { CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon) }
-            let built = RouteRenderingPipeline.buildSegments(
-                .init(
-                    coordsWGS84: coords,
-                    applyGCJForChina: false,
-                    gapDistanceMeters: 2_200,
-                    countryISO2: j.countryISO2,
-                    cityKey: j.startCityKey ?? j.cityKey
-                ),
-                surface: .canvas
-            )
-
-            for seg in built.segments where seg.coords.count >= 2 {
-                let isDashed = seg.style == .dashed
-                // Flight: dashed segment spanning >= 120km → render as great-circle arc.
-                // Short gap (tunnel, brief GPS loss): dashed segment < 120km → render as straight line.
-                // Both are rendered; only tiny noise gaps (< gapDistanceMeters) never reach here.
-                let spanMeters: Double = {
-                    guard let a = seg.coords.first, let b = seg.coords.last else { return 0 }
-                    return CLLocation(latitude: a.latitude, longitude: a.longitude)
-                        .distance(from: CLLocation(latitude: b.latitude, longitude: b.longitude))
-                }()
-                let isFlight = isDashed && spanMeters >= 120_000
-
-                let lineCoords: [CLLocationCoordinate2D]
-                if isFlight, let a = seg.coords.first, let b = seg.coords.last {
-                    lineCoords = greatCircleArc(a, b)
-                } else {
-                    lineCoords = seg.coords
-                }
-                guard lineCoords.count >= 2 else { continue }
-
-                let sig: String? = isDashed ? nil : routeSignature(lineCoords)
-                if let sig {
-                    solidCounts[sig, default: 0] += 1
-                }
-
-                pending.append(
-                    PendingRouteFeature(
-                        line: Turf.LineString(lineCoords),
-                        journeyId: j.id,
-                        isDashed: isDashed,
-                        isFlight: isFlight,
-                        distanceKm: max(0, j.distance / 1000.0),
-                        memoryCount: Double(j.memories.count),
-                        signature: sig
-                    )
-                )
-            }
-        }
-
-        let p95 = max(1.0, quantile(Array(solidCounts.values), p: 0.95))
-
-        for item in pending {
-            let repeatWeight: Double = {
-                guard let sig = item.signature else { return 0.40 }
-                let n = Double(solidCounts[sig, default: 1])
-                return min(1.0, log(1.0 + n) / log(1.0 + p95))
-            }()
-
-            var f = Turf.Feature(geometry: .lineString(item.line))
-            f.properties = [
-                "journeyId": .string(item.journeyId),
-                "isFlight": .boolean(item.isFlight),
-                "distanceKm": .number(item.distanceKm),
-                "memoryCount": .number(item.memoryCount),
-                "repeatWeight": .number(repeatWeight)
-            ]
-            feats.append(f)
-        }
-
-        return Turf.FeatureCollection(features: feats)
+    private enum TransitionDecision {
+        case continueSolid    // append cur to current solid run
+        case breakSolid       // close current run, start fresh (no connecting line)
+        case arcThenContinue  // close current run, emit great-circle arc, start fresh
     }
 
-    private func makeCitiesFC(from cached: [CachedCity]) -> Turf.FeatureCollection {
+    /// Decide how to handle the transition from `prev` to `cur`. Uses per-point
+    /// timestamps when available; otherwise falls back to a distance heuristic.
+    private static func classifyTransition(prev: CoordinateCodable, cur: CoordinateCodable, distanceMeters dd: Double) -> TransitionDecision {
+        // No timestamp → we can't compute velocity. This is the common case for
+        // passive country runs (LifelogAttributedCoordinateRun stores only
+        // CLLocationCoordinate2D with no per-point time). Such points are sparse
+        // samples with unknown temporal spacing; we must NOT connect them with
+        // long straight lines (zigzags across cities). Only connect very close
+        // pairs; arc only truly cross-city scale.
+        guard let tPrev = prev.t, let tCur = cur.t, tCur > tPrev else {
+            if dd < Self.fallbackConnectMeters      { return .continueSolid }
+            if dd >= Self.crossCityArcMeters        { return .arcThenContinue }
+            return .breakSolid
+        }
+
+        let dt = tCur.timeIntervalSince(tPrev)
+        let v = dd / dt
+
+        // Implausible velocity ⇒ corrupt GPS sample, break.
+        if v > Self.implausibleVelocityMps { return .breakSolid }
+
+        // Active locomotion (walking speed up to flight speed) ⇒ user really moved
+        // along this pair, regardless of how long dt is. Cross-city scale renders
+        // as great-circle arc so the curve looks right on globe.
+        if v >= Self.locomotionMinVelocityMps {
+            return dd >= Self.crossCityArcMeters ? .arcThenContinue : .continueSolid
+        }
+
+        // Very short dt with near-zero motion ⇒ harmless GPS jitter during active
+        // tracking. Keep connected.
+        if dt < Self.rapidSamplingDtSeconds { return .continueSolid }
+
+        // Long dt + below-walking velocity ⇒ user was stationary (sat somewhere).
+        // Don't draw a line bridging the stationary period.
+        return .breakSolid
+    }
+
+    private static func makeCitiesFC(from cached: [CachedCity]) -> Turf.FeatureCollection {
         var feats: [Turf.Feature] = []
         var seen = Set<String>()
 

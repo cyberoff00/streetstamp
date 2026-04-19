@@ -870,6 +870,14 @@ async function getPushTokens(pool, userID) {
   return rows;
 }
 
+async function countUnreadNotifications(pool, userID) {
+  const { rows } = await pool.query(
+    "SELECT COUNT(*)::int AS cnt FROM notifications WHERE user_id = $1 AND read = false",
+    [userID]
+  );
+  return rows[0]?.cnt ?? 0;
+}
+
 // ============================================================
 // Extended Queries (for direct-PG mode)
 // ============================================================
@@ -1152,6 +1160,7 @@ module.exports = {
   upsertPushToken,
   deletePushToken,
   getPushTokens,
+  countUnreadNotifications,
 
   // User Blocks
   blockUser,

@@ -649,6 +649,40 @@ struct PhotoDiscoveryScanButton: View {
 }
 
 // =======================================================
+// MARK: - Render throttle
+// =======================================================
+
+/// Limits concurrent MKMapSnapshotter / Mapbox snapshot requests to avoid
+/// tile-server rate-limiting that returns blank images.
+private actor RenderThrottle {
+    static let shared = RenderThrottle(limit: 4)
+
+    private let limit: Int
+    private var active = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(limit: Int) { self.limit = limit }
+
+    func acquire() async {
+        if active < limit {
+            active += 1
+            return
+        }
+        await withCheckedContinuation { cont in
+            waiters.append(cont)
+        }
+    }
+
+    func release() {
+        active -= 1
+        if !waiters.isEmpty {
+            active += 1
+            waiters.removeFirst().resume()
+        }
+    }
+}
+
+// =======================================================
 // MARK: - In-memory image cache
 // =======================================================
 
@@ -944,8 +978,10 @@ final class CityThumbnailLoader: ObservableObject {
                 appearanceRaw: appearanceRaw,
                 parts: renderKeyParts
             )
-            // Fast path: same key, image already showing — nothing to do.
-            if currentKey == renderKey, image != nil { return }
+            // Fast path: same key, image already rendered — nothing to do.
+            // Must also check renderedKey: after cancel(), currentKey is preserved
+            // but the render never completed, so we must not skip the re-render.
+            if currentKey == renderKey, renderedKey == renderKey, image != nil { return }
             // Also skip if we already rendered this exact key (survives cancel()).
             if renderedKey == renderKey, image != nil {
                 currentKey = renderKey
@@ -1057,7 +1093,8 @@ final class CityThumbnailLoader: ObservableObject {
         let boundarySignature = "ignored-for-cache"
         let anchorSignature = "ignored-for-cache"
         let styleVersion = 5
-        let fullKey = "render|v\(styleVersion)|\(city.id)|\(appearanceRaw)|\(journeySignature)"
+        let colorVersion = (MapLayerStyle(rawValue: appearanceRaw) ?? .mutedDark).isSatelliteStyle ? 2 : 1
+        let fullKey = "render|v\(styleVersion)c\(colorVersion)|\(city.id)|\(appearanceRaw)|\(journeySignature)"
         return CityThumbnailDebugLogger.RenderKeyParts(
             fullKey: fullKey,
             journeySignature: journeySignature,
@@ -1187,11 +1224,20 @@ final class CityThumbnailLoader: ObservableObject {
         // MKMapSnapshotter can return a valid UIImage with blank tiles when the tile
         // server rate-limits the request (error == nil, but all tiles are solid color).
         // Retry up to 3 times with a 3s back-off before giving up.
+        // Mapbox Snapshotter has explicit success/failure callbacks, so blank-image
+        // detection is only needed for MapKit snapshots.
+        // Throttle concurrent snapshot requests to avoid overwhelming the tile server.
+        let isMapbox = (MapLayerStyle(rawValue: appearanceRaw) ?? .mutedDark).engine == .mapbox
+        await RenderThrottle.shared.acquire()
+
         var img: UIImage?
         for attempt in 0..<3 {
             if attempt > 0 {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled else {
+                    await RenderThrottle.shared.release()
+                    return
+                }
             }
             let candidate: UIImage?
             if let primary = await Self.makeSnapshot(city: city, appearanceRaw: appearanceRaw, fetchedBoundary: fetchedBoundary) {
@@ -1199,11 +1245,14 @@ final class CityThumbnailLoader: ObservableObject {
             } else {
                 candidate = await Self.makeFallbackSnapshot(city: city, appearanceRaw: appearanceRaw)
             }
-            if let candidate, !Self.isBlankImage(candidate) {
+            if let candidate, isMapbox || !Self.isBlankImage(candidate) {
                 img = candidate
                 break
             }
         }
+
+        await RenderThrottle.shared.release()
+
         guard let img else { return }
 
         CityImageMemoryCache.shared.set(img, forKey: key)
@@ -1216,6 +1265,10 @@ final class CityThumbnailLoader: ObservableObject {
             )
         }
     }
+
+    /// Maximum automatic retries after a failed render (prevents infinite loops).
+    private var renderRetryCount = 0
+    private static let maxRenderRetries = 2
 
     private func renderOnDemand(city: City, appearanceRaw: String, key: String, renderCacheStore: CityRenderCacheStore) {
         renderTask?.cancel()
@@ -1233,6 +1286,39 @@ final class CityThumbnailLoader: ObservableObject {
                 if let img {
                     self.image = img
                     self.renderedKey = key
+                    self.renderRetryCount = 0
+                } else {
+                    // Render failed — clear the stale image so the user sees
+                    // placeholder instead of wrong-style cache.
+                    self.image = nil
+                    // Auto-retry after a delay for cells that stay visible
+                    // (`.task(id:)` won't re-fire if the cell never scrolls off).
+                    if self.renderRetryCount < Self.maxRenderRetries {
+                        self.renderRetryCount += 1
+                        self.scheduleRetry(city: city, appearanceRaw: appearanceRaw, key: key, renderCacheStore: renderCacheStore)
+                    }
+                }
+            }
+        }
+    }
+
+    private func scheduleRetry(city: City, appearanceRaw: String, key: String, renderCacheStore: CityRenderCacheStore) {
+        renderTask?.cancel()
+        renderTask = Task(priority: .utility) { [city, appearanceRaw, key] in
+            try? await Task.sleep(nanoseconds: 5_000_000_000) // 5s backoff
+            guard !Task.isCancelled, await self.currentKey == key else { return }
+            await Self.ensurePersistentCache(for: city, appearanceRaw: appearanceRaw, renderCacheStore: renderCacheStore)
+            guard !Task.isCancelled else { return }
+            let img = CityImageMemoryCache.shared.image(forKey: key) ?? renderCacheStore.image(forKey: key)
+            await MainActor.run {
+                guard self.currentKey == key else { return }
+                if let img {
+                    self.image = img
+                    self.renderedKey = key
+                    self.renderRetryCount = 0
+                } else if self.renderRetryCount < Self.maxRenderRetries {
+                    self.renderRetryCount += 1
+                    self.scheduleRetry(city: city, appearanceRaw: appearanceRaw, key: key, renderCacheStore: renderCacheStore)
                 }
             }
         }

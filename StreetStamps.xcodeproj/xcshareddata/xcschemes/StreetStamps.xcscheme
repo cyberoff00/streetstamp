@@ -53,7 +53,7 @@
       </Testables>
    </TestAction>
    <LaunchAction
-      buildConfiguration = "Release"
+      buildConfiguration = "Debug"
       selectedDebuggerIdentifier = ""
       selectedLauncherIdentifier = "Xcode.IDEFoundation.Launcher.PosixSpawn"
       launchStyle = "0"
@@ -98,6 +98,11 @@
          <EnvironmentVariable
             key = "OS_ACTIVITY_MODE = disable"
             value = ""
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "FEATURE_FLAG_FORCE_REGION"
+            value = "GB"
             isEnabled = "YES">
          </EnvironmentVariable>
       </EnvironmentVariables>

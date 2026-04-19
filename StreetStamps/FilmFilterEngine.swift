@@ -4,43 +4,13 @@ import UIKit
 
 // =======================================================
 // MARK: - Film Filter Engine
-// Sakura CCD Soft — warm sunlight, airy shadows,
-// soft highlight bloom, restrained color, fine digital grain.
-// Reference: early Fuji compact digital output with soft diffusion.
+// Primary path: .cube LUT (cinematic_teal_orange.cube)
+// Fallback: parameter-based CCD chain if LUT unavailable
 // =======================================================
 
 enum FilmFilterEngine {
-    struct CaptureLookTuning {
-        let tonePoint0: CGPoint
-        let tonePoint1: CGPoint
-        let tonePoint2: CGPoint
-        let tonePoint3: CGPoint
-        let tonePoint4: CGPoint
-        let targetNeutral: CIVector
-        let saturation: Float
-        let brightness: Float
-        let contrast: Float
-        let bloomRadius: CGFloat
-        let bloomIntensity: CGFloat
-        let grainStrength: CGFloat
-        let vignetteIntensity: CGFloat
 
-        static let sakuraCCDSoft = CaptureLookTuning(
-            tonePoint0: CGPoint(x: 0.0, y: 0.02),   // lighter black lift
-            tonePoint1: CGPoint(x: 0.25, y: 0.245),
-            tonePoint2: CGPoint(x: 0.50, y: 0.50),
-            tonePoint3: CGPoint(x: 0.75, y: 0.755),  // keep midtones open
-            tonePoint4: CGPoint(x: 1.0, y: 0.97),    // gentler highlight rolloff
-            targetNeutral: CIVector(x: 7300, y: 4),  // cool daylight shift
-            saturation: 0.90,
-            brightness: 0.0,
-            contrast: 0.96,
-            bloomRadius: 5.0,
-            bloomIntensity: 0.025,
-            grainStrength: 0.006,
-            vignetteIntensity: 0.07
-        )
-    }
+    // MARK: - Shared CIContext
 
     private static let ciContext: CIContext = {
         if let mtl = MTLCreateSystemDefaultDevice() {
@@ -49,39 +19,30 @@ enum FilmFilterEngine {
         return CIContext(options: [.cacheIntermediates: false])
     }()
 
+    // MARK: - LUT (lazy, loaded once)
+
+    /// Cached cube data loaded from cinematic_teal_orange.cube in the app bundle.
+    private static let lutData: (data: Data, dimension: Int)? = loadCubeLUT(named: "cinematic_natural_v3")
+
     // MARK: - Public
 
-    /// Full CCD look — for final capture output
+    /// Full look — for final capture output.
+    /// Uses the .cube LUT when available; falls back to parameter chain otherwise.
     static func applyToCapture(_ uiImage: UIImage) -> UIImage {
         guard let cgImage = uiImage.cgImage else { return uiImage }
         let orientation = uiImage.imageOrientation
         let ciInput = CIImage(cgImage: cgImage)
-        let tuning = CaptureLookTuning.sakuraCCDSoft
 
-        var result = ciInput
+        var result: CIImage
+        if let lut = lutData {
+            result = applyLUT(ciInput, data: lut.data, dimension: lut.dimension)
+        } else {
+            result = applyParameterChain(ciInput)
+        }
 
-        // 1. Tone: lifted blacks and a soft shoulder to keep sunlight airy
-        result = toneCurve(result, tuning: tuning)
-
-        // 2. White balance: warm overall, slightly green to keep skin from going yellow
-        result = warmthShift(result, tuning: tuning)
-
-        // 3. Color: restrained saturation and softened contrast
-        result = colorPunch(result, tuning: tuning)
-
-        // 4. Highlight bloom: bright areas should glow rather than fog the whole frame
-        result = highlightBloom(result, radius: tuning.bloomRadius, intensity: tuning.bloomIntensity)
-
-        // 5. Fine CCD grain (uniform, not coarse film grain)
-        result = ccdGrain(result, strength: tuning.grainStrength)
-
-        // 6. Very subtle vignette — natural falloff only
-        result = vignette(
-            result,
-            intensity: tuning.vignetteIntensity,
-            radius: vignetteRadius(for: ciInput.extent)
-        )
-
+        // Grain and vignette always run on top of the color grade
+        result = ccdGrain(result, strength: 0.006)
+        result = vignette(result, intensity: 0.07, radius: vignetteRadius(for: ciInput.extent))
         result = result.cropped(to: ciInput.extent)
 
         guard let outputCG = ciContext.createCGImage(result, from: result.extent) else {
@@ -90,84 +51,128 @@ enum FilmFilterEngine {
         return UIImage(cgImage: outputCG, scale: uiImage.scale, orientation: orientation)
     }
 
-    /// Lightweight version for live preview tint (no grain/bloom)
-    static func previewTintColor() -> UIColor {
-        // A very subtle warm overlay to hint at the filter in live preview
-        UIColor(red: 1.0, green: 0.95, blue: 0.85, alpha: 0.045)
+    // MARK: - LUT Application
+
+    /// intensity: 0 = original, 1 = full LUT. 0.55 keeps the look without crushing the image.
+    private static let lutIntensity: Float = 0.55
+
+    private static func applyLUT(_ input: CIImage, data: Data, dimension: Int) -> CIImage {
+        // CIColorCube (no inputColorSpace) applies the LUT in CoreImage's working linear space
+        // without an extra sRGB ↔ linear round-trip, which avoids double-gamma overexposure.
+        guard let f = CIFilter(name: "CIColorCube") else { return input }
+        f.setValue(input, forKey: kCIInputImageKey)
+        f.setValue(dimension, forKey: "inputCubeDimension")
+        f.setValue(data as NSData, forKey: "inputCubeData")
+        guard let graded = f.outputImage else { return input }
+
+        // Blend LUT result with original at lutIntensity to tame extreme looks
+        guard let blend = CIFilter(name: "CIDissolveTransition") else { return graded }
+        blend.setValue(input, forKey: kCIInputImageKey)
+        blend.setValue(graded, forKey: "inputTargetImage")
+        blend.setValue(lutIntensity, forKey: kCIInputTimeKey)
+        return blend.outputImage?.cropped(to: input.extent) ?? graded
     }
 
-    // MARK: - Filter Components
+    // MARK: - .cube Parser
 
-    /// Soft CCD tone curve: airy shadows, gentle midtones, soft highlight rolloff
-    private static func toneCurve(_ input: CIImage, tuning: CaptureLookTuning) -> CIImage {
-        let f = CIFilter.toneCurve()
-        f.inputImage = input
-        f.point0 = tuning.tonePoint0
-        f.point1 = tuning.tonePoint1
-        f.point2 = tuning.tonePoint2
-        f.point3 = tuning.tonePoint3
-        f.point4 = tuning.tonePoint4
-        return f.outputImage ?? input
+    /// Parses a standard 3D .cube file from the app bundle.
+    /// Returns (float32 RGBA data, dimension) or nil on failure.
+    private static func loadCubeLUT(named name: String) -> (Data, Int)? {
+        guard let url = Bundle.main.url(forResource: name, withExtension: "cube"),
+              let text = try? String(contentsOf: url, encoding: .utf8) else {
+            return nil
+        }
+
+        var dimension = 0
+        var floats: [Float] = []
+
+        for raw in text.components(separatedBy: .newlines) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty || line.hasPrefix("#") { continue }
+            if line.hasPrefix("TITLE") { continue }
+            if line.hasPrefix("LUT_3D_SIZE") {
+                dimension = Int(line.components(separatedBy: .whitespaces).last ?? "") ?? 0
+                floats.reserveCapacity(dimension * dimension * dimension * 4)
+                continue
+            }
+            if line.hasPrefix("DOMAIN_") { continue }
+
+            let parts = line.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+            guard parts.count >= 3,
+                  let r = Float(parts[0]),
+                  let g = Float(parts[1]),
+                  let b = Float(parts[2]) else { continue }
+            floats.append(r)
+            floats.append(g)
+            floats.append(b)
+            floats.append(1.0)  // alpha
+        }
+
+        guard dimension > 0, floats.count == dimension * dimension * dimension * 4 else {
+            return nil
+        }
+
+        let data = floats.withUnsafeBytes { Data($0) }
+        return (data, dimension)
     }
 
-    /// Warm but slightly green-balanced shift to preserve clean skin tones
-    private static func warmthShift(_ input: CIImage, tuning: CaptureLookTuning) -> CIImage {
-        let f = CIFilter.temperatureAndTint()
-        f.inputImage = input
-        f.neutral = CIVector(x: 6500, y: 0)
-        f.targetNeutral = tuning.targetNeutral
-        return f.outputImage ?? input
+    // MARK: - Parameter Chain Fallback
+
+    private static func applyParameterChain(_ input: CIImage) -> CIImage {
+        var result = input
+
+        let f1 = CIFilter.toneCurve()
+        f1.inputImage = result
+        f1.point0 = CGPoint(x: 0.0, y: 0.02)
+        f1.point1 = CGPoint(x: 0.25, y: 0.245)
+        f1.point2 = CGPoint(x: 0.50, y: 0.50)
+        f1.point3 = CGPoint(x: 0.75, y: 0.755)
+        f1.point4 = CGPoint(x: 1.0, y: 0.97)
+        result = f1.outputImage ?? result
+
+        let f2 = CIFilter.temperatureAndTint()
+        f2.inputImage = result
+        f2.neutral = CIVector(x: 6500, y: 0)
+        f2.targetNeutral = CIVector(x: 7300, y: 4)
+        result = f2.outputImage ?? result
+
+        let f3 = CIFilter.colorControls()
+        f3.inputImage = result
+        f3.saturation = 0.90
+        f3.brightness = 0.0
+        f3.contrast = 0.96
+        result = f3.outputImage ?? result
+
+        let bloom = CIFilter.bloom()
+        bloom.inputImage = result
+        bloom.radius = 5.0
+        bloom.intensity = 0.025
+        result = bloom.outputImage?.cropped(to: input.extent) ?? result
+
+        return result
     }
 
-    /// Restrained color response to keep greens and reds from feeling too modern
-    private static func colorPunch(_ input: CIImage, tuning: CaptureLookTuning) -> CIImage {
-        let f = CIFilter.colorControls()
-        f.inputImage = input
-        f.saturation = tuning.saturation
-        f.brightness = tuning.brightness
-        f.contrast = tuning.contrast
-        return f.outputImage ?? input
-    }
+    // MARK: - Grain & Vignette
 
-    /// CCD highlight bloom — light bleeds around bright areas
-    private static func highlightBloom(_ input: CIImage, radius: CGFloat, intensity: CGFloat) -> CIImage {
-        let f = CIFilter.bloom()
-        f.inputImage = input
-        f.radius = Float(radius)
-        f.intensity = Float(intensity)
-        return f.outputImage?.cropped(to: input.extent) ?? input
-    }
-
-    /// CCD-style grain: fine, uniform digital noise (not coarse film grain)
     private static func ccdGrain(_ input: CIImage, strength: CGFloat) -> CIImage {
         let extent = input.extent
-
         guard let noiseRaw = CIFilter(name: "CIRandomGenerator")?.outputImage else { return input }
-
-        // Scale noise down for finer grain pattern
-        let scaleTransform = CGAffineTransform(scaleX: 0.5, y: 0.5)
-        let scaledNoise = noiseRaw.transformed(by: scaleTransform)
-
-        // Make monochrome + control strength
+        let scaledNoise = noiseRaw.transformed(by: CGAffineTransform(scaleX: 0.5, y: 0.5))
         let mono = CIFilter.colorMatrix()
         mono.inputImage = scaledNoise
         let s = Float(strength)
-        // Use luminance coefficients for natural-looking monochrome noise
-        mono.rVector = CIVector(x: 0.0, y: 0.0, z: 0.0, w: CGFloat(s * 0.6))
-        mono.gVector = CIVector(x: 0.0, y: 0.0, z: 0.0, w: CGFloat(s * 0.6))
-        mono.bVector = CIVector(x: 0.0, y: 0.0, z: 0.0, w: CGFloat(s * 0.6))
-        mono.aVector = CIVector(x: 0.0, y: 0.0, z: 0.0, w: 0.0)
-        mono.biasVector = CIVector(x: CGFloat(-s * 0.3), y: CGFloat(-s * 0.3), z: CGFloat(-s * 0.3), w: 1.0)
-
-        guard let grainLayer = mono.outputImage?.cropped(to: extent) else { return input }
-
+        mono.rVector = CIVector(x: 0, y: 0, z: 0, w: CGFloat(s * 0.6))
+        mono.gVector = CIVector(x: 0, y: 0, z: 0, w: CGFloat(s * 0.6))
+        mono.bVector = CIVector(x: 0, y: 0, z: 0, w: CGFloat(s * 0.6))
+        mono.aVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+        mono.biasVector = CIVector(x: CGFloat(-s * 0.3), y: CGFloat(-s * 0.3), z: CGFloat(-s * 0.3), w: 1)
+        guard let grain = mono.outputImage?.cropped(to: extent) else { return input }
         let blend = CIFilter.additionCompositing()
-        blend.inputImage = grainLayer
+        blend.inputImage = grain
         blend.backgroundImage = input
         return blend.outputImage?.cropped(to: extent) ?? input
     }
 
-    /// Subtle optical vignette
     private static func vignette(_ input: CIImage, intensity: CGFloat, radius: CGFloat) -> CIImage {
         let f = CIFilter.vignette()
         f.inputImage = input

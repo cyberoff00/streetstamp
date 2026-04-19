@@ -1582,7 +1582,8 @@ async function profileDTOForViewerAsync(target, isSelf, isFriend) {
       totalUnlockedCities: cards.length
     },
     journeys,
-    unlockedCityCards: cards
+    unlockedCityCards: cards,
+    createdAt: target.createdAt || null
   };
 }
 
@@ -2148,9 +2149,12 @@ function fireRemotePush(ownerID, alert, data) {
     try {
       const tokens = await DB.getPushTokens(pgPool, ownerID);
       if (!tokens.length) return;
+      // Include current unread count so the system icon badge stays accurate
+      // even before the app foregrounds and pulls notifications.
+      const badge = await DB.countUnreadNotifications(pgPool, ownerID);
       await APNs.sendToUser(tokens, alert, data, async (invalidToken) => {
         await DB.deletePushToken(pgPool, ownerID, invalidToken);
-      });
+      }, badge);
     } catch (err) {
       console.error(`[APNs] fireRemotePush error for ${ownerID}:`, err.message);
     }
@@ -3423,6 +3427,24 @@ async function main() {
     }
   });
 
+  // ── Delete Account ──────────────────────────────────────────
+  app.delete("/v1/account", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      if (!uid) return res.status(401).json({ message: "unauthorized" });
+      if (!pgPool) return res.status(501).json({ message: "account deletion requires PG" });
+      const me = await getUser(uid);
+      if (!me) return res.status(404).json({ message: "user not found" });
+      console.log(`[ACCOUNT] Deleting account uid=${uid} displayName=${me.displayName || ""}`);
+      await DB.deleteUserByID(pgPool, uid);
+      console.log(`[ACCOUNT] Account deleted uid=${uid}`);
+      return res.status(200).json({ deleted: true });
+    } catch (err) {
+      console.error(`[ERROR] DELETE /v1/account:`, err);
+      return res.status(500).json({ message: "account deletion failed" });
+    }
+  });
+
   app.get("/v1/blocks", async (req, res) => {
     try {
       const uid = parseBearer(req);
@@ -4451,13 +4473,9 @@ async function main() {
       const contentType = String(req.body?.contentType || "application/octet-stream").slice(0, 64);
       if (hash.length < 8) return res.status(400).json({ message: "invalid hash" });
 
-      // Prefer CF-IPCountry (set by Cloudflare for orange-cloud domains) over client-declared region.
-      // This correctly handles Chinese users abroad (device locale = CN but physical location ≠ CN).
-      // Gray-cloud (China domestic) requests have no CF-IPCountry; they fall back to client-declared region.
-      const cfCountry = String(req.headers["cf-ipcountry"] || "").toUpperCase().trim();
-      const clientRegion = String(req.body?.region || "").toUpperCase();
-      const region = cfCountry || clientRegion;
-      const useServer = region === "CN" || !r2Client || !R2_PUBLIC_BASE;
+      // All regions upload directly to R2 via presigned URL.
+      // /v1/media/upload remains as fallback (strategy:server) only when R2 is unconfigured.
+      const useServer = !r2Client || !R2_PUBLIC_BASE;
       if (useServer) return res.status(200).json({ strategy: "server" });
 
       const objectKey = `${uid}/${hash}${ext}`;

@@ -20,19 +20,19 @@ enum AboutUsContent {
             ]
         ),
         Section(
-            title: L10n.t("about_postscript"),
+            title: "话外",
             paragraphs: [
-                L10n.t("about_us_traveler_needs")
+                "旅行者的需求"
             ]
         ),
         Section(
-            title: L10n.t("about_us_traveler_needs"),
+            title: "旅行者的需求",
             paragraphs: [
                 L10n.t("about_us_traveler_needs_content")
             ]
         ),
         Section(
-            title: L10n.t("about_us_cyber_dog_title"),
+            title: "赛博遛狗的故事",
             paragraphs: [
                 L10n.t("about_us_cyber_dog_content")
             ]
@@ -111,7 +111,7 @@ struct AboutUsView: View {
             ForEach(Array(AboutUsContent.sections.enumerated()), id: \.offset) { index, section in
                 if index == 0 {
                     bodyParagraphGroup(section.paragraphs)
-                } else if section.title == L10n.t("about_postscript") {
+                } else if section.title == "话外" {
                     asideSection
                         .padding(.top, 48)
                 }
@@ -121,7 +121,7 @@ struct AboutUsView: View {
 
     private var asideSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(L10n.key("about_postscript"))
+            Text("话外")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundColor(UITheme.softBlack)
 
@@ -131,7 +131,7 @@ struct AboutUsView: View {
                         Text(section.title)
                             .font(.system(size: 16, weight: .regular))
                             .foregroundColor(Color(red: 0.26, green: 0.30, blue: 0.35))
-                            .padding(.top, section.title == L10n.t("about_us_traveler_needs") ? 6 : 0)
+                            .padding(.top, section.title == "旅行者的需求" ? 6 : 0)
                     }
 
                     bodyParagraphGroup(section.paragraphs)

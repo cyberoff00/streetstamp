@@ -49,6 +49,7 @@ struct MembershipGateView: View {
 
     @Environment(\.dismiss) private var dismiss
     @StateObject private var membership = MembershipStore.shared
+    @ObservedObject private var featureFlags = FeatureFlagStore.shared
     @State private var products: [Product] = []
     @State private var isPurchasing = false
     @State private var errorMessage: String?
@@ -133,16 +134,21 @@ struct MembershipGateView: View {
     // MARK: - Benefits Grid (2 columns)
 
     private var benefitsGrid: some View {
-        let items: [(icon: String, key: String)] = [
-            ("globe.americas.fill", "membership_benefit_globe"),
-            ("photo.on.rectangle.angled", "membership_benefit_photos"),
-            ("person.2.fill", "membership_benefit_friends"),
-            ("icloud.fill", "membership_benefit_icloud"),
-            ("envelope.fill", "membership_benefit_postcard"),
-            ("paintpalette.fill", "membership_benefit_map"),
-            ("square.and.arrow.up.fill", "membership_benefit_gpx"),
-            ("bitcoinsign.circle.fill", "membership_benefit_coins"),
-        ]
+        // Social-gated entries (photos-per-journey / friends / postcard) are
+        // hidden in restricted storefront regions (e.g. mainland China).
+        let socialEnabled = featureFlags.socialEnabled
+        var items: [(icon: String, key: String)] = []
+        items.append(("globe.americas.fill", "membership_benefit_globe"))
+        if socialEnabled {
+            items.append(("photo.on.rectangle.angled", "membership_benefit_photos"))
+            items.append(("person.2.fill", "membership_benefit_friends"))
+            items.append(("envelope.fill", "membership_benefit_postcard"))
+        }
+        items.append(("icloud.fill", "membership_benefit_icloud"))
+        items.append(("paintpalette.fill", "membership_benefit_map"))
+        items.append(("square.and.arrow.up.fill", "membership_benefit_gpx"))
+        items.append(("bag.fill", "membership_benefit_equipment_coins"))
+        items.append(("sparkles", "membership_benefit_more_features"))
 
         return LazyVGrid(
             columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
