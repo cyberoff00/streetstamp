@@ -32,7 +32,7 @@ func robotFaceFromHeading(_ headingDegrees: Double) -> RobotFace {
 // MARK: - Loadout (v1: pixel character)
 
 struct RobotLoadout: Codable, Equatable, Hashable {
-    static let defaultHairColorHex = "#2B2A28"
+    static let defaultHairColorHex = "#4CAF50"
     static let defaultBodyColorHex = "#E8BE9C"
 
     static func normalizedHairId(_ hairId: String) -> String {
@@ -172,7 +172,7 @@ struct RobotLoadout: Codable, Equatable, Hashable {
         RobotLoadout(
             bodyId: "body",
             headId: "head",
-            hairId: "hair_0001",
+            hairId: "hair_0004",
             suitId: nil,
             upperId: "upper_0001",
             underId: "under_0001",
@@ -181,7 +181,7 @@ struct RobotLoadout: Codable, Equatable, Hashable {
             shoesId: nil,
             hatId: nil,
             glassId: nil,
-            accessoryIds: [],
+            accessoryIds: ["pat_014"],
             expressionId: "expr_0001",
             hairColorHex: defaultHairColorHex,
             bodyColorHex: defaultBodyColorHex
@@ -325,6 +325,10 @@ struct RobotRendererView: View {
             return catalogStore.imageName(pat.images, face: face)
         }
         return nil
+    }
+
+    private func isTopLayerAccessory(itemId: String) -> Bool {
+        catalogStore.item(categoryId: "accessory", itemId: itemId)?.layer == "accessory_top"
     }
 
     private func shoesAsset(face: RobotFace) -> String? {
@@ -509,31 +513,34 @@ private var expressionLayer: some View {
 @ViewBuilder
 private var hairLayer: some View {
     // Prefer exact facing; fallback to front with opacity when side/back is missing.
+    // hairColorHex == "none" means "show the sprite as drawn" (no tint).
     if let front = hairAsset(face: .front) {
+        let raw = loadout.hairColorHex.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tint: Color? = (raw.isEmpty || raw.lowercased() == "none") ? nil : hairTint
         switch face {
         case .front:
-            maskTintedImg(front, color: hairTint)
+            hairSprite(front, tint: tint)
         case .right:
             if let side = hairAsset(face: .right) {
-                maskTintedImg(side, color: hairTint)
+                hairSprite(side, tint: tint)
             } else {
-                maskTintedImg(front, color: hairTint)
+                hairSprite(front, tint: tint)
                     .opacity(0.20)
             }
         case .left:
             if let side = hairAsset(face: .left) ?? hairAsset(face: .right) {
-                maskTintedImg(side, color: hairTint)
+                hairSprite(side, tint: tint)
                     .scaleEffect(x: -1, y: 1)
             } else {
-                maskTintedImg(front, color: hairTint)
+                hairSprite(front, tint: tint)
                     .scaleEffect(x: -1, y: 1)
                     .opacity(0.20)
             }
         case .back:
             if let back = hairAsset(face: .back) {
-                maskTintedImg(back, color: hairTint)
+                hairSprite(back, tint: tint)
             } else {
-                maskTintedImg(front, color: hairTint)
+                hairSprite(front, tint: tint)
                     .opacity(0.20)
             }
         }
@@ -542,38 +549,51 @@ private var hairLayer: some View {
     }
 }
 
+private func hairSprite(_ name: String, tint: Color?) -> some View {
+    AvatarLayerImage(imageName: name, tintColor: tint)
+}
+
     @ViewBuilder
-    private var accessoryLayer: some View {
-        let ids = loadout.accessoryIds.filter { $0 != "none" }
-        if ids.isEmpty {
-            EmptyView()
-        } else {
-            ForEach(ids, id: \.self) { itemId in
-                if let front = accessoryAsset(itemId: itemId, face: .front) {
-                    switch face {
-                    case .front:
-                        img(front)
-                    case .right:
-                        if let side = accessoryAsset(itemId: itemId, face: .right) {
-                            img(side)
-                        } else {
-                            img(front).opacity(0.20)
-                        }
-                    case .left:
-                        if let side = accessoryAsset(itemId: itemId, face: .left) ?? accessoryAsset(itemId: itemId, face: .right) {
-                            img(side).scaleEffect(x: -1, y: 1)
-                        } else {
-                            img(front).scaleEffect(x: -1, y: 1).opacity(0.20)
-                        }
-                    case .back:
-                        if let back = accessoryAsset(itemId: itemId, face: .back) {
-                            img(back)
-                        } else {
-                            img(front).opacity(0.20)
-                        }
-                    }
+    private func accessoryItemLayer(itemId: String) -> some View {
+        if let front = accessoryAsset(itemId: itemId, face: .front) {
+            switch face {
+            case .front:
+                img(front)
+            case .right:
+                if let side = accessoryAsset(itemId: itemId, face: .right) {
+                    img(side)
+                } else {
+                    img(front).opacity(0.20)
+                }
+            case .left:
+                if let side = accessoryAsset(itemId: itemId, face: .left) ?? accessoryAsset(itemId: itemId, face: .right) {
+                    img(side).scaleEffect(x: -1, y: 1)
+                } else {
+                    img(front).scaleEffect(x: -1, y: 1).opacity(0.20)
+                }
+            case .back:
+                if let back = accessoryAsset(itemId: itemId, face: .back) {
+                    img(back)
+                } else {
+                    img(front).opacity(0.20)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var accessoryLayer: some View {
+        let ids = loadout.accessoryIds.filter { $0 != "none" && !isTopLayerAccessory(itemId: $0) }
+        ForEach(ids, id: \.self) { itemId in
+            accessoryItemLayer(itemId: itemId)
+        }
+    }
+
+    @ViewBuilder
+    private var topAccessoryLayer: some View {
+        let ids = loadout.accessoryIds.filter { $0 != "none" && isTopLayerAccessory(itemId: $0) }
+        ForEach(ids, id: \.self) { itemId in
+            accessoryItemLayer(itemId: itemId)
         }
     }
 
@@ -630,6 +650,7 @@ var body: some View {
             accessoryLayer
             glassLayer
             hatLayer
+            topAccessoryLayer
 
             if face == .back {
                 Text(L10n.t("avatar_placeholder_back"))

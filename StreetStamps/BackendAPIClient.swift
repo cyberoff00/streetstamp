@@ -445,15 +445,19 @@ final class BackendAPIClient {
     static let shared = BackendAPIClient()
     private let tokenRefreshGate = BackendTokenRefreshGate()
     private let refreshBackoffGate = BackendRefreshBackoffGate()
+    private let sessionLock = NSLock()
+    private var primaryURLSession: URLSession = BackendAPIClient.makeDefaultURLSession()
     private var transport: @Sendable (URLRequest) async throws -> (Data, URLResponse)
 
     @MainActor
     private weak var sessionStore: UserSessionStore?
 
     private init() {
+        let initialSession = self.primaryURLSession
         self.transport = { request in
-            try await URLSession.shared.data(for: request)
+            try await initialSession.data(for: request)
         }
+        self.transport = self.makeDefaultTransport()
     }
 
     @MainActor
@@ -468,9 +472,42 @@ final class BackendAPIClient {
     }
 
     func resetTestingTransport() {
-        self.transport = { request in
-            try await URLSession.shared.data(for: request)
+        self.transport = self.makeDefaultTransport()
+    }
+
+    private static func makeDefaultURLSession() -> URLSession {
+        let config = URLSessionConfiguration.default
+        // Keep request timeout aligned with per-request `timeout` param (default 15s).
+        // Default 60s is too long for diagnosing stale HTTP/2 connections.
+        config.timeoutIntervalForRequest = 15
+        config.timeoutIntervalForResource = 60
+        config.waitsForConnectivity = false
+        return URLSession(configuration: config)
+    }
+
+    private func makeDefaultTransport() -> @Sendable (URLRequest) async throws -> (Data, URLResponse) {
+        return { [weak self] request in
+            let session: URLSession
+            if let self {
+                self.sessionLock.lock()
+                session = self.primaryURLSession
+                self.sessionLock.unlock()
+            } else {
+                session = URLSession.shared
+            }
+            return try await session.data(for: request)
         }
+    }
+
+    /// Force a fresh TCP/TLS connection on the next request by tearing down the
+    /// current `URLSession` connection pool. Used when retrying after a transient
+    /// network error so we don't keep slamming a half-broken HTTP/2 connection.
+    fileprivate func rebuildPrimaryURLSessionForRetry() {
+        sessionLock.lock()
+        let old = primaryURLSession
+        primaryURLSession = Self.makeDefaultURLSession()
+        sessionLock.unlock()
+        old.invalidateAndCancel()
     }
 
     private func makeURL(path: String) throws -> URL {
@@ -556,6 +593,48 @@ final class BackendAPIClient {
     private var decoder: JSONDecoder { Self.sharedDecoder }
     private var encoder: JSONEncoder { Self.sharedEncoder }
 
+    private static func isIdempotent(method: String) -> Bool {
+        switch method.uppercased() {
+        case "GET", "HEAD", "OPTIONS", "PUT", "DELETE":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static let transientNSURLErrorCodes: Set<Int> = [
+        NSURLErrorTimedOut,                   // -1001
+        NSURLErrorCannotConnectToHost,        // -1004
+        NSURLErrorNetworkConnectionLost,      // -1005
+        NSURLErrorDNSLookupFailed,            // -1006
+        NSURLErrorNotConnectedToInternet,     // -1009
+        NSURLErrorSecureConnectionFailed,     // -1200
+        NSURLErrorServerCertificateUntrusted, // -1202 (intermittent on bad SNI rewrite)
+        NSURLErrorCannotFindHost,             // -1003 (transient DNS)
+        NSURLErrorRequestBodyStreamExhausted  // -1021 (HTTP/2 stream cancelled mid-flight)
+    ]
+
+    private static func isTransientNSURLError(_ error: NSError) -> Bool {
+        guard error.domain == NSURLErrorDomain else { return false }
+        return transientNSURLErrorCodes.contains(error.code)
+    }
+
+    /// Exponential backoff with jitter for retries: 500ms, 1.5s, 4s (+ up to 100ms jitter).
+    /// Deliberately on the gentler side so the user is less likely to ever see the
+    /// "retrying" toast — most flaky-network requests recover within attempt 1 or 2.
+    private static func retryBackoffNanos(forAttempt attempt: Int) -> UInt64 {
+        let baseMs: Int = {
+            switch attempt {
+            case 0: return 500
+            case 1: return 1500
+            case 2: return 4000
+            default: return 4000
+            }
+        }()
+        let jitterMs = Int.random(in: 0...100)
+        return UInt64((baseMs + jitterMs)) * 1_000_000
+    }
+
     private func request(
         path: String,
         method: String,
@@ -591,7 +670,12 @@ final class BackendAPIClient {
 
         var lastError: Error?
         var usedFallback = false
-        for attempt in 0..<2 {
+        // Idempotent methods get up to 4 attempts (initial + 3 retries) to ride
+        // out the intermittent CN-electric → Cloudflare path: HTTP/2 stream
+        // cancellations, mid-flight TLS resets, and stale connection-pool reuse.
+        // Non-idempotent methods stay at 2 (initial + 1 fallback-domain retry).
+        let maxAttempts = Self.isIdempotent(method: method) ? 4 : 2
+        for attempt in 0..<maxAttempts {
             do {
                 let (data, resp) = try await transport(req)
                 guard let http = resp as? HTTPURLResponse else {
@@ -626,6 +710,18 @@ final class BackendAPIClient {
                     )
                 }
 
+                // 5xx on an idempotent request → treat as transient and retry
+                // (except on the final attempt). Non-idempotent requests fall
+                // through to validateResponse which surfaces the error.
+                if Self.isIdempotent(method: method),
+                   (500...599).contains(http.statusCode),
+                   attempt < maxAttempts - 1 {
+                    lastError = BackendAPIError.server("HTTP \(http.statusCode)")
+                    try? await Task.sleep(nanoseconds: Self.retryBackoffNanos(forAttempt: attempt))
+                    rebuildPrimaryURLSessionForRetry()
+                    continue
+                }
+
                 if usedFallback { BackendConfig.activateFallback() }
                 return try validateResponse(
                     data: data,
@@ -636,29 +732,33 @@ final class BackendAPIClient {
             } catch {
                 lastError = error
                 let nsError = error as NSError
-                let isNetworkError = nsError.domain == NSURLErrorDomain &&
-                    (nsError.code == NSURLErrorTimedOut ||
-                     nsError.code == NSURLErrorCannotConnectToHost ||
-                     nsError.code == NSURLErrorNetworkConnectionLost)
+                let isTransient = Self.isTransientNSURLError(nsError)
 
-                if attempt == 0 && isNetworkError {
-                    // Retry with fallback domain instead of same URL
+                // First failure on a transient network error: prefer switching
+                // to the fallback domain (cheap, often resolves origin/CDN
+                // routing issues without a full session rebuild).
+                if attempt == 0 && isTransient && !usedFallback {
                     let currentBase = BackendConfig.baseURLString
                     let fallback = BackendConfig.fallbackBaseURL
-                    guard currentBase != fallback,
-                          let originalURL = req.url
-                    else {
-                        try? await Task.sleep(nanoseconds: 500_000_000)
-                        continue
+                    if currentBase != fallback, let originalURL = req.url {
+                        let swapped = originalURL.absoluteString.replacingOccurrences(of: currentBase, with: fallback)
+                        if let retryURL = URL(string: swapped) {
+                            print("[BackendAPI] Primary \(currentBase) failed, trying fallback \(fallback)")
+                            req.url = retryURL
+                            usedFallback = true
+                            continue
+                        }
                     }
-                    let swapped = originalURL.absoluteString.replacingOccurrences(of: currentBase, with: fallback)
-                    guard let retryURL = URL(string: swapped) else {
-                        try? await Task.sleep(nanoseconds: 500_000_000)
-                        continue
-                    }
-                    print("[BackendAPI] Primary \(currentBase) failed, trying fallback \(fallback)")
-                    req.url = retryURL
-                    usedFallback = true
+                }
+
+                // Idempotent + transient → exponential backoff retry on a
+                // freshly-rebuilt URLSession (forces new TCP/TLS connection,
+                // bypasses any stale HTTP/2 connection in the pool).
+                if Self.isIdempotent(method: method),
+                   isTransient,
+                   attempt < maxAttempts - 1 {
+                    try? await Task.sleep(nanoseconds: Self.retryBackoffNanos(forAttempt: attempt))
+                    rebuildPrimaryURLSessionForRetry()
                     continue
                 }
                 throw error

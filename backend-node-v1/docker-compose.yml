@@ -68,6 +68,7 @@ services:
       APNS_TEAM_ID: "${APNS_TEAM_ID:-}"
       APNS_USE_SANDBOX: "${APNS_USE_SANDBOX:-false}"
       PG_MAX_CLIENTS: "${PG_MAX_CLIENTS:-50}"
+      SOCIAL_DISABLED_REGIONS: "${SOCIAL_DISABLED_REGIONS-CN}"
     deploy:
       resources:
         limits:

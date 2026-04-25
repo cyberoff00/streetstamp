@@ -2693,7 +2693,7 @@ struct JourneyMemoryDetailView: View {
             return
         }
         let decision = JourneyVisibilityPolicy.evaluateChange(
-            current: journey.visibility,
+            current: effective,
             target: target,
             isLoggedIn: sessionStore.isLoggedIn,
             journeyDistance: journey.distance,

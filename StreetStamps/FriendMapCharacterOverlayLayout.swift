@@ -13,8 +13,8 @@ enum FriendMapCharacterOverlayLayout {
 
     static func makeLayout(in size: CGSize) -> Layout {
         let doorPosition = CGPoint(
-            x: 92,
-            y: size.height - 245
+            x: 64,
+            y: size.height - 190
         )
         let friendPosition = CGPoint(
             x: size.width - 84,

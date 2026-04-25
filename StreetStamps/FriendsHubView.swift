@@ -202,6 +202,7 @@ struct FriendsHubView: View {
     @State private var showAddFriendSheet = false
     @State private var pendingFriendRequestSent = false
     @State private var loadingRemote = false
+    @StateObject private var retryBanner = RetryBannerCoordinator()
     @State private var activeRoute: FriendsRoute?
     @State private var toastText = ""
     @State private var showToast = false
@@ -427,7 +428,9 @@ struct FriendsHubView: View {
                 prefillInviteCode: addFriendPrefillInviteCode,
                 prefillHandle: addFriendPrefillHandle
             ) {
-                await refreshRemoteFriends()
+                async let a: Void = refreshRemoteFriends()
+                async let b: Void = refreshFriendRequests()
+                _ = await (a, b)
                 pendingFriendRequestSent = true
             }
             .environmentObject(socialStore)
@@ -495,6 +498,7 @@ struct FriendsHubView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
+        .networkRetryBanner(isPresented: retryBanner.isShowing)
         .onAppear {
             let t0 = CFAbsoluteTimeGetCurrent()
             socialStore.ensureLoaded()
@@ -610,7 +614,11 @@ struct FriendsHubView: View {
                 onPresentLikes: { friendID, journeyID, title in
                     presentFeedLikes(friendID: friendID, journeyID: journeyID, title: title)
                 },
-                onRefresh: { await refreshRemoteFriends(force: true) }
+                onRefresh: {
+                    async let a: Void = refreshRemoteFriends(force: true)
+                    async let b: Void = refreshFriendRequests()
+                    _ = await (a, b)
+                }
             )
         }
         .background(FigmaTheme.background)
@@ -656,7 +664,9 @@ struct FriendsHubView: View {
         }
         .scrollPosition(id: $friendsListScrollPosition)
         .refreshable {
-            await refreshRemoteFriends(force: true)
+            async let a: Void = refreshRemoteFriends(force: true)
+            async let b: Void = refreshFriendRequests()
+            _ = await (a, b)
         }
         .background(FigmaTheme.background)
     }
@@ -909,7 +919,9 @@ struct FriendsHubView: View {
         @MainActor
         private func performInitialFeedRefreshIfNeeded() async {
             guard !didPerformInitialFeedRefresh else { return }
-            await refreshRemoteFriends()
+            async let a: Void = refreshRemoteFriends()
+            async let b: Void = refreshFriendRequests()
+            _ = await (a, b)
         }
 
         @MainActor
@@ -1028,6 +1040,8 @@ struct FriendsHubView: View {
             let previousFriends = socialStore.friends
             let token = sessionStore.currentAccessToken
 
+            retryBanner.beginOperation()
+
             // Fetch friends and own profile in parallel — both are needed for the feed.
             async let friendsTask = socialStore.fetchFriendSnapshotsFromBackend(accessToken: token)
             async let myProfileTask = fetchMyProfile(token: token)
@@ -1046,9 +1060,11 @@ struct FriendsHubView: View {
                         perJourneyLimit: 5
                     )
                 )
+                retryBanner.operationSucceeded()
             } else {
                 print("⏱ [FriendsHub] fetchFriendSnapshots returned nil: \(Int((CFAbsoluteTimeGetCurrent()-t0)*1000))ms")
                 socialStore.restoreFriendsIfEmpty(previousFriends)
+                retryBanner.operationFailed()
                 // Do NOT mark initial refresh done on failure — allow retry on next attempt.
                 return
             }
@@ -1057,12 +1073,10 @@ struct FriendsHubView: View {
             lastFeedRefreshTime = Date()
 
             let toastCallback: ((String) -> Void)? = showUnreadToast ? { [self] msg in showFeedToast(msg, duration: 2.2) } : nil
-            async let notifTask: Void = notificationStore.refresh(
+            await notificationStore.refresh(
                 token: token,
                 showToastCallback: toastCallback
             )
-            async let reqTask: Void = refreshFriendRequests()
-            _ = await (notifTask, reqTask)
             print("⏱ [FriendsHub] refreshRemoteFriends total: \(Int((CFAbsoluteTimeGetCurrent()-t0)*1000))ms")
         }
 
@@ -1140,7 +1154,9 @@ struct FriendsHubView: View {
 
             do {
                 let resp = try await BackendAPIClient.shared.acceptFriendRequest(token: token, requestID: requestID)
-                await refreshRemoteFriends(force: true)
+                async let a: Void = refreshRemoteFriends(force: true)
+                async let b: Void = refreshFriendRequests()
+                _ = await (a, b)
                 showFeedToast(resp.message ?? L10n.t("friends_request_accepted"))
             } catch {
                 showFeedToast(String(format: L10n.t("friends_accept_failed_format"), error.localizedDescription))
@@ -1289,6 +1305,7 @@ struct FriendsHubView: View {
                     } else if item.type == "friend_request" {
                         showSocialNotificationsSheet = false
                         tab = .allFriends
+                        Task { await refreshFriendRequests() }
                     } else if item.type == "journey_like",
                               let jid = item.journeyID?.trimmingCharacters(in: .whitespacesAndNewlines),
                               !jid.isEmpty {

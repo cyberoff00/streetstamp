@@ -179,6 +179,7 @@ struct LifelogView: View {
     @State private var showPermissionSettingsPrompt = false
     @State private var showAlwaysLocationGuide = false
     @AppStorage("streetstamps.lifelog.alwaysLocationGuideShown") private var alwaysLocationGuideShown = false
+    @AppStorage("streetstamps.lifelog.permissionHintDismissed") private var permissionHintDismissed = false
     @State private var shareItem: LifelogShareImageItem? = nil
     @State private var didCenterOnEnter = false
     @State private var selectedDay: Date? = nil
@@ -646,11 +647,25 @@ struct LifelogView: View {
 
     @ViewBuilder
     private var permissionHint: some View {
-        if showEnableHint && locationHub.authorizationStatus != .authorizedAlways {
+        if showEnableHint && !permissionHintDismissed && locationHub.authorizationStatus != .authorizedAlways {
             VStack(alignment: .leading, spacing: 8) {
-                Text(L10n.t("lifelog_permission_hint"))
-                    .appCaptionStyle()
-                    .foregroundColor(panelText)
+                HStack(alignment: .top, spacing: 8) {
+                    Text(L10n.t("lifelog_permission_hint"))
+                        .appCaptionStyle()
+                        .foregroundColor(panelText)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button {
+                        permissionHintDismissed = true
+                        showEnableHint = false
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(panelText.opacity(0.6))
+                            .frame(width: 22, height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
                 Button(L10n.t("lifelog_permission_action")) {
                     handleAlwaysPermissionAction()
                 }
@@ -1132,7 +1147,7 @@ struct LifelogView: View {
         // Auto-fit today on the first fully-rendered snapshot (before the user pans).
         if !didAutoFitToRoute, isViewingToday {
             if let region = regionFittingRoute(snapshot.farRouteSegments) {
-                cameraCommand = LifelogCameraCommand(id: UUID(), region: region)
+                cameraCommand = LifelogCameraCommand(id: UUID(), region: region, animated: false)
             }
             didAutoFitToRoute = true
         }
@@ -1142,12 +1157,12 @@ struct LifelogView: View {
         guard Calendar.current.isDate(snapshotDay, inSameDayAs: pendingDay) else { return }
 
         if let region = regionFittingRoute(snapshot.farRouteSegments) {
-            cameraCommand = LifelogCameraCommand(id: UUID(), region: region)
+            cameraCommand = LifelogCameraCommand(id: UUID(), region: region, animated: false)
         } else if let wgs = snapshot.selectedDayCenterCoordinate {
             cameraCommand = LifelogCameraCommand(id: UUID(), region: MKCoordinateRegion(
                 center: mapCoordForLifelog(wgs),
                 span: MKCoordinateSpan(latitudeDelta: 0.03, longitudeDelta: 0.03)
-            ))
+            ), animated: false)
         }
         pendingRecenterDay = nil
     }

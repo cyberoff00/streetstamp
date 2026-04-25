@@ -101,13 +101,13 @@ struct MainView: View {
                         Button {
                             showSubscription = true
                         } label: {
-                            Image(systemName: "crown")
+                            Image(systemName: "crown.fill")
                                 .font(.system(size: 15, weight: .semibold))
-                                .foregroundColor(Color.black.opacity(0.45))
+                                .foregroundColor(FigmaTheme.secondary)
                                 .frame(width: 36, height: 36)
-                                .background(Color.white.opacity(0.88))
+                                .background(Color.white.opacity(0.92))
                                 .clipShape(Circle())
-                                .shadow(color: .black.opacity(0.07), radius: 6, y: 2)
+                                .shadow(color: FigmaTheme.secondary.opacity(0.18), radius: 6, y: 2)
                         }
                         .padding(.trailing, 20)
                     }

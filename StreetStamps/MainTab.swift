@@ -294,8 +294,20 @@ struct MainTabView: View {
 
     @ViewBuilder
     private func modalDestinationView(for destination: ModalNavDestination) -> some View {
-        ModalNavigationWrapper(destination: destination) {
-            modalNavPresentation.dismiss()
+        switch destination {
+        case .equipment:
+            // Flat presentation (no wrapping NavigationStack) so returning
+            // via the back button dismisses the fullScreenCover directly.
+            // This avoids the iOS 17 blank-flash caused by the two-stage
+            // "NavigationStack pop → cover dismiss" sequence. EquipmentView
+            // has no inner NavigationLink/navigationDestination so it doesn't
+            // need an outer stack. Trade-off: no edge swipe-back gesture
+            // (SwipeBackEnabler relies on UINavigationController).
+            ModalEquipmentEntryView()
+        default:
+            ModalNavigationWrapper(destination: destination) {
+                modalNavPresentation.dismiss()
+            }
         }
     }
 
@@ -422,7 +434,16 @@ private struct ModalNavigationWrapper: View {
     let destination: ModalNavDestination
     let onDismiss: () -> Void
 
-    @State private var path: [ModalNavDestination] = []
+    @State private var path: [ModalNavDestination]
+
+    init(destination: ModalNavDestination, onDismiss: @escaping () -> Void) {
+        self.destination = destination
+        self.onDismiss = onDismiss
+        // Initialize path with the destination so NavigationStack renders the
+        // target content on the first frame. Deferring to .onAppear caused a
+        // blank flash on iOS 17 (root Color.clear visible before push animation).
+        self._path = State(initialValue: [destination])
+    }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -431,11 +452,6 @@ private struct ModalNavigationWrapper: View {
                 .navigationDestination(for: ModalNavDestination.self) { dest in
                     modalContent(for: dest)
                 }
-        }
-        .onAppear {
-            if path.isEmpty {
-                path = [destination]
-            }
         }
         .onChange(of: path) { _, newPath in
             if newPath.isEmpty {

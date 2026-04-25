@@ -15,6 +15,11 @@ enum FAQContent {
                 answer: L10n.t("faq_a_overview")
             ),
             FAQItem(
+                id: "route_recording",
+                question: L10n.t("faq_q_route_recording"),
+                answer: L10n.t("faq_a_route_recording")
+            ),
+            FAQItem(
                 id: "track_accuracy",
                 question: L10n.t("faq_q_track_accuracy"),
                 answer: L10n.t("faq_a_track_accuracy")
@@ -23,11 +28,6 @@ enum FAQContent {
                 id: "battery",
                 question: L10n.t("faq_q_battery"),
                 answer: L10n.t("faq_a_battery")
-            ),
-            FAQItem(
-                id: "sport_vs_daily",
-                question: L10n.t("faq_q_sport_vs_daily"),
-                answer: L10n.t("faq_a_sport_vs_daily")
             ),
             FAQItem(
                 id: "data_storage",

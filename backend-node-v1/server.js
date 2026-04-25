@@ -67,7 +67,7 @@ const GOOGLE_CLIENT_ID = (process.env.GOOGLE_CLIENT_ID || "").trim();
 const APPLE_AUDIENCES = (process.env.APPLE_AUDIENCES || process.env.APPLE_BUNDLE_ID || "").trim();
 const APPSTORE_FALLBACK_URL = (process.env.APPSTORE_FALLBACK_URL || "https://apps.apple.com/us/search?term=Worldo").trim();
 const WRITE_FREEZE_ENABLED = String(process.env.WRITE_FREEZE_ENABLED || "").trim().toLowerCase();
-const SOCIAL_DISABLED_REGIONS = (process.env.SOCIAL_DISABLED_REGIONS || "CN").trim().toUpperCase().split(",").map(s => s.trim()).filter(Boolean);
+const SOCIAL_DISABLED_REGIONS = (process.env.SOCIAL_DISABLED_REGIONS ?? "CN").trim().toUpperCase().split(",").map(s => s.trim()).filter(Boolean);
 const LEGACY_EMAIL_REVERIFY_EMAIL = normalizeEmail(process.env.LEGACY_EMAIL_REVERIFY_EMAIL || "yinterestingy@163.com");
 
 const visibilityPrivate = "private";

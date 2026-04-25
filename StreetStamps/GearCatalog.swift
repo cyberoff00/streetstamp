@@ -537,12 +537,6 @@ final class AvatarCatalogStore: ObservableObject {
                             images: .init(front: nil, right: nil, back: nil, left: nil)
                         ),
                         .init(
-                            id: "hat_001",
-                            nameKey: "Hat 001",
-                            layer: "hat",
-                            images: .init(front: "front_hat001", right: nil, back: nil, left: nil)
-                        ),
-                        .init(
                             id: "hat_012",
                             nameKey: "Hat 012",
                             layer: "hat",
@@ -585,12 +579,6 @@ final class AvatarCatalogStore: ObservableObject {
                             nameKey: "equipment_item_none",
                             layer: "accessory",
                             images: .init(front: nil, right: nil, back: nil, left: nil)
-                        ),
-                        .init(
-                            id: "acc_001",
-                            nameKey: "Accessory 001",
-                            layer: "accessory",
-                            images: .init(front: "front_ac001", right: nil, back: nil, left: nil)
                         ),
                         .init(
                             id: "acc_002",
@@ -663,6 +651,12 @@ final class AvatarCatalogStore: ObservableObject {
                             nameKey: "Accessory 015",
                             layer: "accessory",
                             images: .init(front: "front_ac016", right: nil, back: nil, left: nil)
+                        ),
+                        .init(
+                            id: "acc_001",
+                            nameKey: "Accessory 001",
+                            layer: "accessory",
+                            images: .init(front: "front_ac001", right: nil, back: nil, left: nil)
                         )
                     ]
                 )

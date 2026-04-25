@@ -7,6 +7,12 @@ final class FeatureFlagStore: ObservableObject {
 
     @Published private(set) var socialEnabled: Bool = true
     @Published private(set) var hasFetched: Bool = false
+    /// True only when we have positive confirmation for this install — either a
+    /// successful server response this session, a prior unlock (`everUnlocked`),
+    /// or a debug override. Callers that gate login UI should check this before
+    /// `socialEnabled`, since the raw flag defaults to `true` and cannot by
+    /// itself distinguish "online, server says yes" from "offline, no answer yet".
+    @Published private(set) var hasConfirmedSocial: Bool = false
 
     private let socialOverrideKey = "streetstamps.feature.social_enabled_override"
     private let everUnlockedKey = "streetstamps.feature.social_ever_unlocked"
@@ -19,6 +25,7 @@ final class FeatureFlagStore: ObservableObject {
         #endif
         if let override = overrideValue {
             socialEnabled = override
+            hasConfirmedSocial = true
             return
         }
         // Asymmetric rule: once the server has ever returned social:true for this
@@ -27,6 +34,7 @@ final class FeatureFlagStore: ObservableObject {
         // the region gate.
         if everUnlocked {
             socialEnabled = true
+            hasConfirmedSocial = true
         }
     }
 
@@ -77,6 +85,7 @@ final class FeatureFlagStore: ObservableObject {
                     socialEnabled = false
                 }
                 // else: previously unlocked — ignore server-side false.
+                hasConfirmedSocial = true
             }
         } catch {
             #if DEBUG

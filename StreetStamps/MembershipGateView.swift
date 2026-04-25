@@ -148,38 +148,49 @@ struct MembershipGateView: View {
         items.append(("paintpalette.fill", "membership_benefit_map"))
         items.append(("square.and.arrow.up.fill", "membership_benefit_gpx"))
         items.append(("bag.fill", "membership_benefit_equipment_coins"))
-        items.append(("sparkles", "membership_benefit_more_features"))
 
-        return LazyVGrid(
-            columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
-            spacing: 10
-        ) {
-            ForEach(items, id: \.key) { item in
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(FigmaTheme.primary)
-                        .frame(width: 18, height: 18)
-                        .background(FigmaTheme.primary.opacity(0.12))
-                        .clipShape(Circle())
+        return VStack(spacing: 10) {
+            LazyVGrid(
+                columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
+                spacing: 10
+            ) {
+                ForEach(items, id: \.key) { item in
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(FigmaTheme.primary)
+                            .frame(width: 18, height: 18)
+                            .background(FigmaTheme.primary.opacity(0.12))
+                            .clipShape(Circle())
 
-                    Text(L10n.t(item.key))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(FigmaTheme.text)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
+                        Text(L10n.t(item.key))
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(FigmaTheme.text)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
 
-                    Spacer(minLength: 0)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 10)
+                    .background(FigmaTheme.card)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(FigmaTheme.border, lineWidth: 1)
+                    )
                 }
-                .padding(.vertical, 8)
-                .padding(.horizontal, 10)
-                .background(FigmaTheme.card)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(FigmaTheme.border, lineWidth: 1)
-                )
             }
+
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 11))
+                    .foregroundColor(FigmaTheme.primary.opacity(0.7))
+                Text(L10n.t("membership_benefit_more_features"))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(FigmaTheme.subtext)
+            }
+            .padding(.top, 4)
         }
     }
 

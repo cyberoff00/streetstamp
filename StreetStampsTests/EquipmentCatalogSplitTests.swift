@@ -41,14 +41,14 @@ final class EquipmentCatalogSplitTests: XCTestCase {
         let glasses = try XCTUnwrap(catalog.categories.first(where: { $0.id == "glass" }))
         let accessories = try XCTUnwrap(catalog.categories.first(where: { $0.id == "accessory" }))
 
-        XCTAssertEqual(hats.items.dropFirst().first?.id, "hat_001")
-        XCTAssertEqual(hats.items.dropFirst().first?.images.front, "front_hat001")
+        XCTAssertEqual(hats.items.dropFirst().first?.id, "hat_002")
+        XCTAssertEqual(hats.items.dropFirst().first?.images.front, "front_hat002")
 
         XCTAssertEqual(glasses.items.dropFirst().first?.id, "glass_001")
         XCTAssertEqual(glasses.items.dropFirst().first?.images.front, "front_glass001")
 
-        XCTAssertEqual(accessories.items.dropFirst().first?.id, "acc_001")
-        XCTAssertEqual(accessories.items.dropFirst().first?.images.front, "front_ac001")
+        XCTAssertEqual(accessories.items.dropFirst().first?.id, "acc_027")
+        XCTAssertEqual(accessories.items.dropFirst().first?.images.front, "front_hat001")
     }
 
     func test_avatarCatalogIncludesImportedFrontAssetsInMatchingCategories() throws {
@@ -117,8 +117,8 @@ final class EquipmentCatalogSplitTests: XCTestCase {
         XCTAssertEqual(under.items.last?.images.front, "front_under007")
         XCTAssertEqual(pats.items.last?.id, "pat_007")
         XCTAssertEqual(pats.items.last?.images.front, "front_pat007")
-        XCTAssertEqual(accessories.items.last?.id, "acc_012")
-        XCTAssertEqual(accessories.items.last?.images.front, "front_ac013")
+        XCTAssertEqual(accessories.items.last?.id, "acc_001")
+        XCTAssertEqual(accessories.items.last?.images.front, "front_ac001")
     }
 
     func test_equipmentCategoryIconsMapHatGlassAndAccessoryToDedicatedAssets() {

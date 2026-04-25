@@ -54,8 +54,8 @@ enum GearPricingConfig {
         case "accessory":
             return firstN(6, of: visibleItems)
         case "pat":
-            // No free pet items by default. Change here if needed.
-            return []
+            // pat_014 is the default equipped pet and must be free.
+            return ["pat_014"]
         case "shoes":
             return firstN(visibleItems.count, of: visibleItems) // all free for now
         default:

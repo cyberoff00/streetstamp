@@ -55,6 +55,8 @@
 "auth_sign_in_lower" = "Sign in";
 "auth_sign_in_subtitle" = "Enter your credentials to continue";
 "auth_sign_up" = "SIGN UP";
+"auth_continue_with_apple" = "Continuar con Apple";
+"auth_continue_with_email" = "Continuar con correo";
 "avatar_placeholder_back" = "ATRÁS";
 "back" = "Atrás";
 "backend_base_url_placeholder" = "API_BASE_URL (for example https://api.example.com)";
@@ -148,6 +150,7 @@
 "equipment_accessory" = "Accesorios";
 "equipment_apply_try_on" = "Apply Try-on";
 "equipment_buy_all_and_apply" = "Buy all and apply";
+"equipment_buy_and_apply_format" = "Comprar y aplicar · %d";
 "equipment_buy_short" = "COMPRAR %d";
 "equipment_camera" = "CAMERA";
 "equipment_coins_added_format" = "+%d coins";
@@ -565,7 +568,7 @@
 "profile_sending" = "Sending...";
 "profile_setup_avatar_hint" = "Explore more in Equipment later.";
 "profile_setup_avatar_title" = "SET YOUR STARTING LOOK";
-"profile_setup_confirm" = "ENTER STREETSTAMPS";
+"profile_setup_confirm" = "ENTER WORLDO";
 "profile_setup_edit_look" = "EDIT MY LOOK";
 "profile_setup_nickname_hint" = "Nicknames are unique now, so pick one that feels like you.";
 "profile_setup_nickname_label" = "NICKNAME";
@@ -573,7 +576,7 @@
 "profile_setup_ready_body" = "We'll save this nickname and outfit to your account so your friends see the same traveler everywhere.";
 "profile_setup_ready_title" = "One last step";
 "profile_setup_skip" = "SKIP";
-"profile_setup_subtitle" = "Pick your look and claim a nickname before you enter StreetStamps.";
+"profile_setup_subtitle" = "Pick your look and claim a nickname before you enter Worldo.";
 "profile_setup_title" = "SET UP YOUR TRAVELER";
 "profile_share_card" = "Share Card";
 "profile_showcase" = "Showcase";
@@ -975,7 +978,7 @@
 "friends_input_exclusive_id_hint" = "Ingresa el ID exclusivo del amigo (ej: @alice)";
 "friends_input_invite_code_hint" = "Ingresa el código de invitación (A1B2C3D4)";
 "friends_input_qr_token_hint" = "Pega el token QR o el enlace";
-"friends_qr_invalid_content" = "No se pudo reconocer el contenido del QR. Verifica que sea un código/enlace de invitación de StreetStamps.";
+"friends_qr_invalid_content" = "No se pudo reconocer el contenido del QR. Verifica que sea un código/enlace de invitación de Worldo.";
 "friends_qr_recognized" = "Invitación reconocida. Toca \"Enviar solicitud de amistad\".";
 "friends_qr_send_request" = "Enviar solicitud de amistad";
 "friends_qr_sending" = "Enviando…";
@@ -1098,3 +1101,4 @@
 "city_empty_title" = "Aún no hay tarjetas";
 "city_empty_desc" = "Inicia un viaje para desbloquear ciudades,\no importa desde tus fotos arriba a la derecha";
 "postcard_no_city_hint" = "Inicia un viaje para desbloquear ciudades y obtener la oportunidad de enviar postales desde cada ciudad";
+"network_unstable_retrying" = "Red inestable, reintentando…";

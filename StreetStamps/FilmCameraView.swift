@@ -42,6 +42,8 @@ struct FilmCameraView: View {
     @State private var showReview = false
     @State private var shutterScale: CGFloat = 1.0
     @State private var filmCounter: Int = Int.random(in: 1...24)
+    @State private var pinchBaseZoom: CGFloat? = nil
+    @GestureState private var isPinching: Bool = false
 
     // Camera body color palette
     private let bodyColor = Color(red: 0.09, green: 0.09, blue: 0.10)
@@ -127,12 +129,29 @@ struct FilmCameraView: View {
                 if selectedPreset.showsFilmFrame {
                     filmFrameBorder(width: viewfinderW, height: viewfinderH)
                 }
+
+                zoomIndicator
+                    .frame(width: viewfinderW, height: viewfinderH, alignment: .top)
+                    .allowsHitTesting(false)
             }
             .frame(width: viewfinderW, height: viewfinderH)
             .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 3, style: .continuous)
                     .stroke(Color.black.opacity(0.8), lineWidth: 1.5)
+            )
+            .contentShape(Rectangle())
+            .gesture(
+                MagnificationGesture()
+                    .updating($isPinching) { _, state, _ in state = true }
+                    .onChanged { value in
+                        let base = pinchBaseZoom ?? camera.zoomFactor
+                        if pinchBaseZoom == nil { pinchBaseZoom = camera.zoomFactor }
+                        camera.setZoom(base * value)
+                    }
+                    .onEnded { _ in
+                        pinchBaseZoom = nil
+                    }
             )
             .padding(.horizontal, viewfinderPadH)
 
@@ -211,6 +230,25 @@ struct FilmCameraView: View {
                 )
                 .frame(height: 1)
         }
+    }
+
+    // =====================================================
+    // MARK: - Zoom Indicator
+    // =====================================================
+
+    private var zoomIndicator: some View {
+        let visible = isPinching || camera.zoomFactor > 1.05
+        return Text(String(format: "%.1f×", camera.zoomFactor))
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .tracking(1)
+            .foregroundColor(amber)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(Color.black.opacity(0.55))
+            .clipShape(Capsule())
+            .padding(.top, 10)
+            .opacity(visible ? 1 : 0)
+            .animation(.easeInOut(duration: 0.18), value: visible)
     }
 
     // =====================================================
@@ -624,7 +662,9 @@ final class FilmCameraEngine: NSObject, ObservableObject {
     @Published var flashEnabled = false
     @Published var isUsingFrontCamera = false
     @Published var isSessionReady = false
+    @Published var zoomFactor: CGFloat = 1.0
 
+    private let zoomCeiling: CGFloat = 5.0
     private var currentDevice: AVCaptureDevice?
     private var photoOutput = AVCapturePhotoOutput()
     private var captureCompletion: ((UIImage?) -> Void)?
@@ -692,7 +732,32 @@ final class FilmCameraEngine: NSObject, ObservableObject {
             }
 
             self.captureSession.commitConfiguration()
-            DispatchQueue.main.async { self.isUsingFrontCamera = wantFront }
+            self.applyZoomLocked(1.0)
+            DispatchQueue.main.async {
+                self.isUsingFrontCamera = wantFront
+                self.zoomFactor = 1.0
+            }
+        }
+    }
+
+    func setZoom(_ raw: CGFloat) {
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            self.applyZoomLocked(raw)
+        }
+    }
+
+    private func applyZoomLocked(_ raw: CGFloat) {
+        guard let device = currentDevice else { return }
+        let maxAllowed = min(device.activeFormat.videoMaxZoomFactor, zoomCeiling)
+        let clamped = max(1.0, min(raw, maxAllowed))
+        do {
+            try device.lockForConfiguration()
+            device.videoZoomFactor = clamped
+            device.unlockForConfiguration()
+            DispatchQueue.main.async { self.zoomFactor = clamped }
+        } catch {
+            // Ignore — zoom is a non-critical enhancement.
         }
     }
 

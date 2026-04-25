@@ -27,6 +27,7 @@ struct PostcardInboxView: View {
     @State private var pendingFocusMessageID: String?
     @State private var isRefreshing = false
     @State private var showComposer = false
+    @StateObject private var retryBanner = RetryBannerCoordinator()
     private let focusMessageID: String?
     private let friendID: String?
     private let friendName: String?
@@ -128,6 +129,7 @@ struct PostcardInboxView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
+        .networkRetryBanner(isPresented: retryBanner.isShowing)
         .fullScreenCover(isPresented: $showComposer) {
             NavigationStack {
                 PostcardComposerView(
@@ -346,7 +348,16 @@ struct PostcardInboxView: View {
         guard !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false }
-        await postcardCenter.refreshFromBackend(token: sessionStore.currentAccessToken)
+        let token = sessionStore.currentAccessToken
+        guard let token, !token.isEmpty else { return }
+
+        retryBanner.beginOperation()
+        await postcardCenter.refreshFromBackend(token: token)
+        if postcardCenter.lastSyncError == nil {
+            retryBanner.operationSucceeded()
+        } else {
+            retryBanner.operationFailed()
+        }
     }
 
     private func statusTone(for status: PostcardDraftStatus) -> Color {

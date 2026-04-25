@@ -344,6 +344,8 @@
 "auth_sign_in_lower" = "登录";
 "auth_sign_in_subtitle" = "输入账号信息继续";
 "auth_sign_up" = "注册";
+"auth_continue_with_apple" = "使用 Apple 继续";
+"auth_continue_with_email" = "使用邮箱继续";
 "cities_title" = "城市";
 "clear" = "清空";
 "coming_soon_message" = "%@ 暂不可用。";
@@ -661,6 +663,7 @@
 "equipment_unowned_items" = "未购买装备";
 "equipment_total_price_format" = "总价 %d";
 "equipment_buy_all_and_apply" = "一键购买并应用";
+"equipment_buy_and_apply_format" = "购买并应用 · %d";
 "equipment_purchased_and_applied" = "已购买并应用";
 "equipment_coins_label" = "金币";
 "equipment_iap_loading_hint" = "正在加载商品...";
@@ -708,7 +711,7 @@
 "profile_name_empty" = "昵称不能为空";
 "profile_name_updated" = "昵称已更新";
 "profile_setup_title" = "设置你的初始旅行形象";
-"profile_setup_subtitle" = "先换好造型，再取一个昵称，然后进入 StreetStamps。";
+"profile_setup_subtitle" = "先换好造型，再取一个昵称，然后进入 Worldo。";
 "profile_setup_avatar_title" = "设置初始形象";
 "profile_setup_avatar_hint" = "后续可在装备页探索更多";
 "profile_setup_edit_look" = "去换装";
@@ -1003,7 +1006,7 @@
 "friends_qr_upload_photo" = "上传二维码";
 "friends_qr_sending" = "发送中…";
 "friends_qr_send_request" = "发送好友申请";
-"friends_qr_invalid_content" = "二维码内容无法识别，请确认对方分享的是 StreetStamps 邀请码/链接。";
+"friends_qr_invalid_content" = "二维码内容无法识别，请确认对方分享的是 Worldo 邀请码/链接。";
 "friends_qr_recognized" = "已识别邀请信息，点击「发送好友申请」即可。";
 "friends_input_invite_code_hint" = "输入邀请码（A1B2C3D4）";
 "friends_input_exclusive_id_hint" = "输入好友专属ID（示例：@alice）";
@@ -1058,7 +1061,7 @@
 "membership_page_title" = "Premium";
 "membership_hero_title" = "解锁你的旅程";
 "membership_your_benefits" = "你的权益";
-"membership_indie_note" = "你的订阅直接支持独立开发者。无广告。不出售任何数据。";
+"membership_indie_note" = "支持一位独立女开发者打造最佳产品体验。无广告。不出售任何数据。";
 "membership_status_active" = "Premium 已激活";
 "membership_status_free" = "免费版";
 "membership_upgrade_subtitle" = "解锁全部功能，畅享旅途记录。";
@@ -1205,8 +1208,8 @@
 "faq_a_track_accuracy" = "GPS 精度取决于你所处的环境。高楼密集区、隧道和室内会削弱 GPS 信号，导致定位漂移和轨迹偏移。在 GPS 信号丢失的地方（如地铁、隧道、建筑物内），Worldo 的轨迹会出现跳点，连成直线或显示为虚线，这是所有 GPS 应用的正常现象。此外，手机的性能状态和电量也会影响 GPS 芯片的工作精度。建议将定位权限设为「始终允许」，尽量在开阔区域使用。运动模式下 GPS 采样更精确，轨迹会更准确，但在信号盲区仍无法完全避免。";
 "faq_q_battery" = "Worldo 耗电吗？";
 "faq_a_battery" = "Worldo 在耗电方面做了大量优化。运动模式为了 GPS 和轨迹更精确，相对较为耗电；但 Worldo 默认使用日常模式，比同类轨迹软件省电很多。不追踪旅程时，后台追踪使用低精度定位更新，耗电量极小。你还可以在设置中进一步调整精度以节省电量。";
-"faq_q_sport_vs_daily" = "运动模式和日常模式有什么区别？";
-"faq_a_sport_vs_daily" = "运动模式以高精度录制，带路线平滑处理 — 适合跑步、骑行或徒步等需要精确轨迹的场景。日常模式为省电优化，会根据出行方式自动调整 — 适合通勤或全天记录等更看重续航的场景。";
+"faq_q_route_recording" = "我的路线会被如何记录？";
+"faq_a_route_recording" = "Worldo 通过 GPS 采样并结合多级过滤（抖动抑制、跳点检测、信号中断处理）来记录你的路线，再绘制到地图上。开启旅程时你可以选择记录模式：\n• 运动模式 — 高精度 GPS 采样 + 自适应路线平滑，精度对齐专业运动软件，适合跑步、骑行、徒步等注重轨迹细节的场景。\n• 日常模式 — 省电优化，更偏向长时间旅程探索。会根据出行方式（步行、公共交通、驾车等）自动调整采样，适合全天出行、通勤等更看重续航而非精细细节的场景。";
 "faq_q_data_storage" = "我的数据存在哪里？";
 "faq_a_data_storage" = "所有数据首先存储在本地设备上。公开旅程登录账号后会通过服务器同步，方便好友查看你的足迹；私密旅程、记忆照片和后台追踪数据仅存在本地，可通过 iCloud 备份。你的数据会被加密保护，不会被用作任何商业用途。";
 "faq_q_phone_migration" = "我要换手机，数据怎么办？";
@@ -1266,3 +1269,4 @@
 "city_empty_title" = "暂无城市卡";
 "city_empty_desc" = "开启旅程解锁城市，\n或右上角通过相册导入";
 "postcard_no_city_hint" = "开启旅程解锁城市，才能获得对应城市的明信片发送机会";
+"network_unstable_retrying" = "网络不稳，正在重试";

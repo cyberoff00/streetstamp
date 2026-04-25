@@ -81,6 +81,47 @@ final class LiveActivityManager: ObservableObject {
             currentPauseStartedAt = nil
         }
     }
+
+    /// Cold-start reconciliation. If the previous process was killed, any Live Activity
+    /// it started is now orphaned (sitting on the lock screen with frozen data, and with
+    /// no in-process reference). Call this exactly once on launch:
+    /// - hasOngoingJourney == true: adopt the orphan so resuming keeps the same card
+    ///   instead of stacking a second one; end any extras defensively.
+    /// - hasOngoingJourney == false: end all orphans.
+    func adoptOrEndStaleActivities(hasOngoingJourney: Bool) {
+        guard isLiveActivitySupported else { return }
+        let existing = Array(Activity<TrackingActivityAttributes>.activities)
+        guard hasOngoingJourney, let primary = existing.first else {
+            endAllStaleActivities()
+            return
+        }
+        currentActivity = primary
+        trackingStartTime = primary.attributes.startTime
+        accumulatedPausedDuration = 0
+        currentPauseStartedAt = nil
+        let lastState = primary.content.state
+        cachedDistance = lastState.distanceMeters
+        cachedIsPaused = lastState.isPaused
+        cachedMemoriesCount = lastState.memoriesCount
+        print("[LiveActivity] Adopted existing activity: \(primary.id)")
+        if existing.count > 1 {
+            Task {
+                let finalState = TrackingActivityAttributes.ContentState(
+                    distanceMeters: 0,
+                    elapsedSeconds: 0,
+                    isTracking: false,
+                    isPaused: false,
+                    memoriesCount: 0
+                )
+                for stale in existing.dropFirst() {
+                    await stale.end(
+                        ActivityContent(state: finalState, staleDate: nil),
+                        dismissalPolicy: .immediate
+                    )
+                }
+            }
+        }
+    }
     
     /// 开始 Live Activity
     func startActivity(mode: TrackingMode) {
@@ -88,12 +129,30 @@ final class LiveActivityManager: ObservableObject {
             print("[LiveActivity] Not supported on this device")
             return
         }
-        
-        // 如果已有活动，先结束
-        if currentActivity != nil {
-            endActivity()
+
+        // Reuse an adopted activity (from cold-start adoption) instead of ending
+        // and re-requesting, which would briefly stack two cards on the lock screen.
+        if let existing = currentActivity {
+            accumulatedPausedDuration = 0
+            currentPauseStartedAt = nil
+            cachedIsPaused = false
+            let resumedState = TrackingActivityAttributes.ContentState(
+                distanceMeters: cachedDistance,
+                elapsedSeconds: getElapsedSeconds(),
+                isTracking: true,
+                isPaused: false,
+                memoriesCount: cachedMemoriesCount
+            )
+            Task {
+                await existing.update(
+                    ActivityContent(state: resumedState, staleDate: nil)
+                )
+            }
+            startUpdateTimer()
+            print("[LiveActivity] Reused existing activity: \(existing.id)")
+            return
         }
-        
+
         let startTime = Date()
         trackingStartTime = startTime
         accumulatedPausedDuration = 0
@@ -103,7 +162,7 @@ final class LiveActivityManager: ObservableObject {
             trackingMode: mode == .sport ? "sport" : "daily",
             startTime: startTime
         )
-        
+
         let initialState = TrackingActivityAttributes.ContentState(
             distanceMeters: 0,
             elapsedSeconds: 0,
@@ -111,7 +170,7 @@ final class LiveActivityManager: ObservableObject {
             isPaused: false,
             memoriesCount: 0
         )
-        
+
         do {
             let activity = try Activity.request(
                 attributes: attributes,

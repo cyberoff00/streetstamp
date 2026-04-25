@@ -235,14 +235,6 @@ enum SettingsInformationPresentation {
                 badgeText: nil,
                 rowHeight: 64,
                 destination: .feedback
-            ),
-            SettingsInformationRowPresentation(
-                title: L10n.t("settings_rate_app_title"),
-                icon: "star",
-                iconColor: .orange,
-                badgeText: nil,
-                rowHeight: 64,
-                destination: .rateApp
             )
         ]
     }
@@ -289,7 +281,6 @@ struct SettingsView: View {
     @State private var showAccountMessage = false
     @State private var didLoadAccountProfile = false
     @State private var showAuthSheet = false
-    @State private var authSheetMode: AuthEntryMode = .signIn
     @State private var showLogoutConfirmation = false
     @State private var showDeleteAccountConfirmation = false
     @State private var isDeletingAccount = false
@@ -304,6 +295,7 @@ struct SettingsView: View {
     @State private var showMembershipGate: MembershipGatedFeature? = nil
     @State private var detailMessage = ""
     @State private var showDetailMessage = false
+    @State private var isRevertingICloudToggleForGate = false
 
     private enum SettingsNavDest: String, Identifiable {
         case subscription, dataMigration, gpxImport
@@ -380,14 +372,13 @@ struct SettingsView: View {
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 24) {
-                accountSection
+                if (FeatureFlagStore.shared.socialEnabled && FeatureFlagStore.shared.hasConfirmedSocial) || sessionStore.isLoggedIn {
+                    accountSection
+                }
                 subscriptionSection
                 utilitiesSection
                 generalSection
                 infoSection
-                if sessionStore.isLoggedIn && !sessionStore.hasEmailPassword {
-                    linkEmailSection
-                }
                 if sessionStore.isLoggedIn {
                     logoutSection
                 }
@@ -449,7 +440,6 @@ struct SettingsView: View {
         .sheet(isPresented: $showAuthSheet) {
             AuthEntryView(
                 onContinueGuest: { showAuthSheet = false },
-                initialMode: authSheetMode,
                 onAuthenticated: {
                     Task { await refreshAccountIfPossible(force: true) }
                     showAuthSheet = false
@@ -467,17 +457,17 @@ struct SettingsView: View {
             NavigationStack {
                 settingsNavDestView(for: dest)
             }
-            .onChange(of: iCloudSyncEnabled) { _, enabled in
-                Task { await handleICloudSyncToggleChanged(enabled: enabled) }
-            }
-            .sheet(item: $showMembershipGate) { feature in
-                MembershipGateView(feature: feature)
-            }
-            .alert(L10n.t("prompt"), isPresented: $showDetailMessage) {
-                Button(L10n.t("ok"), role: .cancel) {}
-            } message: {
-                Text(detailMessage)
-            }
+        }
+        .onChange(of: iCloudSyncEnabled) { _, enabled in
+            Task { await handleICloudSyncToggleChanged(enabled: enabled) }
+        }
+        .sheet(item: $showMembershipGate) { feature in
+            MembershipGateView(feature: feature)
+        }
+        .alert(L10n.t("prompt"), isPresented: $showDetailMessage) {
+            Button(L10n.t("ok"), role: .cancel) {}
+        } message: {
+            Text(detailMessage)
         }
     }
 
@@ -782,7 +772,6 @@ struct SettingsView: View {
         Group {
             if accountCardPresentation.style == .guest {
                 Button {
-                    authSheetMode = .signIn
                     showAuthSheet = true
                 } label: {
                     guestAccountCard(presentation: accountCardPresentation)
@@ -1140,7 +1129,7 @@ struct SettingsView: View {
                 .truncationMode(.tail)
 
             accountInfoRow(label: L10n.t("account_exclusive_id_label"), value: exclusiveIDDraft.isEmpty ? "--" : exclusiveIDDraft)
-            accountInfoRow(label: L10n.t("account_email_label"), value: accountEmail.isEmpty ? L10n.t("not_linked") : accountEmail)
+            emailInfoRow
 
             Divider().overlay(Color.black.opacity(0.08))
 
@@ -1172,6 +1161,55 @@ struct SettingsView: View {
                 .truncationMode(.middle)
         }
         .padding(.vertical, 2)
+    }
+
+    private var emailInfoRow: some View {
+        #if DEBUG
+        // Flip to true to force the link-email badge on in DEBUG builds for UI verification.
+        let debugAlwaysShowLinkBadge = true
+        let showsLinkBadge = sessionStore.isLoggedIn
+            && (debugAlwaysShowLinkBadge
+                || (!sessionStore.hasEmailPassword && sessionStore.hasEmailPasswordEverSynced))
+        #else
+        let showsLinkBadge = sessionStore.isLoggedIn
+            && !sessionStore.hasEmailPassword
+            && sessionStore.hasEmailPasswordEverSynced
+        #endif
+        let valueText = accountEmail.isEmpty ? L10n.t("not_linked") : accountEmail
+        return Group {
+            if showsLinkBadge {
+                Button {
+                    showLinkEmailSheet = true
+                } label: {
+                    emailInfoRowContent(valueText: valueText, showsBadge: true)
+                }
+                .buttonStyle(.plain)
+            } else {
+                emailInfoRowContent(valueText: valueText, showsBadge: false)
+            }
+        }
+    }
+
+    private func emailInfoRowContent(valueText: String, showsBadge: Bool) -> some View {
+        HStack(spacing: 8) {
+            Text(L10n.t("account_email_label"))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(FigmaTheme.subtext)
+            Spacer(minLength: 8)
+            Text(valueText)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(FigmaTheme.text)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if showsBadge {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.orange)
+                    .accessibilityLabel(L10n.t("link_email_panel_title"))
+            }
+        }
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
     }
 
     private var levelRulesSection: some View {
@@ -1277,37 +1315,6 @@ struct SettingsView: View {
                     .buttonStyle(.plain)
                 }
             }
-        }
-    }
-
-    private var linkEmailSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Button {
-                showLinkEmailSheet = true
-            } label: {
-                HStack(spacing: 14) {
-                    Image(systemName: "envelope.badge.shield.half.filled")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundColor(.orange)
-                        .frame(width: 20)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(L10n.t("link_email_panel_title"))
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(FigmaTheme.text)
-                        Text(L10n.t("link_email_panel_subtitle"))
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(FigmaTheme.subtext)
-                    }
-
-                    Spacer(minLength: 8)
-                }
-                .padding(.horizontal, 20)
-                .frame(minHeight: 68)
-                .figmaSurfaceCard(radius: 34)
-                .appFullSurfaceTapTarget(.roundedRect(34))
-            }
-            .buttonStyle(.plain)
         }
     }
 
@@ -1678,7 +1685,7 @@ struct SettingsView: View {
         let deviceModel = UIDevice.current.model
         let subject = String(format: L10n.t("feedback_email_subject"), appVersion)
         let body = String(format: L10n.t("feedback_email_body"), deviceModel, systemVersion, appVersion)
-        let mailto = "feedback@worldo.app"  // TODO: replace with actual email
+        let mailto = "yinterestingy@gmail.com"
         var components = URLComponents(string: "mailto:\(mailto)")!
         components.queryItems = [
             URLQueryItem(name: "subject", value: subject),
@@ -1701,7 +1708,14 @@ struct SettingsView: View {
     }
 
     private func handleICloudSyncToggleChanged(enabled: Bool) async {
+        // Second-pass onChange triggered by the revert below. Swallow it so the
+        // user only sees the membership gate, not a spurious "disabled" alert.
+        if isRevertingICloudToggleForGate {
+            isRevertingICloudToggleForGate = false
+            return
+        }
         if enabled && !MembershipStore.shared.iCloudSyncEnabled {
+            isRevertingICloudToggleForGate = true
             iCloudSyncEnabled = false
             showMembershipGate = .iCloudSync
             return
@@ -1862,7 +1876,7 @@ struct SettingsView: View {
         defer { isDeletingAccount = false }
         do {
             try await BackendAPIClient.shared.deleteAccount(token: token)
-            sessionStore.logoutToGuest()
+            sessionStore.logoutToGuest(promptReauthenticationOnNextLaunch: false)
             displayNameDraft = ""
             displayNameInput = ""
             exclusiveIDDraft = ""

@@ -348,6 +348,8 @@
 "auth_sign_in_lower" = "Sign in";
 "auth_sign_in_subtitle" = "Enter your credentials to continue";
 "auth_sign_up" = "SIGN UP";
+"auth_continue_with_apple" = "Continue with Apple";
+"auth_continue_with_email" = "Continue with Email";
 "cities_title" = "Cities";
 "clear" = "Clear";
 "coming_soon_message" = "%@ is not available yet.";
@@ -672,6 +674,7 @@
 "equipment_unowned_items" = "Unowned Items";
 "equipment_total_price_format" = "Total %d";
 "equipment_buy_all_and_apply" = "Buy all and apply";
+"equipment_buy_and_apply_format" = "Buy & Apply · %d";
 "equipment_purchased_and_applied" = "Purchased and applied";
 "equipment_coins_label" = "coins";
 "equipment_iap_loading_hint" = "Loading store products...";
@@ -719,7 +722,7 @@
 "profile_name_empty" = "Display name cannot be empty";
 "profile_name_updated" = "Display name updated";
 "profile_setup_title" = "SET UP YOUR TRAVELER";
-"profile_setup_subtitle" = "Pick your look and claim a nickname before you enter StreetStamps.";
+"profile_setup_subtitle" = "Pick your look and claim a nickname before you enter Worldo.";
 "profile_setup_avatar_title" = "SET YOUR STARTING LOOK";
 "profile_setup_avatar_hint" = "Explore more in Equipment later.";
 "profile_setup_edit_look" = "EDIT MY LOOK";
@@ -738,7 +741,7 @@
 "profile_setup_ready_title" = "One last step";
 "profile_setup_ready_body" = "We'll save this nickname and outfit to your account so your friends see the same traveler everywhere.";
 "profile_setup_skip" = "SKIP";
-"profile_setup_confirm" = "ENTER STREETSTAMPS";
+"profile_setup_confirm" = "ENTER WORLDO";
 "account_exclusive_id_empty" = "Exclusive ID cannot be empty";
 "account_exclusive_id_rules" = "Exclusive ID only supports letters, numbers, and underscores";
 "account_exclusive_id_updated" = "Exclusive ID updated";
@@ -1048,7 +1051,7 @@
 "membership_page_title" = "Premium";
 "membership_hero_title" = "Elevate Your Journey";
 "membership_your_benefits" = "YOUR BENEFITS";
-"membership_indie_note" = "Your subscription directly supports independent development. No ads. No data sold. Ever.";
+"membership_indie_note" = "Supports a solo female developer pursuing the best product experience. No ads. No data sold.";
 "membership_status_active" = "Premium Active";
 "membership_status_free" = "Free Plan";
 "membership_upgrade_subtitle" = "Unlock all features and get the most out of your journeys.";
@@ -1098,7 +1101,7 @@
 "friends_input_exclusive_id_hint" = "Enter friend's exclusive ID (e.g. @alice)";
 "friends_input_invite_code_hint" = "Enter invite code (A1B2C3D4)";
 "friends_input_qr_token_hint" = "Paste QR code token or link";
-"friends_qr_invalid_content" = "Could not recognize the QR code content. Please confirm it is a StreetStamps invite code/link.";
+"friends_qr_invalid_content" = "Could not recognize the QR code content. Please confirm it is a Worldo invite code/link.";
 "friends_qr_recognized" = "Invite information recognized. Tap \"Send Friend Request\" to proceed.";
 "friends_qr_send_request" = "Send Friend Request";
 "friends_qr_sending" = "Sending…";
@@ -1211,8 +1214,8 @@
 "faq_a_track_accuracy" = "GPS accuracy depends on your environment. Tall buildings, tunnels, and indoor areas can weaken GPS signals, causing position drift. Where GPS signal is lost (subways, tunnels, buildings), the route may show jump points connected as straight lines or dashed segments — this is normal behavior for all GPS apps. Your phone's battery level and performance state can also affect GPS chip accuracy. For best results, make sure Location Services is set to \"Always\" and try to stay in open areas. Sport mode uses higher precision GPS sampling for better accuracy, but cannot fully prevent this in signal-dead zones.";
 "faq_q_battery" = "Does Worldo drain my battery?";
 "faq_a_battery" = "Worldo has been heavily optimized to minimize battery usage. Sport mode consumes more battery for higher GPS precision and route accuracy. However, Worldo defaults to Daily mode, which is significantly more efficient than similar tracking apps. When not actively tracking, background tracking uses minimal battery via low-precision location updates. You can further adjust precision in Settings to save even more battery.";
-"faq_q_sport_vs_daily" = "What's the difference between Sport and Daily mode?";
-"faq_a_sport_vs_daily" = "Sport mode records at high precision with route smoothing — ideal for running, cycling, or hiking where route detail matters. Daily mode is battery-optimized and auto-adjusts based on your travel method — best for commuting or all-day tracking where battery life is more important than route precision.";
+"faq_q_route_recording" = "How does Worldo record my route?";
+"faq_a_route_recording" = "Worldo samples your GPS position and runs it through multi-stage filtering (jitter suppression, jump detection, signal-gap handling) before drawing it on the map. When you start a journey, you can pick the recording mode:\n• Sport mode — high-precision GPS sampling with adaptive route smoothing. Accuracy is tuned to align with dedicated professional sports apps, so it's the right choice for running, cycling, hiking, or any activity where route detail matters.\n• Daily mode — battery-optimized and built for long-duration travel and exploration. It auto-adjusts sampling based on your travel method (walking, transit, driving, etc.), making it ideal for full-day trips, commutes, and everyday tracking where endurance outweighs fine detail.";
 "faq_q_data_storage" = "Where is my data stored?";
 "faq_a_data_storage" = "All data is stored locally on your device first. Public journeys sync through Worldo's servers when you sign in, so friends can see your footprints. Private journeys, memory photos, and background tracking data stay on-device and can be backed up via iCloud. Your data is encrypted and never used for any commercial purposes.";
 "faq_q_phone_migration" = "I'm switching phones — what about my data?";
@@ -1272,3 +1275,4 @@
 "city_empty_title" = "No city cards yet";
 "city_empty_desc" = "Start a journey to unlock cities,\nor import from photos via top-right";
 "postcard_no_city_hint" = "Start a journey to unlock cities and earn postcard opportunities for each city";
+"network_unstable_retrying" = "Network unstable, retrying...";

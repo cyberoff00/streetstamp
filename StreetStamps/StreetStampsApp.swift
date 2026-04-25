@@ -237,14 +237,29 @@ struct StreetStampsApp: App {
 
     @MainActor
     private func maybeShowFirstAuthPromptIfNeeded() {
+        guard hasSeenIntroSlides, !sessionStore.isLoggedIn else { return }
+        // Only prompt when we have positive confirmation that social is enabled
+        // for this install. That covers three cases: (1) gated regions like CN
+        // where the server says no and we keep the user in guest mode, (2) the
+        // offline cold start where `socialEnabled` still sits at the default
+        // `true` but no server answer has arrived — login wouldn't work over
+        // a dead network anyway, and (3) debug overrides. When flags later
+        // confirm, `.onReceive($hasConfirmedSocial)` re-runs this method.
+        guard FeatureFlagStore.shared.hasConfirmedSocial else { return }
+        guard FeatureFlagStore.shared.socialEnabled else { return }
+
         let firstPromptKey = "streetstamps.auth_entry_shown.v1"
-        if hasSeenIntroSlides &&
-            !sessionStore.isLoggedIn &&
-            !UserDefaults.standard.bool(forKey: firstPromptKey) {
+        let isFirstLaunchPrompt = !UserDefaults.standard.bool(forKey: firstPromptKey)
+        let hasPendingReauthPrompt = sessionStore.hasPendingReauthPrompt
+
+        guard isFirstLaunchPrompt || hasPendingReauthPrompt else { return }
+
+        if isFirstLaunchPrompt {
             UserDefaults.standard.set(true, forKey: firstPromptKey)
-            showAuthEntry = true
         }
+        showAuthEntry = true
     }
+
 
     init() {
         BackendConfig.resetToDefault()
@@ -330,7 +345,10 @@ struct StreetStampsApp: App {
             }
             .fullScreenCover(isPresented: $showAuthEntry) {
                 AuthEntryView(
-                    onContinueGuest: { showAuthEntry = false },
+                    onContinueGuest: {
+                        sessionStore.clearPendingReauthPrompt()
+                        showAuthEntry = false
+                    },
                     onAuthenticated: { showAuthEntry = false }
                 )
                 .environmentObject(sessionStore)
@@ -392,9 +410,8 @@ struct StreetStampsApp: App {
                 async let cityCacheLoad: () = cityCache.loadInitialDataAsync()
 
                 await journeyLoad
-                if !journeyStore.journeys.contains(where: { $0.endTime == nil }) {
-                    LiveActivityManager.shared.endAllStaleActivities()
-                }
+                let hasOngoing = journeyStore.journeys.contains(where: { $0.endTime == nil })
+                LiveActivityManager.shared.adoptOrEndStaleActivities(hasOngoingJourney: hasOngoing)
                 setupAutoEndHandler()
                 setupBackgroundPersistHandler()
                 recoverUnconfirmedJourneyPublishes()
@@ -436,7 +453,9 @@ struct StreetStampsApp: App {
                     countryISO2: lifelogStore.countryISO2 ?? locationHub.countryISO2
                 )
 
-                // Phase 3: Deferred non-critical services
+                // Phase 3: Deferred non-critical services. The auth prompt check
+                // is a no-op if feature flags haven't resolved yet; the
+                // .onReceive($hasFetched) handler re-runs it once they do.
                 Task { @MainActor in
                     await Task.yield()
                     VoiceBroadcastService.shared.start()
@@ -477,6 +496,10 @@ struct StreetStampsApp: App {
         appContentWithStartupTasks
             .onChange(of: hasSeenIntroSlides) { _, seen in
                 guard seen else { return }
+                maybeShowFirstAuthPromptIfNeeded()
+            }
+            .onReceive(FeatureFlagStore.shared.$hasConfirmedSocial) { confirmed in
+                guard confirmed else { return }
                 maybeShowFirstAuthPromptIfNeeded()
             }
             .onChange(of: sessionStore.activeLocalProfileID) { oldUserID, uid in

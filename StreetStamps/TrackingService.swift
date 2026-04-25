@@ -1238,7 +1238,15 @@ final class TrackingService: ObservableObject {
         let isSignalRecoveryGap = shouldTreatAsSignalRecoveryGap(for: loc, minDistance: minD)
 
         // Hard gaps (time-only gaps should not create dashed segments if the user didn't move much)
-        if dt >= gapSec && d2d >= max(25, minD * 2.0) { isGapLike = true }
+        // Distance threshold decoupled from minD: only drive and flight get larger thresholds,
+        // because their speed signatures are distinct enough that mode detection is reliable.
+        let gapDistanceThresholdForMode: Double
+        switch mode {
+        case .drive, .motorcycle: gapDistanceThresholdForMode = 1000
+        case .flight:             gapDistanceThresholdForMode = 2000
+        default:                  gapDistanceThresholdForMode = 200
+        }
+        if dt >= gapSec && d2d >= gapDistanceThresholdForMode { isGapLike = true }
         if d2d  >= gapDist { isGapLike = true }
         if isSignalRecoveryGap { isGapLike = true }
 

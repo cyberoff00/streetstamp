@@ -26,6 +26,11 @@ private enum AuthField: Hashable {
     case confirmPassword
 }
 
+private enum AuthStage {
+    case landing
+    case emailForm
+}
+
 struct AuthEntryView: View {
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var deepLinkStore: AppDeepLinkStore
@@ -35,6 +40,7 @@ struct AuthEntryView: View {
     let initialMode: AuthEntryMode?
     let onAuthenticated: (() -> Void)?
 
+    @State private var stage: AuthStage = .landing
     @State private var mode: AuthEntryMode = .signIn
     @State private var fullName = ""
     @State private var email = ""
@@ -68,27 +74,19 @@ struct AuthEntryView: View {
 
     var body: some View {
         ZStack {
-            gridBackground
+            brandBackground
                 .ignoresSafeArea()
 
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 22) {
-                    titleBlock
-                    formBlock
-                    authPrimaryButton
-                    switchModeRow
-                    if mode != .resetPassword {
-                        socialDivider
-                        socialButtons
-                        guestButton
-                    }
+            Group {
+                switch stage {
+                case .landing:
+                    landingContent
+                case .emailForm:
+                    emailFormContent
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 28)
-                .padding(.bottom, 22)
             }
+            .transition(.opacity.combined(with: .move(edge: .trailing)))
         }
-        .interactiveDismissDisabled()
         .alert(L10n.t("prompt"), isPresented: $showMessage) {
             Button(L10n.t("ok"), role: .cancel) {}
         } message: {
@@ -120,6 +118,7 @@ struct AuthEntryView: View {
         .onAppear {
             if let initialMode {
                 mode = initialMode
+                stage = .emailForm
             }
             adoptPendingPasswordResetTokenIfNeeded()
         }
@@ -129,28 +128,240 @@ struct AuthEntryView: View {
         }
     }
 
-    private var gridBackground: some View {
+    private var brandBackground: some View {
         ZStack {
-            FigmaTheme.background
+            LinearGradient(
+                colors: [
+                    Color(red: 0.99, green: 1.00, blue: 0.99),
+                    Color(red: 0.92, green: 0.97, blue: 0.94)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
 
-            GeometryReader { proxy in
-                Path { path in
-                    let spacing: CGFloat = 24
-                    var x: CGFloat = 0
-                    while x <= proxy.size.width {
-                        path.move(to: CGPoint(x: x, y: 0))
-                        path.addLine(to: CGPoint(x: x, y: proxy.size.height))
-                        x += spacing
-                    }
-                    var y: CGFloat = 0
-                    while y <= proxy.size.height {
-                        path.move(to: CGPoint(x: 0, y: y))
-                        path.addLine(to: CGPoint(x: proxy.size.width, y: y))
-                        y += spacing
+            AuthBrandMapTraces()
+                .stroke(
+                    accent.opacity(0.22),
+                    style: StrokeStyle(lineWidth: 1.2, lineCap: .round, dash: [5, 7])
+                )
+                .blendMode(.multiply)
+        }
+    }
+
+    // MARK: - Landing
+
+    private var landingContent: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 40)
+
+            landingHero
+                .padding(.horizontal, 24)
+
+            Spacer(minLength: 40)
+
+            VStack(spacing: 12) {
+                landingEmailButton
+                landingAppleButton
+                landingGuestLink
+                    .padding(.top, 8)
+            }
+            .padding(.horizontal, 24)
+
+            landingTermsFooter
+                .padding(.top, 22)
+                .padding(.bottom, 28)
+                .padding(.horizontal, 36)
+        }
+    }
+
+    private var landingHero: some View {
+        VStack(spacing: 22) {
+            brandLogoBadge
+                .padding(.top, 8)
+
+            VStack(spacing: 12) {
+                Text(L10n.t("brand_wordmark"))
+                    .font(.system(size: 44, weight: .heavy))
+                    .tracking(-1.4)
+                    .foregroundStyle(Color.black.opacity(0.9))
+
+                VStack(spacing: 2) {
+                    Text(taglineParts.primary)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.black.opacity(0.54))
+                    if let secondary = taglineParts.accent {
+                        Text(secondary)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(accent)
                     }
                 }
-                .stroke(Color.black.opacity(0.03), lineWidth: 0.7)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxWidth: 320)
+        }
+    }
+
+    private var taglineParts: (primary: String, accent: String?) {
+        let raw = L10n.t("splash_tagline")
+        if let range = raw.range(of: ". ") {
+            let primary = String(raw[..<range.upperBound]).trimmingCharacters(in: .whitespaces)
+            let rest = String(raw[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+            if !rest.isEmpty { return (primary, rest) }
+        }
+        return (raw, nil)
+    }
+
+    private var brandLogoBadge: some View {
+        ZStack {
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            accent,
+                            Color(red: 0.0, green: 182.0 / 255.0, blue: 122.0 / 255.0)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 132, height: 132)
+                .shadow(color: accent.opacity(0.38), radius: 28, x: 0, y: 18)
+                .overlay(
+                    Circle()
+                        .stroke(Color.white.opacity(0.45), lineWidth: 1)
+                )
+
+            AuthBrandWShape()
+                .stroke(
+                    Color.white,
+                    style: StrokeStyle(lineWidth: 9, lineCap: .round, lineJoin: .round)
+                )
+                .frame(width: 72, height: 72)
+        }
+    }
+
+    private var landingAppleButton: some View {
+        Button {
+            Task { await submitAppleAuth() }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "applelogo")
+                    .font(.system(size: 18, weight: .bold))
+                Text(L10n.t("auth_continue_with_apple"))
+                    .font(.system(size: 17, weight: .semibold))
+            }
+            .foregroundColor(FigmaTheme.text)
+            .frame(maxWidth: .infinity)
+            .frame(height: 56)
+            .background(Color.white)
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.06), radius: 14, x: 0, y: 6)
+            .appFullSurfaceTapTarget(.capsule)
+        }
+        .buttonStyle(CardPressButtonStyle(pressedScale: 0.985, pressedOpacity: 0.95))
+        .disabled(submitting)
+        .opacity(submitting ? 0.7 : 1.0)
+    }
+
+    private var landingEmailButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.24)) {
+                stage = .emailForm
+            }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "envelope.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                Text(L10n.t("auth_continue_with_email"))
+                    .font(.system(size: 17, weight: .semibold))
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .frame(height: 56)
+            .background(
+                LinearGradient(
+                    colors: [
+                        accent,
+                        Color(red: 0.0, green: 182.0 / 255.0, blue: 122.0 / 255.0)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .clipShape(Capsule())
+            .shadow(color: accent.opacity(0.32), radius: 18, x: 0, y: 10)
+            .appFullSurfaceTapTarget(.capsule)
+        }
+        .buttonStyle(CardPressButtonStyle(pressedScale: 0.985, pressedOpacity: 0.95))
+    }
+
+    private var landingGuestLink: some View {
+        Button {
+            showGuestNotice = true
+        } label: {
+            Text(L10n.t("continue_as_guest"))
+                .font(.system(size: 15, weight: .bold))
+                .foregroundColor(accent)
+                .padding(.vertical, 10)
+                .padding(.horizontal, 12)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var landingTermsFooter: some View {
+        Text(termsAttributedText)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundColor(.black.opacity(0.45))
+            .multilineTextAlignment(.center)
+            .tint(accent)
+    }
+
+    // MARK: - Email form stage
+
+    private var emailFormContent: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 22) {
+                emailFormHeader
+                formBlock
+                authPrimaryButton
+                switchModeRow
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 12)
+            .padding(.bottom, 22)
+        }
+    }
+
+    private var emailFormHeader: some View {
+        VStack(spacing: 18) {
+            HStack {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.24)) {
+                        clearPasswordResetDraft()
+                        mode = .signIn
+                        stage = .landing
+                    }
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(FigmaTheme.text.opacity(0.82))
+                        .frame(width: 40, height: 40)
+                        .background(Color.white.opacity(0.94))
+                        .clipShape(Circle())
+                        .overlay(
+                            Circle().stroke(Color.black.opacity(0.06), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+                Spacer()
+            }
+
+            titleBlock
         }
     }
 
@@ -330,48 +541,6 @@ struct AuthEntryView: View {
         .font(.system(size: 14, weight: .semibold))
     }
 
-    private var socialDivider: some View {
-        HStack(spacing: 16) {
-            Rectangle()
-                .fill(Color.black.opacity(0.10))
-                .frame(height: 1)
-            Text(L10n.t("or"))
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.black.opacity(0.56))
-            Rectangle()
-                .fill(Color.black.opacity(0.10))
-                .frame(height: 1)
-        }
-        .padding(.top, 2)
-    }
-
-    private var socialButtons: some View {
-        VStack(spacing: 12) {
-            socialButton(title: "Apple", iconName: "applelogo", iconColor: .black) {
-                Task { await submitAppleAuth() }
-            }
-        }
-    }
-
-    private var guestButton: some View {
-        Button {
-            showGuestNotice = true
-        } label: {
-            Text(L10n.t("continue_as_guest"))
-                .frame(maxWidth: .infinity)
-                .frame(height: 50)
-                .background(Color.clear)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 25, style: .continuous)
-                        .stroke(warm.opacity(0.5), lineWidth: 2)
-                )
-                .font(.system(size: 14, weight: .bold))
-                .foregroundColor(warm)
-                .appFullSurfaceTapTarget(.roundedRect(25))
-        }
-        .padding(.top, 6)
-    }
-
     private func fieldLabel(_ title: String) -> some View {
         Text(title)
             .font(.system(size: 12, weight: .semibold))
@@ -434,28 +603,6 @@ struct AuthEntryView: View {
             RoundedRectangle(cornerRadius: 29, style: .continuous)
                 .stroke(Color.black.opacity(0.03), lineWidth: 1)
         )
-    }
-
-    private func socialButton(title: String, iconName: String, iconColor: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: iconName)
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundColor(iconColor)
-                Text(title)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.black)
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 52)
-            .background(Color.white.opacity(0.96))
-            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(Color.black.opacity(0.04), lineWidth: 1)
-            )
-            .appFullSurfaceTapTarget(.roundedRect(26))
-        }
-        .buttonStyle(CardPressButtonStyle(pressedScale: 0.985, pressedOpacity: 0.95))
     }
 
     private func submitEmailAuth() {
@@ -686,5 +833,75 @@ struct AuthEntryView: View {
             }
         }
         return error.localizedDescription
+    }
+}
+
+private struct AuthBrandWShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let sx = rect.width / 180
+        let sy = rect.height / 180
+
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.minX + x * sx, y: rect.minY + y * sy)
+        }
+
+        path.move(to: p(40, 50))
+        path.addLine(to: p(40, 110))
+        path.addArc(
+            center: p(60, 110),
+            radius: 20 * min(sx, sy),
+            startAngle: .degrees(180),
+            endAngle: .degrees(0),
+            clockwise: true
+        )
+        path.addLine(to: p(80, 80))
+        path.addArc(
+            center: p(90, 80),
+            radius: 10 * min(sx, sy),
+            startAngle: .degrees(180),
+            endAngle: .degrees(0),
+            clockwise: false
+        )
+        path.addLine(to: p(100, 110))
+        path.addArc(
+            center: p(120, 110),
+            radius: 20 * min(sx, sy),
+            startAngle: .degrees(180),
+            endAngle: .degrees(0),
+            clockwise: true
+        )
+        path.addLine(to: p(140, 50))
+        return path
+    }
+}
+
+private struct AuthBrandMapTraces: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let w = rect.width
+        let h = rect.height
+
+        path.move(to: CGPoint(x: -0.10 * w, y: 0.08 * h))
+        path.addQuadCurve(
+            to: CGPoint(x: 0.55 * w, y: 0.14 * h),
+            control: CGPoint(x: 0.22 * w, y: -0.02 * h)
+        )
+        path.addQuadCurve(
+            to: CGPoint(x: 1.10 * w, y: 0.22 * h),
+            control: CGPoint(x: 0.82 * w, y: 0.32 * h)
+        )
+
+        path.move(to: CGPoint(x: -0.10 * w, y: 0.88 * h))
+        path.addQuadCurve(
+            to: CGPoint(x: 0.60 * w, y: 0.82 * h),
+            control: CGPoint(x: 0.30 * w, y: 0.98 * h)
+        )
+        path.addQuadCurve(
+            to: CGPoint(x: 1.10 * w, y: 0.94 * h),
+            control: CGPoint(x: 0.88 * w, y: 0.68 * h)
+        )
+
+        return path
     }
 }

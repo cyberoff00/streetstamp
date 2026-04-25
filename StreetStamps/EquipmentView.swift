@@ -54,7 +54,6 @@ struct EquipmentView: View {
     @ObservedObject private var store: AvatarCatalogStore = .shared
 
     @State private var selectedCategoryId: String = "hair"
-    @State private var isTryOnMode = false
     @State private var tryOnLoadout: RobotLoadout? = nil
     @State private var economy: EquipmentEconomy = EquipmentEconomyStore.load()
 
@@ -150,11 +149,6 @@ struct EquipmentView: View {
         .onChange(of: loadout) { _, newValue in
             economy.ensureCurrentLoadoutOwned(loadout: newValue)
         }
-        .onChange(of: isTryOnMode) { _, enabled in
-            if !enabled {
-                tryOnLoadout = nil
-            }
-        }
         .onChange(of: economy) { _, newValue in
             EquipmentEconomyStore.save(newValue)
         }
@@ -195,6 +189,62 @@ struct EquipmentView: View {
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.78), value: showTryOnPurchaseDialog)
         .animation(.spring(response: 0.42, dampingFraction: 0.58), value: unlockCelebration)
+        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: hasPendingTryOnChanges)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            pendingChangesActionBar
+        }
+    }
+
+    @ViewBuilder
+    private var pendingChangesActionBar: some View {
+        if hasPendingTryOnChanges {
+            HStack(spacing: 10) {
+                Button {
+                    cancelTryOnChanges()
+                } label: {
+                    Text(L10n.t("cancel"))
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(FigmaTheme.text)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(Color.white)
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(FigmaTheme.border, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    applyTryOnSelection()
+                } label: {
+                    Text(applyButtonTitle)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(FigmaTheme.primary)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 10)
+            .padding(.bottom, 10)
+            .background(FigmaTheme.card.opacity(0.96))
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(FigmaTheme.border)
+                    .frame(height: 1)
+            }
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
+    private var applyButtonTitle: String {
+        guard let tryOnLoadout else { return L10n.t("apply") }
+        let missing = missingItemsForTryOn(loadout: tryOnLoadout)
+        let totalCost = missing.reduce(0) { $0 + itemPrice(for: $1.categoryId) }
+        if totalCost > 0 {
+            return String(format: L10n.t("equipment_buy_and_apply_format"), totalCost)
+        }
+        return L10n.t("apply")
     }
 
     private func unlockCelebrationCard(_ celebration: UnlockCelebration) -> some View {
@@ -247,7 +297,9 @@ struct EquipmentView: View {
     }
 
     private var selectedHairColorHex: String {
-        normalizedHex(effectiveLoadout.hairColorHex, fallback: RobotLoadout.defaultHairColorHex)
+        let raw = effectiveLoadout.hairColorHex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.isEmpty || raw.lowercased() == "none" { return "none" }
+        return normalizedHex(raw, fallback: RobotLoadout.defaultHairColorHex)
     }
 
     private var selectedBodyColorHex: String {
@@ -325,85 +377,7 @@ struct EquipmentView: View {
             .overlay {
                 RobotRendererView(size: 176, face: .front, loadout: effectiveLoadout)
             }
-            .overlay(alignment: .bottomLeading) {
-                tryOnCornerControl
-                    .padding(.leading, 14)
-                    .padding(.bottom, 14)
-            }
             .shadow(color: Color.black.opacity(0.06), radius: 24, x: 0, y: 6)
-    }
-
-    @ViewBuilder
-    private var tryOnCornerControl: some View {
-        if isTryOnMode {
-            if hasPendingTryOnChanges {
-                HStack(spacing: 8) {
-                    Button(L10n.t("equipment_apply_try_on")) {
-                        applyTryOnSelection()
-                    }
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12)
-                    .frame(height: 34)
-                    .background(FigmaTheme.primary)
-                    .clipShape(Capsule())
-                    .buttonStyle(.plain)
-
-                    Button(L10n.t("cancel")) {
-                        cancelTryOnChanges()
-                    }
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(FigmaTheme.text)
-                    .padding(.horizontal, 12)
-                    .frame(height: 34)
-                    .background(Color.white.opacity(0.94))
-                    .clipShape(Capsule())
-                    .overlay(
-                        Capsule()
-                            .stroke(FigmaTheme.border, lineWidth: 1)
-                    )
-                    .buttonStyle(.plain)
-                }
-            } else {
-                Button {
-                    isTryOnMode = false
-                } label: {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(FigmaTheme.primary)
-                        .frame(width: 38, height: 38)
-                        .background(Color.white.opacity(0.94))
-                        .clipShape(Circle())
-                        .overlay(
-                            Circle()
-                                .stroke(FigmaTheme.border, lineWidth: 1)
-                        )
-                }
-                .buttonStyle(.plain)
-            }
-        } else {
-            Button {
-                beginTryOnMode()
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text(L10n.t("equipment_try_on_mode"))
-                        .font(.system(size: 12, weight: .semibold))
-                        .lineLimit(1)
-                }
-                .foregroundColor(FigmaTheme.primary)
-                .padding(.horizontal, 12)
-                .frame(height: 34)
-                .background(Color.white.opacity(0.94))
-                .clipShape(Capsule())
-                .overlay(
-                    Capsule()
-                        .stroke(FigmaTheme.border, lineWidth: 1)
-                )
-            }
-            .buttonStyle(.plain)
-        }
     }
 
     @ViewBuilder
@@ -416,9 +390,13 @@ struct EquipmentView: View {
                 }
             }
         case "hair":
-            compactColorSwatches(colors: hairColorOptions, selectedHex: selectedHairColorHex) { hex in
+            compactColorSwatches(
+                colors: hairColorOptions,
+                selectedHex: selectedHairColorHex,
+                includesNone: true
+            ) { hex in
                 updateLoadout {
-                    $0.hairColorHex = hex.uppercased()
+                    $0.hairColorHex = (hex.lowercased() == "none") ? "none" : hex.uppercased()
                 }
             }
         default:
@@ -514,6 +492,7 @@ struct EquipmentView: View {
     private func compactColorSwatches(
         colors: [String],
         selectedHex: String,
+        includesNone: Bool = false,
         onSelect: @escaping (String) -> Void
     ) -> some View {
         LazyVGrid(
@@ -521,6 +500,11 @@ struct EquipmentView: View {
             alignment: .leading,
             spacing: 10
         ) {
+            if includesNone {
+                noneColorSwatch(isSelected: selectedHex.lowercased() == "none") {
+                    onSelect("none")
+                }
+            }
             ForEach(colors, id: \.self) { hex in
                 colorSwatch(
                     hex: hex,
@@ -601,6 +585,26 @@ struct EquipmentView: View {
         .buttonStyle(.plain)
     }
 
+    private func noneColorSwatch(isSelected: Bool, onTap: @escaping () -> Void) -> some View {
+        Button(action: onTap) {
+            ZStack {
+                Circle().fill(Color.white)
+                Capsule()
+                    .fill(Color.red.opacity(0.7))
+                    .frame(height: 2)
+                    .rotationEffect(.degrees(-45))
+            }
+            .frame(width: 28, height: 28)
+            .clipShape(Circle())
+            .overlay(
+                Circle()
+                    .stroke(isSelected ? Color.black : Color.black.opacity(0.12), lineWidth: isSelected ? 2.2 : 1)
+            )
+            .appFullSurfaceTapTarget(.circle)
+        }
+        .buttonStyle(.plain)
+    }
+
     @ViewBuilder
     private var itemGrid: some View {
         if let category = store.catalog.categories.first(where: { $0.id == selectedCategoryId }) {
@@ -648,33 +652,16 @@ struct EquipmentView: View {
     }
 
     private func handleTap(category: GearCategory, item: GearItem, ownership: GearOwnership) {
-        if isTryOnMode {
-            if ownership == .equipped {
-                deselectItem(category: category, item: item)
-            } else {
-                applySelection(category: category, item: item)
-            }
-            if let feedbackKey = EquipmentInteractionFeedbackPolicy.feedbackLocalizationKey(
-                isTryOnMode: true,
-                tappedEquippedItem: ownership == .equipped
-            ) {
-                showFeedback(L10n.t(feedbackKey))
-            }
+        if ownership == .equipped {
+            deselectItem(category: category, item: item)
             return
         }
-
-        switch ownership {
-        case .equipped:
-            deselectItem(category: category, item: item)
-        case .owned:
-            applySelection(category: category, item: item)
-            showFeedback(L10n.t("equipment_equipped_feedback"))
-        case .locked:
-            if !isTryOnMode {
-                beginTryOnMode()
-            }
-            applySelection(category: category, item: item)
-            showFeedback(L10n.t("equipment_trying_on"))
+        applySelection(category: category, item: item)
+        if let feedbackKey = EquipmentInteractionFeedbackPolicy.feedbackLocalizationKey(
+            isTryOnMode: true,
+            tappedEquippedItem: false
+        ) {
+            showFeedback(L10n.t(feedbackKey))
         }
     }
 
@@ -863,7 +850,6 @@ struct EquipmentView: View {
 
         loadout = pendingTryOnPurchase.targetLoadout
         tryOnLoadout = nil
-        isTryOnMode = false
         showTryOnPurchaseDialog = false
         showUnlockCelebration(L10n.t("equipment_purchased_and_applied"))
         self.pendingTryOnPurchase = nil
@@ -874,14 +860,8 @@ struct EquipmentView: View {
         return tryOnLoadout != loadout
     }
 
-    private func beginTryOnMode() {
-        isTryOnMode = true
-        tryOnLoadout = loadout
-    }
-
     private func cancelTryOnChanges() {
         tryOnLoadout = nil
-        isTryOnMode = false
     }
 
     private func applyTryOnSelection() {
@@ -890,7 +870,6 @@ struct EquipmentView: View {
         guard !missing.isEmpty else {
             loadout = tryOnLoadout
             self.tryOnLoadout = nil
-            isTryOnMode = false
             showFeedback(L10n.t("apply"))
             return
         }
@@ -932,13 +911,9 @@ struct EquipmentView: View {
     }
 
     private func updateLoadout(_ transform: (inout RobotLoadout) -> Void) {
-        if isTryOnMode {
-            var temp = tryOnLoadout ?? loadout
-            transform(&temp)
-            tryOnLoadout = temp
-        } else {
-            transform(&loadout)
-        }
+        var temp = tryOnLoadout ?? loadout
+        transform(&temp)
+        tryOnLoadout = (temp == loadout) ? nil : temp
     }
 
     private func applySelection(category: GearCategory, item: GearItem) {
@@ -1161,17 +1136,11 @@ private struct GearCard: View {
     var body: some View {
         VStack(spacing: 0) {
             ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(isEquipped
-                        ? Color(red: 231.0 / 255.0, green: 245.0 / 255.0, blue: 236.0 / 255.0)
-                        : Color(red: 245.0 / 255.0, green: 245.0 / 255.0, blue: 247.0 / 255.0))
-
                 if let imageName {
+                    let sizeScale: CGFloat = imageName == "front_hat001" ? 0.85 : 1.0
+                    let size = EquipmentPreviewMetrics.gridImageSize * sizeScale
                     EquipmentPreviewImage(imageName: imageName, opacity: isLocked ? 0.45 : 1)
-                        .frame(
-                            width: EquipmentPreviewMetrics.gridImageSize,
-                            height: EquipmentPreviewMetrics.gridImageSize
-                        )
+                        .frame(width: size, height: size)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 } else {
                     Image(systemName: "minus")
@@ -1180,7 +1149,7 @@ private struct GearCard: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .frame(height: EquipmentPreviewMetrics.gridPreviewHeight)
+            .aspectRatio(1, contentMode: .fit)
             .overlay(alignment: .topLeading) {
                 if isLocked {
                     Image(systemName: "lock.fill")
@@ -1204,16 +1173,19 @@ private struct GearCard: View {
                 }
             }
 
-            priceLabel
-                .frame(maxWidth: .infinity, minHeight: 30)
-                .background(Color.white)
+            if !isFree {
+                priceLabel
+                    .frame(maxWidth: .infinity, minHeight: 28)
+            }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(FigmaTheme.mutedBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(isEquipped ? FigmaTheme.primary : Color.black.opacity(0.06),
+                        lineWidth: isEquipped ? 2 : 1)
         )
-        .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 2)
+        .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 2)
     }
 
     @ViewBuilder

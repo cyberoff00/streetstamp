@@ -58,6 +58,7 @@ final class UserSessionStore: ObservableObject {
     private static let guestAccountBindingsKey = "streetstamps.guest_account_bindings.v1"
     private static let autoRecoveredGuestSourcesKey = "streetstamps.auto_recovered_guest_sources.v1"
     private static let hasEmailPasswordKey = "streetstamps.has_email_password.v1"
+    private static let pendingReauthPromptKey = "streetstamps.pending_reauth_prompt.v1"
 
     init() {
         let guestID = Self.loadOrCreateGuestID()
@@ -170,6 +171,14 @@ final class UserSessionStore: ObservableObject {
     var isLoggedIn: Bool {
         if case .account = session { return true }
         return false
+    }
+
+    var hasPendingReauthPrompt: Bool {
+        UserDefaults.standard.bool(forKey: Self.pendingReauthPromptKey)
+    }
+
+    func clearPendingReauthPrompt() {
+        UserDefaults.standard.removeObject(forKey: Self.pendingReauthPromptKey)
     }
 
     func bootstrapFileSystem() {
@@ -293,6 +302,7 @@ final class UserSessionStore: ObservableObject {
         persistSession()
         persistFirebaseAccountState()
         clearPendingGuestMigrationMarker()
+        clearPendingReauthPrompt()
     }
 
     func applyFirebaseAccountSession(
@@ -327,6 +337,7 @@ final class UserSessionStore: ObservableObject {
         if !preserveGuestBoundary {
             clearPendingGuestMigrationMarker()
         }
+        clearPendingReauthPrompt()
     }
 
     func updateCachedFirebaseIDToken(_ token: String?) {
@@ -411,13 +422,21 @@ final class UserSessionStore: ObservableObject {
         persistSession()
     }
 
-    func logoutToGuest(requireReauthenticationPrompt: Bool = false) {
+    func logoutToGuest(
+        requireReauthenticationPrompt: Bool = false,
+        promptReauthenticationOnNextLaunch: Bool = true
+    ) {
         session = .guest(guestID: guestID)
         firebaseAccountState = nil
         requiresProfileSetup = false
         hasEmailPassword = false
         persistSession()
         persistFirebaseAccountState()
+        if promptReauthenticationOnNextLaunch {
+            UserDefaults.standard.set(true, forKey: Self.pendingReauthPromptKey)
+        } else {
+            clearPendingReauthPrompt()
+        }
         if requireReauthenticationPrompt {
             reauthenticationPromptVersion &+= 1
         }

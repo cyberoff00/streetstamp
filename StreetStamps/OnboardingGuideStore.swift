@@ -88,8 +88,8 @@ final class OnboardingGuideStore: ObservableObject {
     private let hintsKey = "streetstamps.onboarding.v3.hints"
     private let hintsSchemaKey = "streetstamps.onboarding.v3.schema"
     private static let currentHintsSchema = 2
-    private var shownLightweightTips: Set<String> = []
-    private var shownHints: Set<String> = []
+    @Published private var shownLightweightTips: Set<String> = []
+    @Published private var shownHints: Set<String> = []
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults

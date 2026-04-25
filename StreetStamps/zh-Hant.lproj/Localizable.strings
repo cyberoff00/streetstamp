@@ -55,6 +55,8 @@
 "auth_sign_in_lower" = "登入";
 "auth_sign_in_subtitle" = "输入账号信息繼續";
 "auth_sign_up" = "註冊";
+"auth_continue_with_apple" = "使用 Apple 繼續";
+"auth_continue_with_email" = "使用電子郵件繼續";
 "avatar_placeholder_back" = "背面占位";
 "back" = "返回";
 "backend_base_url_placeholder" = "API_BASE_URL（例如 https://api.xxx.com）";
@@ -148,6 +150,7 @@
 "equipment_accessory" = "配饰";
 "equipment_apply_try_on" = "应用试穿";
 "equipment_buy_all_and_apply" = "一键購買并应用";
+"equipment_buy_and_apply_format" = "購買並應用 · %d";
 "equipment_buy_short" = "購買 %d";
 "equipment_camera" = "相機";
 "equipment_coins_added_format" = "+%d 金幣";
@@ -582,7 +585,7 @@
 "profile_setup_ready_body" = "保存后，你的暱稱和穿搭会同步到账号里，好友看到的就是这一版。";
 "profile_setup_ready_title" = "差最后一步";
 "profile_setup_skip" = "跳過";
-"profile_setup_subtitle" = "先换好造型，再取一个暱稱，然后進入 StreetStamps。";
+"profile_setup_subtitle" = "先换好造型，再取一个暱稱，然后進入 Worldo。";
 "profile_setup_title" = "設置你的初始旅行形象";
 "profile_share_card" = "分享卡片";
 "profile_showcase" = "展示柜";
@@ -976,7 +979,7 @@
 "friends_input_exclusive_id_hint" = "輸入好友專屬ID（範例：@alice）";
 "friends_input_invite_code_hint" = "輸入邀請碼（A1B2C3D4）";
 "friends_input_qr_token_hint" = "貼上二維碼 token 或連結";
-"friends_qr_invalid_content" = "二維碼內容無法識別，請確認對方分享的是 StreetStamps 邀請碼/連結。";
+"friends_qr_invalid_content" = "二維碼內容無法識別，請確認對方分享的是 Worldo 邀請碼/連結。";
 "friends_qr_recognized" = "已識別邀請資訊，點擊「發送好友申請」即可。";
 "friends_qr_send_request" = "發送好友申請";
 "friends_qr_sending" = "發送中…";
@@ -1162,8 +1165,8 @@
 "faq_subtitle" = "關於 Worldo 的常見問題解答";
 "faq_q_overview" = "Worldo 怎麼玩？";
 "faq_a_overview" = "Worldo 是一款融合旅程記錄與地圖社交的產品。你可以：\n• 開啟旅程記錄跑步、騎行、徒步或城市探索的軌跡，沿途拍照寫下心情，留住每一段真實的出行記憶。\n• 開啟始終追蹤模式，即使不主動開始旅程，每天的足跡也會自動記錄。\n• 看著自己的足跡在 Worldo 地圖和 3D 地球上逐漸繪成，每到一座新城市就解鎖一張城市卡片。\n• 關注朋友，在動態中看到他們正在探索的城市、走過的路線和旅途記憶。\n• 給好友寄明信片，收集獨特裝備來個性化你的檔案。";
-"faq_q_sport_vs_daily" = "運動模式和日常模式有什麼區別？";
-"faq_a_sport_vs_daily" = "運動模式以高精度錄製，帶路線平滑處理 — 適合跑步、騎行或徒步等需要精確軌跡的場景。日常模式為省電優化，會根據出行方式自動調整 — 適合通勤或全天記錄等更看重續航的場景。";
+"faq_q_route_recording" = "我的路線會被如何記錄？";
+"faq_a_route_recording" = "Worldo 透過 GPS 取樣並結合多級過濾（抖動抑制、跳點偵測、訊號中斷處理）來記錄你的路線，再繪製到地圖上。開啟旅程時你可以選擇記錄模式：\n• 運動模式 — 高精度 GPS 取樣 + 自適應路線平滑，精度對齊專業運動軟體，適合跑步、騎行、徒步等注重軌跡細節的場景。\n• 日常模式 — 省電優化，更偏向長時間旅程探索。會根據出行方式（步行、公共交通、駕車等）自動調整取樣，適合全天出行、通勤等更看重續航而非精細細節的場景。";
 "faq_q_battery" = "Worldo 耗電嗎？";
 "faq_a_battery" = "Worldo 在耗電方面做了大量優化。運動模式為了 GPS 和軌跡更精確，相對較為耗電；但 Worldo 預設使用日常模式，比同類軌跡軟體省電很多。不追蹤旅程時，後台追蹤使用低精度定位更新，耗電量極小。你還可以在設定中進一步調整精度以節省電量。";
 "faq_q_track_accuracy" = "為什麼軌跡不準？";
@@ -1206,7 +1209,7 @@
 "membership_compare_premium_only" = "專屬功能";
 "membership_cta_monthly" = "開始月度會員";
 "membership_cta_yearly" = "開始年度會員";
-"membership_indie_note" = "你的訂閱直接支持獨立開發者。無廣告。不出售任何資料。";
+"membership_indie_note" = "支持一位獨立女開發者打造最佳產品體驗。無廣告。不出售任何資料。";
 
 // Photo Edit
 "photo_edit_button" = "編輯";
@@ -1236,3 +1239,4 @@
 // Misc
 "resume_upper" = "繼續";
 "tab_memory" = "記憶";
+"network_unstable_retrying" = "網絡不穩，正在重試";

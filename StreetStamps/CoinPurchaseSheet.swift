@@ -37,6 +37,7 @@ struct CoinPurchaseSheet: View {
     @StateObject private var store = CoinStoreService.shared
     @ObservedObject private var membership = MembershipStore.shared
     @State private var isPurchasing = false
+    @State private var showMembershipGate = false
 
     var body: some View {
         NavigationStack {
@@ -62,6 +63,10 @@ struct CoinPurchaseSheet: View {
             .toolbar(.hidden, for: .navigationBar)
         }
         .presentationDetents([.medium])
+        .sheet(isPresented: $showMembershipGate) {
+            MembershipGateView(feature: .coinBoost)
+                .environmentObject(MembershipStore.shared)
+        }
         .task {
             await store.loadProducts()
         }
@@ -126,9 +131,8 @@ struct CoinPurchaseSheet: View {
     // MARK: - Premium upsell banner
 
     private var premiumBanner: some View {
-        NavigationLink {
-            MembershipSubscriptionView()
-                .environmentObject(MembershipStore.shared)
+        Button {
+            showMembershipGate = true
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "star.circle.fill")

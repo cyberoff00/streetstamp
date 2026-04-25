@@ -55,6 +55,8 @@
 "auth_sign_in_lower" = "Sign in";
 "auth_sign_in_subtitle" = "Enter your credentials to continue";
 "auth_sign_up" = "SIGN UP";
+"auth_continue_with_apple" = "Apple로 계속하기";
+"auth_continue_with_email" = "이메일로 계속하기";
 "avatar_placeholder_back" = "뒤";
 "back" = "뒤로";
 "backend_base_url_placeholder" = "API_BASE_URL (for example https://api.example.com)";
@@ -148,6 +150,7 @@
 "equipment_accessory" = "액세서리";
 "equipment_apply_try_on" = "Apply Try-on";
 "equipment_buy_all_and_apply" = "Buy all and apply";
+"equipment_buy_and_apply_format" = "구매 후 적용 · %d";
 "equipment_buy_short" = "구매 %d";
 "equipment_camera" = "CAMERA";
 "equipment_coins_added_format" = "+%d coins";
@@ -565,7 +568,7 @@
 "profile_sending" = "Sending...";
 "profile_setup_avatar_hint" = "Explore more in Equipment later.";
 "profile_setup_avatar_title" = "SET YOUR STARTING LOOK";
-"profile_setup_confirm" = "ENTER STREETSTAMPS";
+"profile_setup_confirm" = "ENTER WORLDO";
 "profile_setup_edit_look" = "EDIT MY LOOK";
 "profile_setup_nickname_hint" = "Nicknames are unique now, so pick one that feels like you.";
 "profile_setup_nickname_label" = "NICKNAME";
@@ -573,7 +576,7 @@
 "profile_setup_ready_body" = "We'll save this nickname and outfit to your account so your friends see the same traveler everywhere.";
 "profile_setup_ready_title" = "One last step";
 "profile_setup_skip" = "SKIP";
-"profile_setup_subtitle" = "Pick your look and claim a nickname before you enter StreetStamps.";
+"profile_setup_subtitle" = "Pick your look and claim a nickname before you enter Worldo.";
 "profile_setup_title" = "SET UP YOUR TRAVELER";
 "profile_share_card" = "Share Card";
 "profile_showcase" = "Showcase";
@@ -968,7 +971,7 @@
 "friends_input_exclusive_id_hint" = "친구 전용 ID 입력 (예: @alice)";
 "friends_input_invite_code_hint" = "초대 코드 입력 (A1B2C3D4)";
 "friends_input_qr_token_hint" = "QR 코드 토큰 또는 링크 붙여넣기";
-"friends_qr_invalid_content" = "QR 코드 내용을 인식할 수 없습니다. StreetStamps 초대 코드/링크인지 확인해 주세요.";
+"friends_qr_invalid_content" = "QR 코드 내용을 인식할 수 없습니다. Worldo 초대 코드/링크인지 확인해 주세요.";
 "friends_qr_recognized" = "초대 정보를 인식했습니다. '친구 요청 보내기'를 탭하세요.";
 "friends_qr_send_request" = "친구 요청 보내기";
 "friends_qr_sending" = "전송 중…";
@@ -1091,3 +1094,4 @@
 "city_empty_title" = "아직 시티 카드가 없습니다";
 "city_empty_desc" = "여행을 시작하여 도시를 잠금 해제하거나,\n오른쪽 상단에서 사진으로 가져오세요";
 "postcard_no_city_hint" = "여행을 시작하여 도시를 잠금 해제하면 해당 도시의 엽서를 보낼 수 있습니다";
+"network_unstable_retrying" = "네트워크 불안정, 재시도 중...";
