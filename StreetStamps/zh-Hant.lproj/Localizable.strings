@@ -78,6 +78,10 @@
 "city_deep_memories_toggle_off" = "記憶 关";
 "city_deep_memories_toggle_on" = "記憶 开";
 "city_deep_memories_toggle_show_accessibility" = "顯示地圖上的記憶";
+"city_deep_eraser_enter" = "整理";
+"city_deep_eraser_done" = "完成";
+"city_deep_eraser_restore_all" = "還原全部";
+"city_deep_eraser_undo" = "復原";
 "city_empty_subtitle" = "生成一张城市卡，或完成一次旅程来解鎖你的第一座城市。";
 "city_empty_title" = "还没有城市印章";
 "city_library_header_city" = "你的城市印章";
@@ -911,7 +915,7 @@
 "membership_compare_free" = "免費";
 "membership_compare_premium" = "Premium";
 "membership_compare_photos" = "照片 / 旅程";
-"membership_info_photos" = "每段旅程最多可添加的照片數，每條記憶最多 2 張。免費 6 張，Premium 12 張。";
+"membership_info_photos" = "每段旅程最多可添加的照片數。免費 6 張，Premium 12 張。";
 "journey_photo_limit_toast" = "為了留下最精彩瞬間，每次行程最多 %d 張照片";
 "membership_info_postcard" = "每個城市：可向每位好友發 1 張(免費)/2 張(Premium)明信片，最多 3 位(免費)/10 位(Premium)好友。該城市每多一段旅程，每位好友 +1 張，可發好友數也增加。";
 "membership_compare_friends" = "好友";
@@ -1209,7 +1213,7 @@
 "membership_compare_premium_only" = "專屬功能";
 "membership_cta_monthly" = "開始月度會員";
 "membership_cta_yearly" = "開始年度會員";
-"membership_indie_note" = "支持一位獨立女開發者打造最佳產品體驗。無廣告。不出售任何資料。";
+"membership_indie_note" = "訂閱支持獨立開發者。追求最完美的產品體驗，永無廣告。無資料商用。";
 
 // Photo Edit
 "photo_edit_button" = "編輯";

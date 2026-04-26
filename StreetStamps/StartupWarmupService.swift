@@ -18,12 +18,12 @@ final class StartupWarmupService {
 #endif
     }
 
-    func start(cities: [City], appearanceRaw: String, renderCacheStore: CityRenderCacheStore, limit: Int = 24) {
+    func start(cities: [City], appearanceRaw: String, renderCacheStore: CityRenderCacheStore, limit: Int = 24, renderMaskByJourney: [String: Set<Int>] = [:]) {
         let selected = Self.selectCities(from: cities, limit: limit)
         guard !selected.isEmpty else { return }
 
         let citiesToWarm = selected.filter {
-            let key = CityThumbnailLoader.renderCacheKey(for: $0, appearanceRaw: appearanceRaw)
+            let key = CityThumbnailLoader.renderCacheKey(for: $0, appearanceRaw: appearanceRaw, renderMaskByJourney: renderMaskByJourney)
             return warmedRenderKeys.insert(key).inserted
         }
         log("start totalCities=\(cities.count) selected=\(selected.count) warming=\(citiesToWarm.count) appearance=\(appearanceRaw)")
@@ -34,7 +34,7 @@ final class StartupWarmupService {
                 await MainActor.run {
                     self.log("warm city=\(city.id) name=\(city.localizedName)")
                 }
-                await CityThumbnailLoader.ensurePersistentCache(for: city, appearanceRaw: appearanceRaw, renderCacheStore: renderCacheStore)
+                await CityThumbnailLoader.ensurePersistentCache(for: city, appearanceRaw: appearanceRaw, renderCacheStore: renderCacheStore, renderMaskByJourney: renderMaskByJourney)
             }
         }
     }

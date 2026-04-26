@@ -221,6 +221,25 @@ struct CityDeepStyledSegment {
     let repeatWeight: Double
 }
 
+/// Controls whether `styledSegments` collapses repeated solid runs that share a
+/// signature into a single segment. The granularity picks the lat/lon
+/// quantization grid used by the signature.
+/// - `.coarse` (~55m) suits city-zoom thumbnails and globe-scale views.
+/// - `.fine` (~14m) suits street-zoom views where adjacent parallel streets
+///   must not collapse into one.
+enum SignatureDedupGranularity {
+    case none
+    case coarse
+    case fine
+
+    fileprivate var scale: Double {
+        switch self {
+        case .none, .coarse: return 2_000  // 1° / 2_000 ≈ 55m
+        case .fine: return 8_000           // 1° / 8_000 ≈ 14m
+        }
+    }
+}
+
 enum CityDeepRenderEngine {
     private static let cityFocusMinPoints = 2
     private static let boundaryTrustMaxDistanceMeters: CLLocationDistance = 120_000
@@ -230,7 +249,8 @@ enum CityDeepRenderEngine {
         journeys: [JourneyRoute],
         countryISO2: String?,
         cityKey: String?,
-        surface: RouteRenderSurface = .mapKit
+        surface: RouteRenderSurface = .mapKit,
+        dedupGranularity: SignatureDedupGranularity = .none
     ) -> [CityDeepStyledSegment] {
         let raw: [CityDeepStyledSegment] = journeys.flatMap { journey in
             RouteRenderingPipeline
@@ -256,19 +276,43 @@ enum CityDeepRenderEngine {
 
         guard !raw.isEmpty else { return [] }
 
+        let scale = dedupGranularity.scale
         var freq: [String: Int] = [:]
         for seg in raw where !seg.isGap && seg.coords.count >= 2 {
-            let key = segmentSignature(seg.coords)
+            let key = segmentSignature(seg.coords, scale: scale)
             freq[key, default: 0] += 1
         }
 
         let p95 = max(1.0, quantile(Array(freq.values), p: 0.95))
-        return raw.map { seg in
-            guard !seg.isGap, seg.coords.count >= 2 else { return seg }
-            let key = segmentSignature(seg.coords)
-            let n = Double(freq[key, default: 1])
-            let weight = min(1.0, log(1.0 + n) / log(1.0 + p95))
-            return CityDeepStyledSegment(coords: seg.coords, isGap: false, repeatWeight: weight)
+
+        switch dedupGranularity {
+        case .none:
+            return raw.map { seg in
+                guard !seg.isGap, seg.coords.count >= 2 else { return seg }
+                let key = segmentSignature(seg.coords, scale: scale)
+                let n = Double(freq[key, default: 1])
+                let weight = min(1.0, log(1.0 + n) / log(1.0 + p95))
+                return CityDeepStyledSegment(coords: seg.coords, isGap: false, repeatWeight: weight)
+            }
+        case .coarse, .fine:
+            // Fold solid runs by signature: keep only the first occurrence and
+            // tag it with the weight derived from pre-dedup count. Gap segments
+            // are kept as-is — they're sparse and not the source of clutter.
+            var seen: Set<String> = []
+            var folded: [CityDeepStyledSegment] = []
+            folded.reserveCapacity(raw.count)
+            for seg in raw {
+                guard !seg.isGap, seg.coords.count >= 2 else {
+                    folded.append(seg)
+                    continue
+                }
+                let key = segmentSignature(seg.coords, scale: scale)
+                if !seen.insert(key).inserted { continue }
+                let n = Double(freq[key, default: 1])
+                let weight = min(1.0, log(1.0 + n) / log(1.0 + p95))
+                folded.append(CityDeepStyledSegment(coords: seg.coords, isGap: false, repeatWeight: weight))
+            }
+            return folded
         }
     }
 
@@ -495,7 +539,7 @@ enum CityDeepRenderEngine {
         return MKCoordinateRegion(center: targetCenter, span: targetSpan)
     }
 
-    private static func segmentSignature(_ coords: [CLLocationCoordinate2D]) -> String {
+    private static func segmentSignature(_ coords: [CLLocationCoordinate2D], scale: Double = 2_000) -> String {
         guard let first = coords.first, let last = coords.last else { return UUID().uuidString }
         let stride = max(1, coords.count / 6)
         var samples: [CLLocationCoordinate2D] = [first]
@@ -509,8 +553,8 @@ enum CityDeepRenderEngine {
         samples.append(last)
 
         func quantized(_ c: CLLocationCoordinate2D) -> String {
-            let lat = Int((c.latitude * 2_000).rounded())
-            let lon = Int((c.longitude * 2_000).rounded())
+            let lat = Int((c.latitude * scale).rounded())
+            let lon = Int((c.longitude * scale).rounded())
             return "\(lat):\(lon)"
         }
 

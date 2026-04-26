@@ -137,11 +137,33 @@ final class MembershipStore: ObservableObject {
 
     private let tierKey = "streetstamps.membership.tier"
     private let expirationKey = "streetstamps.membership.expiration"
+    private let sandboxPurchasedOnceKey = "streetstamps.membership.sandbox_purchased_once"
     static let welcomeBonusGrantedKey = "streetstamps.membership.welcome_bonus_granted"
+
+    /// TestFlight builds and App Store review use sandbox receipts. Production
+    /// App Store users get a regular `receipt`. This is the standard way to
+    /// distinguish test/review traffic from real paying users.
+    private static var isSandboxEnvironment: Bool {
+        Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt"
+    }
+
+    /// Sandbox compresses subscriptions to 5 min (monthly) / 1 hour (yearly)
+    /// and stops auto-renewing after 6 cycles. We override that with a 30-day
+    /// local grant so TestFlight testers and reviewers can use premium across
+    /// a full review session without re-subscribing.
+    private static let sandboxGrantSeconds: TimeInterval = 86400 * 30
 
     private var transactionListener: Task<Void, Never>?
 
-    var isPremium: Bool { tier == .premium }
+    var isPremium: Bool {
+        guard tier == .premium else { return false }
+        // Treat a cached-premium tier whose expiration has already passed as
+        // free until refreshEntitlement() syncs the real StoreKit state. This
+        // prevents users from continuing to access premium features in the
+        // window between subscription expiry and Transaction.updates delivery.
+        if let exp = expirationDate, exp < Date() { return false }
+        return true
+    }
 
     private init() {
         // Restore cached tier from UserDefaults
@@ -203,12 +225,27 @@ final class MembershipStore: ObservableObject {
             }
         }
 
+        let isSandbox = Self.isSandboxEnvironment
+
         if foundActive {
             let wasFreeBefore = tier == .free
-            applyTier(.premium, expiration: latestExpiration)
+            var expiration = latestExpiration
+            if isSandbox {
+                // Reviewer/tester completed a real purchase flow — extend the
+                // 5-minute sandbox window to 30 days so they keep premium for
+                // the rest of the session. See sandboxGrantSeconds doc.
+                expiration = Date().addingTimeInterval(Self.sandboxGrantSeconds)
+                UserDefaults.standard.set(true, forKey: sandboxPurchasedOnceKey)
+            }
+            applyTier(.premium, expiration: expiration)
             if wasFreeBefore && !welcomeBonusGranted {
                 awardWelcomeBonus()
             }
+        } else if isSandbox && UserDefaults.standard.bool(forKey: sandboxPurchasedOnceKey) {
+            // Sandbox auto-renewal exhausted (max 6 cycles) but tester
+            // previously completed the purchase flow — preserve premium so
+            // the test build doesn't flip back to free mid-session.
+            applyTier(.premium, expiration: Date().addingTimeInterval(Self.sandboxGrantSeconds))
         } else {
             applyTier(.free, expiration: nil)
         }
@@ -245,6 +282,7 @@ final class MembershipStore: ObservableObject {
     // MARK: - Internal
 
     private func applyTier(_ newTier: MembershipTier, expiration: Date?) {
+        let wasPremium = (tier == .premium)
         tier = newTier
         expirationDate = expiration
         UserDefaults.standard.set(newTier.rawValue, forKey: tierKey)
@@ -253,6 +291,18 @@ final class MembershipStore: ObservableObject {
         } else {
             UserDefaults.standard.removeObject(forKey: expirationKey)
         }
+        if wasPremium && newTier == .free {
+            revokePersistedPremiumEntitlements()
+        }
+    }
+
+    /// Persisted premium-only state that does not auto-revoke from read-time
+    /// gates. Read-time gates (globe zoom, gpx export, photo cap, etc.) flip
+    /// automatically once `tier` becomes `.free`; only these UserDefaults-backed
+    /// switches stay "on" after the tier flips and must be cleared explicitly.
+    private func revokePersistedPremiumEntitlements() {
+        UserDefaults.standard.set(false, forKey: AppSettings.iCloudSyncEnabledKey)
+        MapLayerStyle.revertToDefaultIfNeeded()
     }
 
     /// Whether the welcome bonus has already been granted for the active user.

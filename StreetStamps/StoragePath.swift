@@ -74,6 +74,7 @@ struct StoragePath: Sendable {
     var deletedJourneyIDsURL: URL { cachesDir.appendingPathComponent("deleted_journey_ids.json", isDirectory: false) }
     var photoDiscoveredCitiesURL: URL { cachesDir.appendingPathComponent("photo_discovered_cities.json", isDirectory: false) }
     var photoScanResultURL: URL { cachesDir.appendingPathComponent("photo_scan_result.json", isDirectory: false) }
+    var renderMaskURL: URL { cachesDir.appendingPathComponent("render_mask.json", isDirectory: false) }
 
     /// Marker file to ensure one-time migrations.
     var migrationMarkerV1: URL { userRoot.appendingPathComponent(".migrated_v1", isDirectory: false) }

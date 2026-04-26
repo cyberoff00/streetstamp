@@ -20,7 +20,7 @@ final class CityNameTranslationCache: @unchecked Sendable {
 
     private let lock = NSLock()
     private var cache: [String: String] = [:]  // "cityKey|zh" → simplified Chinese name
-    private let persistKey = "cityNameTranslation.cache.v2"
+    private let persistKey = "cityNameTranslation.cache.v3"
     private let sharedDefaults = UserDefaults(suiteName: "group.com.streetstamps.shared") ?? .standard
 
     private let geocoder = CLGeocoder()
@@ -33,9 +33,13 @@ final class CityNameTranslationCache: @unchecked Sendable {
            let dict = try? JSONDecoder().decode([String: String].self, from: data) {
             cache = dict
         }
-        // One-time cleanup of old cache keys
+        // One-time cleanup of old cache keys.
+        // v2 contained polluted entries (e.g. Huzhou|CN → "浙江") from a past
+        // bug where translate() was called with the wrong CardLevel. Dropping
+        // v2 forces re-translation with the now-correct inferIdentityLevel path.
         for oldKey in [
             "cityNameTranslation.cache.v1",
+            "cityNameTranslation.cache.v2",
             "reverseGeocode.displayCacheByLocaleKey.v7",
             "reverseGeocode.displayCacheByLocaleKey.v2"
         ] {

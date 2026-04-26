@@ -954,6 +954,10 @@
 "city_deep_memories_toggle_off" = "记忆 关";
 "city_deep_memories_toggle_show_accessibility" = "显示地图上的记忆";
 "city_deep_memories_toggle_hide_accessibility" = "隐藏地图上的记忆";
+"city_deep_eraser_enter" = "整理";
+"city_deep_eraser_done" = "完成";
+"city_deep_eraser_restore_all" = "还原全部";
+"city_deep_eraser_undo" = "撤销";
 "lifelog_mood_option_sad" = "低落";
 "lifelog_mood_option_notbad" = "一般";
 "lifelog_mood_option_happy" = "开心";
@@ -1061,7 +1065,7 @@
 "membership_page_title" = "Premium";
 "membership_hero_title" = "解锁你的旅程";
 "membership_your_benefits" = "你的权益";
-"membership_indie_note" = "支持一位独立女开发者打造最佳产品体验。无广告。不出售任何数据。";
+"membership_indie_note" = "订阅支持独立开发者。追求最完美的产品体验，永无广告。无数据商用。";
 "membership_status_active" = "Premium 已激活";
 "membership_status_free" = "免费版";
 "membership_upgrade_subtitle" = "解锁全部功能，畅享旅途记录。";
@@ -1076,7 +1080,7 @@
 "membership_compare_free" = "免费";
 "membership_compare_premium" = "Premium";
 "membership_compare_photos" = "照片 / 旅程";
-"membership_info_photos" = "每段旅程最多可添加的照片数，每条记忆最多 2 张。免费 6 张，Premium 12 张。";
+"membership_info_photos" = "每段旅程最多可添加的照片数。免费 6 张，Premium 12 张。";
 "journey_photo_limit_toast" = "为了留下最精彩瞬间，每次行程最多 %d 张照片";
 "membership_info_postcard" = "每个城市：免费版每位好友最多发 1 张明信片（最多 3 位好友）。Premium 无限制。";
 "membership_compare_friends" = "好友";

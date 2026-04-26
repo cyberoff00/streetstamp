@@ -46,6 +46,7 @@ struct CityStampLibraryView: View {
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var cache: CityCache
     @EnvironmentObject private var renderCacheStore: CityRenderCacheStore
+    @EnvironmentObject private var renderMaskStore: RenderMaskStore
     @State private var digestByCityID: [String: CityDigest] = [:]
 
     // ✅ Delete confirmations
@@ -127,13 +128,13 @@ struct CityStampLibraryView: View {
             guard store.hasLoaded, vm.cities.isEmpty else { return }
             vm.load(journeyStore: store, cityCache: cache)
             digestByCityID = makeDigestMap(from: cache.cachedCities)
-            StartupWarmupService.shared.start(cities: displayCities, appearanceRaw: effectiveAppearanceRaw, renderCacheStore: renderCacheStore, limit: 16)
+            StartupWarmupService.shared.start(cities: displayCities, appearanceRaw: effectiveAppearanceRaw, renderCacheStore: renderCacheStore, limit: 16, renderMaskByJourney: renderMaskStore.snapshot())
         }
         .onChange(of: store.hasLoaded) { loaded in
             if loaded {
                 vm.load(journeyStore: store, cityCache: cache)
                 digestByCityID = makeDigestMap(from: cache.cachedCities)
-                StartupWarmupService.shared.start(cities: displayCities, appearanceRaw: effectiveAppearanceRaw, renderCacheStore: renderCacheStore, limit: 16)
+                StartupWarmupService.shared.start(cities: displayCities, appearanceRaw: effectiveAppearanceRaw, renderCacheStore: renderCacheStore, limit: 16, renderMaskByJourney: renderMaskStore.snapshot())
             }
         }
         .onChange(of: languagePreference.currentLanguage) { _ in
@@ -164,7 +165,7 @@ struct CityStampLibraryView: View {
             }
 
             digestByCityID = nextDigests
-            StartupWarmupService.shared.start(cities: displayCities, appearanceRaw: effectiveAppearanceRaw, renderCacheStore: renderCacheStore, limit: 16)
+            StartupWarmupService.shared.start(cities: displayCities, appearanceRaw: effectiveAppearanceRaw, renderCacheStore: renderCacheStore, limit: 16, renderMaskByJourney: renderMaskStore.snapshot())
         }
         .alert(L10n.t("delete_city_alert_title"), isPresented: $showDeleteCityAlert, presenting: cityToDelete) { city in
             Button(L10n.t("delete"), role: .destructive) {
@@ -878,6 +879,7 @@ struct CityThumbnailView: View {
 
     @AppStorage(MapLayerStyle.storageKey) private var layerStyleRaw = MapLayerStyle.current.rawValue
     @EnvironmentObject private var renderCacheStore: CityRenderCacheStore
+    @EnvironmentObject private var renderMaskStore: RenderMaskStore
     @StateObject private var loader = CityThumbnailLoader()
 
     init(city: City? = nil, basePath: String?, routePath: String?) {
@@ -891,22 +893,33 @@ struct CityThumbnailView: View {
         layerStyleRaw
     }
 
+    /// Snapshot of the user's render mask. Driven by `maskRevision` so the
+    /// view re-evaluates `loadKey` when the mask changes.
+    private var maskSnapshot: [String: Set<Int>] {
+        _ = renderMaskStore.maskRevision
+        return renderMaskStore.snapshot()
+    }
+
     private var loadKey: String {
         // For city-mode rendering, use the full render key so any journey data change
-        // (new journey added, distance updated, etc.) triggers a reload.
+        // (new journey added, distance updated, etc.) triggers a reload. Mask
+        // sig is part of the render key so cleanups in CityDeepView invalidate
+        // this thumbnail next time we appear.
         if let city {
-            return CityThumbnailLoader.renderCacheKey(for: city, appearanceRaw: effectiveAppearanceRaw)
+            return CityThumbnailLoader.renderCacheKey(for: city, appearanceRaw: effectiveAppearanceRaw, renderMaskByJourney: maskSnapshot)
         }
         return "\(routePath ?? "")||\(basePath ?? "")||\(effectiveAppearanceRaw)"
     }
 
     var body: some View {
+        let snapshot = maskSnapshot
         let syncCachedImage = CityThumbnailLoader.existingCachedImage(
             city: city,
             routePath: routePath,
             basePath: basePath,
             appearanceRaw: effectiveAppearanceRaw,
-            renderCacheStore: renderCacheStore
+            renderCacheStore: renderCacheStore,
+            renderMaskByJourney: snapshot
         )
 
         Group {
@@ -939,7 +952,7 @@ struct CityThumbnailView: View {
             }
         }
         .task(id: loadKey) {
-            loader.load(city: city, routePath: routePath, basePath: basePath, appearanceRaw: effectiveAppearanceRaw, renderCacheStore: renderCacheStore)
+            loader.load(city: city, routePath: routePath, basePath: basePath, appearanceRaw: effectiveAppearanceRaw, renderCacheStore: renderCacheStore, renderMaskByJourney: snapshot)
         }
         .onDisappear {
             loader.cancel()
@@ -967,10 +980,10 @@ final class CityThumbnailLoader: ObservableObject {
     private nonisolated static let boundaryTrustMaxDistanceMeters: CLLocationDistance = 120_000
     private nonisolated static let boundaryTrustMaxSpanDegrees: CLLocationDegrees = 3.0
 
-    func load(city: City?, routePath: String?, basePath: String?, appearanceRaw: String, renderCacheStore: CityRenderCacheStore) {
+    func load(city: City?, routePath: String?, basePath: String?, appearanceRaw: String, renderCacheStore: CityRenderCacheStore, renderMaskByJourney: [String: Set<Int>] = [:]) {
         // City cards use render-keyed persistent caching first, then render on miss.
         if let city {
-            let renderKeyParts = Self.renderKeyParts(for: city, appearanceRaw: appearanceRaw)
+            let renderKeyParts = Self.renderKeyParts(for: city, appearanceRaw: appearanceRaw, renderMaskByJourney: renderMaskByJourney)
             let renderKey = renderKeyParts.fullKey
             CityThumbnailDebugLogger.shared.recordRenderKey(
                 cityID: city.id,
@@ -1019,7 +1032,7 @@ final class CityThumbnailLoader: ObservableObject {
                 "load city=\(city.id) source=render_miss key=\(renderKey)"
             )
             // Keep stale image visible while rendering the new one — avoids placeholder flash.
-            renderOnDemand(city: city, appearanceRaw: appearanceRaw, key: renderKey, renderCacheStore: renderCacheStore)
+            renderOnDemand(city: city, appearanceRaw: appearanceRaw, key: renderKey, renderCacheStore: renderCacheStore, renderMaskByJourney: renderMaskByJourney)
             return
         }
 
@@ -1081,11 +1094,11 @@ final class CityThumbnailLoader: ObservableObject {
         // Intentionally keep currentKey and image so re-appear is instant.
     }
 
-    nonisolated static func renderCacheKey(for city: City, appearanceRaw: String) -> String {
-        renderKeyParts(for: city, appearanceRaw: appearanceRaw).fullKey
+    nonisolated static func renderCacheKey(for city: City, appearanceRaw: String, renderMaskByJourney: [String: Set<Int>] = [:]) -> String {
+        renderKeyParts(for: city, appearanceRaw: appearanceRaw, renderMaskByJourney: renderMaskByJourney).fullKey
     }
 
-    nonisolated static func renderKeyParts(for city: City, appearanceRaw: String) -> CityThumbnailDebugLogger.RenderKeyParts {
+    nonisolated static func renderKeyParts(for city: City, appearanceRaw: String, renderMaskByJourney: [String: Set<Int>] = [:]) -> CityThumbnailDebugLogger.RenderKeyParts {
         let journeySignature = city.journeys
             .sorted { $0.id < $1.id }
             .map(journeySignature)
@@ -1094,7 +1107,20 @@ final class CityThumbnailLoader: ObservableObject {
         let anchorSignature = "ignored-for-cache"
         let styleVersion = 5
         let colorVersion = (MapLayerStyle(rawValue: appearanceRaw) ?? .mutedDark).isSatelliteStyle ? 2 : 1
-        let fullKey = "render|v\(styleVersion)c\(colorVersion)|\(city.id)|\(appearanceRaw)|\(journeySignature)"
+        // Include only the masks for journeys that belong to this city, so
+        // edits to one city's polylines don't invalidate every other city's
+        // thumbnail cache.
+        let maskSig: String = {
+            guard !renderMaskByJourney.isEmpty else { return "" }
+            let parts: [String] = city.journeys
+                .compactMap { j -> String? in
+                    guard let mask = renderMaskByJourney[j.id], !mask.isEmpty else { return nil }
+                    return "\(j.id)#" + mask.sorted().map(String.init).joined(separator: ",")
+                }
+                .sorted()
+            return parts.isEmpty ? "" : "|m=\(parts.joined(separator: ";"))"
+        }()
+        let fullKey = "render|v\(styleVersion)c\(colorVersion)|\(city.id)|\(appearanceRaw)|\(journeySignature)\(maskSig)"
         return CityThumbnailDebugLogger.RenderKeyParts(
             fullKey: fullKey,
             journeySignature: journeySignature,
@@ -1125,9 +1151,10 @@ final class CityThumbnailLoader: ObservableObject {
     nonisolated static func existingPersistentCache(
         for city: City,
         appearanceRaw: String,
-        renderCacheStore: CityRenderCacheStore
+        renderCacheStore: CityRenderCacheStore,
+        renderMaskByJourney: [String: Set<Int>] = [:]
     ) -> UIImage? {
-        let key = renderCacheKey(for: city, appearanceRaw: appearanceRaw)
+        let key = renderCacheKey(for: city, appearanceRaw: appearanceRaw, renderMaskByJourney: renderMaskByJourney)
         if let cached = CityImageMemoryCache.shared.image(forKey: key) {
             return cached
         }
@@ -1143,13 +1170,15 @@ final class CityThumbnailLoader: ObservableObject {
         routePath: String?,
         basePath: String?,
         appearanceRaw: String,
-        renderCacheStore: CityRenderCacheStore
+        renderCacheStore: CityRenderCacheStore,
+        renderMaskByJourney: [String: Set<Int>] = [:]
     ) -> UIImage? {
         if let city {
             return existingPersistentCache(
                 for: city,
                 appearanceRaw: appearanceRaw,
-                renderCacheStore: renderCacheStore
+                renderCacheStore: renderCacheStore,
+                renderMaskByJourney: renderMaskByJourney
             )
         }
 
@@ -1182,8 +1211,8 @@ final class CityThumbnailLoader: ObservableObject {
         return nil
     }
 
-    nonisolated static func ensurePersistentCache(for city: City, appearanceRaw: String, renderCacheStore: CityRenderCacheStore) async {
-        let key = renderCacheKey(for: city, appearanceRaw: appearanceRaw)
+    nonisolated static func ensurePersistentCache(for city: City, appearanceRaw: String, renderCacheStore: CityRenderCacheStore, renderMaskByJourney: [String: Set<Int>] = [:]) async {
+        let key = renderCacheKey(for: city, appearanceRaw: appearanceRaw, renderMaskByJourney: renderMaskByJourney)
         if CityImageMemoryCache.shared.image(forKey: key) != nil {
             await MainActor.run {
                 CityThumbnailDebugLogger.shared.log(
@@ -1221,6 +1250,19 @@ final class CityThumbnailLoader: ObservableObject {
             anchor: city.anchor ?? city.journeys.first?.allCLCoords.first
         )
 
+        // Substitute the city's journeys with mask-applied splits so the
+        // thumbnail polylines reflect the user's render mask. Original
+        // journey data on disk is untouched.
+        let maskedCity: City
+        if !renderMaskByJourney.isEmpty,
+           city.journeys.contains(where: { (renderMaskByJourney[$0.id] ?? []).isEmpty == false }) {
+            var copy = city
+            copy.journeys = city.journeys.flatMap { $0.applyingRenderMaskSplit(renderMaskByJourney[$0.id] ?? []) }
+            maskedCity = copy
+        } else {
+            maskedCity = city
+        }
+
         // MKMapSnapshotter can return a valid UIImage with blank tiles when the tile
         // server rate-limits the request (error == nil, but all tiles are solid color).
         // Retry up to 3 times with a 3s back-off before giving up.
@@ -1240,10 +1282,10 @@ final class CityThumbnailLoader: ObservableObject {
                 }
             }
             let candidate: UIImage?
-            if let primary = await Self.makeSnapshot(city: city, appearanceRaw: appearanceRaw, fetchedBoundary: fetchedBoundary) {
+            if let primary = await Self.makeSnapshot(city: maskedCity, appearanceRaw: appearanceRaw, fetchedBoundary: fetchedBoundary) {
                 candidate = primary
             } else {
-                candidate = await Self.makeFallbackSnapshot(city: city, appearanceRaw: appearanceRaw)
+                candidate = await Self.makeFallbackSnapshot(city: maskedCity, appearanceRaw: appearanceRaw)
             }
             if let candidate, isMapbox || !Self.isBlankImage(candidate) {
                 img = candidate
@@ -1270,10 +1312,10 @@ final class CityThumbnailLoader: ObservableObject {
     private var renderRetryCount = 0
     private static let maxRenderRetries = 2
 
-    private func renderOnDemand(city: City, appearanceRaw: String, key: String, renderCacheStore: CityRenderCacheStore) {
+    private func renderOnDemand(city: City, appearanceRaw: String, key: String, renderCacheStore: CityRenderCacheStore, renderMaskByJourney: [String: Set<Int>] = [:]) {
         renderTask?.cancel()
-        renderTask = Task(priority: .utility) { [city, appearanceRaw, key] in
-            await Self.ensurePersistentCache(for: city, appearanceRaw: appearanceRaw, renderCacheStore: renderCacheStore)
+        renderTask = Task(priority: .utility) { [city, appearanceRaw, key, renderMaskByJourney] in
+            await Self.ensurePersistentCache(for: city, appearanceRaw: appearanceRaw, renderCacheStore: renderCacheStore, renderMaskByJourney: renderMaskByJourney)
             guard !Task.isCancelled else { return }
             let img = CityImageMemoryCache.shared.image(forKey: key) ?? renderCacheStore.image(forKey: key)
             await MainActor.run {
@@ -1295,19 +1337,19 @@ final class CityThumbnailLoader: ObservableObject {
                     // (`.task(id:)` won't re-fire if the cell never scrolls off).
                     if self.renderRetryCount < Self.maxRenderRetries {
                         self.renderRetryCount += 1
-                        self.scheduleRetry(city: city, appearanceRaw: appearanceRaw, key: key, renderCacheStore: renderCacheStore)
+                        self.scheduleRetry(city: city, appearanceRaw: appearanceRaw, key: key, renderCacheStore: renderCacheStore, renderMaskByJourney: renderMaskByJourney)
                     }
                 }
             }
         }
     }
 
-    private func scheduleRetry(city: City, appearanceRaw: String, key: String, renderCacheStore: CityRenderCacheStore) {
+    private func scheduleRetry(city: City, appearanceRaw: String, key: String, renderCacheStore: CityRenderCacheStore, renderMaskByJourney: [String: Set<Int>] = [:]) {
         renderTask?.cancel()
-        renderTask = Task(priority: .utility) { [city, appearanceRaw, key] in
+        renderTask = Task(priority: .utility) { [city, appearanceRaw, key, renderMaskByJourney] in
             try? await Task.sleep(nanoseconds: 5_000_000_000) // 5s backoff
             guard !Task.isCancelled, await self.currentKey == key else { return }
-            await Self.ensurePersistentCache(for: city, appearanceRaw: appearanceRaw, renderCacheStore: renderCacheStore)
+            await Self.ensurePersistentCache(for: city, appearanceRaw: appearanceRaw, renderCacheStore: renderCacheStore, renderMaskByJourney: renderMaskByJourney)
             guard !Task.isCancelled else { return }
             let img = CityImageMemoryCache.shared.image(forKey: key) ?? renderCacheStore.image(forKey: key)
             await MainActor.run {
@@ -1640,7 +1682,8 @@ final class CityThumbnailLoader: ObservableObject {
         let styledSegments = CityDeepRenderEngine.styledSegments(
             journeys: city.journeys,
             countryISO2: city.countryISO2,
-            cityKey: city.id
+            cityKey: city.id,
+            dedupGranularity: .coarse
         )
 
         let options = MKMapSnapshotter.Options()
@@ -1693,22 +1736,15 @@ final class CityThumbnailLoader: ObservableObject {
         ),
               let region = clampedRegion(wgs84Region) else { return nil }
 
-        // Build segments in WGS84 for Mapbox.
-        let styledSegments: [CityDeepStyledSegment] = city.journeys.flatMap { journey in
-            RouteRenderingPipeline
-                .buildSegments(
-                    .init(
-                        coordsWGS84: journey.allCLCoords,
-                        applyGCJForChina: false,
-                        gapDistanceMeters: 2_200,
-                        countryISO2: city.countryISO2,
-                        cityKey: city.id
-                    ),
-                    surface: .mapbox
-                )
-                .segments
-                .map { seg in CityDeepStyledSegment(coords: seg.coords, isGap: seg.style == .dashed, repeatWeight: 0) }
-        }
+        // Build segments in WGS84 for Mapbox. Use the shared engine so we get
+        // the same signature-based dedup + repeatWeight as the MapKit thumbnail.
+        let styledSegments = CityDeepRenderEngine.styledSegments(
+            journeys: city.journeys,
+            countryISO2: city.countryISO2,
+            cityKey: city.id,
+            surface: .mapbox,
+            dedupGranularity: .coarse
+        )
 
         let snapshotSize = CGSize(width: 480, height: 320)
         let styleURI = StyleURI(rawValue: style.mapboxStyleURI) ?? .dark

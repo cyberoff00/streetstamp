@@ -445,6 +445,30 @@ struct MembershipSubscriptionView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 28)
                 .padding(.bottom, 4)
+
+            HStack(spacing: 18) {
+                Button {
+                    if let url = URL(string: "https://cyberoff00.github.io/streetstamp/terms.html") {
+                        UIApplication.shared.open(url)
+                    }
+                } label: {
+                    Text(L10n.t("auth_terms_of_service"))
+                        .font(.system(size: 12))
+                        .foregroundColor(FigmaTheme.subtext)
+                        .underline()
+                }
+                Button {
+                    if let url = URL(string: "https://cyberoff00.github.io/streetstamp/privacy-policy.html") {
+                        UIApplication.shared.open(url)
+                    }
+                } label: {
+                    Text(L10n.t("auth_terms_privacy_policy"))
+                        .font(.system(size: 12))
+                        .foregroundColor(FigmaTheme.subtext)
+                        .underline()
+                }
+            }
+            .padding(.bottom, 6)
         }
         .padding(.top, 12)
         .background(

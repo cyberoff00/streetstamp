@@ -36,12 +36,28 @@ final class UnifiedLifelogAvatarAnnotation: NSObject, MKAnnotation {
 /// Small circle overlay marking a memory location
 final class UnifiedMemoryDotCircle: MKCircle {}
 
+/// The brush circle rendered while the user drags inside eraser mode. Lives
+/// at the meter radius the engine computes from the brush's screen-point size
+/// at the current map zoom.
+final class UnifiedEraseBrushCircle: MKCircle {}
+
+/// Pan recognizer that enters `.began` on touch-down rather than requiring
+/// the standard ~10pt movement threshold. Eraser brush UX needs immediate
+/// visual feedback the moment the finger lands.
+final class ImmediatePanGestureRecognizer: UIPanGestureRecognizer {
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesBegan(touches, with: event)
+        if state == .possible { state = .began }
+    }
+}
+
 // MARK: - MapKit Engine UIViewRepresentable
 
 struct MapKitEngineView: UIViewRepresentable {
     let segments: [MapRouteSegment]
     let annotations: [MapAnnotationItem]
     let circles: [MapCircleOverlay]
+    let eraseBrush: MapEraseBrush?
     let cameraCommand: MapCameraCommand?
     let config: MapConfiguration
     let callbacks: MapCallbacks
@@ -74,6 +90,30 @@ struct MapKitEngineView: UIViewRepresentable {
             let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.onUserGesture(_:)))
             pinch.cancelsTouchesInView = false
             map.addGestureRecognizer(pinch)
+
+            // Eraser brush pan — fires on touch-down so the brush circle
+            // appears immediately and a single tap can also erase. While brush
+            // mode is active we disable map scroll entirely; the two-finger
+            // pan below restores manual map panning. Pinch-to-zoom is a
+            // separate recognizer and keeps working.
+            let brushPan = ImmediatePanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.onBrushPan(_:)))
+            brushPan.maximumNumberOfTouches = 1
+            brushPan.cancelsTouchesInView = false
+            brushPan.delegate = context.coordinator
+            map.addGestureRecognizer(brushPan)
+            context.coordinator.brushPanRecognizer = brushPan
+
+            // Manual two-finger pan, only enabled in brush mode. We can't
+            // rely on tweaking MKMapView's internal pan recognizer because
+            // it lives on a private subview, not the map view itself.
+            let twoPan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.onMapTwoFingerPan(_:)))
+            twoPan.minimumNumberOfTouches = 2
+            twoPan.maximumNumberOfTouches = 2
+            twoPan.cancelsTouchesInView = false
+            twoPan.delegate = context.coordinator
+            twoPan.isEnabled = false
+            map.addGestureRecognizer(twoPan)
+            context.coordinator.mapTwoFingerPanRecognizer = twoPan
         }
 
         // Apply initial camera + data
@@ -81,6 +121,7 @@ struct MapKitEngineView: UIViewRepresentable {
             context.coordinator.lastCommandID = cmd.id
             context.coordinator.applyCamera(cmd, to: map)
         }
+        context.coordinator.applyBrushMode(on: map, brush: eraseBrush)
         context.coordinator.syncAll(on: map, segments: segments, annotations: annotations, circles: circles)
         return map
     }
@@ -97,6 +138,7 @@ struct MapKitEngineView: UIViewRepresentable {
             context.coordinator.applyCamera(cmd, to: map)
         }
 
+        context.coordinator.applyBrushMode(on: map, brush: eraseBrush)
         context.coordinator.syncAll(on: map, segments: segments, annotations: annotations, circles: circles)
 
         // Sync altitude back to caller
@@ -111,7 +153,7 @@ struct MapKitEngineView: UIViewRepresentable {
 
     // MARK: - Coordinator
 
-    final class Coordinator: NSObject, MKMapViewDelegate {
+    final class Coordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDelegate {
         var config: MapConfiguration
         var callbacks: MapCallbacks
         var layerStyle: MapLayerStyle
@@ -131,6 +173,14 @@ struct MapKitEngineView: UIViewRepresentable {
         private var renderedSegments: [MapRouteSegment] = []
         private var routeOverlays: [StyledPolyline] = []
         private var tailOverlay: MKPolyline?
+
+        // Eraser brush state
+        weak var brushPanRecognizer: UIPanGestureRecognizer?
+        weak var mapTwoFingerPanRecognizer: UIPanGestureRecognizer?
+        private var currentBrush: MapEraseBrush?
+        private var brushOverlay: UnifiedEraseBrushCircle?
+        private var brushIsBrushing: Bool = false
+        private var brushLastSampleTime: CFTimeInterval = 0
 
         // Gesture
         private var isProgrammaticRegionChange = false
@@ -176,6 +226,129 @@ struct MapKitEngineView: UIViewRepresentable {
                     self?.callbacks.onGestureStateChanged?(false)
                 }
             }
+        }
+
+        // MARK: - Eraser brush
+
+        /// Apply or clear brush mode. While active, the map's built-in scroll
+        /// is disabled so single-finger drags reach the brush; our own
+        /// two-finger pan recognizer takes over map panning. Pinch-zoom is
+        /// a separate gesture and keeps working.
+        ///
+        /// Only writes side effects on actual edge transitions — updateUIView
+        /// fires on every body render and we don't want to repeatedly poke
+        /// gesture/scroll state mid-stroke.
+        func applyBrushMode(on map: MKMapView, brush: MapEraseBrush?) {
+            let wasActive = currentBrush != nil
+            let isActive = brush != nil
+            currentBrush = brush
+
+            if !wasActive && isActive {
+                map.isScrollEnabled = false
+                brushPanRecognizer?.isEnabled = true
+                mapTwoFingerPanRecognizer?.isEnabled = true
+            } else if wasActive && !isActive {
+                map.isScrollEnabled = true
+                brushPanRecognizer?.isEnabled = false
+                mapTwoFingerPanRecognizer?.isEnabled = false
+                removeBrushOverlay(on: map)
+                brushIsBrushing = false
+            }
+        }
+
+        @objc func onMapTwoFingerPan(_ gr: UIPanGestureRecognizer) {
+            guard currentBrush != nil else { return }
+            guard let map = gr.view as? MKMapView else { return }
+
+            switch gr.state {
+            case .began, .changed:
+                let translation = gr.translation(in: map)
+                guard translation.x != 0 || translation.y != 0 else { return }
+                gr.setTranslation(.zero, in: map)
+
+                let bounds = map.bounds.size
+                guard bounds.width > 0, bounds.height > 0 else { return }
+                let span = map.region.span
+                let lonDelta = -Double(translation.x) * span.longitudeDelta / Double(bounds.width)
+                let latDelta = Double(translation.y) * span.latitudeDelta / Double(bounds.height)
+                var center = map.region.center
+                center.latitude = max(-85, min(85, center.latitude + latDelta))
+                center.longitude += lonDelta
+                isProgrammaticRegionChange = true
+                map.setCenter(center, animated: false)
+            default:
+                break
+            }
+        }
+
+        @objc func onBrushPan(_ gr: UIPanGestureRecognizer) {
+            guard let brush = currentBrush else { return }
+            guard let map = gr.view as? MKMapView else { return }
+
+            switch gr.state {
+            case .began:
+                brushIsBrushing = true
+                callbacks.onGestureStateChanged?(true)
+                callbacks.onEraseBrushStrokeStart?()
+                emitBrushSample(at: gr.location(in: map), on: map, brush: brush, force: true)
+            case .changed:
+                emitBrushSample(at: gr.location(in: map), on: map, brush: brush, force: false)
+            case .ended, .cancelled, .failed:
+                brushIsBrushing = false
+                emitBrushSample(at: gr.location(in: map), on: map, brush: brush, force: true)
+                callbacks.onEraseBrushStrokeEnd?()
+                removeBrushOverlay(on: map)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                    self?.callbacks.onGestureStateChanged?(false)
+                }
+            default:
+                break
+            }
+        }
+
+        private func emitBrushSample(at screenPoint: CGPoint, on map: MKMapView, brush: MapEraseBrush, force: Bool) {
+            // Throttle to ~33ms (≈30 Hz). Pan gesture events fire at display
+            // frequency; we don't need to compute mask updates that fast.
+            let now = CACurrentMediaTime()
+            if !force, now - brushLastSampleTime < 0.033 { return }
+            brushLastSampleTime = now
+
+            let coord = map.convert(screenPoint, toCoordinateFrom: map)
+            // Convert the brush's fixed screen-point size into world meters
+            // using the current map projection at the brush position. This
+            // keeps the brush a constant visual size as the user zooms.
+            let edgePoint = CGPoint(x: screenPoint.x + brush.screenRadiusPoints, y: screenPoint.y)
+            let edgeCoord = map.convert(edgePoint, toCoordinateFrom: map)
+            let centerLoc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+            let edgeLoc = CLLocation(latitude: edgeCoord.latitude, longitude: edgeCoord.longitude)
+            let radiusMeters = max(1, centerLoc.distance(from: edgeLoc))
+
+            updateBrushOverlay(on: map, center: coord, radius: radiusMeters)
+            callbacks.onEraseBrushSwept?(coord, radiusMeters)
+        }
+
+        private func updateBrushOverlay(on map: MKMapView, center: CLLocationCoordinate2D, radius: CLLocationDistance) {
+            removeBrushOverlay(on: map)
+            let circle = UnifiedEraseBrushCircle(center: center, radius: radius)
+            // .aboveLabels keeps the brush visible above polylines and labels —
+            // critical for the user to see where the eraser is hovering.
+            map.addOverlay(circle, level: .aboveLabels)
+            brushOverlay = circle
+        }
+
+        private func removeBrushOverlay(on map: MKMapView) {
+            if let old = brushOverlay {
+                map.removeOverlay(old)
+                brushOverlay = nil
+            }
+        }
+
+        // The brush pan recognizer must coexist with the map's pinch gesture
+        // (so users can still zoom in/out mid-edit). Single-finger pan is
+        // already disabled via map.isScrollEnabled = false during brush mode.
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            true
         }
 
         // MARK: - Overlays
@@ -254,8 +427,14 @@ struct MapKitEngineView: UIViewRepresentable {
                     for seg in segments[commonPrefixCount...] where seg.coordinates.count > 1 {
                         let poly = StyledPolyline(coordinates: seg.coordinates, count: seg.coordinates.count)
                         poly.isGap = seg.isGap
-                        if let n = counts[segmentSignature(seg.coordinates)], !poly.isGap {
-                            poly.repeatWeight = min(1.0, log(1.0 + Double(n)) / log(1.0 + p95))
+                        if !poly.isGap {
+                            // Trust upstream weight when present (caller already deduped/weighted);
+                            // otherwise compute from counts collected here.
+                            if seg.repeatWeight > 0 {
+                                poly.repeatWeight = max(0, min(1, seg.repeatWeight))
+                            } else if let n = counts[segmentSignature(seg.coordinates)] {
+                                poly.repeatWeight = min(1.0, log(1.0 + Double(n)) / log(1.0 + p95))
+                            }
                         }
                         poly.title = poly.isGap ? "route_dashed" : "route_solid"
                         appended.append(poly)
@@ -279,7 +458,10 @@ struct MapKitEngineView: UIViewRepresentable {
                 for seg in segments where seg.coordinates.count >= 2 {
                     let poly = StyledPolyline(coordinates: seg.coordinates, count: seg.coordinates.count)
                     poly.isGap = seg.isGap
-                    if let n = counts[segmentSignature(seg.coordinates)], !poly.isGap {
+                    if seg.repeatWeight > 0 {
+                        // Trust upstream weight when present (caller already deduped/weighted).
+                        poly.repeatWeight = max(0, min(1, seg.repeatWeight))
+                    } else if let n = counts[segmentSignature(seg.coordinates)], !poly.isGap {
                         poly.repeatWeight = min(1.0, log(1.0 + Double(n)) / log(1.0 + p95))
                     } else {
                         poly.repeatWeight = max(0, min(1, seg.repeatWeight))
@@ -455,6 +637,18 @@ struct MapKitEngineView: UIViewRepresentable {
         // MARK: - MKMapViewDelegate
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+            // Eraser brush: bright orange disc following the user's finger.
+            // High contrast + thick stroke so it's unmistakably visible
+            // against any underlying map style.
+            if let brush = overlay as? UnifiedEraseBrushCircle {
+                let r = MKCircleRenderer(circle: brush)
+                let accent = UIColor(red: 1.00, green: 0.45, blue: 0.05, alpha: 1.0)
+                r.fillColor = accent.withAlphaComponent(0.32)
+                r.strokeColor = accent
+                r.lineWidth = 2.5
+                return r
+            }
+
             // Memory dot circle
             if let dot = overlay as? UnifiedMemoryDotCircle {
                 let r = MKCircleRenderer(circle: dot)

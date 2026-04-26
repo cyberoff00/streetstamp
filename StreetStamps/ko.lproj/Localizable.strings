@@ -78,6 +78,10 @@
 "city_deep_memories_toggle_off" = "기억 꺼짐";
 "city_deep_memories_toggle_on" = "기억 켜짐";
 "city_deep_memories_toggle_show_accessibility" = "지도에서 추억 보기";
+"city_deep_eraser_enter" = "정리";
+"city_deep_eraser_done" = "완료";
+"city_deep_eraser_restore_all" = "모두 복원";
+"city_deep_eraser_undo" = "실행 취소";
 "city_empty_subtitle" = "도시 카드를 생성하거나 여정을 완료하여 첫 도시를 해금하세요.";
 "city_empty_title" = "아직 도시 스탬프가 없습니다";
 "city_library_header_city" = "내 도시 스탬프";
@@ -898,7 +902,7 @@
 "membership_compare_free" = "무료";
 "membership_compare_premium" = "Premium";
 "membership_compare_photos" = "사진 / 여정";
-"membership_info_photos" = "여정당 추가 가능한 최대 사진 수. 메모리당 최대 2장. 무료: 6장, Premium: 12장.";
+"membership_info_photos" = "여정당 추가 가능한 최대 사진 수. 무료: 6장, Premium: 12장.";
 "membership_info_postcard" = "도시당: 친구 1명에게 1장(무료)/2장(Premium) 발송 가능, 최대 3명(무료)/10명(Premium). 해당 도시의 여정이 추가될 때마다 친구당 +1장, 수신자 수도 증가.";
 "membership_compare_friends" = "친구";
 "membership_compare_unlimited" = "무제한";

@@ -10,6 +10,10 @@ struct MapboxEngineView: UIViewRepresentable {
     let segments: [MapRouteSegment]
     let annotations: [MapAnnotationItem]
     let circles: [MapCircleOverlay]
+    /// Mapbox engine accepts the brush param for API symmetry but does not yet
+    /// implement an interactive brush. Mask filtering is upstream (segments
+    /// are pre-filtered) so polylines still respect the user's existing mask.
+    let eraseBrush: MapEraseBrush?
     let cameraCommand: MapCameraCommand?
     let config: MapConfiguration
     let callbacks: MapCallbacks
@@ -26,6 +30,8 @@ struct MapboxEngineView: UIViewRepresentable {
     private let circleSourceId = "um-circles-source"
     private let circleGlowLayerId = "um-circles-glow"
     private let circleMainLayerId = "um-circles-main"
+    let brushSourceId = "um-brush-source"
+    let brushLayerId = "um-brush-circle"
 
     func makeCoordinator() -> Coordinator { Coordinator(config: config, callbacks: callbacks) }
 
@@ -81,6 +87,27 @@ struct MapboxEngineView: UIViewRepresentable {
                 }
             }
             context.coordinator.cameraChangedCancelable = cancelable
+
+            // Eraser brush gesture recognizers. Both stay on the Mapbox view;
+            // brushPan handles single-finger drags (and is enabled only in
+            // brush mode), mapTwoFingerPan handles map panning while brush is
+            // active (Mapbox's own pan is disabled then).
+            let brushPan = ImmediatePanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.onBrushPan(_:)))
+            brushPan.maximumNumberOfTouches = 1
+            brushPan.cancelsTouchesInView = false
+            brushPan.delegate = context.coordinator
+            brushPan.isEnabled = false
+            mapView.addGestureRecognizer(brushPan)
+            context.coordinator.brushPanRecognizer = brushPan
+
+            let twoPan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.onMapTwoFingerPan(_:)))
+            twoPan.minimumNumberOfTouches = 2
+            twoPan.maximumNumberOfTouches = 2
+            twoPan.cancelsTouchesInView = false
+            twoPan.delegate = context.coordinator
+            twoPan.isEnabled = false
+            mapView.addGestureRecognizer(twoPan)
+            context.coordinator.mapTwoFingerPanRecognizer = twoPan
         }
 
         // Apply initial camera
@@ -131,11 +158,12 @@ struct MapboxEngineView: UIViewRepresentable {
         if context.coordinator.styleLoaded {
             context.coordinator.refreshData()
         }
+        context.coordinator.applyBrushMode(on: mapView, brush: eraseBrush)
     }
 
     // MARK: - Coordinator
 
-    final class Coordinator: NSObject {
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var config: MapConfiguration
         var callbacks: MapCallbacks
         weak var mapView: MapboxMaps.MapView?
@@ -151,6 +179,14 @@ struct MapboxEngineView: UIViewRepresentable {
         var pendingCamera: MapCameraCommand? = nil
         /// Retains the camera-changed observation so it doesn't get cancelled immediately.
         var cameraChangedCancelable: AnyCancelable? = nil
+
+        // Eraser brush state — mirrors MapKitEngine's coordinator.
+        weak var brushPanRecognizer: UIPanGestureRecognizer?
+        weak var mapTwoFingerPanRecognizer: UIPanGestureRecognizer?
+        private var currentBrush: MapEraseBrush?
+        private var brushIsBrushing = false
+        private var brushLastSampleTime: CFTimeInterval = 0
+        private var lastBrushSavedPanEnabled: Bool = true
 
         init(config: MapConfiguration, callbacks: MapCallbacks) {
             self.config = config
@@ -267,11 +303,59 @@ struct MapboxEngineView: UIViewRepresentable {
             addRouteLayers(mapboxMap: mapboxMap, baseColor: baseColor, glowColor: glowColor, isDark: isDark)
             addTailLayer(mapboxMap: mapboxMap, baseColor: baseColor, glowColor: glowColor, isDark: isDark)
             addCircleLayers(mapboxMap: mapboxMap, isDark: isDark)
+            addBrushLayer(mapboxMap: mapboxMap)
+        }
+
+        private func addBrushLayer(mapboxMap: MapboxMap) {
+            guard let ev = engineView else { return }
+            if !mapboxMap.sourceExists(withId: ev.brushSourceId) {
+                var src = GeoJSONSource(id: ev.brushSourceId)
+                src.data = .featureCollection(Turf.FeatureCollection(features: []))
+                try? mapboxMap.addSource(src)
+            }
+            if !mapboxMap.layerExists(withId: ev.brushLayerId) {
+                var layer = CircleLayer(id: ev.brushLayerId, source: ev.brushSourceId)
+                let accent = UIColor(red: 1.00, green: 0.45, blue: 0.05, alpha: 1.0)
+                layer.circleColor = .constant(StyleColor(accent))
+                layer.circleOpacity = .constant(0.32)
+                layer.circleStrokeColor = .constant(StyleColor(accent))
+                layer.circleStrokeOpacity = .constant(1.0)
+                layer.circleStrokeWidth = .constant(2.5)
+                // Radius gets driven from the brush config in updateBrushOverlay.
+                layer.circleRadius = .constant(0)
+                let anchor: LayerPosition = mapboxMap.layerExists(withId: ev.circleMainLayerId)
+                    ? .above(ev.circleMainLayerId)
+                    : (aboveBuildingsPosition(mapboxMap) ?? .default)
+                try? mapboxMap.addLayer(layer, layerPosition: anchor)
+            }
+        }
+
+        /// Find a layer position that places our overlays above 3D building
+        /// extrusions. Mapbox styles render fill-extrusion layers above
+        /// regular line layers, so without explicit positioning a route can
+        /// disappear behind 3D buildings at street zoom. Falls back to the
+        /// default top-of-stack position when no building layer is found.
+        private func aboveBuildingsPosition(_ mapboxMap: MapboxMap) -> LayerPosition? {
+            let candidates = [
+                "building-extrusion",
+                "3d-buildings",
+                "building-3d",
+                "building",
+                "building-outline"
+            ]
+            for c in candidates where mapboxMap.layerExists(withId: c) {
+                return .above(c)
+            }
+            return nil
         }
 
         // v11: helpers take MapboxMap directly (mapboxMap.style returns self)
+        // Layers are chained: each one is positioned just above the previous
+        // so the visual stack (bottom→top) ends up: building → glow → main →
+        // highlight → dashed → tail → circle-glow → circle-main → brush.
         private func addRouteLayers(mapboxMap: MapboxMap, baseColor: UIColor, glowColor: UIColor, isDark: Bool) {
             guard let ev = engineView else { return }
+            let buildingsAnchor = aboveBuildingsPosition(mapboxMap)
 
             if !mapboxMap.layerExists(withId: ev.routeGlowLayerId) {
                 var glow = LineLayer(id: ev.routeGlowLayerId, source: ev.routeSourceId)
@@ -293,7 +377,7 @@ struct MapboxEngineView: UIViewRepresentable {
                     14; 4.0
                     20; 6.0
                 })
-                try? mapboxMap.addLayer(glow)
+                try? mapboxMap.addLayer(glow, layerPosition: buildingsAnchor)
             }
 
             if !mapboxMap.layerExists(withId: ev.routeMainLayerId) {
@@ -310,7 +394,7 @@ struct MapboxEngineView: UIViewRepresentable {
                     16; 5.0
                     20; 8.0
                 })
-                try? mapboxMap.addLayer(main)
+                try? mapboxMap.addLayer(main, layerPosition: .above(ev.routeGlowLayerId))
             }
 
             if !mapboxMap.layerExists(withId: ev.routeHighlightLayerId) {
@@ -327,7 +411,7 @@ struct MapboxEngineView: UIViewRepresentable {
                     16; 1.4
                     20; 2.0
                 })
-                try? mapboxMap.addLayer(highlight)
+                try? mapboxMap.addLayer(highlight, layerPosition: .above(ev.routeMainLayerId))
             }
 
             // Dashed signal-loss segments render the main layer only. A glow layer would
@@ -348,7 +432,7 @@ struct MapboxEngineView: UIViewRepresentable {
                     16; 3.75
                     20; 6.0
                 })
-                try? mapboxMap.addLayer(dmain)
+                try? mapboxMap.addLayer(dmain, layerPosition: .above(ev.routeHighlightLayerId))
             }
         }
 
@@ -366,7 +450,10 @@ struct MapboxEngineView: UIViewRepresentable {
                     14; 2.5
                     20; 4.0
                 })
-                try? mapboxMap.addLayer(tail)
+                let anchor: LayerPosition = mapboxMap.layerExists(withId: ev.routeDashedMainLayerId)
+                    ? .above(ev.routeDashedMainLayerId)
+                    : (aboveBuildingsPosition(mapboxMap) ?? .default)
+                try? mapboxMap.addLayer(tail, layerPosition: anchor)
             }
         }
 
@@ -380,7 +467,12 @@ struct MapboxEngineView: UIViewRepresentable {
                 glow.circleOpacity = .constant(isDark ? 0.50 : 0.35)
                 glow.circleRadius = .constant(8)
                 glow.circleBlur = .constant(0.8)
-                try? mapboxMap.addLayer(glow)
+                let anchor: LayerPosition = mapboxMap.layerExists(withId: ev.tailLayerId)
+                    ? .above(ev.tailLayerId)
+                    : (mapboxMap.layerExists(withId: ev.routeDashedMainLayerId)
+                        ? .above(ev.routeDashedMainLayerId)
+                        : (aboveBuildingsPosition(mapboxMap) ?? .default))
+                try? mapboxMap.addLayer(glow, layerPosition: anchor)
             }
 
             if !mapboxMap.layerExists(withId: ev.circleMainLayerId) {
@@ -391,7 +483,7 @@ struct MapboxEngineView: UIViewRepresentable {
                 main.circleStrokeColor = .constant(StyleColor(green))
                 main.circleStrokeWidth = .constant(1.5)
                 main.circleStrokeOpacity = .constant(isDark ? 0.75 : 0.55)
-                try? mapboxMap.addLayer(main)
+                try? mapboxMap.addLayer(main, layerPosition: .above(ev.circleGlowLayerId))
             }
         }
 
@@ -578,6 +670,135 @@ struct MapboxEngineView: UIViewRepresentable {
 
                 viewAnnotations[item.id] = hostView
             }
+        }
+
+        // MARK: - Eraser brush
+
+        func applyBrushMode(on mapView: MapboxMaps.MapView, brush: MapEraseBrush?) {
+            let wasActive = currentBrush != nil
+            let isActive = brush != nil
+            currentBrush = brush
+
+            // Only snapshot/restore on actual edge transitions. updateUIView
+            // is called on every body render — re-saving while already active
+            // would persist our own `false` as the "original" and leave the
+            // map permanently un-pannable on exit.
+            if !wasActive && isActive {
+                lastBrushSavedPanEnabled = mapView.gestures.options.panEnabled
+                mapView.gestures.options.panEnabled = false
+            } else if wasActive && !isActive {
+                mapView.gestures.options.panEnabled = lastBrushSavedPanEnabled
+            }
+
+            brushPanRecognizer?.isEnabled = isActive
+            mapTwoFingerPanRecognizer?.isEnabled = isActive
+
+            if let brush = brush, styleLoaded {
+                if let layerId = engineView?.brushLayerId,
+                   mapView.mapboxMap.layerExists(withId: layerId) {
+                    try? mapView.mapboxMap.setLayerProperty(
+                        for: layerId,
+                        property: "circle-radius",
+                        value: Double(brush.screenRadiusPoints)
+                    )
+                }
+            }
+
+            if !isActive {
+                clearBrushOverlay(on: mapView)
+                brushIsBrushing = false
+            }
+        }
+
+        @objc func onBrushPan(_ gr: UIPanGestureRecognizer) {
+            guard let brush = currentBrush else { return }
+            guard let mapView else { return }
+
+            switch gr.state {
+            case .began:
+                brushIsBrushing = true
+                callbacks.onGestureStateChanged?(true)
+                callbacks.onEraseBrushStrokeStart?()
+                emitBrushSample(at: gr.location(in: mapView), on: mapView, brush: brush, force: true)
+            case .changed:
+                emitBrushSample(at: gr.location(in: mapView), on: mapView, brush: brush, force: false)
+            case .ended, .cancelled, .failed:
+                brushIsBrushing = false
+                emitBrushSample(at: gr.location(in: mapView), on: mapView, brush: brush, force: true)
+                callbacks.onEraseBrushStrokeEnd?()
+                clearBrushOverlay(on: mapView)
+                scheduleGestureEnd()
+            default:
+                break
+            }
+        }
+
+        @objc func onMapTwoFingerPan(_ gr: UIPanGestureRecognizer) {
+            guard currentBrush != nil else { return }
+            guard let mapView else { return }
+
+            switch gr.state {
+            case .began, .changed:
+                let translation = gr.translation(in: mapView)
+                guard translation.x != 0 || translation.y != 0 else { return }
+                gr.setTranslation(.zero, in: mapView)
+
+                // Move the camera so the underlying map shifts opposite to
+                // the finger drag direction (standard pan feel).
+                let bounds = mapView.bounds.size
+                guard bounds.width > 0, bounds.height > 0 else { return }
+                let centerScreen = CGPoint(x: bounds.width / 2, y: bounds.height / 2)
+                let targetScreen = CGPoint(
+                    x: centerScreen.x - translation.x,
+                    y: centerScreen.y - translation.y
+                )
+                let newCenter = mapView.mapboxMap.coordinate(for: targetScreen)
+                guard newCenter.latitude.isFinite, newCenter.longitude.isFinite else { return }
+                isProgrammaticCamera = true
+                mapView.mapboxMap.setCamera(to: CameraOptions(center: newCenter))
+            default:
+                break
+            }
+        }
+
+        private func emitBrushSample(at screenPoint: CGPoint, on mapView: MapboxMaps.MapView, brush: MapEraseBrush, force: Bool) {
+            let now = CACurrentMediaTime()
+            if !force, now - brushLastSampleTime < 0.033 { return }
+            brushLastSampleTime = now
+
+            let coord = mapView.mapboxMap.coordinate(for: screenPoint)
+            guard coord.latitude.isFinite, coord.longitude.isFinite else { return }
+
+            // Convert fixed screen-radius into world meters via the projection
+            // at the brush position so callers can hit-test in meter space.
+            let edgePoint = CGPoint(x: screenPoint.x + brush.screenRadiusPoints, y: screenPoint.y)
+            let edgeCoord = mapView.mapboxMap.coordinate(for: edgePoint)
+            let centerLoc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+            let edgeLoc = CLLocation(latitude: edgeCoord.latitude, longitude: edgeCoord.longitude)
+            let radiusMeters = max(1, centerLoc.distance(from: edgeLoc))
+
+            updateBrushOverlay(on: mapView, center: coord)
+            callbacks.onEraseBrushSwept?(coord, radiusMeters)
+        }
+
+        private func updateBrushOverlay(on mapView: MapboxMaps.MapView, center: CLLocationCoordinate2D) {
+            guard styleLoaded, let sourceId = engineView?.brushSourceId else { return }
+            guard mapView.mapboxMap.sourceExists(withId: sourceId) else { return }
+            let feature = Turf.Feature(geometry: Turf.Geometry.point(Turf.Point(center)))
+            let fc = Turf.FeatureCollection(features: [feature])
+            mapView.mapboxMap.updateGeoJSONSource(withId: sourceId, geoJSON: .featureCollection(fc))
+        }
+
+        private func clearBrushOverlay(on mapView: MapboxMaps.MapView) {
+            guard styleLoaded, let sourceId = engineView?.brushSourceId else { return }
+            guard mapView.mapboxMap.sourceExists(withId: sourceId) else { return }
+            mapView.mapboxMap.updateGeoJSONSource(withId: sourceId, geoJSON: .featureCollection(Turf.FeatureCollection(features: [])))
+        }
+
+        // Allow brush/two-finger pan to coexist with Mapbox's pinch.
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            true
         }
     }
 }

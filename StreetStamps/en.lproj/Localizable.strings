@@ -971,6 +971,10 @@
 "city_deep_memories_toggle_off" = "Memories Off";
 "city_deep_memories_toggle_show_accessibility" = "Show memories on map";
 "city_deep_memories_toggle_hide_accessibility" = "Hide memories on map";
+"city_deep_eraser_enter" = "Cleanup";
+"city_deep_eraser_done" = "Done";
+"city_deep_eraser_restore_all" = "Restore All";
+"city_deep_eraser_undo" = "Undo";
 "lifelog_mood_option_sad" = "Low";
 "lifelog_mood_option_notbad" = "Okay";
 "lifelog_mood_option_happy" = "Happy";
@@ -1051,7 +1055,7 @@
 "membership_page_title" = "Premium";
 "membership_hero_title" = "Elevate Your Journey";
 "membership_your_benefits" = "YOUR BENEFITS";
-"membership_indie_note" = "Supports a solo female developer pursuing the best product experience. No ads. No data sold.";
+"membership_indie_note" = "Subscribe to support an indie developer in pursuit of the most perfect product experience. No ads, ever. No commercial data use.";
 "membership_status_active" = "Premium Active";
 "membership_status_free" = "Free Plan";
 "membership_upgrade_subtitle" = "Unlock all features and get the most out of your journeys.";
@@ -1066,7 +1070,7 @@
 "membership_compare_free" = "Free";
 "membership_compare_premium" = "Premium";
 "membership_compare_photos" = "Photos / journey";
-"membership_info_photos" = "Max photos per journey. Each memory can hold up to 2 photos. Free: 6 total, Premium: 12 total.";
+"membership_info_photos" = "Max photos per journey. Free: 6 total, Premium: 12 total.";
 "journey_photo_limit_toast" = "To capture the best moments, each journey allows up to %d photos";
 "membership_info_postcard" = "Per city: Free plan can send 1 postcard per friend (max 3 friends). Premium is unlimited.";
 "membership_compare_friends" = "Friends";

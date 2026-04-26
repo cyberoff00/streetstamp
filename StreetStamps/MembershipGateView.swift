@@ -351,6 +351,29 @@ struct MembershipGateView: View {
                 .foregroundColor(FigmaTheme.subtext.opacity(0.6))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 20)
+
+            HStack(spacing: 16) {
+                Button {
+                    if let url = URL(string: "https://cyberoff00.github.io/streetstamp/terms.html") {
+                        UIApplication.shared.open(url)
+                    }
+                } label: {
+                    Text(L10n.t("auth_terms_of_service"))
+                        .font(.system(size: 11))
+                        .foregroundColor(FigmaTheme.subtext)
+                        .underline()
+                }
+                Button {
+                    if let url = URL(string: "https://cyberoff00.github.io/streetstamp/privacy-policy.html") {
+                        UIApplication.shared.open(url)
+                    }
+                } label: {
+                    Text(L10n.t("auth_terms_privacy_policy"))
+                        .font(.system(size: 11))
+                        .foregroundColor(FigmaTheme.subtext)
+                        .underline()
+                }
+            }
         }
     }
 

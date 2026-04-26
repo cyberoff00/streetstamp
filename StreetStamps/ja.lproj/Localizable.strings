@@ -78,6 +78,10 @@
 "city_deep_memories_toggle_off" = "記憶 オフ";
 "city_deep_memories_toggle_on" = "記憶 オン";
 "city_deep_memories_toggle_show_accessibility" = "地図上の記憶を表示";
+"city_deep_eraser_enter" = "整理";
+"city_deep_eraser_done" = "完了";
+"city_deep_eraser_restore_all" = "すべて復元";
+"city_deep_eraser_undo" = "元に戻す";
 "city_empty_subtitle" = "都市カードを生成するか、旅を完了して最初の都市を解放しましょう。";
 "city_empty_title" = "まだ都市スタンプがありません";
 "city_library_header_city" = "あなたの都市スタンプ";
@@ -898,7 +902,7 @@
 "membership_compare_free" = "無料";
 "membership_compare_premium" = "Premium";
 "membership_compare_photos" = "写真 / 旅程";
-"membership_info_photos" = "旅ごとに追加できる写真の上限。各メモリー最大2枚。無料: 6枚、Premium: 12枚。";
+"membership_info_photos" = "旅ごとに追加できる写真の上限。無料: 6枚、Premium: 12枚。";
 "membership_info_postcard" = "都市ごと：友達1人に1枚(無料)/2枚(Premium)送付可、最大3人(無料)/10人(Premium)。その都市の旅が増えるたびに友達1人あたり+1枚、送付先も増加。";
 "membership_compare_friends" = "フレンド";
 "membership_compare_unlimited" = "無制限";

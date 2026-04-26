@@ -8,6 +8,7 @@ struct UnifiedMapView: View {
     let segments: [MapRouteSegment]
     let annotations: [MapAnnotationItem]
     let circles: [MapCircleOverlay]
+    let eraseBrush: MapEraseBrush?
     let cameraCommand: MapCameraCommand?
     let config: MapConfiguration
     let callbacks: MapCallbacks
@@ -16,6 +17,7 @@ struct UnifiedMapView: View {
         segments: [MapRouteSegment],
         annotations: [MapAnnotationItem] = [],
         circles: [MapCircleOverlay] = [],
+        eraseBrush: MapEraseBrush? = nil,
         cameraCommand: MapCameraCommand? = nil,
         config: MapConfiguration,
         callbacks: MapCallbacks = MapCallbacks()
@@ -23,6 +25,7 @@ struct UnifiedMapView: View {
         self.segments = segments
         self.annotations = annotations
         self.circles = circles
+        self.eraseBrush = eraseBrush
         self.cameraCommand = cameraCommand
         self.config = config
         self.callbacks = callbacks
@@ -39,6 +42,7 @@ struct UnifiedMapView: View {
                 segments: segments,
                 annotations: annotations,
                 circles: circles,
+                eraseBrush: eraseBrush,
                 cameraCommand: cameraCommand,
                 config: config,
                 callbacks: callbacks,
@@ -49,6 +53,7 @@ struct UnifiedMapView: View {
                 segments: segments,
                 annotations: annotations,
                 circles: circles,
+                eraseBrush: eraseBrush,
                 cameraCommand: cameraCommand,
                 config: config,
                 callbacks: callbacks,

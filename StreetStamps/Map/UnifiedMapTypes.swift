@@ -48,6 +48,21 @@ struct MapCircleOverlay: Identifiable {
     let radiusMeters: Double
 }
 
+// MARK: - Eraser brush (CityDeepView eraser)
+
+/// Configures the eraser brush mode on the map. When non-nil, the engine
+/// disables map panning, attaches its own pan recognizer, and reports each
+/// brush sample back via `onEraseBrushSwept` so the caller can erase points
+/// underneath the brush. The engine also renders a single circle overlay at
+/// the current brush position for visual feedback.
+///
+/// Radius is specified in screen points so the brush feels the same size at
+/// any zoom level. The engine converts to meters per sample using the active
+/// map projection and reports that meter radius back via the callback.
+struct MapEraseBrush: Equatable {
+    let screenRadiusPoints: CGFloat
+}
+
 // MARK: - Camera Command
 
 struct MapCameraCommand: Identifiable {
@@ -156,4 +171,14 @@ struct MapCallbacks {
     var onGestureStateChanged: ((Bool) -> Void)? = nil
     var onFollowUserChanged: ((Bool) -> Void)? = nil
     var onCameraAltitudeChanged: ((CLLocationDistance) -> Void)? = nil
+    /// Eraser brush stroke: fired continuously while the user drags inside
+    /// brush mode. Reports the current brush coordinate plus its radius in
+    /// meters at the active zoom. Caller is expected to find journey points
+    /// within the radius and add them to the render mask.
+    var onEraseBrushSwept: ((CLLocationCoordinate2D, CLLocationDistance) -> Void)? = nil
+    /// Fired once when a brush stroke starts (finger touches down). The
+    /// caller can use this to begin recording an undo step.
+    var onEraseBrushStrokeStart: (() -> Void)? = nil
+    /// Fired when a brush stroke ends (finger lifts or gesture cancels).
+    var onEraseBrushStrokeEnd: (() -> Void)? = nil
 }

@@ -78,6 +78,10 @@
 "city_deep_memories_toggle_off" = "Recuerdos desactivados";
 "city_deep_memories_toggle_on" = "Recuerdos activados";
 "city_deep_memories_toggle_show_accessibility" = "Mostrar recuerdos en el mapa";
+"city_deep_eraser_enter" = "Limpiar";
+"city_deep_eraser_done" = "Listo";
+"city_deep_eraser_restore_all" = "Restaurar todo";
+"city_deep_eraser_undo" = "Deshacer";
 "city_empty_subtitle" = "Genera una tarjeta de ciudad o termina un viaje para desbloquear tu primera ciudad.";
 "city_empty_title" = "Aún no tienes sellos de ciudad";
 "city_library_header_city" = "Tus sellos de ciudad";
@@ -898,7 +902,7 @@
 "membership_compare_free" = "Gratis";
 "membership_compare_premium" = "Premium";
 "membership_compare_photos" = "Fotos / viaje";
-"membership_info_photos" = "Fotos máx. por viaje. Máx. 2 por recuerdo. Gratis: 6, Premium: 12.";
+"membership_info_photos" = "Fotos máx. por viaje. Gratis: 6, Premium: 12.";
 "membership_info_postcard" = "Por ciudad: envía 1 (Gratis) / 2 (Premium) postales por amigo, a máx. 3 (Gratis) / 10 (Premium) amigos. Cada viaje extra da +1 por amigo y más destinatarios.";
 "membership_compare_friends" = "Amigos";
 "membership_compare_unlimited" = "Ilimitado";

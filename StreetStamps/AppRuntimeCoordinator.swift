@@ -275,12 +275,14 @@ enum AppJourneySyncCoordinator {
         journeyStore: JourneyStore,
         cityCache: CityCache,
         cityRenderCache: CityRenderCacheStore,
+        renderMaskStore: RenderMaskStore? = nil,
         limit: Int = 16
     ) async {
         let journeysSnapshot = journeyStore.journeys
         let cachedCitiesSnapshot = cityCache.cachedCities
         let appearanceRaw = MapLayerStyle.current.rawValue
         let renderCache = cityRenderCache
+        let renderMaskSnapshot = renderMaskStore?.snapshot() ?? [:]
         let cities = await Task.detached(priority: .userInitiated) {
             CityLibraryVM.buildCities(journeys: journeysSnapshot, cachedCities: cachedCitiesSnapshot)
         }.value
@@ -288,7 +290,8 @@ enum AppJourneySyncCoordinator {
             cities: cities,
             appearanceRaw: appearanceRaw,
             renderCacheStore: renderCache,
-            limit: limit
+            limit: limit,
+            renderMaskByJourney: renderMaskSnapshot
         )
     }
 }

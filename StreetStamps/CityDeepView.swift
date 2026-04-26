@@ -38,6 +38,7 @@ struct CityDeepView: View {
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var cache: CityCache
     @EnvironmentObject private var flow: AppFlowCoordinator
+    @EnvironmentObject private var renderMaskStore: RenderMaskStore
     @ObservedObject private var languagePreference = LanguagePreference.shared
 
     init(city: City) {
@@ -52,6 +53,22 @@ struct CityDeepView: View {
 
     @State private var editingMemory: JourneyMemory? = nil
     @State private var showMemoriesOnMap = true
+    @State private var isEditingMask: Bool = false
+    @State private var editPointTemplates: [EditPointTemplate] = []
+
+    /// Cached edit-point geometry built once per `(cachedJourneys, engine, city)`
+    /// session. Per-brush sample re-uses these without re-running
+    /// `MapCoordAdapter.forMapKit` over thousands of points.
+    fileprivate struct EditPointTemplate {
+        let journeyID: String
+        let index: Int
+        let coord: CLLocationCoordinate2D
+        /// True when the next template (within the same journey) is far
+        /// enough away that the polyline would render the connector as a
+        /// dashed signal-loss segment. Used to extend brush hit-testing onto
+        /// dashed lines so brushing the visible dashes also erases them.
+        let isDashedSegmentAfter: Bool
+    }
 
     @State private var fittedRegion: MKCoordinateRegion? = nil
     @State private var initialCameraCommand: MapCameraCommand? = nil
@@ -97,6 +114,18 @@ struct CityDeepView: View {
         return city.journeys.compactMap { byId[$0.id] }
     }
 
+    /// `cachedJourneys` with the user's render mask applied. Each masked
+    /// region splits its journey into multiple synthetic journeys so the
+    /// polyline renders as a true gap (instead of bridging the erased range
+    /// with a straight connector line, which would make the eraser useless).
+    private var effectiveJourneys: [JourneyRoute] {
+        // Touch maskRevision so SwiftUI re-renders when the mask changes.
+        _ = renderMaskStore.maskRevision
+        return cachedJourneys.flatMap { j in
+            j.applyingRenderMaskSplit(renderMaskStore.mask(for: j.id))
+        }
+    }
+
     struct Segment {
         let coords: [CLLocationCoordinate2D]
         let isGap: Bool
@@ -111,37 +140,6 @@ struct CityDeepView: View {
         return built.segments.map { Segment(coords: $0.coords, isGap: $0.style == .dashed, repeatWeight: 0) }
     }
 
-    private func segmentSignature(_ coords: [CLLocationCoordinate2D]) -> String {
-        guard let first = coords.first, let last = coords.last else { return UUID().uuidString }
-        let stride = max(1, coords.count / 6)
-        var samples: [CLLocationCoordinate2D] = [first]
-        if coords.count > 2 {
-            var i = stride
-            while i < coords.count - 1 {
-                samples.append(coords[i])
-                i += stride
-            }
-        }
-        samples.append(last)
-
-        func quantized(_ c: CLLocationCoordinate2D) -> String {
-            let lat = Int((c.latitude * 2_000).rounded())
-            let lon = Int((c.longitude * 2_000).rounded())
-            return "\(lat):\(lon)"
-        }
-
-        let forward = samples.map(quantized).joined(separator: "|")
-        let backward = samples.reversed().map(quantized).joined(separator: "|")
-        return min(forward, backward)
-    }
-
-    private func quantile(_ values: [Int], p: Double) -> Double {
-        guard !values.isEmpty else { return 1.0 }
-        let sorted = values.sorted()
-        let index = Int((Double(sorted.count - 1) * p).rounded())
-        return Double(sorted[max(0, min(sorted.count - 1, index))])
-    }
-
     private var currentEngine: MapEngineSetting {
         (MapLayerStyle(rawValue: layerStyleRaw) ?? .mutedDark).engine
     }
@@ -150,10 +148,11 @@ struct CityDeepView: View {
         let surface: RouteRenderSurface = currentEngine == .mapbox ? .mapbox : .mapKit
         return CityDeepRenderEngine
             .styledSegments(
-                journeys: cachedJourneys,
+                journeys: effectiveJourneys,
                 countryISO2: effectiveCountryISO2,
                 cityKey: activeCityKey,
-                surface: surface
+                surface: surface,
+                dedupGranularity: .fine
             )
             .map { seg in
                 Segment(coords: seg.coords, isGap: seg.isGap, repeatWeight: seg.repeatWeight)
@@ -167,16 +166,154 @@ struct CityDeepView: View {
     }
 
     private var mapAnnotations: [MapAnnotationItem] {
-        guard showMemoriesOnMap, store.hasLoaded, !store.isLoading else { return [] }
+        guard !isEditingMask, showMemoriesOnMap, store.hasLoaded, !store.isLoading else { return [] }
         return groupedMemories.map { g in
             MapAnnotationItem(id: g.id, coordinate: g.coordinate, kind: .memoryGroup(key: g.key, items: g.items))
         }
     }
 
     private var mapCircles: [MapCircleOverlay] {
-        guard showMemoriesOnMap, store.hasLoaded, !store.isLoading else { return [] }
+        guard !isEditingMask, showMemoriesOnMap, store.hasLoaded, !store.isLoading else { return [] }
         return memoryDotCoordinates.enumerated().map { (i, coord) in
             MapCircleOverlay(id: "dot-\(i)", center: coord, radiusMeters: 30)
+        }
+    }
+
+    /// Brush size in screen points. Fixed at this size regardless of zoom so
+    /// the brush feels consistent — the engine converts to world meters per
+    /// sample at the active projection.
+    private static let eraseBrushScreenRadiusPoints: CGFloat = 18
+
+    /// Same threshold the polyline pipeline uses to render gap segments as
+    /// dashes (`RouteRenderingPipelineInput.gapDistanceMeters` for CityDeep).
+    private static let eraseDashedGapMeters: Double = 2_200
+
+    /// Brush config passed down to the engine. Nil when not editing.
+    private var eraseBrush: MapEraseBrush? {
+        guard isEditingMask else { return nil }
+        return MapEraseBrush(screenRadiusPoints: Self.eraseBrushScreenRadiusPoints)
+    }
+
+    /// Build the per-journey point cache used as a spatial lookup target by
+    /// brush sweeps. Built once on edit-mode entry / journey change — heavy
+    /// `MapCoordAdapter.forMapKit` work doesn't repeat per brush sample.
+    private func rebuildEditPointTemplates() {
+        guard isEditingMask else {
+            if !editPointTemplates.isEmpty { editPointTemplates = [] }
+            return
+        }
+        let countryCode = effectiveCountryISO2
+        let cityKey = activeCityKey
+        let engine = currentEngine
+        let gapThresholdSq = Self.eraseDashedGapMeters * Self.eraseDashedGapMeters
+        var out: [EditPointTemplate] = []
+        for j in cachedJourneys {
+            let display = j.displayRouteCoordinates
+            guard !display.isEmpty else { continue }
+            let cls = display.map { $0.cl }
+            // Match each engine's projection: MapKit applies GCJ for China,
+            // Mapbox renders WGS84 directly. Brush coords come back from the
+            // engine in its own projection, so templates must match.
+            let adjusted: [CLLocationCoordinate2D] = engine == .mapbox
+                ? cls
+                : MapCoordAdapter.forMapKit(cls, countryISO2: countryCode, cityKey: cityKey)
+
+            // Two-pass: collect valid (idx, coord) pairs first so we can
+            // compute neighbour distance against the actual polyline neighbour
+            // (skipping invalid points the polyline drops too).
+            var valid: [(Int, CLLocationCoordinate2D)] = []
+            valid.reserveCapacity(adjusted.count)
+            for (idx, coord) in adjusted.enumerated() where coord.isValid {
+                valid.append((idx, coord))
+            }
+            for k in 0..<valid.count {
+                let (idx, coord) = valid[k]
+                let dashedAfter: Bool
+                if k + 1 < valid.count {
+                    let next = valid[k + 1].1
+                    let cosLat = cos((coord.latitude + next.latitude) * 0.5 * .pi / 180.0)
+                    let dLat = (next.latitude - coord.latitude) * 111_000
+                    let dLon = (next.longitude - coord.longitude) * 111_000 * cosLat
+                    dashedAfter = (dLat * dLat + dLon * dLon) >= gapThresholdSq
+                } else {
+                    dashedAfter = false
+                }
+                out.append(EditPointTemplate(
+                    journeyID: j.id,
+                    index: idx,
+                    coord: coord,
+                    isDashedSegmentAfter: dashedAfter
+                ))
+            }
+        }
+        editPointTemplates = out
+    }
+
+    /// Brush sweep handler. Called continuously from the engine while the
+    /// user drags. Finds journey points within `radius` meters of the brush
+    /// coordinate (and dashed-segment connectors that pass under the brush)
+    /// and adds them to the render mask. Uses flat-earth distance with a
+    /// bounding-box prefilter — accurate enough at brush-radius scale and
+    /// ~100x faster than `CLLocation.distance`.
+    private func handleEraseBrushSwept(at coord: CLLocationCoordinate2D, radiusMeters: CLLocationDistance) {
+        guard !editPointTemplates.isEmpty else { return }
+        let cosLat = cos(coord.latitude * .pi / 180.0)
+        let metersPerDegLat = 111_000.0
+        let metersPerDegLon = 111_000.0 * max(cosLat, 0.001)
+        let latLimitDeg = radiusMeters / metersPerDegLat
+        let lonLimitDeg = radiusMeters / metersPerDegLon
+        let radiusSq = radiusMeters * radiusMeters
+
+        // Convert each candidate to local meter offsets relative to brush
+        // center so distance math is straight 2D Euclidean.
+        func localMeters(_ c: CLLocationCoordinate2D) -> (Double, Double) {
+            ((c.latitude - coord.latitude) * metersPerDegLat,
+             (c.longitude - coord.longitude) * metersPerDegLon)
+        }
+
+        var hitsByJourney: [String: Set<Int>] = [:]
+        let n = editPointTemplates.count
+        for k in 0..<n {
+            let t = editPointTemplates[k]
+            // Point-radius hit
+            let dLatDeg = t.coord.latitude - coord.latitude
+            let dLonDeg = t.coord.longitude - coord.longitude
+            if abs(dLatDeg) <= latLimitDeg, abs(dLonDeg) <= lonLimitDeg {
+                let mLat = dLatDeg * metersPerDegLat
+                let mLon = dLonDeg * metersPerDegLon
+                if mLat * mLat + mLon * mLon <= radiusSq {
+                    hitsByJourney[t.journeyID, default: []].insert(t.index)
+                }
+            }
+
+            // Dashed-segment connector under brush: erase both endpoints so
+            // the visible dash line vanishes. Without this, the brush passes
+            // through gaps without any effect because there are no points
+            // along the dashed line.
+            guard t.isDashedSegmentAfter, k + 1 < n else { continue }
+            let next = editPointTemplates[k + 1]
+            guard next.journeyID == t.journeyID else { continue }
+            let (ax, ay) = localMeters(t.coord)
+            let (bx, by) = localMeters(next.coord)
+            let dx = bx - ax
+            let dy = by - ay
+            let lenSq = dx * dx + dy * dy
+            let segDistSq: Double
+            if lenSq < 1 {
+                segDistSq = ax * ax + ay * ay
+            } else {
+                let s = max(0, min(1, -(ax * dx + ay * dy) / lenSq))
+                let cx = ax + s * dx
+                let cy = ay + s * dy
+                segDistSq = cx * cx + cy * cy
+            }
+            if segDistSq <= radiusSq {
+                hitsByJourney[t.journeyID, default: []].insert(t.index)
+                hitsByJourney[next.journeyID, default: []].insert(next.index)
+            }
+        }
+        for (jid, indices) in hitsByJourney {
+            renderMaskStore.erase(journeyID: jid, indices: indices)
         }
     }
 
@@ -349,12 +486,23 @@ struct CityDeepView: View {
                 segments: mapSegments(),
                 annotations: mapAnnotations,
                 circles: mapCircles,
+                eraseBrush: eraseBrush,
                 cameraCommand: initialCameraCommand,
                 config: .cityDeep(),
                 callbacks: MapCallbacks(
                     onSelectMemories: { memories in
+                        guard !isEditingMask else { return }
                         guard let latest = memories.sorted(by: { $0.timestamp > $1.timestamp }).first else { return }
                         editingMemory = latest
+                    },
+                    onEraseBrushSwept: { coord, radius in
+                        handleEraseBrushSwept(at: coord, radiusMeters: radius)
+                    },
+                    onEraseBrushStrokeStart: {
+                        renderMaskStore.beginStroke()
+                    },
+                    onEraseBrushStrokeEnd: {
+                        renderMaskStore.endStroke()
                     }
                 )
             )
@@ -366,30 +514,69 @@ struct CityDeepView: View {
             VStack(spacing: 0) {
                 headerBar
 
-                HStack(alignment: .top) {
+                HStack(alignment: .top, spacing: 8) {
                     statsBadge
                     Spacer(minLength: 0)
+                    if isEditingMask {
+                        Button {
+                            renderMaskStore.undo()
+                        } label: {
+                            Image(systemName: "arrow.uturn.backward")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(renderMaskStore.undoDepth > 0 ? UITheme.softBlack : UITheme.softBlack.opacity(0.35))
+                                .frame(width: 32, height: 32)
+                                .background(UITheme.cardBg)
+                                .clipShape(Circle())
+                                .overlay(
+                                    Circle().stroke(UITheme.cardStroke, lineWidth: 0.8)
+                                )
+                                .shadow(radius: 2, y: 1)
+                        }
+                        .buttonStyle(CardPressButtonStyle(pressedScale: 0.92, pressedOpacity: 0.88))
+                        .disabled(renderMaskStore.undoDepth == 0)
+                        .accessibilityLabel(L10n.t("city_deep_eraser_undo"))
+                    }
+                    if !isEditingMask {
+                        Button {
+                            showMemoriesOnMap.toggle()
+                            if !showMemoriesOnMap {
+                                editingMemory = nil
+                            }
+                        } label: {
+                            Text(L10n.t(showMemoriesOnMap ? "city_deep_memories_toggle_on" : "city_deep_memories_toggle_off"))
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(UITheme.softBlack)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .background(UITheme.cardBg)
+                                .clipShape(Capsule())
+                                .overlay(
+                                    Capsule().stroke(UITheme.cardStroke, lineWidth: 0.8)
+                                )
+                                .shadow(radius: 2, y: 1)
+                        }
+                        .buttonStyle(CardPressButtonStyle(pressedScale: 0.94, pressedOpacity: 0.88))
+                        .accessibilityLabel(L10n.t(showMemoriesOnMap ? "city_deep_memories_toggle_hide_accessibility" : "city_deep_memories_toggle_show_accessibility"))
+                    }
                     Button {
-                        showMemoriesOnMap.toggle()
-                        if !showMemoriesOnMap {
+                        isEditingMask.toggle()
+                        if isEditingMask {
                             editingMemory = nil
                         }
                     } label: {
-                        Text(L10n.t(showMemoriesOnMap ? "city_deep_memories_toggle_on" : "city_deep_memories_toggle_off"))
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(UITheme.softBlack)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                            .background(UITheme.cardBg)
-                            .clipShape(Capsule())
+                        Image(systemName: "eraser")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(isEditingMask ? .white : UITheme.softBlack)
+                            .frame(width: 32, height: 32)
+                            .background(isEditingMask ? Color(red: 1.00, green: 0.45, blue: 0.05) : UITheme.cardBg)
+                            .clipShape(Circle())
                             .overlay(
-                                Capsule()
-                                    .stroke(UITheme.cardStroke, lineWidth: 0.8)
+                                Circle().stroke(UITheme.cardStroke, lineWidth: 0.8)
                             )
                             .shadow(radius: 2, y: 1)
                     }
-                    .buttonStyle(CardPressButtonStyle(pressedScale: 0.94, pressedOpacity: 0.88))
-                    .accessibilityLabel(L10n.t(showMemoriesOnMap ? "city_deep_memories_toggle_hide_accessibility" : "city_deep_memories_toggle_show_accessibility"))
+                    .buttonStyle(CardPressButtonStyle(pressedScale: 0.92, pressedOpacity: 0.88))
+                    .accessibilityLabel(L10n.t(isEditingMask ? "city_deep_eraser_done" : "city_deep_eraser_enter"))
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
@@ -450,6 +637,8 @@ struct CityDeepView: View {
         .onChange(of: activeCityKey) { _ in
             fetchedBoundaryPolygon = nil
             cachedJourneys = buildCurrentJourneys()
+            isEditingMask = false
+            editPointTemplates = []
             refreshRegionAndBoundary()
             refreshDisplayTitleFromCardKey()
         }
@@ -471,9 +660,21 @@ struct CityDeepView: View {
         }
         .onChange(of: cachedJourneys.count) { _ in
             refreshRegionAndBoundary()
+            if isEditingMask { rebuildEditPointTemplates() }
         }
         .onChange(of: layerStyleRaw) { _ in
+            // Engine projections differ (MapKit applies GCJ for China,
+            // Mapbox uses WGS84 directly); rebuild template coords so
+            // brush hit-test stays aligned with what the user sees.
+            if isEditingMask { rebuildEditPointTemplates() }
             refreshRegionAndBoundary()
+        }
+        .onChange(of: isEditingMask) { editing in
+            if editing {
+                rebuildEditPointTemplates()
+            } else {
+                editPointTemplates = []
+            }
         }
         .background(SwipeBackEnabler())
         .navigationBarBackButtonHidden(true)

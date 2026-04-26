@@ -2991,6 +2991,7 @@ private final class FriendMirrorContext: ObservableObject {
             }
         }
         try? fm.removeItem(at: paths.cityCacheURL)
+        try? fm.removeItem(at: paths.cityMembershipIndexURL)
         try? fm.removeItem(at: paths.routeCacheURL)
     }
 

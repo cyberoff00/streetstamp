@@ -73,6 +73,7 @@ struct StreetStampsApp: App {
     @StateObject private var cityRenderCache: CityRenderCacheStore
     @StateObject private var lifelogStore: LifelogStore
     @StateObject private var trackTileStore: TrackTileStore
+    @StateObject private var renderMaskStore: RenderMaskStore
     @StateObject private var lifelogRenderCache: LifelogRenderCacheCoordinator
     @StateObject private var socialStore: SocialGraphStore
     @StateObject private var postcardCenter: PostcardCenter
@@ -289,6 +290,7 @@ struct StreetStampsApp: App {
         let llStore = LifelogStore(paths: paths)
         _lifelogStore = StateObject(wrappedValue: llStore)
         _trackTileStore = StateObject(wrappedValue: TrackTileStore(paths: paths))
+        _renderMaskStore = StateObject(wrappedValue: RenderMaskStore(paths: paths))
         _lifelogRenderCache = StateObject(wrappedValue: LifelogRenderCacheCoordinator())
         _socialStore = StateObject(wrappedValue: SocialGraphStore(userID: session.activeLocalProfileID))
         _postcardCenter = StateObject(wrappedValue: PostcardCenter(userID: session.activeLocalProfileID))
@@ -323,6 +325,7 @@ struct StreetStampsApp: App {
             .environmentObject(cityRenderCache)
             .environmentObject(lifelogStore)
             .environmentObject(trackTileStore)
+            .environmentObject(renderMaskStore)
             .environmentObject(lifelogRenderCache)
             .environmentObject(socialStore)
             .environmentObject(postcardCenter)
@@ -393,6 +396,9 @@ struct StreetStampsApp: App {
                 await FeatureFlagStore.shared.fetchFlags()
             }
             .task {
+                await MembershipStore.shared.refreshEntitlement()
+            }
+            .task {
                 BackendAPIClient.shared.bindSessionStore(sessionStore)
                 let startupUserID = sessionStore.activeLocalProfileID
                 await sessionStore.bootstrapFileSystemAsync()
@@ -442,11 +448,13 @@ struct StreetStampsApp: App {
                     }
                     return await group.first { _ in true } ?? []
                 }
+                let renderMaskSnapshot = renderMaskStore.snapshot()
                 StartupWarmupService.shared.start(
                     cities: cities,
                     appearanceRaw: appearanceRaw,
                     renderCacheStore: renderCache,
-                    limit: 4
+                    limit: 4,
+                    renderMaskByJourney: renderMaskSnapshot
                 )
                 rebuildTrackTiles()
                 lifelogRenderCache.scheduleWarmupRecentDays(
@@ -485,8 +493,9 @@ struct StreetStampsApp: App {
                         }
                         return await group.first { _ in true } ?? []
                     }
+                    let masks = renderMaskStore.snapshot()
                     StartupWarmupService.shared.start(
-                        cities: c, appearanceRaw: ar, renderCacheStore: rc, limit: 16
+                        cities: c, appearanceRaw: ar, renderCacheStore: rc, limit: 16, renderMaskByJourney: masks
                     )
                 }
             }
@@ -521,6 +530,7 @@ struct StreetStampsApp: App {
                     )
                     lifelogStore.rebind(paths: paths)
                     cityRenderCache.rebind(rootDir: paths.thumbnailsDir)
+                    renderMaskStore.rebind(paths: paths)
 
                     // Load journey, lifelog, city cache, and track tiles in parallel.
                     // All four do heavy disk I/O — running them concurrently avoids
@@ -557,11 +567,13 @@ struct StreetStampsApp: App {
                         return await group.first { _ in true } ?? []
                     }
                     guard !Task.isCancelled else { return }
+                    let renderMaskSnapshot = renderMaskStore.snapshot()
                     StartupWarmupService.shared.start(
                         cities: cities,
                         appearanceRaw: appearanceRaw,
                         renderCacheStore: renderCache,
-                        limit: 4
+                        limit: 4,
+                        renderMaskByJourney: renderMaskSnapshot
                     )
                     rebuildTrackTiles()
                     lifelogRenderCache.scheduleWarmupRecentDays(
@@ -587,8 +599,9 @@ struct StreetStampsApp: App {
                         return await group.first { _ in true } ?? []
                     }
                     guard !Task.isCancelled else { return }
+                    let deferredMasks = renderMaskStore.snapshot()
                     StartupWarmupService.shared.start(
-                        cities: deferredCities, appearanceRaw: deferredAR, renderCacheStore: deferredRC, limit: 16
+                        cities: deferredCities, appearanceRaw: deferredAR, renderCacheStore: deferredRC, limit: 16, renderMaskByJourney: deferredMasks
                     )
                 }
             }
@@ -616,6 +629,7 @@ struct StreetStampsApp: App {
                 if phase == .active {
                     UNUserNotificationCenter.current().setBadgeCount(0)
                     publishStore.handleSceneActivation()
+                    Task { await MembershipStore.shared.refreshEntitlement() }
                     applyIdleLocationPolicy(requestSingleRefreshWhenIdle: true)
                     syncMotionActivityPolicy()
                     lifelogRenderCache.markTodayDirty(
