@@ -54,6 +54,7 @@ struct CityDeepView: View {
     @State private var editingMemory: JourneyMemory? = nil
     @State private var showMemoriesOnMap = true
     @State private var isEditingMask: Bool = false
+    @State private var showEraserIntro: Bool = false
     @State private var editPointTemplates: [EditPointTemplate] = []
 
     /// Cached edit-point geometry built once per `(cachedJourneys, engine, city)`
@@ -558,25 +559,32 @@ struct CityDeepView: View {
                         .buttonStyle(CardPressButtonStyle(pressedScale: 0.94, pressedOpacity: 0.88))
                         .accessibilityLabel(L10n.t(showMemoriesOnMap ? "city_deep_memories_toggle_hide_accessibility" : "city_deep_memories_toggle_show_accessibility"))
                     }
-                    Button {
-                        isEditingMask.toggle()
-                        if isEditingMask {
-                            editingMemory = nil
+                    // Eraser brush is only available on the Mapbox engine. The MapKit
+                    // engine has unresolved gesture-coordination issues between the
+                    // brush pan, two-finger pan, and built-in pinch zoom that make
+                    // pinch zoom unusable while brush mode is active.
+                    if currentEngine == .mapbox {
+                        Button {
+                            if isEditingMask {
+                                isEditingMask = false
+                            } else {
+                                showEraserIntro = true
+                            }
+                        } label: {
+                            Image(systemName: "eraser")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(isEditingMask ? .white : UITheme.softBlack)
+                                .frame(width: 32, height: 32)
+                                .background(isEditingMask ? Color(red: 1.00, green: 0.45, blue: 0.05) : UITheme.cardBg)
+                                .clipShape(Circle())
+                                .overlay(
+                                    Circle().stroke(UITheme.cardStroke, lineWidth: 0.8)
+                                )
+                                .shadow(radius: 2, y: 1)
                         }
-                    } label: {
-                        Image(systemName: "eraser")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(isEditingMask ? .white : UITheme.softBlack)
-                            .frame(width: 32, height: 32)
-                            .background(isEditingMask ? Color(red: 1.00, green: 0.45, blue: 0.05) : UITheme.cardBg)
-                            .clipShape(Circle())
-                            .overlay(
-                                Circle().stroke(UITheme.cardStroke, lineWidth: 0.8)
-                            )
-                            .shadow(radius: 2, y: 1)
+                        .buttonStyle(CardPressButtonStyle(pressedScale: 0.92, pressedOpacity: 0.88))
+                        .accessibilityLabel(L10n.t(isEditingMask ? "city_deep_eraser_done" : "city_deep_eraser_enter"))
                     }
-                    .buttonStyle(CardPressButtonStyle(pressedScale: 0.92, pressedOpacity: 0.88))
-                    .accessibilityLabel(L10n.t(isEditingMask ? "city_deep_eraser_done" : "city_deep_eraser_enter"))
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
@@ -624,6 +632,15 @@ struct CityDeepView: View {
                 .environmentObject(sessionStore)
             }
         }
+        .alert(L10n.t("city_deep_eraser_intro_title"), isPresented: $showEraserIntro) {
+            Button(L10n.t("cancel"), role: .cancel) {}
+            Button(L10n.t("city_deep_eraser_intro_continue")) {
+                isEditingMask = true
+                editingMemory = nil
+            }
+        } message: {
+            Text(L10n.t("city_deep_eraser_intro_message"))
+        }
         .onAppear {
             refreshDisplayTitleFromCardKey()
         }
@@ -663,6 +680,12 @@ struct CityDeepView: View {
             if isEditingMask { rebuildEditPointTemplates() }
         }
         .onChange(of: layerStyleRaw) { _ in
+            // Eraser brush is Mapbox-only — switching to a MapKit style mid-edit
+            // must drop the user out of edit mode, otherwise the gesture stack
+            // breaks pinch zoom on MapKit.
+            if isEditingMask, currentEngine != .mapbox {
+                isEditingMask = false
+            }
             // Engine projections differ (MapKit applies GCJ for China,
             // Mapbox uses WGS84 directly); rebuild template coords so
             // brush hit-test stays aligned with what the user sees.

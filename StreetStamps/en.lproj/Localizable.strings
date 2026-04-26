@@ -975,6 +975,9 @@
 "city_deep_eraser_done" = "Done";
 "city_deep_eraser_restore_all" = "Restore All";
 "city_deep_eraser_undo" = "Undo";
+"city_deep_eraser_intro_title" = "Eraser";
+"city_deep_eraser_intro_message" = "Clean up unwanted route segments.\nDrag to erase, pinch to zoom.";
+"city_deep_eraser_intro_continue" = "Continue";
 "lifelog_mood_option_sad" = "Low";
 "lifelog_mood_option_notbad" = "Okay";
 "lifelog_mood_option_happy" = "Happy";

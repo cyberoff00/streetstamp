@@ -197,6 +197,37 @@ final class JourneyStore: ObservableObject {
                     try? fStore.finalizeJourney(result[i])
                 }
 
+                // MIGRATION: clean route coordinates contaminated by stale GPS re-deliveries.
+                // iOS sometimes re-emitted cached fixes during signal recovery, producing
+                // arrays with non-monotonic timestamps and same-(t,lat,lon) duplicates that
+                // rendered as ghost zigzag lines. Each dirty journey is sorted by t, has
+                // exact duplicates removed, and has its `distance` clamped to the new
+                // haversine sum (never made larger than the originally recorded value).
+                // Idempotent — already-clean journeys do nothing.
+                let cleanupKey = "streetstamps.migration.routeCoord_cleanup_v1"
+                if !UserDefaults.standard.bool(forKey: cleanupKey) {
+                    var cleanedCount = 0
+                    for i in result.indices {
+                        guard JourneyStore.routeNeedsCleanup(result[i].coordinates) else { continue }
+                        let cleaned = JourneyStore.dedupAndSortCoordinates(result[i].coordinates)
+                        result[i].coordinates = cleaned
+                        if !result[i].correctedCoordinates.isEmpty {
+                            result[i].correctedCoordinates = JourneyStore.dedupAndSortCoordinates(result[i].correctedCoordinates)
+                        }
+                        if !result[i].matchedCoordinates.isEmpty {
+                            result[i].matchedCoordinates = JourneyStore.dedupAndSortCoordinates(result[i].matchedCoordinates)
+                        }
+                        let newDist = JourneyStore.haversineSum(cleaned)
+                        result[i].distance = min(result[i].distance, newDist)
+                        try? fStore.finalizeJourney(result[i])
+                        cleanedCount += 1
+                    }
+                    UserDefaults.standard.set(true, forKey: cleanupKey)
+                    if cleanedCount > 0 {
+                        print("[Migration] cleaned \(cleanedCount) journey(s) with stale GPS fixes")
+                    }
+                }
+
                 cont.resume(returning: result)
             }
         }
@@ -691,6 +722,71 @@ final class JourneyStore: ObservableObject {
             object: self,
             userInfo: ["revision": trackTileRevision]
         )
+    }
+
+    // MARK: - Route coordinate cleanup helpers (nonisolated, safe to call from background queue)
+
+    /// Quick scan for routes contaminated by stale iOS re-deliveries: any
+    /// non-monotonic timestamp pair, or any exact (t, lat, lon) duplicate.
+    /// Returns true on the first sign of dirt to keep clean routes essentially free.
+    ///
+    /// Legacy routes recorded before `t` was added carry `t == nil` on every
+    /// point. We refuse to touch those — sort would be unstable and we can't
+    /// distinguish legitimate stationary repeats from stale-fix duplicates
+    /// without timestamps.
+    nonisolated fileprivate static func routeNeedsCleanup(_ coords: [CoordinateCodable]) -> Bool {
+        guard coords.count >= 2 else { return false }
+        if coords.contains(where: { $0.t == nil }) { return false }
+        var prevT: Date = .distantPast
+        var seen = Set<CoordinateCodable>()
+        seen.reserveCapacity(coords.count)
+        for c in coords {
+            // Safe — guarded above.
+            let t = c.t!
+            if t < prevT { return true }
+            prevT = t
+            if !seen.insert(c).inserted { return true }
+        }
+        return false
+    }
+
+    /// Sort by `t` ascending and remove exact (t, lat, lon) duplicates.
+    /// If any coord lacks a timestamp the route is returned unchanged —
+    /// legacy data must keep its original index order.
+    nonisolated fileprivate static func dedupAndSortCoordinates(_ coords: [CoordinateCodable]) -> [CoordinateCodable] {
+        if coords.contains(where: { $0.t == nil }) { return coords }
+        let sorted = coords.sorted { ($0.t ?? .distantPast) < ($1.t ?? .distantPast) }
+        var out: [CoordinateCodable] = []
+        out.reserveCapacity(sorted.count)
+        for p in sorted {
+            if let last = out.last,
+               last.t == p.t,
+               last.lat == p.lat,
+               last.lon == p.lon {
+                continue
+            }
+            out.append(p)
+        }
+        return out
+    }
+
+    /// Sum of haversine distances between consecutive points (meters).
+    nonisolated fileprivate static func haversineSum(_ coords: [CoordinateCodable]) -> Double {
+        guard coords.count >= 2 else { return 0 }
+        let R = 6_371_000.0
+        var total: Double = 0
+        for i in 1..<coords.count {
+            let a = coords[i - 1]
+            let b = coords[i]
+            let lat1 = a.lat * .pi / 180
+            let lat2 = b.lat * .pi / 180
+            let dLat = lat2 - lat1
+            let dLon = (b.lon - a.lon) * .pi / 180
+            let h = sin(dLat / 2) * sin(dLat / 2)
+                  + cos(lat1) * cos(lat2) * sin(dLon / 2) * sin(dLon / 2)
+            total += R * 2 * asin(min(1, sqrt(h)))
+        }
+        return total
     }
 }
 

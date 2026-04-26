@@ -1,4 +1,5 @@
 import XCTest
+import CoreLocation
 @testable import StreetStamps
 
 final class PassiveLocationProfileTests: XCTestCase {

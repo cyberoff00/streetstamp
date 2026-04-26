@@ -34,6 +34,13 @@ final class RenderMaskStore: ObservableObject {
     private static let strokePublishIntervalSeconds: CFTimeInterval = 0.15
     private var lastPublishedAt: CFTimeInterval = 0
 
+    /// Debounce for disk save. Brush strokes can fire `erase()` 30Hz; without
+    /// debouncing, each sample copies the entire mask on the main thread and
+    /// queues a JSON encode + atomic write — enough to stall the main thread
+    /// past the watchdog and crash the app on long strokes.
+    private static let saveDebounceSeconds: TimeInterval = 0.4
+    private var pendingSaveWork: DispatchWorkItem?
+
     init(paths: StoragePath) {
         self.paths = paths
         loadFromDisk()
@@ -111,6 +118,9 @@ final class RenderMaskStore: ObservableObject {
         // Always bump on stroke end so any throttled mid-stroke updates are
         // rolled into one final visible refresh.
         maskRevision &+= 1
+        // Flush the debounced save now so the completed stroke is on disk
+        // even if the user backgrounds the app immediately.
+        flushSaveNow()
     }
 
     /// Pop the last stroke and remove its added indices from the mask.
@@ -190,6 +200,22 @@ final class RenderMaskStore: ObservableObject {
     }
 
     private func scheduleSave() {
+        pendingSaveWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.performSave() }
+        pendingSaveWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.saveDebounceSeconds, execute: work)
+    }
+
+    /// Force an immediate save bypassing the debounce. Called from `endStroke()`
+    /// so the final stroke state always lands on disk even if the user
+    /// backgrounds the app within the debounce window.
+    private func flushSaveNow() {
+        pendingSaveWork?.cancel()
+        pendingSaveWork = nil
+        performSave()
+    }
+
+    private func performSave() {
         let snapshot: [String: [Int]] = maskByJourney.mapValues { Array($0).sorted() }
         let url = paths.renderMaskURL
         let cachesDir = paths.cachesDir

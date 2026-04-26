@@ -958,6 +958,9 @@
 "city_deep_eraser_done" = "完成";
 "city_deep_eraser_restore_all" = "还原全部";
 "city_deep_eraser_undo" = "撤销";
+"city_deep_eraser_intro_title" = "橡皮擦";
+"city_deep_eraser_intro_message" = "修正不想保留的轨迹片段。\n单指擦除，双指缩放。";
+"city_deep_eraser_intro_continue" = "继续";
 "lifelog_mood_option_sad" = "低落";
 "lifelog_mood_option_notbad" = "一般";
 "lifelog_mood_option_happy" = "开心";

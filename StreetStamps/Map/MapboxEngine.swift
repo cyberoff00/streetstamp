@@ -543,16 +543,21 @@ struct MapboxEngineView: UIViewRepresentable {
         // MARK: - Zoom-Aware Visibility
 
         func syncZoomAwareVisibility() {
-            guard let mapView, let ev = engineView, styleLoaded else { return }
+            guard let mapView else { return }
             let zoom = mapView.mapboxMap.cameraState.zoom
             let latDelta = 360.0 / pow(2.0, Double(zoom))
             let shouldShowPins = CityDeepMemoryVisibility.shouldShowPins(latitudeDelta: latDelta)
 
+            // Pin alpha works regardless of style state — it's a UIView property.
             let pinAlpha: CGFloat = shouldShowPins ? 1.0 : 0.0
             UIView.animate(withDuration: 0.2) {
                 for (_, view) in self.viewAnnotations { view.alpha = pinAlpha }
             }
 
+            // Dot layer visibility requires the Mapbox style to be loaded.
+            // Skip this part if not ready; subsequent style-load completion or
+            // camera-change events will retry.
+            guard let ev = engineView, styleLoaded else { return }
             let dotVisibility = shouldShowPins ? "none" : "visible"
             let mapboxMap: MapboxMap = mapView.mapboxMap
             if mapboxMap.layerExists(withId: ev.circleGlowLayerId) {
@@ -622,6 +627,17 @@ struct MapboxEngineView: UIViewRepresentable {
                     let hosting = UIHostingController(rootView: pin)
                     hosting.view.backgroundColor = .clear
                     hosting.view.frame = CGRect(x: 0, y: 0, width: 56, height: 56)
+                    // Set initial alpha to match current zoom-aware state. Without this,
+                    // a freshly-created hostView defaults to alpha=1.0 and only gets
+                    // corrected when syncZoomAwareVisibility runs — which can be skipped
+                    // (styleLoaded guard) or animate over 0.2s, leaving the pin visible at
+                    // the wrong zoom and overlapping with the green dot layer.
+                    if config.useZoomAwareVisibility {
+                        let zoom = mapView.mapboxMap.cameraState.zoom
+                        let latDelta = 360.0 / pow(2.0, Double(zoom))
+                        let shouldShowPins = CityDeepMemoryVisibility.shouldShowPins(latitudeDelta: latDelta)
+                        hosting.view.alpha = CityDeepMemoryVisibility.pinAlpha(shouldShowPins: shouldShowPins)
+                    }
                     hostView = hosting.view
 
                 case .robot:
@@ -756,6 +772,14 @@ struct MapboxEngineView: UIViewRepresentable {
                 guard newCenter.latitude.isFinite, newCenter.longitude.isFinite else { return }
                 isProgrammaticCamera = true
                 mapView.mapboxMap.setCamera(to: CameraOptions(center: newCenter))
+                // Reset the flag after this run loop tick. Without this, the
+                // flag stays `true` forever and onCameraChanged ignores all
+                // subsequent user gestures — breaking syncZoomAwareVisibility
+                // (memory pin alpha / dot visibility) after a single brush-mode
+                // two-finger pan.
+                DispatchQueue.main.async { [weak self] in
+                    self?.isProgrammaticCamera = false
+                }
             default:
                 break
             }

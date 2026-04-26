@@ -44,10 +44,76 @@ final class UnifiedEraseBrushCircle: MKCircle {}
 /// Pan recognizer that enters `.began` on touch-down rather than requiring
 /// the standard ~10pt movement threshold. Eraser brush UX needs immediate
 /// visual feedback the moment the finger lands.
+///
+/// Multi-touch (pinch zoom) cancels the brush so two-finger zoom doesn't
+/// co-fire eraser samples. Without this, the first finger of a pinch
+/// triggers `.began` and continues firing `.changed` events through the
+/// zoom gesture.
 final class ImmediatePanGestureRecognizer: UIPanGestureRecognizer {
+    /// Window after touch-down before we commit to `.began`. If a second finger
+    /// arrives within this window the gesture fails so pinch zoom takes over
+    /// uncontested. ~60ms is long enough to catch a "near-simultaneous" second
+    /// finger but short enough that single-finger erase still feels immediate.
+    private static let multiTouchGuardSeconds: TimeInterval = 0.06
+
+    private var pendingBeganWork: DispatchWorkItem?
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         super.touchesBegan(touches, with: event)
-        if state == .possible { state = .began }
+        // numberOfTouches reflects touches THIS recognizer is tracking — more
+        // reliable than event.allTouches.
+        if numberOfTouches > 1 {
+            // Multi-touch already in flight (pinch). If we'd already begun,
+            // transition through .cancelled so onBrushPan's cleanup runs;
+            // .failed would silently skip the handler and leave brushOverlay
+            // / stroke state hanging.
+            pendingBeganWork?.cancel()
+            state = (state == .began || state == .changed) ? .cancelled : .failed
+            return
+        }
+        // Single finger — defer .began so a near-simultaneous second finger
+        // can pre-empt us. Without this, `state = .began` fires synchronously
+        // here, the brush's `case .began:` handler runs, and a stroke sample
+        // is emitted before we ever get to see the second finger arrive for
+        // a pinch zoom.
+        guard state == .possible else { return }
+        pendingBeganWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            guard self.numberOfTouches == 1, self.state == .possible else { return }
+            self.state = .began
+        }
+        pendingBeganWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.multiTouchGuardSeconds, execute: work)
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        if numberOfTouches > 1 {
+            pendingBeganWork?.cancel()
+            if state == .began || state == .changed {
+                state = .cancelled
+            } else if state == .possible {
+                state = .failed
+            }
+            return
+        }
+        super.touchesMoved(touches, with: event)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesEnded(touches, with: event)
+        pendingBeganWork?.cancel()
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesCancelled(touches, with: event)
+        pendingBeganWork?.cancel()
+    }
+
+    override func reset() {
+        super.reset()
+        pendingBeganWork?.cancel()
+        pendingBeganWork = nil
     }
 }
 
@@ -259,6 +325,24 @@ struct MapKitEngineView: UIViewRepresentable {
         @objc func onMapTwoFingerPan(_ gr: UIPanGestureRecognizer) {
             guard currentBrush != nil else { return }
             guard let map = gr.view as? MKMapView else { return }
+
+            // Defer to pinch zoom while it's active. MKMapView's built-in
+            // pinch drives camera zoom; if we also call setCenter() on every
+            // translation tick the two writes race and pinch only advances a
+            // sliver per gesture before our setCenter() snaps the region back.
+            // We detect pinch via the parallel UIPinchGestureRecognizer
+            // installed in makeUIView (it doesn't drive zoom itself; its
+            // state just mirrors that of the built-in pinch).
+            if let recognizers = map.gestureRecognizers {
+                for r in recognizers where r is UIPinchGestureRecognizer {
+                    if r.state == .began || r.state == .changed {
+                        if gr.state == .began || gr.state == .changed {
+                            gr.state = .cancelled
+                        }
+                        return
+                    }
+                }
+            }
 
             switch gr.state {
             case .began, .changed:

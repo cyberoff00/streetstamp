@@ -2022,37 +2022,47 @@ final class CityCache: ObservableObject {
         Task.detached(priority: .utility) { [weak self] in
             guard let self else { return }
 
-            let (boundary, anchor, allRouteCoords) = await MainActor.run { () -> ([CLLocationCoordinate2D]?, CLLocationCoordinate2D?, [CLLocationCoordinate2D]) in
+            let (boundary, anchor, journeyCoords) = await MainActor.run { () -> ([CLLocationCoordinate2D]?, CLLocationCoordinate2D?, [[CLLocationCoordinate2D]]) in
                 let c = self.cachedCities.first(where: { $0.id == cityKey })
                 let b = c?.boundary?.map { $0.cl }
                 let a = c?.anchor?.cl
 
-                // Only include city-local journeys for thumbnail (not intercity journeys)
+                // Only include city-local journeys for thumbnail (not intercity journeys).
+                // Coords are kept per-journey so different journeys are never connected
+                // by polyline gap-fill — each journey renders as its own independent segments.
                 let js = self.journeyStore.journeys.filter {
                     $0.isCompleted &&
                     $0.startCityKey == cityKey &&
                     $0.endCityKey == cityKey
                 }
-                let coords = js.flatMap { $0.allCLCoords }.filter { $0.isValid }
-                return (b, a, coords)
+                let perJourney: [[CLLocationCoordinate2D]] = js
+                    .map { $0.allCLCoords.filter { $0.isValid } }
+                    .filter { !$0.isEmpty }
+                return (b, a, perJourney)
             }
 
             let boundaryForMap = boundary.map { MapCoordAdapter.forMapKit($0, cityKey: cityKey) }
             let anchorForMap = anchor.map { MapCoordAdapter.forMapKit($0, cityKey: cityKey) }
-            
+
             // Build route segments only if we have route data
-            let hasRouteData = !allRouteCoords.isEmpty
+            let hasRouteData = !journeyCoords.isEmpty
             let overlaySegments: [RenderRouteSegment]
             let isFlightLike: Bool
             let bboxLike: [CLLocationCoordinate2D]
-            
+
             if hasRouteData {
-                let built = RouteRenderingPipeline.buildSegments(
-                    .init(coordsWGS84: allRouteCoords, applyGCJForChina: false, gapDistanceMeters: 8_000, cityKey: cityKey),
-                    surface: .mapKit
-                )
-                overlaySegments = built.segments
-                isFlightLike = built.isFlightLike
+                var aggregated: [RenderRouteSegment] = []
+                var anyFlightLike = false
+                for coords in journeyCoords {
+                    let built = RouteRenderingPipeline.buildSegments(
+                        .init(coordsWGS84: coords, applyGCJForChina: false, gapDistanceMeters: 2_200, cityKey: cityKey),
+                        surface: .mapKit
+                    )
+                    aggregated.append(contentsOf: built.segments)
+                    if built.isFlightLike { anyFlightLike = true }
+                }
+                overlaySegments = aggregated
+                isFlightLike = anyFlightLike
                 let overlayForMapFlat = overlaySegments.flatMap { $0.coords }
                 bboxLike = bboxPolygon(for: overlayForMapFlat) ?? overlayForMapFlat
             } else {

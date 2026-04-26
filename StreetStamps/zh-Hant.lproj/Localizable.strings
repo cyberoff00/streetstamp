@@ -82,6 +82,9 @@
 "city_deep_eraser_done" = "完成";
 "city_deep_eraser_restore_all" = "還原全部";
 "city_deep_eraser_undo" = "復原";
+"city_deep_eraser_intro_title" = "橡皮擦";
+"city_deep_eraser_intro_message" = "修正不想保留的軌跡片段。\n單指擦除，雙指縮放。";
+"city_deep_eraser_intro_continue" = "繼續";
 "city_empty_subtitle" = "生成一张城市卡，或完成一次旅程来解鎖你的第一座城市。";
 "city_empty_title" = "还没有城市印章";
 "city_library_header_city" = "你的城市印章";

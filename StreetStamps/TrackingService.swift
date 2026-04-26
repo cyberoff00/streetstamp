@@ -73,29 +73,12 @@ final class TrackingService: ObservableObject {
         var coords: [CLLocationCoordinate2D] // WGS in internalSegments; map-ready in renderSegmentsForMap
     }
 
-    /// Legacy WGS snapshot (not used by MapView anymore). Non-published to reduce objectWillChange noise.
-    private(set) var segments: [RouteSegment] = []
-
     /// Always maintained (WGS)
     private var internalSegments: [RouteSegment] = []
 
-    /// Always maintained (map-ready coords) for rendering cache (to avoid O(N) conversion every update)
-    private var internalSegmentsForMap: [RouteSegment] = []
-
-    /// Rebuild map-ready segments from WGS segments. Use only when internalSegments is replaced wholesale.
-    private func rebuildInternalSegmentsForMapFromInternal() {
-        let convert = self.convertForMap
-        internalSegmentsForMap = internalSegments.map { seg in
-            var s = seg
-            s.coords = seg.coords.map(convert)
-            return s
-        }
-    }
-
-    // MARK: - ✅ Render cache output for MapView (map-ready coords)
+    // MARK: - ✅ Render cache output for MapView (WGS84; surfaces apply their own coord transforms)
 
     struct RenderSnapshot: Equatable {
-        var segments: [RouteSegment] = []
         var unifiedSegments: [RenderRouteSegment] = []
         var liveTail: [CLLocationCoordinate2D] = []
     }
@@ -123,7 +106,6 @@ final class TrackingService: ObservableObject {
     var recordedLocationsForMemories: [CLLocation] {
         acceptedLocations
     }
-    private let smoothingWindow: Int = 5
 
     // MARK: - Sampling / filtering knobs
 
@@ -335,7 +317,6 @@ final class TrackingService: ObservableObject {
     private var lastRenderSegPointCount: Int = 0
     private let publishDebounceInterval: TimeInterval = 0.2
     private var pendingPublishWork: DispatchWorkItem?
-    private var latestRenderSegmentsForMap: [RouteSegment] = []
     private var latestRenderUnifiedSegmentsForMap: [RenderRouteSegment] = []
     private var latestRenderLiveTailForMap: [CLLocationCoordinate2D] = []
     private let motionHub = MotionActivityHub.shared
@@ -525,13 +506,10 @@ final class TrackingService: ObservableObject {
         isTracking = true
         isPaused = false
 
-        segments.removeAll()
         internalSegments.removeAll()
-        internalSegmentsForMap.removeAll()
         resetSegmentSwitchState()
         forceNewSegmentOnNextAppend = false
 
-        latestRenderSegmentsForMap.removeAll()
         latestRenderUnifiedSegmentsForMap.removeAll()
         latestRenderLiveTailForMap.removeAll()
         renderSnapshot = RenderSnapshot()
@@ -832,7 +810,6 @@ final class TrackingService: ObservableObject {
         isLocationLocked = true
 
         internalSegments = [RouteSegment(id: UUID().uuidString, style: .solid, coords: ext)]
-        rebuildInternalSegmentsForMapFromInternal()
         flushPublishedState(force: true)
 
         // ✅ do not reuse old filter state for playback
@@ -877,8 +854,8 @@ final class TrackingService: ObservableObject {
 
         pendingRenderWork?.cancel()
 
-        let segsForMapSnapshot = internalSegmentsForMap
-        // WGS84 snapshot for engine-agnostic unifiedSegments (Mapbox needs WGS84; MapKit callers apply GCJ-02 themselves)
+        // WGS84 snapshot for engine-agnostic unifiedSegments. Each surface (MapKit/Mapbox/Canvas)
+        // applies its own coordinate transform downstream, so this stays in WGS84.
         let segsWGS84Snapshot = internalSegments
         let lastWGS = rawCoords.last
         let userWGS = userLocation?.coordinate
@@ -886,8 +863,6 @@ final class TrackingService: ObservableObject {
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
 
-            let segsForMap: [RouteSegment] = self.mergeRenderableSegments(segsForMapSnapshot)
-            // Build unified segments from WGS84 so both engines can use them directly.
             let segsWGS84: [RouteSegment] = self.mergeRenderableSegments(segsWGS84Snapshot)
             let unifiedSegsForMap: [RenderRouteSegment] = self.asRenderRouteSegments(segsWGS84)
 
@@ -903,7 +878,6 @@ final class TrackingService: ObservableObject {
 
             Task { @MainActor in
                 guard self.shouldUpdateRenderCache(force: force) else { return }
-                self.latestRenderSegmentsForMap = segsForMap
                 self.latestRenderUnifiedSegmentsForMap = unifiedSegsForMap
                 self.latestRenderLiveTailForMap = tailForMap
                 self.flushPublishedState(force: force)
@@ -990,6 +964,15 @@ final class TrackingService: ObservableObject {
         guard isTracking else { return }
         guard !isPaused else { return } // keep blue dot, stop recording
         if loc.horizontalAccuracy < 0 { return }
+
+        // iOS may re-deliver cached fixes during signal recovery, background→
+        // foreground transitions, or near-tunnel reacquisition. The cached fix
+        // carries its original (now-stale) GPS timestamp. If we accept it,
+        // routeCoordinates ends up with non-monotonic timestamps and the same
+        // (lat, lon, t) tuple sprinkled across the array — which renders as
+        // ghost zigzag lines and inflates totalDistance.
+        if loc.timestamp.timeIntervalSinceNow < -30 { return }
+        if let lastTs = rawTimestamps.last, loc.timestamp <= lastTs { return }
 
         evaluateLongStationaryReminder(with: loc)
 
@@ -1563,7 +1546,6 @@ final class TrackingService: ObservableObject {
     private func appendMissingConnectionSegment(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D, at t: Date) {
         let id = UUID().uuidString
         internalSegments.append(RouteSegment(id: id, style: .dashed, coords: [from, to]))
-        internalSegmentsForMap.append(RouteSegment(id: id, style: .dashed, coords: [convertForMap(from), convertForMap(to)]))
         resetSegmentSwitchState()
     }
 
@@ -1580,14 +1562,10 @@ final class TrackingService: ObservableObject {
             // Non-@Published: direct assign without triggering objectWillChange
             self.coords = self.rawCoords
             self.coordTimestamps = self.rawTimestamps
-            if self.isRealtimeRenderingEnabled {
-                self.segments = self.internalSegments
-            }
             // Bump lightweight version counter (triggers onReceive in MapView)
             self.coordVersion += 1
             // Single @Published update for all render state
             self.renderSnapshot = RenderSnapshot(
-                segments: self.latestRenderSegmentsForMap,
                 unifiedSegments: self.latestRenderUnifiedSegmentsForMap,
                 liveTail: self.latestRenderLiveTailForMap
             )
@@ -1621,18 +1599,6 @@ final class TrackingService: ObservableObject {
         return delta >= thresholdDeg
     }
 
-    // MARK: - Smoothing (legacy, kept but no longer used for walk/run when OneEuro enabled)
-
-    private func smoothedCoordinate(for newCoord: CLLocationCoordinate2D) -> CLLocationCoordinate2D {
-        let n = min(smoothingWindow, acceptedLocations.count)
-        guard n > 1 else { return newCoord }
-
-        let slice = acceptedLocations.suffix(n)
-        let lat = slice.map { $0.coordinate.latitude }.reduce(0, +) / Double(n)
-        let lon = slice.map { $0.coordinate.longitude }.reduce(0, +) / Double(n)
-        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
-    }
-
     // MARK: - Segments builder
 
     private func resetSegmentSwitchState() {
@@ -1642,12 +1608,9 @@ final class TrackingService: ObservableObject {
     }
 
     private func appendPointToInternalSegments(coord: CLLocationCoordinate2D, at t: Date, preferredStyle: SegmentStyle) {
-        let mapCoord = convertForMap(coord)
-
         if internalSegments.isEmpty {
             let id = UUID().uuidString
             internalSegments = [RouteSegment(id: id, style: preferredStyle, coords: [coord])]
-            internalSegmentsForMap = [RouteSegment(id: id, style: preferredStyle, coords: [mapCoord])]
             resetSegmentSwitchState()
             forceNewSegmentOnNextAppend = false
             return
@@ -1658,7 +1621,6 @@ final class TrackingService: ObservableObject {
         if forceNewSegmentOnNextAppend {
             let id = UUID().uuidString
             internalSegments.append(RouteSegment(id: id, style: preferredStyle, coords: [coord]))
-            internalSegmentsForMap.append(RouteSegment(id: id, style: preferredStyle, coords: [mapCoord]))
             resetSegmentSwitchState()
             forceNewSegmentOnNextAppend = false
             return
@@ -1667,7 +1629,6 @@ final class TrackingService: ObservableObject {
         // append to last segment if style unchanged
         if internalSegments[internalSegments.count - 1].style == preferredStyle {
             internalSegments[internalSegments.count - 1].coords.append(coord)
-            internalSegmentsForMap[internalSegmentsForMap.count - 1].coords.append(mapCoord)
             return
         }
 
@@ -1677,7 +1638,6 @@ final class TrackingService: ObservableObject {
             pendingStyleStartAt = t
             pendingStylePointCount = 1
             internalSegments[internalSegments.count - 1].coords.append(coord)
-            internalSegmentsForMap[internalSegmentsForMap.count - 1].coords.append(mapCoord)
             return
         }
 
@@ -1687,13 +1647,11 @@ final class TrackingService: ObservableObject {
 
         guard shouldConfirm else {
             internalSegments[internalSegments.count - 1].coords.append(coord)
-            internalSegmentsForMap[internalSegmentsForMap.count - 1].coords.append(mapCoord)
             return
         }
 
         let id = UUID().uuidString
         internalSegments.append(RouteSegment(id: id, style: preferredStyle, coords: [coord]))
-        internalSegmentsForMap.append(RouteSegment(id: id, style: preferredStyle, coords: [mapCoord]))
         resetSegmentSwitchState()
     }
 
