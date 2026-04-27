@@ -38,6 +38,12 @@
             margin-top: 32px;
             margin-bottom: 12px;
         }
+        h3 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-top: 16px;
+            margin-bottom: 8px;
+        }
         p, li {
             font-size: 15px;
             color: #333;
@@ -54,65 +60,122 @@
 <body>
     <div class="container">
         <h1>Privacy Policy</h1>
-        <p class="updated">Last updated: March 21, 2026</p>
+        <p class="updated">Last updated: April 27, 2026</p>
 
-        <p>Worldo ("we", "our", or "the App") is a journey tracking and city discovery application. This Privacy Policy explains how we collect, use, and protect your information.</p>
+        <p>Worldo ("we", "our", or "the App") is a journey tracking and city discovery application. This Privacy Policy explains how we collect, use, share, and protect your information, and the choices you have. By using Worldo, you agree to the practices described below.</p>
 
         <h2>1. Information We Collect</h2>
 
         <h3>Information you provide</h3>
         <ul>
-            <li><strong>Account information:</strong> Email address, display name, and authentication credentials when you create an account.</li>
-            <li><strong>Journey data:</strong> Routes, locations, timestamps, and photos you capture during journeys.</li>
-            <li><strong>Social data:</strong> Friend connections, postcards, and messages you send or receive through the App.</li>
+            <li><strong>Account information:</strong> Email address, display name, profile photo, and authentication credentials when you create an account or sign in with Apple, Google, or email.</li>
+            <li><strong>Journey content:</strong> Routes, GPS coordinates, timestamps, photos, captions, and notes you capture during journeys, including content you attach to memory blogs and postcards.</li>
+            <li><strong>Avatar customization:</strong> Your pixel-art traveler appearance, equipment, and accessory selections.</li>
+            <li><strong>Social activity:</strong> Friend connections, postcards you send or receive, comments, likes, and reports/blocks you submit.</li>
+            <li><strong>Purchase records:</strong> Receipts and transaction identifiers from Apple when you purchase a subscription or coins. We do not receive or store your payment card details.</li>
         </ul>
 
         <h3>Information collected automatically</h3>
         <ul>
-            <li><strong>Precise location:</strong> GPS coordinates collected during journey tracking (only when you actively start tracking or enable background tracking).</li>
-            <li><strong>Motion and fitness data:</strong> Step count and motion activity (walking, running, driving) used to enhance journey recording accuracy.</li>
-            <li><strong>Health data:</strong> Daily step counts read from HealthKit, displayed in your Lifelog. Workout session data written to maintain stable background tracking.</li>
-            <li><strong>Device information:</strong> App Store region, device locale, and app version for feature availability and localization.</li>
+            <li><strong>Precise location (GPS):</strong> Coordinates and movement data, collected during active journeys (Sport / Daily mode) and during background tracking when you have explicitly enabled the corresponding iOS permission ("Always Allow").</li>
+            <li><strong>Motion and fitness data:</strong> Step counts, walking/running/cycling/driving/transit detection from Core Motion, used to improve journey recording accuracy and to power Lifelog.</li>
+            <li><strong>HealthKit data:</strong> Daily step counts read from HealthKit (only if you grant permission). Workout sessions written to HealthKit to maintain stable background tracking.</li>
+            <li><strong>Push notification token:</strong> When you grant notification permission, your device generates a token used to deliver friend updates, postcard arrivals, and tracking-related alerts.</li>
+            <li><strong>Camera and photo library:</strong> When you choose to add a photo to a journey, the App accesses the camera or photo library you select. We do not access photos you do not pick.</li>
+            <li><strong>Device and diagnostic information:</strong> App version, OS version, device model, App Store region, device locale, anonymized crash reports, and basic event logs used to diagnose issues and improve stability.</li>
         </ul>
 
         <h2>2. How We Use Your Information</h2>
         <ul>
-            <li>Record and display your journeys and city visits</li>
-            <li>Show your daily step count and movement history in Lifelog</li>
-            <li>Enable social features (friend connections, postcards) where available</li>
-            <li>Sync your data across devices via iCloud</li>
-            <li>Improve journey tracking accuracy using motion data</li>
-            <li>Determine feature availability based on your region</li>
+            <li>Record, display, and replay your journeys and city visits</li>
+            <li>Show daily steps, movement history, and mood entries in Lifelog</li>
+            <li>Enable social features (friend connections, postcards, friend city cards) where available</li>
+            <li>Sync your data across your Apple devices via iCloud (Apple CloudKit)</li>
+            <li>Improve journey tracking accuracy using motion and activity data</li>
+            <li>Determine feature availability based on your App Store region</li>
+            <li>Process subscriptions and in-app purchases through Apple</li>
+            <li>Detect and respond to abuse, fraud, and violations of our Terms of Service</li>
+            <li>Communicate with you about service updates, security alerts, and customer support</li>
         </ul>
 
-        <h2>3. Data Storage and Security</h2>
-        <p>Your journey data is stored locally on your device and optionally synced via iCloud (Apple CloudKit). Account and social data is stored on our secure servers. We use HTTPS encryption for all data transmission and JWT-based authentication to protect your account.</p>
+        <h2>3. Third-Party Services and SDKs</h2>
+        <p>We integrate the following third-party services to operate Worldo. Each service has its own privacy policy governing the data it processes.</p>
+        <ul>
+            <li><strong>Apple CloudKit:</strong> Stores your synced journey data, photos, and Lifelog entries in your private iCloud container. Apple cannot read this data.</li>
+            <li><strong>Apple HealthKit:</strong> Reads step and motion data with your permission. Health data is never sent to our servers.</li>
+            <li><strong>Apple Maps / Apple CLGeocoder:</strong> Used to convert GPS coordinates into city and country names, and optionally to snap routes to roads.</li>
+            <li><strong>Firebase Authentication (Google):</strong> Handles secure email/password and federated sign-in (Google, Apple). Receives your email and authentication tokens.</li>
+            <li><strong>Firebase / Google Analytics for Firebase:</strong> Bundled with the Firebase SDK. May collect anonymized device identifiers, app open events, and crash diagnostics for the purpose of stability and reliability.</li>
+            <li><strong>Google Sign-In SDK:</strong> Used when you sign in with a Google account.</li>
+            <li><strong>Google Ads On-Device Conversion SDK:</strong> Performs on-device attribution to measure the effectiveness of advertising. This SDK does not transmit personally identifiable information off the device.</li>
+            <li><strong>Mapbox SDK:</strong> Renders premium map styles. Mapbox may collect anonymized telemetry (style usage, performance metrics) governed by <a href="https://www.mapbox.com/legal/privacy">Mapbox's Privacy Policy</a>.</li>
+            <li><strong>Cloudflare R2:</strong> Stores journey photos and avatar assets uploaded to our backend.</li>
+            <li><strong>Apple App Store / In-App Purchase:</strong> Processes all subscription and coin transactions. We do not receive payment card details.</li>
+        </ul>
+        <p>We do not sell, rent, or share your personal information with advertisers or data brokers.</p>
 
-        <h2>4. Data Sharing</h2>
+        <h2>4. Data Storage and Security</h2>
+        <p>Your journey data is stored locally on your device by default and optionally synced via iCloud (Apple CloudKit). Account information, social interactions, postcards, and uploaded photos are stored on our backend servers, which are currently hosted in Tokyo, Japan. All data transmission uses HTTPS / TLS encryption, and account access is protected by JWT-based authentication. Photos uploaded to our backend are stored on Cloudflare R2 with restricted-access keys.</p>
+
+        <h2>5. Data Sharing</h2>
         <p>We do not sell your personal information. Your data may be shared only in these limited cases:</p>
         <ul>
-            <li><strong>With friends you connect with:</strong> Your display name, avatar, city cards, and postcards are visible to friends you add.</li>
-            <li><strong>Map services:</strong> Your location is sent to Apple Maps for reverse geocoding (converting coordinates to city names) and optional route snapping.</li>
-            <li><strong>As required by law:</strong> We may disclose information if required by applicable law or legal process.</li>
+            <li><strong>With friends you connect with:</strong> Your display name, avatar, city cards, and postcards are visible to friends you have explicitly added or accepted.</li>
+            <li><strong>With map and geocoding services:</strong> Your coordinates are sent to Apple's geocoding service to resolve city and country names, and optionally to Apple Maps for route snapping.</li>
+            <li><strong>With service providers:</strong> Firebase, Mapbox, and Cloudflare process data on our behalf as described above. Their access is limited to operating the App's functionality.</li>
+            <li><strong>For legal reasons:</strong> We may disclose information if required by applicable law, valid legal process, or to protect the rights, safety, or property of Worldo, our users, or others.</li>
+            <li><strong>In a business transfer:</strong> If Worldo is involved in a merger, acquisition, or asset sale, your information may be transferred. We will notify you before this happens and ensure equivalent privacy commitments apply.</li>
         </ul>
 
-        <h2>5. Your Choices</h2>
+        <h2>6. Data Retention</h2>
+        <ul>
+            <li><strong>Account data:</strong> Retained for as long as your account is active.</li>
+            <li><strong>Journey and Lifelog data:</strong> Retained until you delete it from the App or delete your account.</li>
+            <li><strong>Account deletion:</strong> When you delete your account from within the App or by contacting us, your personal data is removed from our active systems within 30 days. Backups containing your data are purged within 90 days.</li>
+            <li><strong>Legal retention:</strong> We may retain certain transactional records (e.g., purchase receipts) for the period required by tax, fraud-prevention, or other legal obligations.</li>
+            <li><strong>Aggregated and anonymized data:</strong> Data that no longer identifies you may be retained indefinitely.</li>
+        </ul>
+
+        <h2>7. Your Rights and Choices</h2>
         <ul>
             <li>You can disable location tracking at any time through iOS Settings.</li>
-            <li>You can deny Health/Motion data access without affecting core app functionality.</li>
-            <li>You can delete your journey data within the App.</li>
-            <li>You can request account deletion by contacting us.</li>
+            <li>You can revoke camera, photos, motion, and HealthKit permissions through iOS Settings without losing core functionality.</li>
+            <li>You can manage push notifications in iOS Settings.</li>
+            <li>You can review and delete individual journeys, photos, and Lifelog entries within the App.</li>
+            <li>You can block other users at any time. Blocked users cannot interact with you.</li>
+            <li>You can request a copy of your data, request correction of inaccurate data, or request deletion by contacting us at the email below.</li>
         </ul>
 
-        <h2>6. Children's Privacy</h2>
-        <p>Worldo is not directed at children under 13. We do not knowingly collect personal information from children under 13. If you believe we have collected such information, please contact us.</p>
+        <h3>For users in the European Economic Area, United Kingdom, and Switzerland (GDPR)</h3>
+        <p>You have the right to access, rectify, port, and erase your personal data; to restrict or object to processing; and to lodge a complaint with your local data protection authority. The legal bases on which we rely are: performance of contract (to provide the App's features), legitimate interests (to operate, secure, and improve the service), consent (for optional permissions like location and HealthKit), and compliance with legal obligations.</p>
 
-        <h2>7. Changes to This Policy</h2>
-        <p>We may update this Privacy Policy from time to time. We will notify you of significant changes through the App or by updating the "Last updated" date above.</p>
+        <h3>For users in California (CCPA / CPRA)</h3>
+        <p>You have the right to know what personal information we collect, the right to delete it, the right to correct inaccurate information, the right to opt out of sale or sharing for cross-context behavioral advertising (we do not sell or share for this purpose), and the right not to be discriminated against for exercising these rights.</p>
+
+        <h2>8. HealthKit Data Disclosure</h2>
+        <p>Health data accessed through HealthKit is used solely within the App to display your daily steps and activity in Lifelog and to maintain accurate background journey tracking via workout sessions.</p>
+        <p>Health data accessed through HealthKit is <strong>never</strong> used for advertising, marketing, data-mining, or any purpose other than the features described in this Privacy Policy. Health data is <strong>never</strong> sold or shared with third parties. Health data is <strong>never</strong> transmitted to our servers.</p>
+
+        <h2>9. Account Deletion</h2>
+        <p>You can delete your account at any time:</p>
+        <ul>
+            <li>From within the App: Settings &rarr; Account &rarr; Delete Account.</li>
+            <li>By contacting us at the email below.</li>
+        </ul>
+        <p>Account deletion permanently removes your account credentials, profile, social connections, postcards, photos uploaded to our servers, and other personal data within 30 days, with backup purges completed within 90 days. Locally stored data on your device will be removed when you uninstall the App.</p>
+
+        <h2>10. International Users</h2>
+        <p>Worldo is operated from Asia, and our backend is currently hosted in Tokyo, Japan. If you access the App from outside Japan, your information will be transferred to and processed in Japan. By using Worldo, you consent to this transfer.</p>
+
+        <h2>11. Children's Privacy</h2>
+        <p>Worldo is not directed to children under 13 (or the equivalent minimum age in your jurisdiction). We do not knowingly collect personal information from children under 13. If you believe a child has provided us with personal information, please contact us and we will delete it.</p>
+
+        <h2>12. Changes to This Policy</h2>
+        <p>We may update this Privacy Policy from time to time. We will notify you of significant changes through the App or by updating the "Last updated" date above. Your continued use of Worldo after changes become effective constitutes acceptance of the revised policy.</p>
 
         <div class="contact">
-            <h2>8. Contact Us</h2>
-            <p>If you have questions about this Privacy Policy, please contact us at:</p>
+            <h2>13. Contact Us</h2>
+            <p>If you have questions, requests, or complaints regarding this Privacy Policy or your data, please contact us at:</p>
             <p><strong>Email:</strong> yinterestingy@gmail.com</p>
         </div>
     </div>
