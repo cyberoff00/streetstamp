@@ -226,6 +226,7 @@ struct ProfileView: View {
                     .appMinTapTarget()
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(L10n.t("settings_title"))
         }
         .padding(.horizontal, 18)
         .padding(.top, 8)
@@ -284,6 +285,8 @@ struct ProfileView: View {
                         .appMinTapTarget()
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(L10n.t("profile_notifications_title"))
+                    .accessibilityValue(notificationStore.unreadCount > 0 ? "\(notificationStore.unreadCount)" : "")
                     .padding(6)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }

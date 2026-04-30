@@ -19,6 +19,7 @@ struct MembershipSubscriptionView: View {
     @State private var selectedProductID: String?
     @State private var productsLoadFinished = false
     @State private var activeInfoKey: String?
+    @State private var showICloudAutoEnableAlert = false
 
     private var sortedProducts: [Product] {
         products.sorted { $0.price < $1.price }
@@ -72,6 +73,39 @@ struct MembershipSubscriptionView: View {
         } message: {
             Text(String(format: L10n.t("membership_welcome_bonus_message"), MembershipTierConfig.premiumWelcomeBonus))
         }
+        .alert(
+            L10n.t("membership_icloud_auto_enabled_title"),
+            isPresented: $showICloudAutoEnableAlert
+        ) {
+            Button(L10n.t("membership_icloud_auto_enabled_ok"), role: .cancel) {
+                membership.pendingICloudAutoEnableNotice = false
+            }
+        } message: {
+            Text(L10n.t("membership_icloud_auto_enabled_message"))
+        }
+        .onAppear { triggerICloudAutoEnableAlertIfPending() }
+        .onChange(of: membership.pendingICloudAutoEnableNotice) { _, pending in
+            if pending { triggerICloudAutoEnableAlertIfPending() }
+        }
+        .onChange(of: membership.showWelcomeBonusAlert) { oldValue, newValue in
+            // Welcome bonus dismissed → defer to next runloop so SwiftUI can
+            // tear down its alert before we present the iCloud one. Stacking
+            // two alerts in the same runloop is unreliable.
+            guard oldValue && !newValue else { return }
+            DispatchQueue.main.async {
+                triggerICloudAutoEnableAlertIfPending()
+            }
+        }
+    }
+
+    /// Show the iCloud-auto-enabled alert if there's a pending notice and no
+    /// welcome-bonus alert currently on screen. Called from .onAppear (for
+    /// re-subscription where no welcome bonus fires), pendingICloudAutoEnableNotice
+    /// changes, and welcome-bonus dismissal.
+    private func triggerICloudAutoEnableAlertIfPending() {
+        guard membership.pendingICloudAutoEnableNotice else { return }
+        guard !membership.showWelcomeBonusAlert else { return }
+        showICloudAutoEnableAlert = true
     }
 
     // MARK: - Header

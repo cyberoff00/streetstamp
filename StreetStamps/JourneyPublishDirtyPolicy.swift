@@ -13,6 +13,8 @@ enum JourneyPublishDirtyPolicy {
         draftMemories: [JourneyMemory],
         snapshotTitle: String,
         draftTitle: String,
+        snapshotActivityTag: String = "",
+        draftActivityTag: String = "",
         snapshotOverallMemory: String,
         draftOverallMemory: String,
         snapshotOverallMemoryImagePaths: [String],
@@ -28,6 +30,8 @@ enum JourneyPublishDirtyPolicy {
             draftMemories: draftMemories,
             snapshotTitle: snapshotTitle,
             draftTitle: draftTitle,
+            snapshotActivityTag: snapshotActivityTag,
+            draftActivityTag: draftActivityTag,
             snapshotOverallMemory: snapshotOverallMemory,
             draftOverallMemory: draftOverallMemory,
             snapshotOverallMemoryImagePaths: snapshotOverallMemoryImagePaths,
@@ -45,6 +49,8 @@ enum JourneyPublishDirtyPolicy {
         draftMemories: [JourneyMemory],
         snapshotTitle: String,
         draftTitle: String,
+        snapshotActivityTag: String = "",
+        draftActivityTag: String = "",
         snapshotOverallMemory: String,
         draftOverallMemory: String,
         snapshotOverallMemoryImagePaths: [String],
@@ -55,6 +61,10 @@ enum JourneyPublishDirtyPolicy {
         let normalizedSnapshotTitle = snapshotTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedDraftTitle = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         if normalizedSnapshotTitle != normalizedDraftTitle { return true }
+
+        let normalizedSnapshotTag = snapshotActivityTag.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedDraftTag = draftActivityTag.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalizedSnapshotTag != normalizedDraftTag { return true }
 
         let normalizedSnapshotOverall = snapshotOverallMemory.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedDraftOverall = draftOverallMemory.trimmingCharacters(in: .whitespacesAndNewlines)

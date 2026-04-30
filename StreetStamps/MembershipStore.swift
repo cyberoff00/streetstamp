@@ -238,8 +238,11 @@ final class MembershipStore: ObservableObject {
                 UserDefaults.standard.set(true, forKey: sandboxPurchasedOnceKey)
             }
             applyTier(.premium, expiration: expiration)
-            if wasFreeBefore && !welcomeBonusGranted {
-                awardWelcomeBonus()
+            if wasFreeBefore {
+                autoEnableICloudSyncIfNeeded()
+                if !welcomeBonusGranted {
+                    awardWelcomeBonus()
+                }
             }
         } else if isSandbox && UserDefaults.standard.bool(forKey: sandboxPurchasedOnceKey) {
             // Sandbox auto-renewal exhausted (max 6 cycles) but tester
@@ -262,6 +265,23 @@ final class MembershipStore: ObservableObject {
 
     /// Set by `awardWelcomeBonus` so the UI can show a congratulations alert.
     @Published var showWelcomeBonusAlert = false
+
+    /// Set when premium just activated and iCloud sync was auto-enabled.
+    /// UI presents a follow-up alert; AppRuntimeCoordinator triggers the
+    /// force-full upload. Both consumers clear it after handling.
+    @Published var pendingICloudAutoEnableNotice = false
+
+    /// Flip the iCloud sync flag on first activation per premium cycle so
+    /// the user gets the feature without manually toggling. Idempotent: if
+    /// the user has already turned it on (or off then on) this is a no-op.
+    private func autoEnableICloudSyncIfNeeded() {
+        guard !AppSettings.isICloudSyncEnabled else { return }
+        UserDefaults.standard.set(true, forKey: AppSettings.iCloudSyncEnabledKey)
+        // Persist the full-upload intent so it survives if the first attempt is
+        // interrupted by an app kill or iCloud being temporarily unavailable.
+        UserDefaults.standard.set(true, forKey: AppSettings.pendingFullSyncAfterAutoEnableKey)
+        pendingICloudAutoEnableNotice = true
+    }
 
     /// Purchase a subscription product.
     func purchase(_ product: Product) async throws -> Bool {

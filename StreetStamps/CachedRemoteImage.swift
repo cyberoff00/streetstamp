@@ -42,16 +42,17 @@ struct CachedRemoteImage<Placeholder: View, Failure: View>: View {
                 uiImage = cached
                 return
             }
-            // Check our own disk cache (reliable, survives URLCache eviction)
-            if let diskData = RemoteImageDiskCache.shared.read(for: url),
-               let decoded = UIImage(data: diskData) {
+            // Disk read + JPEG decode must run off the main actor: with many
+            // cards entering view at once, doing this on .task (MainActor)
+            // stalls the in-flight push/sheet transition and shows as jitter.
+            if let decoded = await Self.loadFromDiskCache(url: url) {
                 RemoteImageCache.shared.setImage(decoded, for: url)
                 uiImage = decoded
                 return
             }
             do {
                 let data = try await RemoteImageFetcher.shared.data(for: url)
-                guard let decoded = UIImage(data: data) else {
+                guard let decoded = await Self.decode(data: data) else {
                     failed = true
                     return
                 }
@@ -62,6 +63,19 @@ struct CachedRemoteImage<Placeholder: View, Failure: View>: View {
                 if !Task.isCancelled { failed = true }
             }
         }
+    }
+
+    private static func loadFromDiskCache(url: URL) async -> UIImage? {
+        await Task.detached(priority: .utility) {
+            guard let data = RemoteImageDiskCache.shared.read(for: url) else { return nil }
+            return UIImage(data: data)?.preparingForDisplay()
+        }.value
+    }
+
+    private static func decode(data: Data) async -> UIImage? {
+        await Task.detached(priority: .utility) {
+            UIImage(data: data)?.preparingForDisplay()
+        }.value
     }
 }
 

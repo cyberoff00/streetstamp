@@ -53,12 +53,12 @@ enum JourneyVisibilityPolicy {
         target: JourneyVisibility,
         isLoggedIn: Bool,
         journeyDistance: Double,
-        memoryCount: Int
+        hasMemory: Bool
     ) -> Decision {
         guard current != target else { return .allowed }
         guard target == .friendsOnly else { return .allowed }
         guard isLoggedIn else { return .denied(.loginRequired) }
-        guard journeyDistance >= minFriendsVisibilityDistanceMeters || memoryCount > 0 else {
+        guard journeyDistance >= minFriendsVisibilityDistanceMeters || hasMemory else {
             return .denied(.journeyNotEligible)
         }
         return .allowed
@@ -75,8 +75,25 @@ enum JourneyVisibilityPolicy {
             target: target,
             isLoggedIn: isLoggedIn,
             journeyDistance: minFriendsVisibilityDistanceMeters,
-            memoryCount: 1
+            hasMemory: true
         ).isAllowed
+    }
+}
+
+extension JourneyRoute {
+    /// True if the journey has any user-authored memory content:
+    /// per-point memories, overall-memory text, or overall-memory photos
+    /// (local paths or remote URLs). Used by visibility gating so that
+    /// adding only an overall memory still unlocks the friends toggle.
+    var hasMemoryContent: Bool {
+        if !memories.isEmpty { return true }
+        if let text = overallMemory,
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return true
+        }
+        if !overallMemoryImagePaths.isEmpty { return true }
+        if !overallMemoryRemoteImageURLs.isEmpty { return true }
+        return false
     }
 }
 

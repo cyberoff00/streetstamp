@@ -630,6 +630,11 @@ final class CityCache: ObservableObject {
     private var membershipIndex = CityMembershipIndex()
     private var cancellables: Set<AnyCancellable> = []
     private var hasRebuiltForCurrentLoadedState = false
+    /// When true, this cache is a frozen snapshot (e.g. a friend's mirrored profile).
+    /// Journey-derived rebuilds and key migrations are suppressed so the persisted
+    /// `cachedCities` stays exactly what the snapshot wrote — viewer-side preferences
+    /// and re-keying must not contaminate another user's published city set.
+    var isReadOnlyMirror: Bool = false
     private let diskQueue = DispatchQueue(label: "CityCache.disk", qos: .utility)
     private var savePending = false
     private var saveScheduled = false
@@ -793,6 +798,7 @@ final class CityCache: ObservableObject {
             hasRebuiltForCurrentLoadedState = false
             return
         }
+        guard !isReadOnlyMirror else { return }
         guard membershipIndex.entries.isEmpty || !hasRebuiltForCurrentLoadedState else { return }
         hasRebuiltForCurrentLoadedState = true
         rebuildFromJourneyStore()
@@ -1432,6 +1438,7 @@ final class CityCache: ObservableObject {
     }
 
     func rebuildFromJourneyStore() {
+        guard !isReadOnlyMirror else { return }
         guard journeyStore.hasLoaded else { return }
         let journeysSnapshot = journeyStore.journeys
         let membershipURL = membershipIndexURL

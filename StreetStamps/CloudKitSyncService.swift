@@ -93,27 +93,94 @@ actor CloudKitSyncService {
 
     func syncJourneyUpsert(_ journey: JourneyRoute, localUserID: String? = nil) async {
         guard AppSettings.isICloudSyncEnabled else { return }
-        guard await isAvailable() else { return }
+        guard await isAvailable() else {
+            if let userID = localUserID {
+                AppSettings.markJourneyPendingUpload(journey.id, for: userID)
+            }
+            return
+        }
         do {
             try await journeySync.ensureZone()
             try await journeySync.uploadJourney(journey)
-
             if let userID = localUserID {
                 try await uploadPhotosForJourney(journey, localUserID: userID)
+                AppSettings.clearJourneyPendingUploads([journey.id], for: userID)
             }
         } catch {
             print("☁️ incremental journey upsert failed:", error)
+            if let userID = localUserID {
+                AppSettings.markJourneyPendingUpload(journey.id, for: userID)
+            }
         }
     }
 
-    func syncJourneyDeletion(id: String) async {
+    func retryJourneyUploads(_ journeys: [JourneyRoute], localUserID: String) async {
         guard AppSettings.isICloudSyncEnabled else { return }
         guard await isAvailable() else { return }
+        do { try await journeySync.ensureZone() } catch {
+            print("☁️ journey retry ensureZone failed:", error)
+            return
+        }
+        var uploaded: [String] = []
+        for route in journeys {
+            do {
+                try await journeySync.uploadJourney(route)
+                try await uploadPhotosForJourney(route, localUserID: localUserID)
+                uploaded.append(route.id)
+            } catch {
+                print("☁️ journey retry failed for \(route.id):", error)
+            }
+        }
+        if !uploaded.isEmpty {
+            AppSettings.clearJourneyPendingUploads(uploaded, for: localUserID)
+        }
+    }
+
+    func syncJourneyDeletion(id: String, localUserID: String? = nil) async {
+        guard AppSettings.isICloudSyncEnabled else { return }
+        // The journey is being deleted locally — drop any pending upload intent
+        // so we don't try to re-upload a record that's about to disappear.
+        if let userID = localUserID {
+            AppSettings.clearJourneyPendingUploads([id], for: userID)
+        }
+        guard await isAvailable() else {
+            if let userID = localUserID {
+                AppSettings.markJourneyPendingDeletion(id, for: userID)
+            }
+            return
+        }
         do {
             try await journeySync.ensureZone()
             try await journeySync.deleteJourney(id: id)
+            if let userID = localUserID {
+                AppSettings.clearJourneyPendingDeletions([id], for: userID)
+            }
         } catch {
             print("☁️ incremental journey delete failed:", error)
+            if let userID = localUserID {
+                AppSettings.markJourneyPendingDeletion(id, for: userID)
+            }
+        }
+    }
+
+    func retryJourneyDeletions(_ ids: [String], localUserID: String) async {
+        guard AppSettings.isICloudSyncEnabled else { return }
+        guard await isAvailable() else { return }
+        do { try await journeySync.ensureZone() } catch {
+            print("☁️ journey delete retry ensureZone failed:", error)
+            return
+        }
+        var deleted: [String] = []
+        for id in ids {
+            do {
+                try await journeySync.deleteJourney(id: id)
+                deleted.append(id)
+            } catch {
+                print("☁️ journey delete retry failed for \(id):", error)
+            }
+        }
+        if !deleted.isEmpty {
+            AppSettings.clearJourneyPendingDeletions(deleted, for: localUserID)
         }
     }
 
@@ -470,11 +537,27 @@ actor CloudKitSyncService {
             alreadyUploaded = try? await photoSync.fetchUploadedFilenames()
         }
 
+        // Continue past per-journey failures so a transient error (network
+        // hiccup, rate limit, single bad record) doesn't abort the whole
+        // bulk upload and leave hundreds of journeys unsynced.
+        var failureCount = 0
         for route in journeys {
-            try await journeySync.uploadJourney(route)
-            if let userID = localUserID {
-                try await uploadPhotosForJourney(route, localUserID: userID, alreadyUploaded: alreadyUploaded)
+            do {
+                try await journeySync.uploadJourney(route)
+                if let userID = localUserID {
+                    try await uploadPhotosForJourney(route, localUserID: userID, alreadyUploaded: alreadyUploaded)
+                    AppSettings.clearJourneyPendingUploads([route.id], for: userID)
+                }
+            } catch {
+                failureCount += 1
+                print("☁️ skipped journey \(route.id) during bulk upload:", error)
+                if let userID = localUserID {
+                    AppSettings.markJourneyPendingUpload(route.id, for: userID)
+                }
             }
+        }
+        if failureCount > 0 {
+            print("☁️ bulk journey upload completed with \(failureCount) skipped of \(journeys.count)")
         }
         return true
     }
@@ -502,16 +585,25 @@ actor CloudKitSyncService {
         guard !dayBatches.isEmpty || !moodByDay.isEmpty || !deletedMoodDayKeys.isEmpty else {
             return false
         }
-        try await lifelogSync.uploadBatches(dayBatches)
-        try await lifelogMoodSync.uploadMoods(moodByDay)
+        // uploadBatches/uploadMoods continue past per-item failures and return
+        // only the keys that actually succeeded, so clearDirtyCloudSyncState
+        // leaves failed keys dirty for retry on the next sync cycle.
+        let uploadedDayKeys = await lifelogSync.uploadBatches(dayBatches)
+        let uploadedMoodDayKeys = await lifelogMoodSync.uploadMoods(moodByDay)
+        var uploadedDeletedMoodDayKeys: [String] = []
         for dayKey in deletedMoodDayKeys {
-            try await lifelogMoodSync.deleteMood(dayKey: dayKey)
+            do {
+                try await lifelogMoodSync.deleteMood(dayKey: dayKey)
+                uploadedDeletedMoodDayKeys.append(dayKey)
+            } catch {
+                print("☁️ skipped mood deletion \(dayKey):", error)
+            }
         }
         await MainActor.run {
             lifelogStore.clearDirtyCloudSyncState(
-                uploadedPointDayKeys: Array(dayBatches.keys),
-                uploadedMoodDayKeys: Array(moodByDay.keys),
-                deletedMoodDayKeys: deletedMoodDayKeys
+                uploadedPointDayKeys: Array(uploadedDayKeys),
+                uploadedMoodDayKeys: Array(uploadedMoodDayKeys),
+                deletedMoodDayKeys: uploadedDeletedMoodDayKeys
             )
         }
         return true
@@ -545,11 +637,15 @@ actor CloudKitSyncService {
             if let existing = alreadyUploaded, existing.contains(filename) { continue }
             let url = photosDir.appendingPathComponent(filename, isDirectory: false)
             guard FileManager.default.fileExists(atPath: url.path) else { continue }
-            try await photoSync.uploadPhoto(
-                filename: filename,
-                imageURL: url,
-                journeyID: journey.id
-            )
+            do {
+                try await photoSync.uploadPhoto(
+                    filename: filename,
+                    imageURL: url,
+                    journeyID: journey.id
+                )
+            } catch {
+                print("☁️ skipped photo \(filename) for journey \(journey.id):", error)
+            }
         }
     }
 

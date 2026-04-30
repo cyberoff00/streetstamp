@@ -53,6 +53,9 @@ final class LifelogStore: ObservableObject {
         var cachedAvailableDayKeys: [String] = []
         var lastPointCoord: CoordinateCodable?
         var lastPointTimestamp: Date?
+        // Day keys that have been written to disk but not yet confirmed uploaded
+        // to CloudKit. Survives app kills so failed uploads are retried on next launch.
+        var pendingCloudUploadDayKeys: [String] = []
 
         static let empty = DayShardIndex()
     }
@@ -161,6 +164,9 @@ final class LifelogStore: ObservableObject {
     private var moodByDay: [String: String] = [:]
     private var availableDayKeys = Set<String>()
     private var dirtyPointDayKeys = Set<String>()
+    // Day keys confirmed written to disk but not yet successfully uploaded to CloudKit.
+    // Persisted in DayShardIndex so they survive app kills and are retried on next launch.
+    private var pendingCloudUploadDayKeys = Set<String>()
     private var dirtyMoodDayKeys = Set<String>()
     private var deletedMoodDayKeys = Set<String>()
     private var pendingSnapshotPersist: DispatchWorkItem?
@@ -251,6 +257,7 @@ final class LifelogStore: ObservableObject {
         moodByDay = [:]
         availableDayKeys = []
         dirtyPointDayKeys = []
+        pendingCloudUploadDayKeys = []
         dirtyMoodDayKeys = []
         deletedMoodDayKeys = []
         availableDays = []
@@ -308,6 +315,7 @@ final class LifelogStore: ObservableObject {
             AppSettings.setPassiveLifelogEnabled(loaded.index.isEnabled)
         }
         archivedJourneyIDs = Set(loaded.index.archivedJourneyIDs)
+        pendingCloudUploadDayKeys = Set(loaded.index.pendingCloudUploadDayKeys)
         moodByDay = loaded.moodByDay
         cachedDistanceMeters = loaded.index.cachedDistanceMeters
         resetPassiveMotionState()
@@ -1192,10 +1200,13 @@ final class LifelogStore: ObservableObject {
     }
 
     func snapshotDirtyPointsByDay() -> [String: [LifelogTrackPoint]] {
-        guard !dirtyPointDayKeys.isEmpty else { return [:] }
+        // Include both in-session dirty keys and keys that survived a previous
+        // app kill without a successful CloudKit upload confirmation.
+        let keysToUpload = dirtyPointDayKeys.union(pendingCloudUploadDayKeys)
+        guard !keysToUpload.isEmpty else { return [:] }
         var result: [String: [LifelogTrackPoint]] = [:]
         let daysDir = paths.lifelogDaysDir
-        for dayKey in dirtyPointDayKeys {
+        for dayKey in keysToUpload {
             if dayKey == todayShard.dayKey {
                 result[dayKey] = todayShard.points
             } else if let cached = loadedShards[dayKey] {
@@ -1310,6 +1321,7 @@ final class LifelogStore: ObservableObject {
 
         let touchedDayKeys = Set(dayBatches.keys).union(deletedDayKeys)
         dirtyPointDayKeys.subtract(touchedDayKeys)
+        pendingCloudUploadDayKeys.subtract(touchedDayKeys)
         dirtyMoodDayKeys.subtract(Set(restoredMoodByDay.keys))
         dirtyMoodDayKeys.subtract(Set(deletedMoodDayKeys))
         self.deletedMoodDayKeys.subtract(Set(restoredMoodByDay.keys))
@@ -1327,6 +1339,7 @@ final class LifelogStore: ObservableObject {
         deletedMoodDayKeys: [String]
     ) {
         dirtyPointDayKeys.subtract(uploadedPointDayKeys)
+        pendingCloudUploadDayKeys.subtract(uploadedPointDayKeys)
         dirtyMoodDayKeys.subtract(uploadedMoodDayKeys)
         self.deletedMoodDayKeys.subtract(deletedMoodDayKeys)
     }
@@ -1432,11 +1445,16 @@ final class LifelogStore: ObservableObject {
     private func persistSnapshotNow() {
         guard hasLoaded else { return }
 
+        // Accumulate dirty point day keys into the persistent pending-upload set
+        // so they survive app kills and are retried on next launch.
+        pendingCloudUploadDayKeys.formUnion(dirtyPointDayKeys)
+
         // Update index metadata
         shardIndex.isEnabled = isEnabled
         shardIndex.archivedJourneyIDs = Array(archivedJourneyIDs)
         shardIndex.cachedDistanceMeters = cachedDistanceMeters
         shardIndex.cachedAvailableDayKeys = availableDayKeys.sorted().reversed()
+        shardIndex.pendingCloudUploadDayKeys = Array(pendingCloudUploadDayKeys)
 
         let indexSnapshot = shardIndex
         let todaySnapshot = todayShard

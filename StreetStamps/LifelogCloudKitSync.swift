@@ -39,10 +39,17 @@ actor LifelogCloudKitSync {
         try await cloudKitSaveRecord(record, in: database)
     }
 
-    func uploadBatches(_ batches: [String: [LifelogStore.LifelogTrackPoint]]) async throws {
+    func uploadBatches(_ batches: [String: [LifelogStore.LifelogTrackPoint]]) async -> Set<String> {
+        var uploaded = Set<String>()
         for (dayKey, points) in batches {
-            try await uploadBatch(dayKey: dayKey, points: points)
+            do {
+                try await uploadBatch(dayKey: dayKey, points: points)
+                uploaded.insert(dayKey)
+            } catch {
+                print("☁️ skipped lifelog day \(dayKey):", error)
+            }
         }
+        return uploaded
     }
 
     func downloadBatches(modifiedAfter: Date?) async throws -> [String: [LifelogStore.LifelogTrackPoint]] {

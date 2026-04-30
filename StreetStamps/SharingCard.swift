@@ -636,12 +636,19 @@ struct PopSharingCard: View {
     }
 
     private func visibilityDecision(for target: JourneyVisibility) -> JourneyVisibilityPolicy.Decision {
-        JourneyVisibilityPolicy.evaluateChange(
+        // Use the in-editor draft so adding an overall memory here unlocks the
+        // friends toggle immediately, before the user saves.
+        let draftHasOverallMemory =
+            !overallMemory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !overallMemoryImagePaths.isEmpty
+            || !journey.overallMemoryRemoteImageURLs.isEmpty
+        let hasMemory = !journey.memories.isEmpty || draftHasOverallMemory
+        return JourneyVisibilityPolicy.evaluateChange(
             current: selectedVisibility,
             target: target,
             isLoggedIn: sessionStore.isLoggedIn,
             journeyDistance: journey.distance,
-            memoryCount: journey.memories.count
+            hasMemory: hasMemory
         )
     }
 

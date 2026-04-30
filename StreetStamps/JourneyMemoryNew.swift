@@ -1086,6 +1086,8 @@ enum JourneyEntryPreviewText {
 // =======================================================
 
 struct JourneyMemoryDetailView: View {
+    private static let activityTagPresets: [String] = ["通勤", "跑步", "旅游", "散步", "骑行", "驾车", "地铁", "登山"]
+
     let journey: JourneyRoute
     let memories: [JourneyMemory]
     let cityName: String
@@ -1109,6 +1111,10 @@ struct JourneyMemoryDetailView: View {
     @State private var snapshotBeforeEdit: [JourneyMemory] = []
     @State private var draftJourneyTitle: String = ""
     @State private var snapshotJourneyTitleBeforeEdit: String = ""
+    @State private var draftActivityTag: String = ""
+    @State private var snapshotActivityTagBeforeEdit: String = ""
+    @State private var showCustomTagAlert: Bool = false
+    @State private var customTagInput: String = ""
     @State private var draftOverallMemory: String = ""
     @State private var snapshotOverallMemoryBeforeEdit: String = ""
     @State private var draftOverallMemoryImagePaths: [String] = []
@@ -1342,6 +1348,8 @@ struct JourneyMemoryDetailView: View {
                 snapshotBeforeEdit = sortedMemories
                 draftJourneyTitle = journey.customTitle ?? ""
                 snapshotJourneyTitleBeforeEdit = draftJourneyTitle
+                draftActivityTag = journey.activityTag ?? ""
+                snapshotActivityTagBeforeEdit = draftActivityTag
                 draftOverallMemory = journey.overallMemory ?? ""
                 snapshotOverallMemoryBeforeEdit = draftOverallMemory
                 draftOverallMemoryImagePaths = journey.overallMemoryImagePaths
@@ -1359,6 +1367,8 @@ struct JourneyMemoryDetailView: View {
                 snapshotBeforeEdit = saved.memories
                 draftJourneyTitle = saved.journeyTitle
                 snapshotJourneyTitleBeforeEdit = draftJourneyTitle
+                draftActivityTag = saved.activityTag
+                snapshotActivityTagBeforeEdit = draftActivityTag
                 draftOverallMemory = saved.overallMemory
                 snapshotOverallMemoryBeforeEdit = draftOverallMemory
                 draftOverallMemoryImagePaths = saved.overallMemoryImagePaths
@@ -1374,6 +1384,8 @@ struct JourneyMemoryDetailView: View {
                 snapshotBeforeEdit = sortedMemories
                 draftJourneyTitle = journey.customTitle ?? ""
                 snapshotJourneyTitleBeforeEdit = draftJourneyTitle
+                draftActivityTag = journey.activityTag ?? ""
+                snapshotActivityTagBeforeEdit = draftActivityTag
                 draftOverallMemory = journey.overallMemory ?? ""
                 snapshotOverallMemoryBeforeEdit = draftOverallMemory
                 draftOverallMemoryImagePaths = journey.overallMemoryImagePaths
@@ -1418,6 +1430,14 @@ struct JourneyMemoryDetailView: View {
             Button(L10n.t("ok"), role: .cancel) { }
         } message: {
             Text(messageText)
+        }
+        .alert(L10n.t("journey_tag_custom_title"), isPresented: $showCustomTagAlert) {
+            TextField(L10n.t("share_activity_placeholder"), text: $customTagInput)
+                .textInputAutocapitalization(.never)
+            Button(L10n.t("cancel"), role: .cancel) { }
+            Button(L10n.t("ok")) {
+                draftActivityTag = customTagInput.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
         }
         .confirmationDialog(
             L10n.t("edit_save_republish_title"),
@@ -1615,7 +1635,9 @@ struct JourneyMemoryDetailView: View {
                         .tracking(1.2)
                         .foregroundColor(Color(red: 0.42, green: 0.45, blue: 0.51))
 
-                    if !journeyActivityTag.isEmpty {
+                    if isEditing {
+                        activityTagEditMenu
+                    } else if !journeyActivityTag.isEmpty {
                         Text(journeyActivityTag.uppercased())
                             .font(.system(size: 10, weight: .bold))
                             .tracking(0.8)
@@ -1664,7 +1686,46 @@ struct JourneyMemoryDetailView: View {
                 .frame(height: 0.5)
         }
     }
-    
+
+    private var activityTagEditMenu: some View {
+        let trimmed = draftActivityTag.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasTag = !trimmed.isEmpty
+        let label = hasTag ? trimmed.uppercased() : L10n.t("journey_tag_add")
+        let foreground = hasTag ? FigmaTheme.secondary : FigmaTheme.secondary.opacity(0.7)
+        let background = hasTag ? FigmaTheme.secondary.opacity(0.12) : FigmaTheme.secondary.opacity(0.06)
+        return Menu {
+            ForEach(Self.activityTagPresets, id: \.self) { item in
+                Button(item) { draftActivityTag = item }
+            }
+            Divider()
+            Button(L10n.t("journey_tag_custom")) {
+                customTagInput = trimmed
+                showCustomTagAlert = true
+            }
+            if hasTag {
+                Button(L10n.t("clear"), role: .destructive) {
+                    draftActivityTag = ""
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                if !hasTag {
+                    Image(systemName: "plus")
+                        .font(.system(size: 9, weight: .bold))
+                }
+                Text(label)
+                    .font(.system(size: 10, weight: .bold))
+                    .tracking(0.8)
+            }
+            .foregroundColor(foreground)
+            .padding(.horizontal, 8)
+            .frame(height: 20)
+            .background(background)
+            .clipShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
     // MARK: - Memories Timeline
     
     private var memoriesTimeline: some View {
@@ -1836,6 +1897,7 @@ struct JourneyMemoryDetailView: View {
     private func beginEditing() {
         snapshotBeforeEdit = draftMemories
         snapshotJourneyTitleBeforeEdit = draftJourneyTitle
+        snapshotActivityTagBeforeEdit = draftActivityTag
         snapshotOverallMemoryBeforeEdit = draftOverallMemory
         snapshotOverallMemoryImagePathsBeforeEdit = draftOverallMemoryImagePaths
         snapshotOverallMemoryRemoteImageURLsBeforeEdit = draftOverallMemoryRemoteImageURLs
@@ -1851,6 +1913,7 @@ struct JourneyMemoryDetailView: View {
 
         draftMemories = snapshotBeforeEdit
         draftJourneyTitle = snapshotJourneyTitleBeforeEdit
+        draftActivityTag = snapshotActivityTagBeforeEdit
         draftOverallMemory = snapshotOverallMemoryBeforeEdit
         draftOverallMemoryImagePaths = snapshotOverallMemoryImagePathsBeforeEdit
         draftOverallMemoryRemoteImageURLs = snapshotOverallMemoryRemoteImageURLsBeforeEdit
@@ -1870,6 +1933,8 @@ struct JourneyMemoryDetailView: View {
             draftMemories: draftMemories,
             snapshotTitle: snapshotJourneyTitleBeforeEdit,
             draftTitle: draftJourneyTitle,
+            snapshotActivityTag: snapshotActivityTagBeforeEdit,
+            draftActivityTag: draftActivityTag,
             snapshotOverallMemory: snapshotOverallMemoryBeforeEdit,
             draftOverallMemory: draftOverallMemory,
             snapshotOverallMemoryImagePaths: snapshotOverallMemoryImagePathsBeforeEdit,
@@ -1916,6 +1981,8 @@ struct JourneyMemoryDetailView: View {
 
         j.memories = draftMemories
         j.customTitle = JourneyMemoryDetailTitlePresentation.normalizedCustomTitle(from: draftJourneyTitle)
+        let trimmedTag = draftActivityTag.trimmingCharacters(in: .whitespacesAndNewlines)
+        j.activityTag = trimmedTag.isEmpty ? nil : trimmedTag
         let trimmedOverall = draftOverallMemory.trimmingCharacters(in: .whitespacesAndNewlines)
         j.overallMemory = trimmedOverall.isEmpty ? nil : trimmedOverall
         j.overallMemoryImagePaths = draftOverallMemoryImagePaths
@@ -1926,6 +1993,8 @@ struct JourneyMemoryDetailView: View {
         snapshotBeforeEdit = draftMemories
         draftJourneyTitle = j.customTitle ?? ""
         snapshotJourneyTitleBeforeEdit = draftJourneyTitle
+        draftActivityTag = j.activityTag ?? ""
+        snapshotActivityTagBeforeEdit = draftActivityTag
         snapshotOverallMemoryBeforeEdit = draftOverallMemory
         snapshotOverallMemoryImagePathsBeforeEdit = draftOverallMemoryImagePaths
         snapshotOverallMemoryRemoteImageURLsBeforeEdit = draftOverallMemoryRemoteImageURLs
@@ -2006,6 +2075,7 @@ struct JourneyMemoryDetailView: View {
             memories: draftMemories,
             focusedMemoryID: focusedMemoryID,
             journeyTitle: draftJourneyTitle,
+            activityTag: draftActivityTag,
             overallMemory: draftOverallMemory,
             overallMemoryImagePaths: draftOverallMemoryImagePaths,
             overallMemoryRemoteImageURLs: draftOverallMemoryRemoteImageURLs
@@ -2697,7 +2767,7 @@ struct JourneyMemoryDetailView: View {
             target: target,
             isLoggedIn: sessionStore.isLoggedIn,
             journeyDistance: journey.distance,
-            memoryCount: journey.memories.count
+            hasMemory: journey.hasMemoryContent
         )
         guard decision.isAllowed else {
             activeJourneySheet = nil

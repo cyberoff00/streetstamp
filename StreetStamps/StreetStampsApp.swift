@@ -11,6 +11,13 @@ struct JourneyDeletionSyncFailure: Equatable {
     let message: String
 }
 
+struct PendingUpdatePrompt: Identifiable {
+    let id = UUID()
+    let latestVersion: String
+    let releaseNotes: String?
+    let appStoreURL: URL
+}
+
 @MainActor
 final class JourneyDeletionSyncFailureStore {
     private var failuresByJourneyID: [String: JourneyDeletionSyncFailure] = [:]
@@ -91,6 +98,7 @@ struct StreetStampsApp: App {
     @State private var trackTileRebuildTask: Task<Void, Never>?
     @State private var trackTileDirty: Bool = false
     @State private var profileSwitchTask: Task<Void, Never>?
+    @State private var pendingUpdatePrompt: PendingUpdatePrompt?
 #if DEBUG
     @State private var showDebugFirstProfileSetupPreview = true
 #endif
@@ -153,12 +161,78 @@ struct StreetStampsApp: App {
         )
     }
 
+    private func retryStalledJourneyUploads() async {
+        guard AppSettings.isICloudSyncEnabled else { return }
+        let localUserID = sessionStore.activeLocalProfileID
+        let pendingIDs = AppSettings.pendingJourneyUploadIDs(for: localUserID)
+        guard !pendingIDs.isEmpty else { return }
+
+        let allJourneys = await MainActor.run { journeyStore.journeys }
+        let toRetry = allJourneys.filter { pendingIDs.contains($0.id) }
+
+        // Journeys in pending but no longer in the store were deleted — clean up.
+        let existingIDs = Set(toRetry.map(\.id))
+        let ghostIDs = Array(pendingIDs.subtracting(existingIDs))
+        if !ghostIDs.isEmpty {
+            AppSettings.clearJourneyPendingUploads(ghostIDs, for: localUserID)
+        }
+
+        guard !toRetry.isEmpty else { return }
+        await CloudKitSyncService.shared.retryJourneyUploads(toRetry, localUserID: localUserID)
+    }
+
+    private func retryStalledJourneyDeletions() async {
+        guard AppSettings.isICloudSyncEnabled else { return }
+        let localUserID = sessionStore.activeLocalProfileID
+        let pendingIDs = AppSettings.pendingJourneyDeletionIDs(for: localUserID)
+        guard !pendingIDs.isEmpty else { return }
+        await CloudKitSyncService.shared.retryJourneyDeletions(Array(pendingIDs), localUserID: localUserID)
+    }
+
     private func syncPendingCloudChanges(userID: String, reason: String) async {
         await CloudKitSyncService.shared.syncCurrentState(
             userID: userID,
             journeyStore: journeyStore,
             lifelogStore: lifelogStore,
             reason: reason
+        )
+    }
+
+    private func performICloudAutoEnableForceFullUpload() async {
+        // If iCloud is currently unavailable, the persistent flag keeps the intent
+        // alive so the next scenePhase == .active triggers a retry automatically.
+        let available = await CloudKitSyncService.shared.isAvailable()
+        guard available else {
+            print("☁️ iCloud unavailable at auto-enable time; will retry on next activation")
+            return
+        }
+
+        // Clear the retry flag before the upload attempt.  If the attempt is
+        // interrupted mid-way, failed lifelog day batches remain dirty via the
+        // persistent pendingCloudUploadDayKeys tracker and are retried on the
+        // next incremental sync.
+        AppSettings.clearPendingFullSyncAfterAutoEnable()
+
+        // Extend background execution budget so a backgrounded upload gets ~30s
+        // of grace before the OS suspends the process.
+        let bgTask = UIApplication.shared.beginBackgroundTask(withName: "icloud_auto_enable_upload") {
+            // Expiry handler: OS is about to suspend — nothing to clean up here
+            // since the persistent dirty tracker will resume on next launch.
+        }
+        defer { UIApplication.shared.endBackgroundTask(bgTask) }
+
+        journeyStore.flushPersist()
+        lifelogStore.flushPersistNow()
+        let localUserID = sessionStore.activeLocalProfileID
+        let accountID = sessionStore.accountUserID ?? localUserID
+        await CloudKitSyncService.shared.syncCurrentState(
+            userID: accountID,
+            localUserID: localUserID,
+            journeyStore: journeyStore,
+            lifelogStore: lifelogStore,
+            reason: "membership_auto_enable",
+            forceFullJourneyUpload: true,
+            forceFullLifelogUpload: true
         )
     }
 
@@ -204,11 +278,12 @@ struct StreetStampsApp: App {
             },
             deleteJourney: { journeyID in
                 Task {
+                    let localUserID = await MainActor.run { sessionStore.activeLocalProfileID }
                     await JourneyDeletionSyncRunner.run(
                         journeyID: journeyID,
                         failureStore: failureStore,
                         cloudDeletion: {
-                            await CloudKitSyncService.shared.syncJourneyDeletion(id: journeyID)
+                            await CloudKitSyncService.shared.syncJourneyDeletion(id: journeyID, localUserID: localUserID)
                         },
                         migrationDeletion: {
                             try await JourneyCloudMigrationService.syncDeletedJourney(
@@ -346,6 +421,32 @@ struct StreetStampsApp: App {
                     .zIndex(999)
                 }
             }
+            .alert(
+                L10n.t("settings_check_updates_available_title"),
+                isPresented: Binding(
+                    get: { pendingUpdatePrompt != nil },
+                    set: { if !$0 { pendingUpdatePrompt = nil } }
+                ),
+                presenting: pendingUpdatePrompt
+            ) { prompt in
+                Button(L10n.t("settings_check_updates_action_update")) {
+                    UIApplication.shared.open(prompt.appStoreURL)
+                    pendingUpdatePrompt = nil
+                }
+                Button(L10n.t("settings_check_updates_action_later"), role: .cancel) {
+                    pendingUpdatePrompt = nil
+                }
+                Button(L10n.t("settings_check_updates_action_skip"), role: .destructive) {
+                    AppUpdateChecker.skipVersion(prompt.latestVersion)
+                    pendingUpdatePrompt = nil
+                }
+            } message: { prompt in
+                if let notes = prompt.releaseNotes, !notes.isEmpty {
+                    Text(String(format: L10n.t("settings_check_updates_available_message_with_notes"), prompt.latestVersion, notes))
+                } else {
+                    Text(String(format: L10n.t("settings_check_updates_available_message"), prompt.latestVersion))
+                }
+            }
             .fullScreenCover(isPresented: $showAuthEntry) {
                 AuthEntryView(
                     onContinueGuest: {
@@ -478,6 +579,19 @@ struct StreetStampsApp: App {
                     try? await Task.sleep(nanoseconds: 800_000_000)
                     applyIdleLocationPolicy(requestSingleRefreshWhenIdle: true)
                     syncMotionActivityPolicy()
+                }
+
+                // Auto check for App Store updates after splash dismisses,
+                // throttled to once per 24h, skipped versions suppressed.
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    if case let .updateAvailable(version, notes, url)? = await AppUpdateChecker.autoCheckIfDue() {
+                        pendingUpdatePrompt = PendingUpdatePrompt(
+                            latestVersion: version,
+                            releaseNotes: notes,
+                            appStoreURL: url
+                        )
+                    }
                 }
 
                 // Phase 4: Deferred remaining city warmup
@@ -630,6 +744,17 @@ struct StreetStampsApp: App {
                     UNUserNotificationCenter.current().setBadgeCount(0)
                     publishStore.handleSceneActivation()
                     Task { await MembershipStore.shared.refreshEntitlement() }
+                    // Retry the full post-membership-enable upload if iCloud was
+                    // unavailable when the user first subscribed.
+                    if AppSettings.hasPendingFullSyncAfterAutoEnable {
+                        Task { await performICloudAutoEnableForceFullUpload() }
+                    }
+                    // Retry individual journeys that failed their incremental upload
+                    // (network error, iCloud unavailable, app killed mid-hook).
+                    Task { await retryStalledJourneyUploads() }
+                    // Same idea for deletions: a stalled delete leaves the CK record
+                    // alive and would resurrect the journey on a future restore.
+                    Task { await retryStalledJourneyDeletions() }
                     applyIdleLocationPolicy(requestSingleRefreshWhenIdle: true)
                     syncMotionActivityPolicy()
                     lifelogRenderCache.markTodayDirty(
@@ -703,6 +828,10 @@ struct StreetStampsApp: App {
             .onReceive(NotificationCenter.default.publisher(for: .lifelogCountryAttributionDidChange)) { notification in
                 let countryISO2 = notification.userInfo?["countryISO2"] as? String
                 lifelogRenderCache.noteCountryAttributionRefresh(countryISO2: countryISO2)
+            }
+            .onReceive(MembershipStore.shared.$pendingICloudAutoEnableNotice) { pending in
+                guard pending else { return }
+                Task { await performICloudAutoEnableForceFullUpload() }
             }
     }
 

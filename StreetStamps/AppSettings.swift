@@ -9,6 +9,9 @@ enum AppSettings {
     static let lifelogPassiveEnabledKey = "streetstamps.lifelog.passive.enabled"
     static let iCloudSyncEnabledKey = "streetstamps.icloud.sync.enabled"
     static let iCloudAutomaticRestoreEnabledKey = "streetstamps.icloud.sync.auto_restore.enabled"
+    static let pendingFullSyncAfterAutoEnableKey = "streetstamps.icloud.pending_full_sync_v1"
+    private static let pendingJourneyUploadKeyPrefix = "streetstamps.icloud.pending_journey_ids."
+    private static let pendingJourneyDeletionKeyPrefix = "streetstamps.icloud.pending_journey_delete_ids."
 
     static var isVoiceBroadcastEnabled: Bool {
         let defaults = UserDefaults.standard
@@ -70,6 +73,52 @@ enum AppSettings {
             return false
         }
         return defaults.bool(forKey: iCloudSyncEnabledKey)
+    }
+
+    static var hasPendingFullSyncAfterAutoEnable: Bool {
+        UserDefaults.standard.bool(forKey: pendingFullSyncAfterAutoEnableKey)
+    }
+
+    static func clearPendingFullSyncAfterAutoEnable() {
+        UserDefaults.standard.removeObject(forKey: pendingFullSyncAfterAutoEnableKey)
+    }
+
+    static func pendingJourneyUploadIDs(for userID: String) -> Set<String> {
+        let key = pendingJourneyUploadKeyPrefix + userID
+        return Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
+    }
+
+    static func markJourneyPendingUpload(_ journeyID: String, for userID: String) {
+        let key = pendingJourneyUploadKeyPrefix + userID
+        var ids = pendingJourneyUploadIDs(for: userID)
+        guard ids.insert(journeyID).inserted else { return }
+        UserDefaults.standard.set(Array(ids), forKey: key)
+    }
+
+    static func clearJourneyPendingUploads(_ journeyIDs: [String], for userID: String) {
+        let key = pendingJourneyUploadKeyPrefix + userID
+        var ids = pendingJourneyUploadIDs(for: userID)
+        ids.subtract(journeyIDs)
+        UserDefaults.standard.set(Array(ids), forKey: key)
+    }
+
+    static func pendingJourneyDeletionIDs(for userID: String) -> Set<String> {
+        let key = pendingJourneyDeletionKeyPrefix + userID
+        return Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
+    }
+
+    static func markJourneyPendingDeletion(_ journeyID: String, for userID: String) {
+        let key = pendingJourneyDeletionKeyPrefix + userID
+        var ids = pendingJourneyDeletionIDs(for: userID)
+        guard ids.insert(journeyID).inserted else { return }
+        UserDefaults.standard.set(Array(ids), forKey: key)
+    }
+
+    static func clearJourneyPendingDeletions(_ journeyIDs: [String], for userID: String) {
+        let key = pendingJourneyDeletionKeyPrefix + userID
+        var ids = pendingJourneyDeletionIDs(for: userID)
+        ids.subtract(journeyIDs)
+        UserDefaults.standard.set(Array(ids), forKey: key)
     }
 
     static var isAutomaticICloudRestoreEnabled: Bool {

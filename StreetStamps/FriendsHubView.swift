@@ -1443,8 +1443,7 @@ private struct FeedActivityListView: View {
                             .scrollTransition(.animated(.spring(response: 0.4, dampingFraction: 0.85))) { content, phase in
                                 content
                                     .opacity(phase.isIdentity ? 1 : 0.3)
-                                    .scaleEffect(phase.isIdentity ? 1 : 0.95)
-                                    .offset(y: phase.isIdentity ? 0 : 20)
+                                    .scaleEffect(phase.isIdentity ? 1 : 0.96)
                             }
                         }
                     }
@@ -2106,6 +2105,7 @@ private struct FriendProfileScreen: View {
     @State private var isDeletingFriend = false
     @State private var showPostcardComposer = false
     @State private var showPhotoBooth = false
+    @State private var photoBoothSnapshot: FriendProfileSnapshot?
     @State private var activeCollectionPage: FriendCollectionPageDestination?
     @State private var showBlockConfirm = false
     @State private var showReportSheet = false
@@ -2249,8 +2249,8 @@ private struct FriendProfileScreen: View {
         }
         .fullScreenCover(isPresented: $showPhotoBooth) {
             FriendPhotoBoothView(
-                hostName: (friend ?? fallbackFriend).displayName,
-                hostLoadout: (friend ?? fallbackFriend).loadout,
+                hostName: (photoBoothSnapshot ?? friend ?? fallbackFriend).displayName,
+                hostLoadout: (photoBoothSnapshot ?? friend ?? fallbackFriend).loadout,
                 visitorLoadout: visitorLoadout
             )
         }
@@ -2327,6 +2327,7 @@ private struct FriendProfileScreen: View {
 
                 if isVisitorSeated && !isViewingOwnFriendProfile {
                     Button {
+                        photoBoothSnapshot = friend ?? fallbackFriend
                         showPhotoBooth = true
                     } label: {
                         Image(systemName: "camera.fill")
@@ -2905,6 +2906,7 @@ private final class FriendMirrorContext: ObservableObject {
         try? paths.ensureBaseDirectoriesExist()
         self.journeyStore = JourneyStore(paths: paths)
         self.cityCache = CityCache(paths: paths, journeyStore: journeyStore)
+        self.cityCache.isReadOnlyMirror = true
         self.renderCacheStore = CityRenderCacheStore(rootDir: paths.thumbnailsDir)
     }
 
