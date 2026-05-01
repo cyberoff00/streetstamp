@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import UIKit
 import MapKit
 import AVFoundation
@@ -75,7 +76,20 @@ enum FriendFeedLogic {
     static func isJourneyEligible(_ journey: FriendSharedJourney) -> Bool {
         let isVisible = journey.visibility == .public || journey.visibility == .friendsOnly
         guard isVisible else { return false }
-        return journey.distance >= minDistanceMeters || !journey.memories.isEmpty
+        return journey.distance >= minDistanceMeters || hasMemoryContent(journey)
+    }
+
+    // Mirrors `JourneyRoute.hasMemoryContent` so the feed-display gate matches
+    // the publish gate (`JourneyVisibilityPolicy.evaluateChange`). If these
+    // drift, journeys can publish successfully yet never appear in the feed.
+    static func hasMemoryContent(_ journey: FriendSharedJourney) -> Bool {
+        if !journey.memories.isEmpty { return true }
+        if let text = journey.overallMemory,
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return true
+        }
+        if !journey.overallMemoryImageURLs.isEmpty { return true }
+        return false
     }
 
     static func feedTimestamp(for journey: FriendSharedJourney) -> Date {
@@ -389,11 +403,8 @@ struct FriendsHubView: View {
                 tabSwitcher
 
                 TabView(selection: $tab) {
-                    activityContent
-                        .tag(FriendsTopTab.activity)
-
-                    allFriendsContent
-                        .tag(FriendsTopTab.allFriends)
+                    activityContent.tag(FriendsTopTab.activity)
+                    allFriendsContent.tag(FriendsTopTab.allFriends)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
             } else {
@@ -545,6 +556,17 @@ struct FriendsHubView: View {
                 async let b: Void = refreshFriendRequests()
                 _ = await (a, b)
                 await refreshRemoteFriends(showUnreadToast: false)
+            }
+        }
+        .onChange(of: sessionStore.sessionRefreshVersion) { _, _ in
+            Task { @MainActor in
+                print("⏱ [FriendsHub] session refresh observed loggedIn=\(sessionStore.isLoggedIn)")
+                didPerformInitialFeedRefresh = false
+                lastFeedRefreshTime = .distantPast
+                pendingFeedRefreshProfiles = nil
+                if sessionStore.isLoggedIn {
+                    await performInitialFeedRefreshIfNeeded()
+                }
             }
         }
         .onChange(of: publishStore.status) { _, newStatus in
@@ -1039,7 +1061,6 @@ struct FriendsHubView: View {
             let t0 = CFAbsoluteTimeGetCurrent()
             let previousFriends = socialStore.friends
             let token = sessionStore.currentAccessToken
-
             retryBanner.beginOperation()
 
             // Fetch friends and own profile in parallel — both are needed for the feed.
@@ -3263,50 +3284,34 @@ private struct FriendCollectionScreen: View {
     }
 
     private func collectionPager(friend: FriendProfileSnapshot) -> some View {
-        ZStack {
-            if page == .cities {
-                CityStampLibraryView(
-                    autoRebuildFromJourneyStore: false,
-                    showHeader: false,
-                    allowCityDetailNavigation: false,
-                    emptyTitleKey: "friend_city_cards_empty_title",
-                    emptySubtitleKey: "friend_city_cards_empty_subtitle"
-                )
-                .environmentObject(mirror.journeyStore)
-                .environmentObject(mirror.cityCache)
-                .environmentObject(mirror.renderCacheStore)
-                .transition(.move(edge: .leading))
-            } else {
-                JourneyMemoryMainView(
-                    hideLeadingControl: true,
-                    showHeader: false,
-                    readOnly: true,
-                    emptyTitleKey: "friend_memories_empty_title",
-                    emptySubtitleKey: "friend_memories_empty_subtitle",
-                    friendLoadout: friend.loadout,
-                    onSelectJourney: { activeJourneyDetail = $0 }
-                )
-                .environmentObject(mirror.journeyStore)
-                .environmentObject(mirror.cityCache)
-                .environmentObject(sessionStore)
-                .transition(.move(edge: .trailing))
-            }
+        TabView(selection: $page) {
+            CityStampLibraryView(
+                autoRebuildFromJourneyStore: false,
+                showHeader: false,
+                allowCityDetailNavigation: false,
+                emptyTitleKey: "friend_city_cards_empty_title",
+                emptySubtitleKey: "friend_city_cards_empty_subtitle"
+            )
+            .environmentObject(mirror.journeyStore)
+            .environmentObject(mirror.cityCache)
+            .environmentObject(mirror.renderCacheStore)
+            .tag(FriendCollectionPage.cities)
+
+            JourneyMemoryMainView(
+                hideLeadingControl: true,
+                showHeader: false,
+                readOnly: true,
+                emptyTitleKey: "friend_memories_empty_title",
+                emptySubtitleKey: "friend_memories_empty_subtitle",
+                friendLoadout: friend.loadout,
+                onSelectJourney: { activeJourneyDetail = $0 }
+            )
+            .environmentObject(mirror.journeyStore)
+            .environmentObject(mirror.cityCache)
+            .environmentObject(sessionStore)
+            .tag(FriendCollectionPage.memories)
         }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 30, coordinateSpace: .local)
-                .onEnded { value in
-                    guard abs(value.translation.width) > abs(value.translation.height) * 1.5 else { return }
-                    if value.translation.width < -30, page == .cities {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                            page = .memories
-                        }
-                    } else if value.translation.width > 30, page == .memories {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                            page = .cities
-                        }
-                    }
-                }
-        )
+        .tabViewStyle(.page(indexDisplayMode: .never))
     }
 }
 

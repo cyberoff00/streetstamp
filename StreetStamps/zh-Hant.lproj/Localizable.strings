@@ -68,6 +68,8 @@
 "coin_sheet_premium_title" = "加入會員，立享 1,500 金幣！";
 "coin_sheet_premium_subtitle" = "每日步行還能賺 5 倍金幣";
 "cancel" = "取消";
+"memory_picker_title" = "選擇記憶";
+"memory_picker_no_note" = "無內容";
 "choose_city_manually" = "手動選擇城市";
 "cities_title" = "城市";
 "city_card_stats" = "%d 次探索 · %d 条記憶";

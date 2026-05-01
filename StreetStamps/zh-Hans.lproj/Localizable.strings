@@ -200,6 +200,8 @@
 "delete_city_alert_message" = "“%@” 将从你的城市卡中移除，无法撤销。";
 "delete" = "删除";
 "cancel" = "取消";
+"memory_picker_title" = "选择记忆";
+"memory_picker_no_note" = "无内容";
 "profile_tagline_travel_enthusiastic" = "旅行爱好者";
 "profile_no_items_title" = "还没有收集到任何物品";
 "profile_no_items_desc" = "完成旅程即可获得装备和物品";

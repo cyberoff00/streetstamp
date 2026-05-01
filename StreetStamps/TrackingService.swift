@@ -1491,9 +1491,9 @@ final class TrackingService: ObservableObject {
     }
 
     private func scheduleLongStationaryReminderNotification() {
-        let center = UNUserNotificationCenter.current()
         let categoryID = longStationaryCategoryID
-        center.getNotificationSettings { [longStationaryNotificationID] settings in
+        let notifID = longStationaryNotificationID
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
             guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { return }
 
             let content = UNMutableNotificationContent()
@@ -1504,12 +1504,15 @@ final class TrackingService: ObservableObject {
             content.categoryIdentifier = categoryID
 
             let request = UNNotificationRequest(
-                identifier: longStationaryNotificationID,
+                identifier: notifID,
                 content: content,
                 trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
             )
-            center.removePendingNotificationRequests(withIdentifiers: [longStationaryNotificationID])
-            center.add(request)
+            // Re-fetch the singleton inside @Sendable closure: UNUserNotificationCenter
+            // doesn't conform to Sendable, so capturing it crosses a boundary.
+            let inner = UNUserNotificationCenter.current()
+            inner.removePendingNotificationRequests(withIdentifiers: [notifID])
+            inner.add(request)
         }
     }
 
@@ -1526,8 +1529,7 @@ final class TrackingService: ObservableObject {
     }
 
     private func scheduleAutoPauseNotification() {
-        let center = UNUserNotificationCenter.current()
-        center.getNotificationSettings { settings in
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
             guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { return }
             let content = UNMutableNotificationContent()
             content.title = L10n.t("auto_pause_notification_title")
@@ -1539,7 +1541,7 @@ final class TrackingService: ObservableObject {
                 content: content,
                 trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
             )
-            center.add(request)
+            UNUserNotificationCenter.current().add(request)
         }
     }
 

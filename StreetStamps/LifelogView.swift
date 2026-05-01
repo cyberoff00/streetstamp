@@ -196,6 +196,11 @@ struct LifelogView: View {
     @State private var bottomDockHeight: CGFloat = 0
     @State private var renderSnapshot: LifelogRenderSnapshot = .empty
     @State private var renderTask: Task<Void, Never>? = nil
+    // SwiftUI TabView keeps every tab's view alive even when off-screen.
+    // Without this gate, every GPS tick (~2s) fires `.onChange(tileRevisionKey)`
+    // → schedules a full render task → cascades MainActor work that starves
+    // every other tab's image fetches and pull-to-refresh handlers.
+    @State private var isOnScreen = false
     @State private var mapContentReady = false
     @State private var renderGenerationState = LifelogRenderGenerationState()
     @State private var pendingRecenterDay: Date? = nil
@@ -425,6 +430,7 @@ struct LifelogView: View {
         }
         .animation(.easeInOut(duration: 0.3), value: activeLifelogHint?.id)
         .onAppear {
+            isOnScreen = true
 #if DEBUG
             if mapDiagnosticsEnabled {
                 diagnosticsAppearAt = Date()
@@ -479,30 +485,35 @@ struct LifelogView: View {
                 Task { await runHealthAndPopupFlow() }
             }
         }
-        .onChange(of: showAlwaysLocationGuide) { isShown in
+        .onChange(of: showAlwaysLocationGuide) { _, isShown in
             guard !isShown else { return }
             Task { await runHealthAndPopupFlow() }
         }
         .onDisappear {
+            isOnScreen = false
             renderTask?.cancel()
             renderTask = nil
         }
-        .onChange(of: lifelogStore.availableDays) { _ in
+        .onChange(of: lifelogStore.availableDays) { _, _ in
             seedSelectedDayIfNeeded()
         }
-        .onChange(of: locationCenterKey) { _ in
+        .onChange(of: locationCenterKey) { _, _ in
+            guard isOnScreen else { return }
             centerOnCurrent(force: !didCenterOnEnter)
 #if DEBUG
             diagnosticsUpdateIfNeeded(reason: "locationCenterKey")
 #endif
         }
-        .onChange(of: tileRevisionKey) { _ in
+        .onChange(of: tileRevisionKey) { _, _ in
+            guard isOnScreen else { return }
             scheduleRenderSnapshotRefresh(debounceNanoseconds: 400_000_000)
         }
-        .onChange(of: lifelogCountryISO2) { _ in
+        .onChange(of: lifelogCountryISO2) { _, _ in
+            guard isOnScreen else { return }
             scheduleRenderSnapshotRefresh()
         }
-        .onChange(of: selectedDay) { _ in
+        .onChange(of: selectedDay) { _, _ in
+            guard isOnScreen else { return }
             scheduleRenderSnapshotRefresh()
             guard isStepPopupVisible else { return }
             Task {
@@ -548,7 +559,7 @@ struct LifelogView: View {
             )
         )
         .ignoresSafeArea()
-        .onChange(of: cameraCommand?.id) { _ in
+        .onChange(of: cameraCommand?.id) { _, _ in
             if let cmd = cameraCommand {
                 unifiedCameraCommand = .setRegion(cmd.region, animated: cmd.animated)
             }
@@ -858,7 +869,7 @@ struct LifelogView: View {
                     .onAppear {
                         bottomDockHeight = proxy.size.height
                     }
-                    .onChange(of: proxy.size.height) { h in
+                    .onChange(of: proxy.size.height) { _, h in
                         bottomDockHeight = h
                     }
             }

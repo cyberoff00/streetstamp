@@ -138,7 +138,7 @@ final class MembershipStore: ObservableObject {
     private let tierKey = "streetstamps.membership.tier"
     private let expirationKey = "streetstamps.membership.expiration"
     private let sandboxPurchasedOnceKey = "streetstamps.membership.sandbox_purchased_once"
-    static let welcomeBonusGrantedKey = "streetstamps.membership.welcome_bonus_granted"
+    nonisolated static let welcomeBonusGrantedKey = "streetstamps.membership.welcome_bonus_granted"
 
     /// TestFlight builds and App Store review use sandbox receipts. Production
     /// App Store users get a regular `receipt`. This is the standard way to

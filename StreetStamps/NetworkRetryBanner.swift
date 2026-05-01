@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 /// Lazily-shown banner used by social refresh paths.
 ///

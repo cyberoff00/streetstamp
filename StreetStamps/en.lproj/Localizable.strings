@@ -204,6 +204,8 @@
 "delete_city_alert_message" = "“%@” will be removed from your City Cards. This can't be undone.";
 "delete" = "Delete";
 "cancel" = "Cancel";
+"memory_picker_title" = "Choose Memory";
+"memory_picker_no_note" = "No content";
 "profile_tagline_travel_enthusiastic" = "Travel Enthusiastic";
 "profile_no_items_title" = "No items collected yet";
 "profile_no_items_desc" = "Complete journeys to earn equipment and items";

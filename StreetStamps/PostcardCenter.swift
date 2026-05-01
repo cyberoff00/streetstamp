@@ -1,5 +1,6 @@
 import Foundation
 import os
+import Combine
 
 extension Notification.Name {
     static let postcardSentGoToInbox = Notification.Name("postcardSentGoToInbox")

@@ -304,11 +304,40 @@ extension CachedCity: @unchecked Sendable {}
 
 final class CitySnapshotService {
     static let shared = CitySnapshotService()
-    private let renderSemaphore = DispatchSemaphore(value: 2)
 
     // ✅ in-flight de-dupe: same key requests share the same render
     private var inFlight: [String: [((UIImage?) -> Void)]] = [:]
     private let lock = NSLock()
+
+    // ✅ non-blocking concurrency limiter (was DispatchSemaphore — blocked threads
+    // and could deadlock with MKMapSnapshotter's main-thread work on iOS 26).
+    private let maxConcurrentRenders = 2
+    private var activeRenders = 0
+    private var pendingRenders: [() -> Void] = []
+
+    private func acquireRenderSlot(_ work: @escaping () -> Void) {
+        lock.lock()
+        if activeRenders < maxConcurrentRenders {
+            activeRenders += 1
+            lock.unlock()
+            work()
+        } else {
+            pendingRenders.append(work)
+            lock.unlock()
+        }
+    }
+
+    private func releaseRenderSlot() {
+        lock.lock()
+        if !pendingRenders.isEmpty {
+            let next = pendingRenders.removeFirst()
+            lock.unlock()
+            next()
+        } else {
+            activeRenders -= 1
+            lock.unlock()
+        }
+    }
     
 
     /// Perf tokens (you can tune)
@@ -349,60 +378,62 @@ final class CitySnapshotService {
             return
         }
 
-        // ✅ limit concurrent snapshot renders (prevents scroll/jank)
-        renderSemaphore.wait()
+        // ✅ limit concurrent snapshot renders (prevents scroll/jank) — non-blocking.
+        acquireRenderSlot { [weak self] in
+            guard let self else { return }
 
-        let options = MKMapSnapshotter.Options()
-        let currentStyle = MapLayerStyle.current
-        options.region = safeRegion
-        options.size = Tokens.size
-        options.scale = Tokens.scale
-        options.mapType = currentStyle.mapKitType
-        options.traitCollection = UITraitCollection(traitsFrom: [
-            UITraitCollection(userInterfaceStyle: currentStyle.mapKitInterfaceStyle),
-            UITraitCollection(displayScale: Tokens.scale),
-            UITraitCollection(activeAppearance: .active),
-            UITraitCollection(userInterfaceLevel: .base)
-        ])
-        options.showsBuildings = Tokens.buildings
-        options.showsPointsOfInterest = Tokens.poi
+            let options = MKMapSnapshotter.Options()
+            let currentStyle = MapLayerStyle.current
+            options.region = safeRegion
+            options.size = Tokens.size
+            options.scale = Tokens.scale
+            options.mapType = currentStyle.mapKitType
+            options.traitCollection = UITraitCollection(traitsFrom: [
+                UITraitCollection(userInterfaceStyle: currentStyle.mapKitInterfaceStyle),
+                UITraitCollection(displayScale: Tokens.scale),
+                UITraitCollection(activeAppearance: .active),
+                UITraitCollection(userInterfaceLevel: .base)
+            ])
+            options.showsBuildings = Tokens.buildings
+            options.showsPointsOfInterest = Tokens.poi
 
-        MKMapSnapshotter(options: options)
-            .start(with: .global(qos: .userInitiated)) { [weak self] snapshot, error in
-                defer { self?.renderSemaphore.signal() }
-                guard let self else { return }
+            MKMapSnapshotter(options: options)
+                .start(with: .global(qos: .userInitiated)) { [weak self] snapshot, error in
+                    defer { self?.releaseRenderSlot() }
+                    guard let self else { return }
 
-                var final: UIImage? = nil
-                if let snapshot {
-                    final = UIGraphicsImageRenderer(size: Tokens.size).image { renderer in
-                        snapshot.image.draw(at: .zero)
+                    var final: UIImage? = nil
+                    if let snapshot {
+                        final = UIGraphicsImageRenderer(size: Tokens.size).image { renderer in
+                            snapshot.image.draw(at: .zero)
 
-                        if drawRoute, overlaySegments.count >= 1 {
-                            let isDark = currentStyle.isDarkStyle
-                            RouteSnapshotDrawer.draw(
-                                segments: overlaySegments,
-                                isFlightLike: isFlightLike,
-                                snapshot: snapshot,
-                                ctx: renderer.cgContext,
-                                coreColor: currentStyle.routeBaseColor.withAlphaComponent(isDark ? 0.78 : 1.0),
-                                stroke: .init(coreWidth: 3.5),
-                                glowColor: currentStyle.routeGlowColor,
-                                isDarkMap: isDark
-                            )
+                            if drawRoute, overlaySegments.count >= 1 {
+                                let isDark = currentStyle.isDarkStyle
+                                RouteSnapshotDrawer.draw(
+                                    segments: overlaySegments,
+                                    isFlightLike: isFlightLike,
+                                    snapshot: snapshot,
+                                    ctx: renderer.cgContext,
+                                    coreColor: currentStyle.routeBaseColor.withAlphaComponent(isDark ? 0.78 : 1.0),
+                                    stroke: .init(coreWidth: 3.5),
+                                    glowColor: currentStyle.routeGlowColor,
+                                    isDarkMap: isDark
+                                )
+                            }
+                            // Dots removed - only show route line
                         }
-                        // Dots removed - only show route line
+                    } else {
+                        print("❌ snapshot failed:", error?.localizedDescription ?? "unknown")
                     }
-                } else {
-                    print("❌ snapshot failed:", error?.localizedDescription ?? "unknown")
+
+                    self.lock.lock()
+                    let callbacks = self.inFlight[cacheKey] ?? []
+                    self.inFlight[cacheKey] = nil
+                    self.lock.unlock()
+
+                    callbacks.forEach { $0(final) }
                 }
-
-                self.lock.lock()
-                let callbacks = self.inFlight[cacheKey] ?? []
-                self.inFlight[cacheKey] = nil
-                self.lock.unlock()
-
-                callbacks.forEach { $0(final) }
-            }
+        }
     }
 
     private func drawDot(_ ctx: CGContext, at p: CGPoint, color: UIColor) {
@@ -1033,11 +1064,12 @@ final class CityCache: ObservableObject {
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
             }
 
-            await MainActor.run {
+            let finalUpdates = updatedJourneys
+            await MainActor.run { [weak self] in
                 guard let self else { return }
 
-                if !updatedJourneys.isEmpty {
-                    for update in updatedJourneys {
+                if !finalUpdates.isEmpty {
+                    for update in finalUpdates {
                         guard var journey = self.journeyStore.journeys.first(where: { $0.id == update.id }) else { continue }
                         journey.startCityKey = update.newKey
                         journey.cityKey = update.newKey
@@ -1146,11 +1178,12 @@ final class CityCache: ObservableObject {
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
             }
 
-            await MainActor.run {
+            let finalUpdates = updatedJourneys
+            await MainActor.run { [weak self] in
                 guard let self else { return }
 
-                if !updatedJourneys.isEmpty {
-                    for update in updatedJourneys {
+                if !finalUpdates.isEmpty {
+                    for update in finalUpdates {
                         guard var journey = self.journeyStore.journeys.first(where: { $0.id == update.id }) else { continue }
                         journey.startCityKey = update.newKey
                         journey.cityKey = update.newKey
@@ -1450,7 +1483,7 @@ final class CityCache: ObservableObject {
             let index = CityCache.buildMembershipIndex(from: journeysSnapshot)
             let indexData = try? JSONEncoder().encode(index)
 
-            await MainActor.run {
+            await MainActor.run { [weak self] in
                 guard let self else { return }
                 // Guard: if journeyStore changed since we started, discard stale result.
                 // The newer mutation will have already triggered its own rebuild or
@@ -1941,7 +1974,6 @@ final class CityCache: ObservableObject {
     }
 
     private func refreshCityFromStore(cityKey: String) {
-        let journeys = journeyStore.journeys
         // Include ALL journeys starting from this city (including intercity journeys)
         let completedInCity = journeyStore.journeys.filter {
             $0.isCompleted
@@ -2220,10 +2252,10 @@ final class CityCache: ObservableObject {
                     continue
                 }
 
-                await MainActor.run {
-                    guard let self else { return }
+                let changedKeys: [String] = await MainActor.run { [weak self] in
+                    guard let self else { return [] }
                     // Find by cityKey at write time — array may have shifted
-                    guard let idx = self.cachedCities.firstIndex(where: { $0.cityKey == cityKey }) else { return }
+                    guard let idx = self.cachedCities.firstIndex(where: { $0.cityKey == cityKey }) else { return [] }
                     let city = self.cachedCities[idx]
 
                     let newKey = r.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2264,8 +2296,6 @@ final class CityCache: ObservableObject {
 
                     // Update journeys that reference the old key
                     if oldKey != newKey {
-                        reKeyedCityKeys.insert(oldKey)
-                        reKeyedCityKeys.insert(newKey)
                         for j in self.journeyStore.journeys {
                             if j.startCityKey == oldKey || j.cityKey == oldKey {
                                 var updated = j
@@ -2274,11 +2304,15 @@ final class CityCache: ObservableObject {
                                 self.journeyStore.upsertSnapshotThrottled(updated, coordCount: updated.coordinates.count)
                             }
                         }
+                        return [oldKey, newKey]
                     }
+                    return []
                 }
+                reKeyedCityKeys.formUnion(changedKeys)
             }
 
-            await MainActor.run { [skippedNoCoord, geocodeFailedCount] in
+            let finalReKeyed = reKeyedCityKeys
+            await MainActor.run { [weak self, skippedNoCoord, geocodeFailedCount, finalReKeyed] in
                 guard let self else { return }
                 // Merge duplicates: re-keying may map multiple old cities to the same canonical key.
                 // Instead of discarding, merge journeyIds/explorations/memories and keep best metadata.
@@ -2317,10 +2351,10 @@ final class CityCache: ObservableObject {
                 // Only flush translations for cities whose keys actually changed.
                 // Preserves valid cached translations for unchanged cities, avoiding
                 // a full re-geocode that can fail under VPN/throttle conditions.
-                if reKeyedCityKeys.isEmpty {
+                if finalReKeyed.isEmpty {
                     // No re-keying happened — translations are all still valid
                 } else {
-                    CityNameTranslationCache.shared.clearKeys(reKeyedCityKeys)
+                    CityNameTranslationCache.shared.clearKeys(finalReKeyed)
                 }
                 self.saveToDisk()
                 self.notifyCitiesChanged()

@@ -119,7 +119,7 @@ struct PopSharingCard: View {
                     mode: mode,
                     onComplete: { edited in
                         activePhotoFlow = nil
-                        appendOverallMemoryPhotos(edited, writesToPhotoLibrary: false)
+                        appendOverallMemoryPhotos(edited, writesToPhotoLibrary: mode.isCamera)
                     },
                     onCancel: {
                         activePhotoFlow = nil
@@ -755,7 +755,7 @@ struct PopSharingCard: View {
         if let last = safe.last {
             let endLoc = CLLocation(latitude: last.latitude, longitude: last.longitude)
             let key = journey.cityKey
-            let parentRegionKey = JourneyCityNamePresentation.parentRegionKey(
+            _ = JourneyCityNamePresentation.parentRegionKey(
                 for: journey,
                 cachedCitiesByKey: cachedCitiesByKey
             )
@@ -1264,7 +1264,7 @@ struct ShareCardGenerator {
         if let last = coords.last {
             let endLoc = CLLocation(latitude: last.latitude, longitude: last.longitude)
             let key = journey.cityKey
-            let parentRegionKey = JourneyCityNamePresentation.parentRegionKey(
+            _ = JourneyCityNamePresentation.parentRegionKey(
                 for: journey,
                 cachedCitiesByKey: cachedCitiesByKey
             )

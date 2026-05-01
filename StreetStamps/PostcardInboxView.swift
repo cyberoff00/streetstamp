@@ -602,7 +602,7 @@ private struct PostcardCardRow: View {
         guard let messageID, let token else { return }
         let req = PostcardReactionRequest(reactionEmoji: emoji, comment: nil)
         do {
-            try await BackendAPIClient.shared.reactToPostcard(token: token, messageID: messageID, req: req)
+            _ = try await BackendAPIClient.shared.reactToPostcard(token: token, messageID: messageID, req: req)
             await MainActor.run {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) {
                     saveToastText = String(format: L10n.t("reaction_sent"), emoji)
@@ -756,7 +756,7 @@ private struct CommentInputSheet: View {
         isSending = true
         let req = PostcardReactionRequest(reactionEmoji: nil, comment: commentText)
         do {
-            try await BackendAPIClient.shared.reactToPostcard(token: token, messageID: messageID, req: req)
+            _ = try await BackendAPIClient.shared.reactToPostcard(token: token, messageID: messageID, req: req)
             await MainActor.run { dismiss() }
         } catch {
             await MainActor.run {

@@ -245,12 +245,12 @@ struct MapboxEngineView: UIViewRepresentable {
             }
         }
 
-        static func altitudeToZoom(_ altitude: CLLocationDistance, latitude: Double = 0) -> CGFloat {
+        nonisolated static func altitudeToZoom(_ altitude: CLLocationDistance, latitude: Double = 0) -> CGFloat {
             let C = 591657550.5 * cos(latitude * .pi / 180)
             return CGFloat(log2(C / max(1, altitude)))
         }
 
-        static func zoomToAltitude(_ zoom: CGFloat, latitude: Double = 0) -> CLLocationDistance {
+        nonisolated static func zoomToAltitude(_ zoom: CGFloat, latitude: Double = 0) -> CLLocationDistance {
             let C = 591657550.5 * cos(latitude * .pi / 180)
             return C / pow(2, Double(zoom))
         }

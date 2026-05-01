@@ -181,7 +181,7 @@ struct MainView: View {
             }
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.78), value: showSharingCard)
-        .onChange(of: showSharingCard) { isShowing in
+        .onChange(of: showSharingCard) { _, isShowing in
             if !isShowing { sharingJourney = nil }
         }
         .onAppear {
@@ -207,7 +207,7 @@ struct MainView: View {
             // Check Mapbox trial expiry
             checkMapboxTrialExpiry()
         }
-        .onChange(of: showMapView) { isShowing in
+        .onChange(of: showMapView) { _, isShowing in
             if !isShowing {
                 syncOngoingFromStore()
                 if !tracking.isTracking, ongoingJourney.endTime != nil {
@@ -216,12 +216,12 @@ struct MainView: View {
             }
         }
         // ✅ 监听 store 加载完成，立即同步数据
-        .onChange(of: store.hasLoaded) { loaded in
+        .onChange(of: store.hasLoaded) { _, loaded in
             if loaded {
                 syncOngoingFromStore()
             }
         }
-        .onChange(of: trackingMode) { newMode in
+        .onChange(of: trackingMode) { _, newMode in
             // ✅ 旅程中也允许切换；策略 B：若当前已在前台静止省电态，不强制退出省电态
             tracking.setTrackingMode(newMode)
             
@@ -233,12 +233,12 @@ struct MainView: View {
                 store.upsertSnapshotThrottled(updated, coordCount: updated.coordinates.count)
             }
         }
-        .onChange(of: flow.resumeOngoingSignal) { _ in
+        .onChange(of: flow.resumeOngoingSignal) { _, _ in
             syncOngoingFromStore()
             guard hasOngoingJourney, ongoingJourney.endTime == nil else { return }
             showMapView = true
         }
-        .onChange(of: flow.pendingWidgetCaptureSignal) { signal in
+        .onChange(of: flow.pendingWidgetCaptureSignal) { _, signal in
             guard signal > 0 else { return }
             syncOngoingFromStore()
             guard hasOngoingJourney, ongoingJourney.endTime == nil else {
@@ -247,7 +247,7 @@ struct MainView: View {
             }
             showMapView = true
         }
-        .onChange(of: flow.endOngoingSignal) { _ in
+        .onChange(of: flow.endOngoingSignal) { _, _ in
             syncOngoingFromStore()
             guard hasOngoingJourney, ongoingJourney.endTime == nil else { return }
             endUnfinishedJourneyAndShare()

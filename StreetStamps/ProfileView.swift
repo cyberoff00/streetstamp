@@ -35,7 +35,11 @@ struct ProfileView: View {
     @State private var toastText = ""
     @State private var showToast = false
     @ObservedObject private var featureFlags = FeatureFlagStore.shared
-    @State private var showSettings = false
+    private enum ProfileNavTarget: Identifiable, Hashable {
+        case settings
+        var id: Self { self }
+    }
+    @State private var profileNavTarget: ProfileNavTarget?
     @State private var showNotificationsSheet = false
     @State private var showPostcardInboxFromNotification = false
     @State private var notifSheetJourneyPush: NotifJourneyPush? = nil
@@ -102,8 +106,11 @@ struct ProfileView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
-        .navigationDestination(isPresented: $showSettings) {
-            SettingsView(showsBackButton: true)
+        .navigationDestination(item: $profileNavTarget) { target in
+            switch target {
+            case .settings:
+                SettingsView(showsBackButton: true)
+            }
         }
         .overlay(alignment: .top) {
             if showToast {
@@ -218,7 +225,7 @@ struct ProfileView: View {
             Spacer()
 
             Button {
-                showSettings = true
+                profileNavTarget = .settings
             } label: {
                 Image(systemName: "gearshape")
                     .font(.system(size: 18, weight: .semibold))

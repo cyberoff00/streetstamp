@@ -130,14 +130,14 @@ struct CityStampLibraryView: View {
             digestByCityID = makeDigestMap(from: cache.cachedCities)
             StartupWarmupService.shared.start(cities: displayCities, appearanceRaw: effectiveAppearanceRaw, renderCacheStore: renderCacheStore, limit: 16, renderMaskByJourney: renderMaskStore.snapshot())
         }
-        .onChange(of: store.hasLoaded) { loaded in
+        .onChange(of: store.hasLoaded) { _, loaded in
             if loaded {
                 vm.load(journeyStore: store, cityCache: cache)
                 digestByCityID = makeDigestMap(from: cache.cachedCities)
                 StartupWarmupService.shared.start(cities: displayCities, appearanceRaw: effectiveAppearanceRaw, renderCacheStore: renderCacheStore, limit: 16, renderMaskByJourney: renderMaskStore.snapshot())
             }
         }
-        .onChange(of: languagePreference.currentLanguage) { _ in
+        .onChange(of: languagePreference.currentLanguage) { _, _ in
             guard store.hasLoaded else { return }
             vm.load(journeyStore: store, cityCache: cache)
         }
@@ -202,7 +202,7 @@ struct CityStampLibraryView: View {
         } message: {
             Text(L10n.t("photo_scan_confirm_message"))
         }
-        .onChange(of: cache.photoDiscoveryProgress) { progress in
+        .onChange(of: cache.photoDiscoveryProgress) { _, progress in
             if case .scanning = progress {
                 photoScanPulse = true
             } else {
@@ -580,7 +580,7 @@ struct PhotoDiscoveryScanButton: View {
                     value: pulse
                 )
         }
-        .onChange(of: cityCache.photoDiscoveryProgress) { progress in
+        .onChange(of: cityCache.photoDiscoveryProgress) { _, progress in
             if case .scanning = progress {
                 pulse = true
             } else {
@@ -687,8 +687,8 @@ private actor RenderThrottle {
 // MARK: - In-memory image cache
 // =======================================================
 
-final class CityImageMemoryCache {
-    static let shared = CityImageMemoryCache()
+final class CityImageMemoryCache: @unchecked Sendable {
+    nonisolated static let shared = CityImageMemoryCache()
     private init() {
         cache.countLimit = 220
         cache.totalCostLimit = 96 * 1024 * 1024
@@ -696,19 +696,19 @@ final class CityImageMemoryCache {
 
     private let cache = NSCache<NSString, UIImage>()
 
-    func image(forKey key: String) -> UIImage? {
+    nonisolated func image(forKey key: String) -> UIImage? {
         cache.object(forKey: key as NSString)
     }
 
-    func set(_ image: UIImage, forKey key: String) {
+    nonisolated func set(_ image: UIImage, forKey key: String) {
         cache.setObject(image, forKey: key as NSString, cost: cost(of: image))
     }
 
-    func removeAll() {
+    nonisolated func removeAll() {
         cache.removeAllObjects()
     }
 
-    private func cost(of image: UIImage) -> Int {
+    nonisolated private func cost(of image: UIImage) -> Int {
         let w = Int(image.size.width * image.scale)
         let h = Int(image.size.height * image.scale)
         return max(1, w * h * 4)

@@ -599,11 +599,12 @@ actor CloudKitSyncService {
                 print("☁️ skipped mood deletion \(dayKey):", error)
             }
         }
+        let finalDeletedMoodKeys = uploadedDeletedMoodDayKeys
         await MainActor.run {
             lifelogStore.clearDirtyCloudSyncState(
                 uploadedPointDayKeys: Array(uploadedDayKeys),
                 uploadedMoodDayKeys: Array(uploadedMoodDayKeys),
-                deletedMoodDayKeys: uploadedDeletedMoodDayKeys
+                deletedMoodDayKeys: finalDeletedMoodKeys
             )
         }
         return true

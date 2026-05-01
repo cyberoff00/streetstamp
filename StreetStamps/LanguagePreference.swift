@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 final class LanguagePreference: ObservableObject {
     static let shared = LanguagePreference()

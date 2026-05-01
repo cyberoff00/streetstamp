@@ -147,7 +147,6 @@ enum FriendsFeedCacheBuilder {
                 let cityKey = friendCityKey(for: journey)
                 let cityName = friendCityDisplayName(for: journey, cards: friend.unlockedCityCards)
                 let memoryCount = journey.memories.count
-                let photoCount = journey.memories.reduce(0) { $0 + $1.imageURLs.count }
                 let unlockedNewCity = !cityKey.isEmpty && firstJourneyByCity[cityKey] == journey.id
 
                 let kind: FriendFeedKind

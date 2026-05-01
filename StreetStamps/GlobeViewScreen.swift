@@ -81,7 +81,7 @@ struct GlobeViewScreen: View {
             didRequestInitialRefresh = true
             globeRefreshCoordinator.requestRefresh(reason: .globePageEntered)
         }
-        .onChange(of: globeRefreshCoordinator.revision) { _ in
+        .onChange(of: globeRefreshCoordinator.revision) { _, _ in
             refreshGlobeData()
         }
     }

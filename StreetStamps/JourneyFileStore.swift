@@ -1,7 +1,10 @@
 import Foundation
 
-final class JourneysFileStore {
-    private let fm = FileManager.default
+final class JourneysFileStore: @unchecked Sendable {
+    // FileManager.default is @MainActor in iOS 18+ SDK; using it as a stored
+    // property default taints the whole class as MainActor-isolated. Use a
+    // fresh FileManager() instance instead — thread-safe for these operations.
+    private let fm = FileManager()
     private let baseURL: URL
 
     /// `baseURL` is the user-scoped journeys directory (e.g. .../<userID>/Journeys).

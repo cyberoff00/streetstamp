@@ -723,11 +723,27 @@ struct StreetStampsApp: App {
                 guard version > 0 else { return }
                 showAuthEntry = true
             }
+            .onChange(of: sessionStore.sessionRefreshVersion) { _, _ in
+                if sessionStore.isLoggedIn {
+                    AppNotificationDelegate.registerForRemoteNotificationsIfAuthorized()
+                    AppNotificationDelegate.uploadPendingPushTokenIfNeeded(
+                        accessToken: sessionStore.currentAccessToken
+                    )
+                    Task { @MainActor in
+                        await notificationStore.refresh(token: sessionStore.currentAccessToken)
+                    }
+                    notificationStore.startPolling { [sessionStore] in
+                        sessionStore.currentAccessToken
+                    }
+                } else {
+                    notificationStore.stopPolling()
+                }
+            }
     }
 
     private var appContentWithLifecycleHandlers: some View {
         appContentWithSessionHandlers
-            .onChange(of: scenePhase) { phase in
+            .onChange(of: scenePhase) { _, phase in
                 // Best-effort: reduce data loss when the app is backgrounded or suspended.
                 if phase == .background || phase == .inactive {
                     journeyStore.flushPersist()

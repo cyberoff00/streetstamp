@@ -55,7 +55,7 @@ struct CollectionTabView: View {
             flow.clearRequestedCollectionPage()
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.82), value: page)
-        .onChange(of: page) { value in
+        .onChange(of: page) { _, value in
             if value == .memories {
                 onboardingGuide.advance(.openMemory)
             }

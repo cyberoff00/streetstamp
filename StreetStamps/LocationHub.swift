@@ -221,15 +221,17 @@ final class LocationHub: ObservableObject {
         geocodeInFlight = true
 
         geocoder.reverseGeocodeLocation(loc) { [weak self] placemarks, _ in
-            guard let self else { return }
-            self.geocodeInFlight = false
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.geocodeInFlight = false
 
-            guard let pm = placemarks?.first else { return }
-            guard let iso = pm.isoCountryCode?.uppercased(), !iso.isEmpty else { return }
+                guard let pm = placemarks?.first else { return }
+                guard let iso = pm.isoCountryCode?.uppercased(), !iso.isEmpty else { return }
 
-            self.lastGeocodeAt = now
-            self.lastGeocodedRegionKey = key
-            self.applyAuthoritativeCountryISO2(iso)
+                self.lastGeocodeAt = now
+                self.lastGeocodedRegionKey = key
+                self.applyAuthoritativeCountryISO2(iso)
+            }
         }
     }
 

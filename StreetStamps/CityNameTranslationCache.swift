@@ -112,17 +112,12 @@ final class CityNameTranslationCache: @unchecked Sendable {
         let cacheKey = "\(cityKey)|zh"
 
         // Cache hit
-        lock.lock()
-        if let cached = cache[cacheKey] {
-            lock.unlock()
+        if let cached = lock.withLock({ cache[cacheKey] }) {
             return localeID.hasPrefix("zh-Hant") ? toTraditional(cached) : cached
         }
-        lock.unlock()
 
         // Rate limit — read/write throttle state under lock
-        let waitTime: TimeInterval = {
-            lock.lock()
-            defer { lock.unlock() }
+        let waitTime: TimeInterval = lock.withLock {
             let now = Date()
             var delay: TimeInterval = 0
             if now < throttledUntil {
@@ -134,7 +129,7 @@ final class CityNameTranslationCache: @unchecked Sendable {
             }
             lastRequestAt = now.addingTimeInterval(delay)
             return delay
-        }()
+        }
         if waitTime > 0 {
             try? await Task.sleep(nanoseconds: UInt64(waitTime * 1_000_000_000))
         }
@@ -212,9 +207,7 @@ final class CityNameTranslationCache: @unchecked Sendable {
         }
 
         if let result {
-            lock.lock()
-            cache[cacheKey] = result
-            lock.unlock()
+            lock.withLock { cache[cacheKey] = result }
             schedulePersist()
         }
 

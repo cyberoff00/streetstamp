@@ -1266,7 +1266,7 @@ final class LifelogStore: ObservableObject {
 
         // Write restored day batches to shard files
         for (key, restoredPoints) in dayBatches {
-            var sorted = restoredPoints.sorted { $0.timestamp < $1.timestamp }
+            let sorted = restoredPoints.sorted { $0.timestamp < $1.timestamp }
 
             if key == todayKey {
                 todayShard.points = sorted
@@ -1928,31 +1928,57 @@ final class LifelogStore: ObservableObject {
             return cached
         }
 
-        // Load all points streaming for attribution
-        let dayKeys = shardIndex.cachedAvailableDayKeys.sorted()
-        let todayKey = todayShard.dayKey
-        let todayPoints = todayShard.points
-        let daysDir = paths.lifelogDaysDir
         let attributionSnapshot = await attributionCoordinator.loadSnapshot()
-        let runs = await Task.detached(priority: .utility) {
-            var allPoints: [LifelogTrackPoint] = []
-            for key in dayKeys {
-                if key == todayKey {
-                    allPoints.append(contentsOf: todayPoints)
-                } else {
-                    allPoints.append(contentsOf: Self.loadShardFromDisk(dir: daysDir, dayKey: key).points)
-                }
+        let runs: [LifelogAttributedCoordinateRun]
+
+        if let day {
+            // Single-day fast path: load only the target day's shard and run
+            // length-encode by ISO2 in O(N_day). Avoids the O(total history)
+            // shard load + sort that the full-history path requires for
+            // attribution.runs index lookups.
+            let targetKey = dayKey(day)
+            let dayPoints: [LifelogTrackPoint]
+            if targetKey == todayShard.dayKey {
+                dayPoints = todayShard.points
+            } else {
+                let daysDir = paths.lifelogDaysDir
+                dayPoints = await Task.detached(priority: .utility) {
+                    Self.loadShardFromDisk(dir: daysDir, dayKey: targetKey).points
+                }.value
             }
-            // Sort by timestamp — archived journey points may be appended
-            // out of chronological order within a day shard, causing index-
-            // based slicing to produce coordinate jumps (straight lines).
-            allPoints.sort { $0.timestamp < $1.timestamp }
-            return Self.makePassiveCountryRuns(
-                from: allPoints,
-                attribution: attributionSnapshot,
-                day: day
-            )
-        }.value
+            runs = await Task.detached(priority: .utility) {
+                Self.makePassiveCountryRunsForSingleDay(
+                    dayPoints: dayPoints,
+                    attribution: attributionSnapshot
+                )
+            }.value
+        } else {
+            // Full-history path: load every shard for cross-day country runs.
+            let dayKeys = shardIndex.cachedAvailableDayKeys.sorted()
+            let todayKey = todayShard.dayKey
+            let todayPoints = todayShard.points
+            let daysDir = paths.lifelogDaysDir
+            runs = await Task.detached(priority: .utility) {
+                var allPoints: [LifelogTrackPoint] = []
+                for key in dayKeys {
+                    if key == todayKey {
+                        allPoints.append(contentsOf: todayPoints)
+                    } else {
+                        allPoints.append(contentsOf: Self.loadShardFromDisk(dir: daysDir, dayKey: key).points)
+                    }
+                }
+                // Sort by timestamp — archived journey points may be appended
+                // out of chronological order within a day shard, causing index-
+                // based slicing to produce coordinate jumps (straight lines).
+                allPoints.sort { $0.timestamp < $1.timestamp }
+                return Self.makePassiveCountryRuns(
+                    from: allPoints,
+                    attribution: attributionSnapshot,
+                    day: nil
+                )
+            }.value
+        }
+
         let latestKey = PassiveCountryRunsCacheKey(
             dayKey: day.map(dayKey),
             trackTileRevision: trackTileRevision,
@@ -2010,6 +2036,79 @@ final class LifelogStore: ObservableObject {
                 endTimestamp: slice.last?.timestamp ?? .distantPast
             )
         }
+    }
+
+    private nonisolated static func makePassiveCountryRunsForSingleDay(
+        dayPoints: [LifelogTrackPoint],
+        attribution: LifelogCountryAttributionSnapshot
+    ) -> [LifelogAttributedCoordinateRun] {
+        guard !dayPoints.isEmpty else { return [] }
+
+        // Day shards may contain archived journey points appended out of
+        // chronological order; sort so country-run boundaries reflect actual
+        // movement in time.
+        let sorted = dayPoints.sorted { $0.timestamp < $1.timestamp }
+
+        // Build a pointID -> iso2 lookup limited to this day's IDs to avoid
+        // materializing a dict over the entire attribution.points table.
+        let targetIDs = Set(sorted.map(\.id))
+        var iso2ByPointID: [String: String?] = [:]
+        iso2ByPointID.reserveCapacity(targetIDs.count)
+        for record in attribution.points where targetIDs.contains(record.pointID) {
+            iso2ByPointID[record.pointID] = record.iso2
+        }
+
+        var runs: [LifelogAttributedCoordinateRun] = []
+        var currentISO2: String? = nil
+        var currentCoords: [CLLocationCoordinate2D] = []
+        var currentStart: Date = .distantPast
+        var currentEnd: Date = .distantPast
+        var hasCurrent = false
+
+        func flush() {
+            defer {
+                currentCoords.removeAll(keepingCapacity: true)
+                hasCurrent = false
+            }
+            guard hasCurrent, currentCoords.count >= 2 else { return }
+            runs.append(
+                LifelogAttributedCoordinateRun(
+                    sourceType: .passive,
+                    coordsWGS84: currentCoords,
+                    countryISO2: currentISO2,
+                    startTimestamp: currentStart,
+                    endTimestamp: currentEnd
+                )
+            )
+        }
+
+        for point in sorted {
+            // Points missing from attribution.points (typically newly recorded
+            // and pending background attribution) join a nil-iso2 group; this
+            // is the same state the legacy path produced for them once the
+            // attribution.runs table caught up.
+            let iso2 = iso2ByPointID[point.id] ?? nil
+            let coord = CLLocationCoordinate2D(latitude: point.lat, longitude: point.lon)
+            if !hasCurrent {
+                currentISO2 = iso2
+                currentCoords = [coord]
+                currentStart = point.timestamp
+                currentEnd = point.timestamp
+                hasCurrent = true
+            } else if iso2 == currentISO2 {
+                currentCoords.append(coord)
+                currentEnd = point.timestamp
+            } else {
+                flush()
+                currentISO2 = iso2
+                currentCoords = [coord]
+                currentStart = point.timestamp
+                currentEnd = point.timestamp
+                hasCurrent = true
+            }
+        }
+        flush()
+        return runs
     }
 
     private func bumpTrackTileRevision() {

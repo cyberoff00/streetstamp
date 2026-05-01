@@ -10,6 +10,7 @@
 
 import Foundation
 import SwiftUI
+import Combine
 import UIKit
 import CoreLocation
 import MapKit
@@ -1288,7 +1289,7 @@ struct JourneyMemoryDetailView: View {
                     navBar
                 }
             }
-            .onChange(of: focusedMemoryID) { id in
+            .onChange(of: focusedMemoryID) { _, id in
                 guard let id else { return }
                 // Wait for keyboard/layout, then scroll.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
@@ -1402,7 +1403,7 @@ struct JourneyMemoryDetailView: View {
                 persistDetailDraftIfNeeded()
             }
         }
-        .onChange(of: scenePhase) { phase in
+        .onChange(of: scenePhase) { _, phase in
             if !readOnly, phase != .active {
                 // ✅ App going to background / may be killed: persist current draft.
                 persistDetailDraftIfNeeded(force: true)
@@ -1505,7 +1506,7 @@ struct JourneyMemoryDetailView: View {
                 mode: mode,
                 onComplete: { edited in
                     activePhotoFlow = nil
-                    appendImagesToActiveMemory(edited, writesToPhotoLibrary: false)
+                    appendImagesToActiveMemory(edited, writesToPhotoLibrary: mode.isCamera)
                 },
                 onCancel: {
                     activePhotoFlow = nil
@@ -2343,7 +2344,6 @@ struct JourneyMemoryDetailView: View {
 
         for mem in sorted {
             let candidate = currentPage + [mem]
-            let chrome = isFirstPage ? chromeHeight : continuationChromeHeight
             // Measure this page with the candidate memories
             let pageView = makePageView(
                 memories: candidate,
@@ -3092,11 +3092,14 @@ private struct AsyncLocalImage: View {
             }
         }
         .task(id: path) {
+            image = nil
             let uid = userID
             let p = path
-            image = await Task.detached(priority: .userInitiated) {
+            let loaded = await Task.detached(priority: .userInitiated) {
                 PhotoStore.loadImage(named: p, userID: uid)
             }.value
+            guard !Task.isCancelled else { return }
+            image = loaded
         }
     }
 }

@@ -33,14 +33,28 @@ enum LiveTrackingRefreshPolicy {
     }
 }
 
-struct CoordinateCodable: Codable, Hashable, Sendable {
+// CoordinateCodable's Hashable conformance must NOT be MainActor-isolated.
+// In a SwiftUI-importing file under Xcode 17 / Swift 6 strict concurrency,
+// synthesized conformances get inferred MainActor — breaks every Set / Dict
+// usage from nonisolated routes. Mark conformance explicitly nonisolated.
+struct CoordinateCodable: Codable, Sendable {
     var lat: Double
     var lon: Double
-    /// GPS timestamp from CLLocation. Nil for legacy data recorded before this field existed.
     var t: Date?
 }
 
-extension CoordinateCodable {
+nonisolated extension CoordinateCodable: Hashable {
+    nonisolated static func == (lhs: CoordinateCodable, rhs: CoordinateCodable) -> Bool {
+        lhs.lat == rhs.lat && lhs.lon == rhs.lon && lhs.t == rhs.t
+    }
+    nonisolated func hash(into hasher: inout Hasher) {
+        hasher.combine(lat)
+        hasher.combine(lon)
+        hasher.combine(t)
+    }
+}
+
+nonisolated extension CoordinateCodable {
     var cl: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
 
     init(lat: Double, lon: Double) {
@@ -56,7 +70,7 @@ extension CoordinateCodable {
     }
 }
 
-extension Array where Element == CoordinateCodable {
+nonisolated extension Array where Element == CoordinateCodable {
     var clCoords: [CLLocationCoordinate2D] { map(\.cl) }
 }
 
@@ -1262,6 +1276,8 @@ struct MapView: View {
     @State private var lastSyncedCoordCount = 0
 
     @State private var editingMemory: JourneyMemory? = nil
+    @State private var pendingMemoryCluster: [JourneyMemory] = []
+    @State private var showMemoryClusterPicker = false
     @State private var lastCoordinateSnapshotPersistAt: Date? = nil
     @State private var activeMapHint: OnboardingGuideStore.Hint?
     @State private var mapHintTask: Task<Void, Never>?
@@ -1370,11 +1386,11 @@ struct MapView: View {
         mapRootWithPresentations
             .onAppear { onMapViewAppear() }
             .onDisappear { onMapViewDisappear() }
-            .onChange(of: journeyRoute.memories) { _ in groupedMemoriesCache = computeGroupedMemories() }
-            .onChange(of: showMemoryEditor) { visible in
+            .onChange(of: journeyRoute.memories) { _, _ in groupedMemoriesCache = computeGroupedMemories() }
+            .onChange(of: showMemoryEditor) { _, visible in
                 if !visible { editingMemory = nil; cameraPreloadedPaths = [] }
             }
-            .onChange(of: flow.pendingWidgetCaptureSignal) { signal in
+            .onChange(of: flow.pendingWidgetCaptureSignal) { _, signal in
                 guard signal > 0 else { return }
                 openCaptureFromWidget()
             }
@@ -1498,6 +1514,17 @@ struct MapView: View {
                 }
             }
             .animation(.spring(response: 0.3, dampingFraction: 0.78), value: showMemoryEditor)
+        }
+        .sheet(isPresented: $showMemoryClusterPicker) {
+            MemoryClusterPickerSheet(
+                memories: pendingMemoryCluster,
+                userID: sessionStore.currentUserID,
+                isPresented: $showMemoryClusterPicker,
+                onSelect: { memory in
+                    editingMemory = memory
+                    showMemoryEditor = true
+                }
+            )
         }
         .overlay {
             if let hint = activeMapHint {
@@ -1712,9 +1739,13 @@ struct MapView: View {
             callbacks: MapCallbacks(
                 onSelectMemories: { items in
                     let sorted = items.sorted { $0.timestamp > $1.timestamp }
-                    guard let first = sorted.first else { return }
-                    editingMemory = first
-                    showMemoryEditor = true
+                    if sorted.count > 1 {
+                        pendingMemoryCluster = sorted
+                        showMemoryClusterPicker = true
+                    } else if let first = sorted.first {
+                        editingMemory = first
+                        showMemoryEditor = true
+                    }
                 },
                 onGestureStateChanged: { interacting in
                     isUserInteractingWithMap = interacting
@@ -2119,7 +2150,7 @@ struct MapView: View {
         // the display title using the locale-aware cache/key without mutating the cityKey.
         let key = (journeyRoute.startCityKey ?? journeyRoute.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
         if !key.isEmpty && key != "Unknown|" {
-            let parentRegionKey = JourneyCityNamePresentation.parentRegionKey(
+            _ = JourneyCityNamePresentation.parentRegionKey(
                 for: journeyRoute,
                 cachedCitiesByKey: cachedCitiesByKey
             )
@@ -3372,10 +3403,10 @@ private var hasUnsavedChanges: Bool {
             .padding(.horizontal, 18)
         }
         
-.onChange(of: title) { _ in scheduleDraftPersist() }
-.onChange(of: notes) { _ in scheduleDraftPersist() }
-.onChange(of: imagePaths) { _ in persistDraft() }
-.onChange(of: mirrorSelfie) { _ in persistDraft() }
+.onChange(of: title) { _, _ in scheduleDraftPersist() }
+.onChange(of: notes) { _, _ in scheduleDraftPersist() }
+.onChange(of: imagePaths) { _, _ in persistDraft() }
+.onChange(of: mirrorSelfie) { _, _ in persistDraft() }
 .interactiveDismissDisabled(hasUnsavedChanges)
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             // ✅ If the app is backgrounded / killed, keep the draft
@@ -3399,7 +3430,7 @@ private var hasUnsavedChanges: Bool {
                 mode: mode,
                 onComplete: { edited in
                     activePhotoFlow = nil
-                    storeEditedImages(edited, writesToPhotoLibrary: false)
+                    storeEditedImages(edited, writesToPhotoLibrary: mode.isCamera)
                 },
                 onCancel: {
                     activePhotoFlow = nil
@@ -3758,11 +3789,14 @@ struct PhotoThumb: View {
             }
         }
         .task(id: path) {
+            image = nil
             let uid = userID
             let p = path
-            image = await Task.detached(priority: .userInitiated) {
+            let loaded = await Task.detached(priority: .userInitiated) {
                 PhotoStore.loadImage(named: p, userID: uid)
             }.value
+            guard !Task.isCancelled else { return }
+            image = loaded
         }
     }
 }
@@ -3830,7 +3864,7 @@ struct MemoryEditorPage: View {
                 mode: mode,
                 onComplete: { edited in
                     activePhotoFlow = nil
-                    storeEditedImages(edited, writesToPhotoLibrary: false)
+                    storeEditedImages(edited, writesToPhotoLibrary: mode.isCamera)
                 },
                 onCancel: {
                     activePhotoFlow = nil

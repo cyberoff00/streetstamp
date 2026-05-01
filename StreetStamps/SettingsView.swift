@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import Foundation
 import CoreLocation
 import UniformTypeIdentifiers
@@ -546,6 +547,17 @@ struct SettingsView: View {
         .task {
             await refreshAccountIfPossible()
             await refreshICloudAvailability()
+        }
+        .onChange(of: sessionStore.sessionRefreshVersion) { _, _ in
+            didLoadAccountProfile = false
+            if sessionStore.isLoggedIn {
+                Task { await refreshAccountIfPossible(force: true) }
+            } else {
+                displayNameDraft = ""
+                displayNameInput = ""
+                exclusiveIDDraft = ""
+                accountEmail = ""
+            }
         }
         .sheet(isPresented: $showDisplayNameEditor) {
             displayNameEditorSheet

@@ -21,6 +21,11 @@ enum PhotoInputMode: Identifiable {
         case .library: return "library"
         }
     }
+
+    var isCamera: Bool {
+        if case .camera = self { return true }
+        return false
+    }
 }
 
 /// Single fullScreenCover that transitions picker → crop editor in-place.
