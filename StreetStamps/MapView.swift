@@ -2911,8 +2911,8 @@ struct MemoryDetailPage: View {
         memory: JourneyMemory,
         isPresented: Binding<Bool>,
         allowsEditing: Bool,
-        maxCardWidth: CGFloat = 340,
-        maxCardHeight: CGFloat = 520,
+        maxCardWidth: CGFloat = 430,
+        maxCardHeight: CGFloat = 540,
         onUpdated: @escaping (JourneyMemory?) -> Void,
         userID: String? = nil
     ) {
@@ -2925,128 +2925,41 @@ struct MemoryDetailPage: View {
         self.userID = userID
     }
 
+    private var trimmedTitle: String { memory.title.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmedNotes: String { memory.notes.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var hasTitle: Bool { !trimmedTitle.isEmpty }
+    private var hasNotes: Bool { !trimmedNotes.isEmpty }
+    private var hasPhotos: Bool { !memory.imagePaths.isEmpty || !memory.remoteImageURLs.isEmpty }
+    private var resolvedUserID: String { userID ?? sessionStore.currentUserID }
+
     var body: some View {
         ZStack {
-            Color.black.opacity(0.4)
+            Color.black.opacity(0.14)
                 .ignoresSafeArea()
                 .onTapGesture { isPresented = false }
 
-            VStack(spacing: 0) {
-                HStack {
-                    Text(L10n.key("tab_memory"))
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.gray)
+            VStack {
+                Spacer().frame(height: 92)
 
-                    Spacer()
-
-                    HStack(spacing: 10) {
-                        if allowsEditing {
-                            Button { showEditor = true } label: {
-                                Image(systemName: "square.and.pencil")
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundColor(.gray)
-                                    .appMinTapTarget()
-                            }
-                        }
-
-                        AppCloseButton(style: .filled) {
-                            isPresented = false
-                        }
-                    }
+                VStack(spacing: 0) {
+                    header
+                    content
+                    footer
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .frame(maxWidth: maxCardWidth)
+                .background(FigmaTheme.mutedBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
+                .shadow(color: Color.black.opacity(0.14), radius: 20, x: 0, y: 8)
 
-                Divider()
-
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        if !memory.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Text(memory.title)
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(FigmaTheme.text)
-                        }
-
-                        if !memory.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Text(memory.notes)
-                                .font(.system(size: 14))
-                                .foregroundColor(FigmaTheme.text.opacity(0.85))
-                        }
-
-                        if !memory.imagePaths.isEmpty || !memory.remoteImageURLs.isEmpty {
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 10) {
-                                    ForEach(Array(memory.imagePaths.enumerated()), id: \.offset) { idx, p in
-                                        ZStack {
-                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                .fill(Color(UIColor(white: 0.92, alpha: 1)))
-                                                .frame(width: 88, height: 88)
-
-                                            if let img = PhotoStore.loadImage(named: p, userID: userID ?? sessionStore.currentUserID) {
-                                                Image(uiImage: img)
-                                                    .resizable()
-                                                    .scaledToFill()
-                                                    .frame(width: 88, height: 88)
-                                                    .clipped()
-                                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                            }
-                                        }
-                                        .onTapGesture {
-                                            viewerIndex = idx
-                                            showViewer = true
-                                        }
-                                    }
-                                    // Show remote URLs only when no local files exist (social fallback for own device or friend view).
-                                    if memory.imagePaths.isEmpty {
-                                        ForEach(Array(memory.remoteImageURLs.enumerated()), id: \.offset) { idx, rawURL in
-                                            if let url = URL(string: rawURL) {
-                                                CachedRemoteImage(url: url) { $0.resizable() } placeholder: {
-                                                    ProgressView()
-                                                        .frame(width: 88, height: 88)
-                                                } failure: {
-                                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                        .fill(Color(UIColor(white: 0.92, alpha: 1)))
-                                                        .frame(width: 88, height: 88)
-                                                        .overlay {
-                                                            Image(systemName: "exclamationmark.triangle")
-                                                                .foregroundColor(.secondary)
-                                                        }
-                                                }
-                                                .scaledToFill()
-                                                .frame(width: 88, height: 88)
-                                                .clipped()
-                                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                                .onTapGesture {
-                                                    viewerIndex = idx
-                                                    showViewer = true
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                .padding(.vertical, 4)
-                            }
-                        }
-
-                        Divider()
-
-                        Text(memory.timestamp.formatted(date: .abbreviated, time: .shortened))
-                            .font(.system(size: 11))
-                            .foregroundColor(.gray)
-                            .padding(.top, 4)
-                    }
-                    .padding(16)
-                }
-                .frame(maxWidth: maxCardWidth, maxHeight: maxCardHeight)
+                Spacer()
             }
-            .background(Color.white)
-            .cornerRadius(12)
+            .padding(.horizontal, 18)
         }
         .fullScreenCover(isPresented: $showViewer) {
             PhotoViewer(
                 imagePaths: memory.imagePaths,
                 remoteImageURLs: memory.remoteImageURLs,
-                userID: userID ?? sessionStore.currentUserID,
+                userID: resolvedUserID,
                 startIndex: viewerIndex,
                 onClose: { showViewer = false }
             )
@@ -3068,17 +2981,168 @@ struct MemoryDetailPage: View {
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.78), value: showEditor)
         .onAppear {
-            // ✅ If user left mid-edit (Back gesture), automatically resume editing.
             let uid = sessionStore.currentUserID
             let mid = memory.id
             if MemoryDraftResumeStore.shouldResume(userID: uid, memoryID: mid),
                MemoryDraftStore.load(userID: uid, memoryID: mid) != nil {
                 showEditor = true
             } else {
-                // Keep resume flag clean if draft was cleared.
                 MemoryDraftResumeStore.set(false, userID: uid, memoryID: mid)
             }
         }
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Text(L10n.key("tab_memory"))
+                .font(.system(size: 20, weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .foregroundColor(FigmaTheme.text)
+
+            Spacer()
+
+            if allowsEditing {
+                Button { showEditor = true } label: {
+                    Image(systemName: "square.and.pencil")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(FigmaTheme.text.opacity(0.85))
+                        .frame(width: 32, height: 32)
+                        .background(Color.black.opacity(0.04))
+                        .clipShape(Circle())
+                        .appMinTapTarget()
+                }
+                .buttonStyle(.plain)
+            }
+
+            AppCloseButton(style: .circleSubtle) {
+                isPresented = false
+            }
+        }
+        .padding(.horizontal, 24)
+        .frame(height: 58)
+        .background(Color.white)
+    }
+
+    private var content: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                if hasTitle {
+                    Text(trimmedTitle)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(FigmaTheme.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 6)
+                }
+
+                if hasNotes {
+                    ScrollView {
+                        Text(trimmedNotes)
+                            .font(MemoryTypography.fontSwiftUI)
+                            .foregroundColor(MemoryTypography.textColorSwiftUI)
+                            .lineSpacing(MemoryTypography.lineSpacing)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 4)
+                    }
+                    .frame(minHeight: 188, maxHeight: 240)
+                }
+
+                if hasPhotos {
+                    photoStrip
+                }
+            }
+            .padding(.top, 8)
+            .padding(.bottom, 8)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+        .frame(minHeight: 290)
+        .background(Color.white)
+        .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+        .padding(.horizontal, 12)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+    }
+
+    private var photoStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(Array(memory.imagePaths.enumerated()), id: \.offset) { idx, p in
+                    photoThumb(localPath: p)
+                        .onTapGesture {
+                            viewerIndex = idx
+                            showViewer = true
+                        }
+                }
+                if memory.imagePaths.isEmpty {
+                    ForEach(Array(memory.remoteImageURLs.enumerated()), id: \.offset) { idx, raw in
+                        if let url = URL(string: raw) {
+                            remoteThumb(url: url)
+                                .onTapGesture {
+                                    viewerIndex = idx
+                                    showViewer = true
+                                }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 4)
+            .padding(.bottom, 4)
+        }
+    }
+
+    @ViewBuilder
+    private func photoThumb(localPath: String) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(UIColor(white: 0.92, alpha: 1)))
+                .frame(width: 88, height: 88)
+            if let img = PhotoStore.loadImage(named: localPath, userID: resolvedUserID) {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 88, height: 88)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func remoteThumb(url: URL) -> some View {
+        CachedRemoteImage(url: url) { $0.resizable() } placeholder: {
+            ProgressView()
+                .frame(width: 88, height: 88)
+        } failure: {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(UIColor(white: 0.92, alpha: 1)))
+                .frame(width: 88, height: 88)
+                .overlay {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundColor(.secondary)
+                }
+        }
+        .scaledToFill()
+        .frame(width: 88, height: 88)
+        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private var footer: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "clock")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(FigmaTheme.subtext)
+            Text(memory.timestamp.formatted(date: .abbreviated, time: .shortened))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(FigmaTheme.subtext)
+            Spacer()
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 12)
     }
 }
 

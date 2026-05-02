@@ -47,6 +47,7 @@ struct CityStampLibraryView: View {
     @EnvironmentObject private var cache: CityCache
     @EnvironmentObject private var renderCacheStore: CityRenderCacheStore
     @EnvironmentObject private var renderMaskStore: RenderMaskStore
+    @EnvironmentObject private var flow: AppFlowCoordinator
     @State private var digestByCityID: [String: CityDigest] = [:]
 
     // ✅ Delete confirmations
@@ -78,8 +79,8 @@ struct CityStampLibraryView: View {
         showHeader: Bool = true,
         allowCityDetailNavigation: Bool = true,
         headerTitle: String? = nil,
-        emptyTitleKey: String = "library_empty_title",
-        emptySubtitleKey: String = "library_empty_subtitle"
+        emptyTitleKey: String = "city_empty_title",
+        emptySubtitleKey: String = "city_empty_desc"
     ) {
         self.autoRebuildFromJourneyStore = autoRebuildFromJourneyStore
         self.showHeader = showHeader
@@ -352,31 +353,81 @@ struct CityStampLibraryView: View {
 
             if displayCities.isEmpty {
                 emptyState(
-                    title: L10n.key("city_empty_title"),
-                    subtitle: L10n.key("city_empty_desc")
+                    title: L10n.key(emptyTitleKey),
+                    subtitle: L10n.key(emptySubtitleKey)
                 )
-                .padding(.top, 60)
+                .padding(.top, 40)
                 .padding(.bottom, 60)
             }
         }
     }
 
     private func emptyState(title: LocalizedStringKey, subtitle: LocalizedStringKey) -> some View {
-        VStack(spacing: FriendSharedEmptyStateStyle.verticalSpacing) {
-            Image(systemName: "map")
-                .font(.system(size: 48))
-                .foregroundColor(.gray.opacity(0.4))
+        VStack(spacing: 20) {
+            ghostCityCard
+                .frame(width: 140, height: 180)
 
-            Text(title)
-                .font(.system(size: FriendSharedEmptyStateStyle.titleFontSize, weight: .semibold))
-                .foregroundColor(UITheme.softBlack)
+            if allowCityDetailNavigation {
+                Text(L10n.t("city_empty_explainer"))
+                    .font(.system(size: FriendSharedEmptyStateStyle.subtitleFontSize))
+                    .foregroundColor(UITheme.subText)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
 
-            Text(subtitle)
-                .font(.system(size: FriendSharedEmptyStateStyle.subtitleFontSize))
-                .foregroundColor(UITheme.subText)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 24)
+                emptyStateActions
+                    .padding(.top, 4)
+            } else {
+                VStack(spacing: 8) {
+                    Text(title)
+                        .font(.system(size: FriendSharedEmptyStateStyle.titleFontSize, weight: .semibold))
+                        .foregroundColor(UITheme.softBlack)
+
+                    Text(subtitle)
+                        .font(.system(size: FriendSharedEmptyStateStyle.subtitleFontSize))
+                        .foregroundColor(UITheme.subText)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                }
+            }
         }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var ghostCityCard: some View {
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .strokeBorder(
+                style: StrokeStyle(lineWidth: 1.2, dash: [5, 4])
+            )
+            .foregroundColor(UITheme.subText.opacity(0.35))
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color.gray.opacity(0.05))
+            )
+            .overlay(
+                Image(systemName: "map")
+                    .font(.system(size: 28, weight: .light))
+                    .foregroundColor(UITheme.subText.opacity(0.45))
+            )
+    }
+
+    @ViewBuilder
+    private var emptyStateActions: some View {
+        Button {
+            flow.requestSelectTab(.start)
+        } label: {
+            Text(L10n.t("city_empty_action_start"))
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(FigmaTheme.primary)
+                )
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: 260)
+        .padding(.horizontal, 24)
     }
 
     // MARK: - Photo discovery

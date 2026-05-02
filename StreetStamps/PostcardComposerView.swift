@@ -178,10 +178,12 @@ struct PostcardComposerView: View {
 
     private var cityRefreshTaskID: String {
         let lang = languagePreference.currentLanguage ?? "sys"
-        let citiesPart = cityCache.cachedCities.map { city in
-            "\(city.id)|\(city.name)|\(city.parentScopeKey ?? "")"
-        }.joined(separator: ";")
-        return "\(lang)|\(citiesPart)"
+        let cityIDs = cityCache.cachedCities
+            .filter { !($0.isTemporary ?? false) }
+            .map(\.id)
+            .sorted()
+            .joined(separator: ";")
+        return "\(lang)|\(cityIDs)"
     }
 
     private var content: some View {

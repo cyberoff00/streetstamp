@@ -36,17 +36,6 @@ struct CollectionTabView: View {
                 pager
             }
         }
-        .overlay(alignment: .bottom) {
-            if page == .cities && cityCache.cachedCities.count == 1 && onboardingGuide.shouldShowHint(.cityCardCollect) && !onboardingGuide.shouldShowHint(.journeySavedToMemory) {
-                ContextualHintBar(
-                    icon: "map",
-                    message: L10n.t("hint_city_card_collect"),
-                    onDismiss: { onboardingGuide.dismissHint(.cityCardCollect) }
-                )
-                .padding(.horizontal, 18)
-                .padding(.bottom, 16)
-            }
-        }
         .onReceive(flow.$requestedCollectionPage) { rawPage in
             guard let rawPage, let target = WorldoPage(rawValue: rawPage) else { return }
             withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {

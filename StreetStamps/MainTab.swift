@@ -106,12 +106,6 @@ struct MainTabView: View {
                 ContextualHintBar(
                     icon: "checkmark.circle",
                     message: L10n.t("hint_journey_saved"),
-                    actionTitle: L10n.t("hint_journey_saved_action"),
-                    onAction: {
-                        selectedTab = .cities
-                        onboardingGuide.dismissHint(.journeySavedToMemory)
-                        journeyJustSaved = false
-                    },
                     onDismiss: {
                         onboardingGuide.dismissHint(.journeySavedToMemory)
                         journeyJustSaved = false

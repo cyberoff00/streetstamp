@@ -117,15 +117,15 @@
 "city_library_header_city" = "你的城市印章";
 
 /* City Library - Empty state */
-"city_empty_title" = "还没有城市印章";
-"city_empty_subtitle" = "生成一张城市卡，或完成一次旅程来解锁你的第一座城市。";
+"city_empty_title" = "还没有城市卡";
+"city_empty_subtitle" = "你探索过的每一次旅程都会成为专属的城市卡片";
 
 /* Card stats */
 "city_stats_line" = "%d 次探索 · %d 条记忆";
 
 "library_city_title" = "城市卡";
-"library_empty_title" = "还没有城市印章";
-"library_empty_subtitle" = "生成一张城市卡，或完成一次旅程来解锁你的第一座城市。";
+"library_empty_title" = "还没有城市卡";
+"library_empty_subtitle" = "你探索过的每一次旅程都会成为专属的城市卡片";
 "friend_city_cards_empty_title" = "TA 暂无城市卡";
 "friend_city_cards_empty_subtitle" = "TA 还没有解锁城市卡。";
 "city_card_stats" = "%d 次探索 · %d 条记忆";
@@ -1156,7 +1156,7 @@
 "hint_map_memory" = "点击拍照或添加笔记，记录沿途点滴";
 "hint_map_finish" = "点击旗帜结束并保存旅程";
 "hint_visibility_toggle" = "选择谁可以看到这次旅程 — 私密、好友或公开";
-"hint_journey_saved" = "旅程已保存！前往「记忆」查看旅程和城市卡";
+"hint_journey_saved" = "两种方式留下你的城市记忆，城市卡片记录城市轨迹，记忆归档你的旅途图文";
 "hint_journey_saved_action" = "去看看";
 "hint_city_card_collect" = "你的第一张城市轨迹卡！探索更多旅程，收集更多城市";
 
@@ -1290,11 +1290,16 @@
 "photo_discovery_from_photos" = "来自相册";
 "photo_count_format" = "%d 张照片";
 "photo_discovery_unlock_all" = "解锁全部发现的城市";
-"photo_scan_confirm_title" = "从相册导入";
-"photo_scan_confirm_message" = "扫描照片中的位置信息，将未记录旅程的城市添加为城市卡片。";
+"photo_scan_confirm_title" = "从相册导入（会员专属）";
+"photo_scan_confirm_message" = "考虑到您在未使用 Worldo 前遗落的行程，会员可开启从照片中扫描城市的功能。";
 "photo_scan_confirm_start" = "开始扫描";
 "empty_city_guide_hint" = "暂无城市卡，开启旅程解锁城市或右上角通过相册导入历史城市";
-"city_empty_title" = "暂无城市卡";
-"city_empty_desc" = "开启旅程解锁城市，\n或右上角通过相册导入";
+"city_empty_title" = "还没有城市卡";
+"city_empty_desc" = "你探索过的每一次旅程都会成为专属的城市卡片";
+"city_empty_explainer" = "你探索过的每一次旅程都会成为专属的城市卡片";
+"memory_empty_explainer" = "你的旅程图文会被归档为一份游记";
+"city_empty_action_start" = "开始一次旅程";
+"city_empty_action_import" = "从相册导入历史城市";
+"memory_empty_action_start" = "开始一次旅程";
 "postcard_no_city_hint" = "开启旅程解锁城市，才能获得对应城市的明信片发送机会";
 "network_unstable_retrying" = "网络不稳，正在重试";

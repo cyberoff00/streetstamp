@@ -16,7 +16,8 @@ struct ContextualHintBar: View {
             Text(message)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(FigmaTheme.text)
-                .lineLimit(2)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
 
             Spacer(minLength: 4)
 

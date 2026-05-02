@@ -87,9 +87,9 @@
 "city_deep_eraser_intro_title" = "橡皮擦";
 "city_deep_eraser_intro_message" = "修正不想保留的軌跡片段。\n單指擦除，雙指縮放。";
 "city_deep_eraser_intro_continue" = "繼續";
-"city_empty_subtitle" = "生成一张城市卡，或完成一次旅程来解鎖你的第一座城市。";
-"city_empty_title" = "还没有城市印章";
-"city_library_header_city" = "你的城市印章";
+"city_empty_subtitle" = "你探索過的每一次旅程都會成為專屬的城市卡片";
+"city_empty_title" = "還沒有城市卡";
+"city_library_header_city" = "你的城市卡";
 "city_stats_line" = "%d 次探索 · %d 条記憶";
 "clear" = "清空";
 "close" = "關閉";
@@ -406,8 +406,8 @@
 "level_progress_counter_format" = "%d/%d";
 "level_remaining_short_format" = "还差 %d 次升级";
 "library_city_title" = "城市卡";
-"library_empty_subtitle" = "生成一张城市卡，或完成一次旅程来解鎖你的第一座城市。";
-"library_empty_title" = "还没有城市印章";
+"library_empty_subtitle" = "你探索過的每一次旅程都會成為專屬的城市卡片";
+"library_empty_title" = "還沒有城市卡";
 "lifelog_clear_mood" = "清除心情";
 "lifelog_confirm_disable" = "確認關閉";
 "lifelog_continue_recording" = "繼續記錄";
@@ -1028,7 +1028,7 @@
 "hint_map_memory" = "點擊拍照或新增筆記，記錄沿途點滴";
 "hint_map_finish" = "點擊旗幟結束並儲存旅程";
 "hint_visibility_toggle" = "選擇誰可以看到這次旅程 — 私密、好友或公開";
-"hint_journey_saved" = "旅程已儲存！前往「記憶」查看旅程和城市卡";
+"hint_journey_saved" = "兩種方式留下你的城市記憶，城市卡片記錄城市軌跡，記憶歸檔你的旅途圖文";
 "hint_journey_saved_action" = "去看看";
 "hint_city_card_collect" = "你的第一張城市軌跡卡！探索更多旅程，收集更多城市";
 
@@ -1129,12 +1129,17 @@
 "photo_discovery_from_photos" = "來自相簿";
 "photo_count_format" = "%d 張照片";
 "photo_discovery_unlock_all" = "解鎖全部發現的城市";
-"photo_scan_confirm_title" = "從相簿匯入";
-"photo_scan_confirm_message" = "掃描照片中的位置資訊，將未記錄旅程的城市新增為城市卡片。";
+"photo_scan_confirm_title" = "從相簿匯入（會員專屬）";
+"photo_scan_confirm_message" = "考慮到您在未使用 Worldo 前遺落的行程，會員可開啟從照片中掃描城市的功能。";
 "photo_scan_confirm_start" = "開始掃描";
 "empty_city_guide_hint" = "暫無城市卡，去開啟旅程或點擊右上角從相簿匯入歷史造訪城市";
-"city_empty_title" = "暫無城市卡";
-"city_empty_desc" = "開啟旅程解鎖城市，\n或點擊右上角從相簿匯入";
+"city_empty_title" = "還沒有城市卡";
+"city_empty_desc" = "你探索過的每一次旅程都會成為專屬的城市卡片";
+"city_empty_explainer" = "你探索過的每一次旅程都會成為專屬的城市卡片";
+"memory_empty_explainer" = "你的旅程圖文會被歸檔為一份遊記";
+"city_empty_action_start" = "開始一次旅程";
+"city_empty_action_import" = "從相簿匯入歷史城市";
+"memory_empty_action_start" = "開始一次旅程";
 "postcard_no_city_hint" = "開啟旅程解鎖城市，才能獲得對應城市的明信片發送機會";
 
 // MARK: - Missing keys aligned with en/zh-Hans

@@ -215,6 +215,7 @@ struct JourneyMemoryMainView: View {
     @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
+    @EnvironmentObject private var flow: AppFlowCoordinator
     @ObservedObject private var languagePreference = LanguagePreference.shared
     @Environment(\.dismiss) private var dismiss
     @State private var expandedCities: Set<String> = []
@@ -478,21 +479,75 @@ struct JourneyMemoryMainView: View {
     // MARK: - Empty State
     
     private var emptyState: some View {
-        VStack(spacing: FriendSharedEmptyStateStyle.verticalSpacing) {
-            Image(systemName: "book.closed")
-                .font(.system(size: 48))
-                .foregroundColor(.gray.opacity(0.4))
-            
-            Text(L10n.key(emptyTitleKey))
-                .font(.system(size: FriendSharedEmptyStateStyle.titleFontSize, weight: .semibold))
-                .foregroundColor(.black)
-            
-            Text(L10n.key(emptySubtitleKey))
-                .font(.system(size: FriendSharedEmptyStateStyle.subtitleFontSize))
-                .foregroundColor(.gray)
-                .multilineTextAlignment(.center)
+        VStack(spacing: 20) {
+            ghostMemoryCard
+                .frame(width: 220, height: 90)
+
+            if !readOnly {
+                Text(L10n.t("memory_empty_explainer"))
+                    .font(.system(size: FriendSharedEmptyStateStyle.subtitleFontSize))
+                    .foregroundColor(.gray)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+
+                Button {
+                    flow.requestSelectTab(.start)
+                } label: {
+                    Text(L10n.t("memory_empty_action_start"))
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: 260)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(FigmaTheme.primary)
+                        )
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
+            } else {
+                VStack(spacing: 8) {
+                    Text(L10n.key(emptyTitleKey))
+                        .font(.system(size: FriendSharedEmptyStateStyle.titleFontSize, weight: .semibold))
+                        .foregroundColor(.black)
+
+                    Text(L10n.key(emptySubtitleKey))
+                        .font(.system(size: FriendSharedEmptyStateStyle.subtitleFontSize))
+                        .foregroundColor(.gray)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                }
+            }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private var ghostMemoryCard: some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(
+                style: StrokeStyle(lineWidth: 1.2, dash: [5, 4])
+            )
+            .foregroundColor(.gray.opacity(0.35))
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.gray.opacity(0.05))
+            )
+            .overlay(
+                HStack(spacing: 10) {
+                    Image(systemName: "book.closed")
+                        .font(.system(size: 22, weight: .light))
+                        .foregroundColor(.gray.opacity(0.45))
+                    VStack(alignment: .leading, spacing: 5) {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Color.gray.opacity(0.18))
+                            .frame(width: 110, height: 8)
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Color.gray.opacity(0.12))
+                            .frame(width: 80, height: 6)
+                    }
+                }
+                .padding(.horizontal, 16)
+            )
     }
     
     // MARK: - Data Grouping

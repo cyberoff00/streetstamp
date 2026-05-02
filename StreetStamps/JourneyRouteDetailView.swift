@@ -182,6 +182,16 @@ struct JourneyRouteDetailView: View {
             }
         }
         .overlay {
+            if isReadOnly, let loadout = friendLoadout, let j = journey {
+                let distText = FriendJourneyDistancePresentation.makeDistanceText(
+                    currentLocation: locationHub.currentLocation,
+                    lastKnownLocation: locationHub.lastKnownLocation,
+                    journeyEndCoordinate: j.coordinates.last?.cl
+                )
+                FriendMapCharacterOverlay(friendLoadout: loadout, distanceText: distText)
+            }
+        }
+        .overlay {
             if let tappedMemory = viewingMemory {
                 MemoryDetailPage(
                     memory: tappedMemory,
@@ -190,8 +200,6 @@ struct JourneyRouteDetailView: View {
                         set: { if !$0 { viewingMemory = nil } }
                     ),
                     allowsEditing: false,
-                    maxCardWidth: 300,
-                    maxCardHeight: 440,
                     onUpdated: { _ in },
                     userID: userID
                 )
@@ -228,16 +236,6 @@ struct JourneyRouteDetailView: View {
                     }
                 )
                 .environmentObject(sessionStore)
-            }
-        }
-        .overlay {
-            if isReadOnly, let loadout = friendLoadout, let j = journey {
-                let distText = FriendJourneyDistancePresentation.makeDistanceText(
-                    currentLocation: locationHub.currentLocation,
-                    lastKnownLocation: locationHub.lastKnownLocation,
-                    journeyEndCoordinate: j.coordinates.last?.cl
-                )
-                FriendMapCharacterOverlay(friendLoadout: loadout, distanceText: distText)
             }
         }
         .onAppear {
