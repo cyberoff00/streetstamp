@@ -1121,6 +1121,10 @@
 "membership_save_badge" = "省钱";
 "membership_subscribe_button" = "订阅";
 "membership_restore_purchases" = "恢复购买";
+"membership_redeem_offer_code" = "兑换码";
+"membership_refund_processed_title" = "退款已处理";
+"membership_refund_processed_message" = "你的订阅退款已处理完成。订阅赠送的欢迎奖励金币（1500）已收回；你通过步数等正常获得的金币不受影响。";
+"membership_refund_processed_ok" = "知道了";
 "membership_auto_renew_note" = "订阅自动续期，可随时在「设置」中取消。";
 "membership_welcome_bonus_title" = "欢迎奖励！";
 "membership_welcome_bonus_message" = "已赠送 %d 金币，快去买装备装扮自己吧！";
@@ -1303,3 +1307,8 @@
 "memory_empty_action_start" = "开始一次旅程";
 "postcard_no_city_hint" = "开启旅程解锁城市，才能获得对应城市的明信片发送机会";
 "network_unstable_retrying" = "网络不稳，正在重试";
+"reset" = "重置";
+"city_edit_display_name" = "修改显示名";
+"city_edit_display_name_title" = "重命名城市";
+"city_edit_display_name_placeholder" = "显示名";
+"city_edit_display_name_hint" = "用自定义名字显示这张卡片。城市身份不变。";

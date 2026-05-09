@@ -319,13 +319,16 @@ final class LocationHub: ObservableObject {
     }
 
     /// Battery-friendly passive Lifelog recording (only used when no active journey is running).
-    func startPassiveLifelog() {
+    /// `initialState` controls the starting accuracy profile. Pass `.moving` when
+    /// passive is taking over right after active tracking ended so the first minutes
+    /// keep continuity instead of dropping to a coarse stationary profile.
+    func startPassiveLifelog(initialState: PassiveLocationState = .stationary) {
         #if DEBUG
         if mode == .mock { return }
         #endif
 
         if current === systemSource {
-            systemSource.startPassiveLifelog()
+            systemSource.startPassiveLifelog(initialState: initialState)
         } else {
             current.start()
         }

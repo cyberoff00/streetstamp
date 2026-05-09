@@ -45,6 +45,116 @@ enum JourneyPostCorrection {
         return cleaned.map { CoordinateCodable(lat: $0.latitude, lon: $0.longitude) }
     }
 
+    /// Display-only simplified coordinates: cleaned + Douglas-Peucker simplified.
+    /// Use case: park strolls under tree cover have GPS jitter that produces visible
+    /// zigzag lines; DP smooths the polyline without affecting `route.distance`
+    /// (distance is computed separately from the cleaned-but-not-simplified geometry).
+    ///
+    /// Epsilon is keyed by average per-point accuracy:
+    ///   sport mode → ε=3m (preserve detail; runners want fidelity)
+    ///   acc < 30  → ε=5m  (good signal, light simplification)
+    ///   acc 30-80 → ε=12m (medium jitter, moderate simplification)
+    ///   acc > 80  → ε=25m (heavy jitter, aggressive flattening)
+    ///
+    /// Persisted per-point `acc` field (PR 3.1) drives this. Legacy data without
+    /// `acc` falls back to ε=5m (treats unknown as good signal).
+    static func simplifiedForDisplay(for route: JourneyRoute) -> [CoordinateCodable] {
+        let coords = route.coordinates.clCoords.filter(CLLocationCoordinate2DIsValid)
+        guard coords.count >= 2 else { return route.coordinates }
+
+        let config = config(for: route.trackingMode)
+        let cleaned = correctedCoordinates(from: coords, config: config)
+        guard cleaned.count >= 2 else { return route.coordinates }
+
+        let avgAcc = averageAccuracy(of: route.coordinates)
+        let epsilon = epsilonForAvgAccuracy(avgAcc, mode: route.trackingMode)
+
+        let simplified = douglasPeucker(cleaned, epsilon: epsilon)
+        let result = simplified.count >= 2 ? simplified : cleaned
+        return result.map { CoordinateCodable(lat: $0.latitude, lon: $0.longitude) }
+    }
+
+    private static func averageAccuracy(of coords: [CoordinateCodable]) -> Double {
+        let accs = coords.compactMap(\.acc).filter { $0 > 0 }
+        guard !accs.isEmpty else { return 30 }   // Legacy data without acc → treat as good signal.
+        return accs.reduce(0, +) / Double(accs.count)
+    }
+
+    private static func epsilonForAvgAccuracy(_ avgAcc: Double, mode: TrackingMode) -> Double {
+        // Conservative: prefer keeping real curves over flattening visible jitter.
+        // Real S-bends or 8m-radius arcs around buildings stay visible at these values.
+        if mode == .sport { return 2 }
+        switch avgAcc {
+        case ..<30:  return 3    // good signal: barely simplify
+        case ..<80:  return 8    // urban: clean small jitter, keep building-detour curves
+        default:     return 18   // dense forest / indoor: flatten heavy zigzag, keep major bends
+        }
+    }
+
+    // MARK: - Douglas-Peucker
+
+    /// Standard recursive DP. Keeps endpoints; for each segment, finds the point
+    /// with max perpendicular distance and either keeps it (and recurses) or
+    /// drops the entire interior.
+    private static func douglasPeucker(_ coords: [CLLocationCoordinate2D], epsilon: Double) -> [CLLocationCoordinate2D] {
+        guard coords.count > 2 else { return coords }
+        var keep = Array(repeating: false, count: coords.count)
+        keep[0] = true
+        keep[coords.count - 1] = true
+        dpRecurse(coords, start: 0, end: coords.count - 1, epsilon: epsilon, keep: &keep)
+        return zip(coords, keep).compactMap { $1 ? $0 : nil }
+    }
+
+    private static func dpRecurse(
+        _ coords: [CLLocationCoordinate2D],
+        start: Int,
+        end: Int,
+        epsilon: Double,
+        keep: inout [Bool]
+    ) {
+        guard end - start >= 2 else { return }
+
+        var maxDist: Double = 0
+        var maxIdx = start
+        for i in (start + 1)..<end {
+            let d = perpendicularDistance(point: coords[i], lineStart: coords[start], lineEnd: coords[end])
+            if d > maxDist {
+                maxDist = d
+                maxIdx = i
+            }
+        }
+
+        guard maxDist > epsilon else { return }
+        keep[maxIdx] = true
+        dpRecurse(coords, start: start, end: maxIdx, epsilon: epsilon, keep: &keep)
+        dpRecurse(coords, start: maxIdx, end: end, epsilon: epsilon, keep: &keep)
+    }
+
+    /// Perpendicular distance from point to line segment, in meters.
+    /// Uses local-tangent approximation (m/° depends on cos(latitude)) — accurate
+    /// for short segments and any latitude up to ~80°. DP doesn't need centimeter precision.
+    private static func perpendicularDistance(
+        point p: CLLocationCoordinate2D,
+        lineStart a: CLLocationCoordinate2D,
+        lineEnd b: CLLocationCoordinate2D
+    ) -> Double {
+        let cosLat = cos(a.latitude * .pi / 180)
+        let metersPerDegLat = 111_320.0
+        let metersPerDegLon = 111_320.0 * max(0.01, cosLat)   // cap to avoid div-by-zero near poles
+
+        let ax = a.longitude * metersPerDegLon
+        let ay = a.latitude * metersPerDegLat
+        let bx = b.longitude * metersPerDegLon
+        let by = b.latitude * metersPerDegLat
+        let px = p.longitude * metersPerDegLon
+        let py = p.latitude * metersPerDegLat
+
+        // Cross-product / line-length formula for point-to-line distance.
+        let num = abs((by - ay) * px - (bx - ax) * py + bx * ay - by * ax)
+        let den = sqrt((by - ay) * (by - ay) + (bx - ax) * (bx - ax))
+        return den > 1e-9 ? num / den : distance(p, a)
+    }
+
     private static func correctedCoordinates(
         from coords: [CLLocationCoordinate2D],
         config: Config

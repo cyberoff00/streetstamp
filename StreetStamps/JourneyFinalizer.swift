@@ -90,7 +90,18 @@ enum JourneyFinalizer {
         if !r.correctedCoordinates.isEmpty {
             r.preferredRouteSource = .corrected
         }
-        r.distance = JourneyPostCorrection.correctedDistance(for: r)
+        // PR 5: trust ingest's accumulated totalDistance — it's been validated by
+        // CoreMotion (stationary periods excluded, walking + zero steps dropped).
+        // Recomputing from raw geometry here would re-include those excluded drift
+        // segments and undo PR 5's validation entirely.
+        // The ingest path's physical-speed limit (50 m/s in L3.1) and OneEuro
+        // smoothing already act as the "outlier rejection" that correctedDistance
+        // was previously providing.
+        // r.distance stays as set by MapView.onCoordsUpdated (= tracking.totalDistance).
+
+        // PR 3.2: overwrite correctedCoordinates with DP-simplified geometry for display.
+        // Distance is independent of this — only smooths the rendered polyline.
+        r.correctedCoordinates = JourneyPostCorrection.simplifiedForDisplay(for: r)
         r.isTooShort = shouldTreatAsStationaryDrift(route: r)
 
         func persistAndReturn(_ updated: JourneyRoute, notify: (() -> Void)?) {

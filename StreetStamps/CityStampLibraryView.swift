@@ -53,6 +53,9 @@ struct CityStampLibraryView: View {
     // ✅ Delete confirmations
     @State private var cityToDelete: City? = nil
     @State private var showDeleteCityAlert = false
+    @State private var cityToEditName: City? = nil
+    @State private var showEditNameAlert = false
+    @State private var editedNameDraft = ""
     @State private var showPublicDetailUnavailableAlert = false
     @State private var activeCityDetail: City? = nil
     @State private var photoScanPulse = false
@@ -173,12 +176,28 @@ struct CityStampLibraryView: View {
                 let keys = city.sourceCityKeys.isEmpty ? [city.id] : city.sourceCityKeys
                 for key in keys {
                     cache.deleteCity(id: key)
+                    CityDisplayOverrideStore.shared.clear(for: key)
                 }
+                CityDisplayOverrideStore.shared.clear(for: city.id)
                 vm.load(journeyStore: store, cityCache: cache)
             }
             Button(L10n.t("cancel"), role: .cancel) {}
         } message: { city in
             Text(String(format: L10n.t("delete_city_alert_message"), locale: Locale.current, city.localizedName))
+        }
+        .alert(L10n.t("city_edit_display_name_title"), isPresented: $showEditNameAlert, presenting: cityToEditName) { city in
+            TextField(L10n.t("city_edit_display_name_placeholder"), text: $editedNameDraft)
+            Button(L10n.t("save")) {
+                CityDisplayOverrideStore.shared.setOverride(editedNameDraft, for: city.id)
+                vm.load(journeyStore: store, cityCache: cache)
+            }
+            Button(L10n.t("reset"), role: .destructive) {
+                CityDisplayOverrideStore.shared.clear(for: city.id)
+                vm.load(journeyStore: store, cityCache: cache)
+            }
+            Button(L10n.t("cancel"), role: .cancel) {}
+        } message: { _ in
+            Text(L10n.t("city_edit_display_name_hint"))
         }
         .alert(L10n.t("details_unavailable_title"), isPresented: $showPublicDetailUnavailableAlert) {
             Button(L10n.t("ok"), role: .cancel) {}
@@ -294,6 +313,13 @@ struct CityStampLibraryView: View {
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
+                            Button {
+                                cityToEditName = city
+                                editedNameDraft = CityDisplayOverrideStore.shared.override(for: city.id) ?? city.localizedName
+                                showEditNameAlert = true
+                            } label: {
+                                Label(L10n.t("city_edit_display_name"), systemImage: "pencil")
+                            }
                             Button(role: .destructive) {
                                 cityToDelete = city
                                 showDeleteCityAlert = true
@@ -1034,6 +1060,8 @@ final class CityThumbnailLoader: ObservableObject {
     func load(city: City?, routePath: String?, basePath: String?, appearanceRaw: String, renderCacheStore: CityRenderCacheStore, renderMaskByJourney: [String: Set<Int>] = [:]) {
         // City cards use render-keyed persistent caching first, then render on miss.
         if let city {
+            let coordCounts = city.journeys.prefix(5).map { ($0.id.prefix(8), $0.coordinates.count, $0.correctedCoordinates.count, $0.matchedCoordinates.count, $0.allCLCoords.count) }
+            print("[CityThumbnail] LOAD city=\(city.id) appearance=\(appearanceRaw) journeys=\(city.journeys.count) coords=\(coordCounts)")
             let renderKeyParts = Self.renderKeyParts(for: city, appearanceRaw: appearanceRaw, renderMaskByJourney: renderMaskByJourney)
             let renderKey = renderKeyParts.fullKey
             CityThumbnailDebugLogger.shared.recordRenderKey(
@@ -1055,6 +1083,7 @@ final class CityThumbnailLoader: ObservableObject {
             renderTask?.cancel()
             renderTask = nil
             if let cached = CityImageMemoryCache.shared.image(forKey: renderKey) {
+                print("[CityThumbnail] LOAD city=\(city.id) cache=MEMORY_HIT key=\(renderKey)")
                 CityThumbnailDebugLogger.shared.log(
                     .memoryHit,
                     cityID: city.id,
@@ -1066,6 +1095,7 @@ final class CityThumbnailLoader: ObservableObject {
             }
 
             if let diskCached = renderCacheStore.image(forKey: renderKey) {
+                print("[CityThumbnail] LOAD city=\(city.id) cache=DISK_HIT key=\(renderKey)")
                 CityThumbnailDebugLogger.shared.log(
                     .diskHit,
                     cityID: city.id,
@@ -1077,6 +1107,7 @@ final class CityThumbnailLoader: ObservableObject {
                 return
             }
 
+            print("[CityThumbnail] LOAD city=\(city.id) cache=MISS_WILL_RENDER key=\(renderKey)")
             CityThumbnailDebugLogger.shared.log(
                 .renderMiss,
                 cityID: city.id,
@@ -1156,7 +1187,7 @@ final class CityThumbnailLoader: ObservableObject {
             .joined(separator: "~")
         let boundarySignature = "ignored-for-cache"
         let anchorSignature = "ignored-for-cache"
-        let styleVersion = 5
+        let styleVersion = 6
         let colorVersion = (MapLayerStyle(rawValue: appearanceRaw) ?? .mutedDark).isSatelliteStyle ? 2 : 1
         // Include only the masks for journeys that belong to this city, so
         // edits to one city's polylines don't invalidate every other city's
@@ -1263,6 +1294,8 @@ final class CityThumbnailLoader: ObservableObject {
     }
 
     nonisolated static func ensurePersistentCache(for city: City, appearanceRaw: String, renderCacheStore: CityRenderCacheStore, renderMaskByJourney: [String: Set<Int>] = [:]) async {
+        let entryCounts = city.journeys.prefix(5).map { ($0.id.prefix(8), $0.coordinates.count, $0.allCLCoords.count) }
+        print("[CityThumbnail] ENSURE city=\(city.id) appearance=\(appearanceRaw) journeys=\(city.journeys.count) coords=\(entryCounts)")
         let key = renderCacheKey(for: city, appearanceRaw: appearanceRaw, renderMaskByJourney: renderMaskByJourney)
         if CityImageMemoryCache.shared.image(forKey: key) != nil {
             await MainActor.run {
@@ -1321,6 +1354,12 @@ final class CityThumbnailLoader: ObservableObject {
         // detection is only needed for MapKit snapshots.
         // Throttle concurrent snapshot requests to avoid overwhelming the tile server.
         let isMapbox = (MapLayerStyle(rawValue: appearanceRaw) ?? .mutedDark).engine == .mapbox
+        // Route-less fallback is only legitimate when there's nothing to draw.
+        // Accepting it for a city with journeys would cache a thumbnail without
+        // routes under the new style key (e.g. after a style switch where the
+        // primary Mapbox snapshot transiently fails) and the user would see
+        // wrong content until the next styleVersion bump. Let primary retry instead.
+        let allowFallback = maskedCity.journeys.isEmpty
         await RenderThrottle.shared.acquire()
 
         var img: UIImage?
@@ -1335,8 +1374,10 @@ final class CityThumbnailLoader: ObservableObject {
             let candidate: UIImage?
             if let primary = await Self.makeSnapshot(city: maskedCity, appearanceRaw: appearanceRaw, fetchedBoundary: fetchedBoundary) {
                 candidate = primary
-            } else {
+            } else if allowFallback {
                 candidate = await Self.makeFallbackSnapshot(city: maskedCity, appearanceRaw: appearanceRaw)
+            } else {
+                candidate = nil
             }
             if let candidate, isMapbox || !Self.isBlankImage(candidate) {
                 img = candidate
@@ -1667,22 +1708,30 @@ final class CityThumbnailLoader: ObservableObject {
         return await makeMapKitSnapshot(city: city, appearanceRaw: appearanceRaw, fetchedBoundary: fetchedBoundary)
     }
 
-    /// Fallback: forward-geocode the city name from the city key to get a center,
-    /// then render a plain map tile without routes.
+    /// Fallback: render a plain map tile without routes.
+    /// Prefers the city's stored anchor (always available for photo-discovered cities,
+    /// and bypasses CLGeocoder rate-limit / unknown-name failures for places like
+    /// "Alxa", "Lhasa" that Apple's English geocoder may not recognize).
+    /// Falls through to forward-geocoding the name only when no anchor is available.
     private static func makeFallbackSnapshot(city: City, appearanceRaw: String) async -> UIImage? {
         let parts = city.id.split(separator: "|")
         guard parts.count >= 2 else { return nil }
         let cityName = String(parts[0])
         let countryISO2 = String(parts[1])
 
-        let center: CLLocationCoordinate2D? = await withCheckedContinuation { cont in
-            let geocoder = CLGeocoder()
-            geocoder.geocodeAddressString("\(cityName), \(countryISO2)") { placemarks, _ in
-                cont.resume(returning: placemarks?.first?.location?.coordinate)
+        let resolvedCenter: CLLocationCoordinate2D?
+        if let anchor = city.anchor, CLLocationCoordinate2DIsValid(anchor) {
+            resolvedCenter = anchor
+        } else {
+            resolvedCenter = await withCheckedContinuation { cont in
+                let geocoder = CLGeocoder()
+                geocoder.geocodeAddressString("\(cityName), \(countryISO2)") { placemarks, _ in
+                    cont.resume(returning: placemarks?.first?.location?.coordinate)
+                }
             }
         }
 
-        guard let center, CLLocationCoordinate2DIsValid(center) else { return nil }
+        guard let center = resolvedCenter, CLLocationCoordinate2DIsValid(center) else { return nil }
         let style = MapLayerStyle(rawValue: appearanceRaw) ?? .mutedDark
 
         if style.engine == .mapbox {
@@ -1797,6 +1846,9 @@ final class CityThumbnailLoader: ObservableObject {
             dedupGranularity: .coarse
         )
 
+        let coordCounts = city.journeys.map { ($0.id, $0.coordinates.count, $0.correctedCoordinates.count, $0.matchedCoordinates.count, $0.allCLCoords.count) }
+        print("[CityThumbnail] ▶ city=\(city.id) journeys=\(city.journeys.count) coordsPerJourney=\(coordCounts.prefix(5))")
+
         let snapshotSize = CGSize(width: 480, height: 320)
         let styleURI = StyleURI(rawValue: style.mapboxStyleURI) ?? .dark
         let isDark = style.isDarkStyle
@@ -1820,15 +1872,24 @@ final class CityThumbnailLoader: ObservableObject {
                 let snapOptions = MapSnapshotOptions(size: snapshotSize, pixelRatio: 2, showsLogo: false, showsAttribution: false)
                 let snapshotter = MapboxMaps.Snapshotter(options: snapOptions)
 
-                // onNext uses MapboxObservable which holds a strong reference to the handler;
-                // the returned Cancelable does not need to be retained.
-                snapshotter.onNext(event: .styleLoaded) { [snapshotter] _ in
-                    print("[CityThumbnail] ▶ styleLoaded fired, adding layers")
-                    // Add route source + layers directly on Snapshotter (it IS a StyleManager).
+                // Use load(mapStyle:completion:) instead of `styleURI = ...` + onNext(.styleLoaded).
+                // The event-stream variant has a race: Snapshotter starts loading a default style
+                // on init, and its styleLoaded can fire before our setStyleURI takes effect — the
+                // callback then adds layers to the wrong style, which the new style load wipes.
+                // load(mapStyle:) gives a deterministic completion tied to *this* style request.
+                snapshotter.load(mapStyle: MapStyle(uri: styleURI)) { [snapshotter] error in
+                    if let error {
+                        print("[CityThumbnail] ▶ Mapbox style load FAILED city=\(city.id) error=\(error)")
+                        cont.resume(returning: nil)
+                        return
+                    }
+                    print("[CityThumbnail] ▶ Mapbox style loaded city=\(city.id) styleURI=\(styleURI.rawValue)")
                     let routeSourceId = "thumb-routes"
                     var src = GeoJSONSource(id: routeSourceId)
                     var feats: [Turf.Feature] = []
-                    for seg in styledSegments where seg.coords.count >= 2 {
+                    var skippedSegments = 0
+                    for seg in styledSegments {
+                        guard seg.coords.count >= 2 else { skippedSegments += 1; continue }
                         var f = Turf.Feature(geometry: .lineString(Turf.LineString(seg.coords)))
                         f.properties = [
                             "isGap": .init(booleanLiteral: seg.isGap),
@@ -1836,8 +1897,10 @@ final class CityThumbnailLoader: ObservableObject {
                         ]
                         feats.append(f)
                     }
+                    print("[CityThumbnail] ▶ city=\(city.id) styledSegments=\(styledSegments.count) feats=\(feats.count) skipped=\(skippedSegments)")
                     src.data = .featureCollection(Turf.FeatureCollection(features: feats))
-                    try? snapshotter.addSource(src)
+                    do { try snapshotter.addSource(src) }
+                    catch { print("[CityThumbnail] ▶ addSource FAILED city=\(city.id) error=\(error)") }
 
                     var glow = LineLayer(id: "thumb-glow", source: routeSourceId)
                     glow.filter = Exp(.eq) { Exp(.get) { "isGap" }; false }
@@ -1847,7 +1910,8 @@ final class CityThumbnailLoader: ObservableObject {
                     glow.lineOpacity = .constant(isDark ? 0.25 : 0.22)
                     glow.lineWidth = .constant(6.0)
                     glow.lineBlur = .constant(3.0)
-                    try? snapshotter.addLayer(glow)
+                    do { try snapshotter.addLayer(glow) }
+                    catch { print("[CityThumbnail] ▶ addLayer thumb-glow FAILED city=\(city.id) error=\(error)") }
 
                     var main = LineLayer(id: "thumb-main", source: routeSourceId)
                     main.filter = Exp(.eq) { Exp(.get) { "isGap" }; false }
@@ -1856,7 +1920,8 @@ final class CityThumbnailLoader: ObservableObject {
                     main.lineJoin = .constant(.round)
                     main.lineOpacity = .constant(1.0)
                     main.lineWidth = .constant(2.5)
-                    try? snapshotter.addLayer(main)
+                    do { try snapshotter.addLayer(main) }
+                    catch { print("[CityThumbnail] ▶ addLayer thumb-main FAILED city=\(city.id) error=\(error)") }
 
                     var dash = LineLayer(id: "thumb-dash", source: routeSourceId)
                     dash.filter = Exp(.eq) { Exp(.get) { "isGap" }; true }
@@ -1866,7 +1931,14 @@ final class CityThumbnailLoader: ObservableObject {
                     dash.lineOpacity = .constant(0.5)
                     dash.lineDasharray = .constant([10, 10])
                     dash.lineWidth = .constant(1.5)
-                    try? snapshotter.addLayer(dash)
+                    do { try snapshotter.addLayer(dash) }
+                    catch { print("[CityThumbnail] ▶ addLayer thumb-dash FAILED city=\(city.id) error=\(error)") }
+
+                    let layerIDs = snapshotter.allLayerIdentifiers.map(\.id)
+                    let hasGlow = layerIDs.contains("thumb-glow")
+                    let hasMain = layerIDs.contains("thumb-main")
+                    let hasDash = layerIDs.contains("thumb-dash")
+                    print("[CityThumbnail] ▶ city=\(city.id) layers glow=\(hasGlow) main=\(hasMain) dash=\(hasDash) totalLayers=\(layerIDs.count)")
 
                     let cam = snapshotter.camera(for: [sw, ne], padding: UIEdgeInsets(top: 20, left: 20, bottom: 20, right: 20), bearing: 0, pitch: 0)
                     snapshotter.setCamera(to: cam)
@@ -1883,9 +1955,6 @@ final class CityThumbnailLoader: ObservableObject {
                         }
                     }
                 }
-
-                // Setting styleURI triggers async style load → fires .styleLoaded when ready.
-                snapshotter.styleURI = styleURI
             }
         }
     }
@@ -1903,8 +1972,13 @@ final class CityThumbnailLoader: ObservableObject {
                 let snapOptions = MapSnapshotOptions(size: snapshotSize, pixelRatio: 2, showsLogo: false, showsAttribution: false)
                 let snapshotter = MapboxMaps.Snapshotter(options: snapOptions)
 
-                snapshotter.onNext(event: .styleLoaded) { [snapshotter] _ in
-                    print("[CityThumbnail] ▶ fallback styleLoaded fired")
+                // See makeMapboxSnapshot for why we avoid onNext(.styleLoaded) here.
+                snapshotter.load(mapStyle: MapStyle(uri: styleURI)) { [snapshotter] error in
+                    if let error {
+                        print("[CityThumbnail] ▶ Mapbox fallback style load FAILED error=\(error)")
+                        cont.resume(returning: nil)
+                        return
+                    }
                     snapshotter.setCamera(to: CameraOptions(center: center, zoom: zoom))
 
                     snapshotter.start(overlayHandler: nil) { [snapshotter] result in
@@ -1919,8 +1993,6 @@ final class CityThumbnailLoader: ObservableObject {
                         }
                     }
                 }
-
-                snapshotter.styleURI = styleURI
             }
         }
     }

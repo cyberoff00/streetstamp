@@ -330,7 +330,7 @@ enum CityPlacemarkResolver {
         preferredLevelOverride: CardLevel? = nil,
         localizedCandidate: String? = nil
     ) -> String {
-        // If caller already resolved a localized name (e.g. from CityNameTranslationCache),
+        // If caller already resolved a localized name (e.g. from CNCityNameLookup),
         // prefer it over the English canonical name.
         if let candidate = localizedCandidate?.trimmingCharacters(in: .whitespacesAndNewlines),
            !candidate.isEmpty {

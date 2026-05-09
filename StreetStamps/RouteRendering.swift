@@ -32,6 +32,25 @@ enum RouteRenderStyleTokens {
     static let flightDashLengths: [CGFloat] = [18, 12]
 }
 
+/// Per-journey route rendering style. Persisted on `JourneyRoute`. Premium-only,
+/// only honored by the SharingCard pipeline — live maps always render `.line`.
+enum RouteRenderStyle: String, Codable, Equatable, Sendable {
+    case line
+    case dots
+}
+
+/// Constants for the rasterized dot rendering used by the share-card pipeline.
+/// The route is rasterized to a screen-aligned grid so that diagonals exhibit
+/// real stair-stepping ("ASCII pixel art" feel) rather than smooth flow.
+enum RouteDotRaster {
+    /// Grid cell size in points. Each cell the route passes through becomes
+    /// at most one dot, so this controls overall density.
+    static let cellSize: CGFloat = 12
+    /// Visible dot diameter in points. Smaller than `cellSize` so neighboring
+    /// dots don't touch — preserves the discrete-pixel look.
+    static let dotDiameter: CGFloat = 8
+}
+
 /// Shared logic that decides:
 /// 1) Whether to compress route into a 2-point "flight-like" segment
 /// 2) Which segments are solid vs dashed
@@ -154,8 +173,19 @@ enum RouteSnapshotDrawer {
         coreColor: UIColor,
         stroke: Stroke,
         glowColor: UIColor? = nil,
-        isDarkMap: Bool = false
+        isDarkMap: Bool = false,
+        renderStyle: RouteRenderStyle = .line
     ) {
+        if renderStyle == .dots {
+            drawDots(
+                segments: segments,
+                pointForCoordinate: { snapshot.point(for: $0) },
+                ctx: ctx,
+                coreColor: coreColor,
+                isDarkMap: isDarkMap
+            )
+            return
+        }
         guard segments.count > 0 else { return }
 
         let glowTint = glowColor ?? coreColor
@@ -223,8 +253,19 @@ enum RouteSnapshotDrawer {
         coreColor: UIColor,
         stroke: Stroke,
         glowColor: UIColor? = nil,
-        isDarkMap: Bool = false
+        isDarkMap: Bool = false,
+        renderStyle: RouteRenderStyle = .line
     ) {
+        if renderStyle == .dots {
+            drawDots(
+                segments: segments,
+                pointForCoordinate: pointForCoordinate,
+                ctx: ctx,
+                coreColor: coreColor,
+                isDarkMap: isDarkMap
+            )
+            return
+        }
         guard segments.count > 0 else { return }
 
         let glowTint = glowColor ?? coreColor
@@ -276,6 +317,71 @@ enum RouteSnapshotDrawer {
             }
         }
 
+        ctx.restoreGState()
+    }
+
+    /// Rasterize each non-gap segment to a screen-aligned grid, then draw one
+    /// dot per lit cell. The route walks in <1 px sub-steps so no cell on a
+    /// diagonal is ever skipped. The Set deduplicates revisited cells (loops,
+    /// overlapping segments) so output density is bounded by canvas area, not
+    /// by route length. Diagonals naturally show stair-stepping → the "ASCII
+    /// pixel art" look that parametric line/dasharray rendering can't produce.
+    /// Gap (dashed) segments are skipped — dot mode is aesthetic, not signal.
+    private static func drawDots(
+        segments: [RenderRouteSegment],
+        pointForCoordinate: (CLLocationCoordinate2D) -> CGPoint,
+        ctx: CGContext,
+        coreColor: UIColor,
+        isDarkMap: Bool
+    ) {
+        guard !segments.isEmpty else { return }
+        let cellSize = RouteDotRaster.cellSize
+        let dotDiameter = RouteDotRaster.dotDiameter
+        let dotInset = (cellSize - dotDiameter) / 2
+
+        struct GridCell: Hashable {
+            let x: Int
+            let y: Int
+        }
+        var litCells = Set<GridCell>()
+
+        @inline(__always) func addPoint(_ p: CGPoint) {
+            let cx = Int(floor(p.x / cellSize))
+            let cy = Int(floor(p.y / cellSize))
+            litCells.insert(GridCell(x: cx, y: cy))
+        }
+
+        for seg in segments where seg.style == .solid && seg.coords.count >= 1 {
+            var prev: CGPoint? = nil
+            for c in seg.coords {
+                let cur = pointForCoordinate(c)
+                if let pr = prev {
+                    let dx = cur.x - pr.x
+                    let dy = cur.y - pr.y
+                    let dist = (dx * dx + dy * dy).squareRoot()
+                    // Sub-pixel stepping guarantees we touch every cell on
+                    // even the steepest diagonals. `max(1, ...)` handles the
+                    // degenerate case of two coincident vertices.
+                    let stepCount = max(1, Int(dist.rounded(.up)))
+                    let invSteps = 1 / CGFloat(stepCount)
+                    for i in 0...stepCount {
+                        let t = CGFloat(i) * invSteps
+                        addPoint(CGPoint(x: pr.x + dx * t, y: pr.y + dy * t))
+                    }
+                } else {
+                    addPoint(cur)
+                }
+                prev = cur
+            }
+        }
+
+        ctx.saveGState()
+        ctx.setFillColor(coreColor.withAlphaComponent(isDarkMap ? 0.95 : 1.0).cgColor)
+        for cell in litCells {
+            let x = CGFloat(cell.x) * cellSize + dotInset
+            let y = CGFloat(cell.y) * cellSize + dotInset
+            ctx.fillEllipse(in: CGRect(x: x, y: y, width: dotDiameter, height: dotDiameter))
+        }
         ctx.restoreGState()
     }
 

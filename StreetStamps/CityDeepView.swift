@@ -688,7 +688,7 @@ struct CityDeepView: View {
         .task(id: activeCityKey) {
             guard let cached = activeCachedCity else { return }
             let locale = LanguagePreference.shared.displayLocale
-            if let translated = await CityNameTranslationCache.shared.translateIfNeeded(cached, locale: locale) {
+            if let translated = CNCityNameLookup.shared.displayName(for: cached.cityKey, locale: locale) {
                 displayTitle = translated
             }
         }

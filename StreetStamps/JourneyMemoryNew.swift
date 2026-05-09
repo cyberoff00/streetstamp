@@ -402,21 +402,16 @@ struct JourneyMemoryMainView: View {
         let journeys = allMemoryJourneys
         let citiesByKey = buildCachedCitiesByKey()
 
-        // cityKey -> sample start coordinate
-        var coordByKey: [String: CLLocationCoordinate2D] = [:]
+        var cityKeys: Set<String> = []
         for j in journeys {
             let key = (j.startCityKey ?? j.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
             guard !key.isEmpty, key != "Unknown|" else { continue }
-            if coordByKey[key] == nil, let start = j.startCoordinate, start.isValid {
-                coordByKey[key] = start
-            }
+            cityKeys.insert(key)
         }
 
-        // Phase 1: resolve all cached titles instantly (no geocode needed)
-        var needsGeocode: [(key: String, coord: CLLocationCoordinate2D)] = []
         var resolvedBatch: [String: String] = [:]
 
-        for (key, coord) in coordByKey {
+        for key in cityKeys {
             if let cachedCity = citiesByKey[key] {
                 let title = cachedCity.displayTitle
                 if !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -426,29 +421,15 @@ struct JourneyMemoryMainView: View {
             }
 
             let locale = LanguagePreference.shared.displayLocale
-            if let cached = CityNameTranslationCache.shared.cachedName(cityKey: key, localeID: locale.identifier),
-               !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                resolvedBatch[key] = cached
-                continue
+            if let title = CNCityNameLookup.shared.displayName(for: key, locale: locale),
+               !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                resolvedBatch[key] = title
             }
-
-            needsGeocode.append((key: key, coord: coord))
         }
 
         if !resolvedBatch.isEmpty {
             await MainActor.run {
                 for (k, v) in resolvedBatch { localizedCityNameByKey[k] = v }
-            }
-        }
-
-        // Phase 2: geocode remaining keys (still serial due to CLGeocoder rate limits)
-        let locale = LanguagePreference.shared.displayLocale
-        for item in needsGeocode {
-            let level = citiesByKey[item.key]?.identityLevel
-                ?? CityPlacemarkResolver.inferIdentityLevel(cityKey: item.key, iso2: item.key.components(separatedBy: "|").last)
-            if let title = await CityNameTranslationCache.shared.translate(cityKey: item.key, anchor: item.coord, level: level, locale: locale),
-               !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                await MainActor.run { localizedCityNameByKey[item.key] = title }
             }
         }
     }

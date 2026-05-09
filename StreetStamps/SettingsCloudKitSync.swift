@@ -25,6 +25,14 @@ actor SettingsCloudKitSync {
         UserScopedProfileStateStore.globalEconomyKey,
     ]
 
+    /// Keys that carry their own per-record modifiedAt. On restore, the cloud
+    /// value only overwrites local when its timestamp is newer than local's.
+    /// Prevents one device's stale upload from clobbering another device's
+    /// fresher state.
+    static let lastWriteWinsKeys: Set<String> = [
+        UserScopedProfileStateStore.globalAvatarLoadoutKey,
+    ]
+
     init(database: CKDatabase) {
         self.database = database
     }

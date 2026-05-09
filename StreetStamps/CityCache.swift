@@ -125,7 +125,7 @@ struct LatLon: Codable {
 
 // MARK: - CachedCity (disk)
 // Locale-independent identity model. All fields are en_US or locale-free.
-// Display name translation happens at render time via CityNameTranslationCache.
+// Display name translation happens at render time via CNCityNameLookup.
 struct CachedCity: Identifiable, Codable {
     let id: String                 // identity key; canonical: "name|ISO2" or temp: "__TMP__|journeyId"
     let cityKey: String
@@ -204,11 +204,13 @@ struct CachedCity: Identifiable, Codable {
         return fromKey.isEmpty ? name : fromKey
     }
 
-    /// The display name for UI. Checks translation cache first, falls back to en_US.
+    /// The display name for UI. User override > CN city mapping > en_US fallback.
     var displayTitle: String {
-        let localeID = LanguagePreference.shared.effectiveLocaleIdentifier
-        if localeID.hasPrefix("en") { return englishName }
-        if let translated = CityNameTranslationCache.shared.cachedName(cityKey: cityKey, localeID: localeID) {
+        if let custom = CityDisplayOverrideStore.shared.override(for: cityKey) {
+            return custom
+        }
+        let locale = LanguagePreference.shared.displayLocale
+        if let translated = CNCityNameLookup.shared.displayName(for: cityKey, locale: locale) {
             return translated
         }
         return englishName
@@ -2237,7 +2239,6 @@ final class CityCache: ObservableObject {
 
         Task.detached(priority: .utility) { [weak self] in
             var geocodeFailedCount = 0
-            var reKeyedCityKeys = Set<String>()  // old keys that changed during repair
             for (cityKey, anchor) in citiesToRepair {
                 let location = CLLocation(latitude: anchor.lat, longitude: anchor.lon)
                 var result: ReverseGeocodeService.CanonicalResult?
@@ -2252,10 +2253,10 @@ final class CityCache: ObservableObject {
                     continue
                 }
 
-                let changedKeys: [String] = await MainActor.run { [weak self] in
-                    guard let self else { return [] }
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
                     // Find by cityKey at write time — array may have shifted
-                    guard let idx = self.cachedCities.firstIndex(where: { $0.cityKey == cityKey }) else { return [] }
+                    guard let idx = self.cachedCities.firstIndex(where: { $0.cityKey == cityKey }) else { return }
                     let city = self.cachedCities[idx]
 
                     let newKey = r.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2304,15 +2305,11 @@ final class CityCache: ObservableObject {
                                 self.journeyStore.upsertSnapshotThrottled(updated, coordCount: updated.coordinates.count)
                             }
                         }
-                        return [oldKey, newKey]
                     }
-                    return []
                 }
-                reKeyedCityKeys.formUnion(changedKeys)
             }
 
-            let finalReKeyed = reKeyedCityKeys
-            await MainActor.run { [weak self, skippedNoCoord, geocodeFailedCount, finalReKeyed] in
+            await MainActor.run { [weak self, skippedNoCoord, geocodeFailedCount] in
                 guard let self else { return }
                 // Merge duplicates: re-keying may map multiple old cities to the same canonical key.
                 // Instead of discarding, merge journeyIds/explorations/memories and keep best metadata.
@@ -2348,14 +2345,6 @@ final class CityCache: ObservableObject {
                 }
                 self.cachedCities = self.cachedCities.compactMap { merged.removeValue(forKey: $0.id) }
 
-                // Only flush translations for cities whose keys actually changed.
-                // Preserves valid cached translations for unchanged cities, avoiding
-                // a full re-geocode that can fail under VPN/throttle conditions.
-                if finalReKeyed.isEmpty {
-                    // No re-keying happened — translations are all still valid
-                } else {
-                    CityNameTranslationCache.shared.clearKeys(finalReKeyed)
-                }
                 self.saveToDisk()
                 self.notifyCitiesChanged()
                 // Only mark done if ALL cities were successfully repaired

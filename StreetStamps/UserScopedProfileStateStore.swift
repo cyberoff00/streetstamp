@@ -49,7 +49,9 @@ enum UserScopedProfileStateStore {
 
     static func saveCurrentLoadout(_ loadout: RobotLoadout, for userID: String, defaults: UserDefaults = .standard) {
         guard !userID.isEmpty else { return }
-        guard let data = normalizedLoadoutData(loadout) else { return }
+        var stamped = loadout
+        stamped.modifiedAt = Date()
+        guard let data = normalizedLoadoutData(stamped) else { return }
 
         defaults.set(data, forKey: globalAvatarLoadoutKey)
         defaults.set(data, forKey: avatarLoadoutKey(for: userID))

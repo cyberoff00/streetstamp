@@ -83,6 +83,14 @@ struct MembershipSubscriptionView: View {
         } message: {
             Text(L10n.t("membership_icloud_auto_enabled_message"))
         }
+        .alert(
+            L10n.t("membership_refund_processed_title"),
+            isPresented: $membership.showRefundProcessedAlert
+        ) {
+            Button(L10n.t("membership_refund_processed_ok"), role: .cancel) {}
+        } message: {
+            Text(L10n.t("membership_refund_processed_message"))
+        }
         .onAppear { triggerICloudAutoEnableAlertIfPending() }
         .onChange(of: membership.pendingICloudAutoEnableNotice) { _, pending in
             if pending { triggerICloudAutoEnableAlertIfPending() }
@@ -462,15 +470,25 @@ struct MembershipSubscriptionView: View {
             .opacity(isPurchasing ? 0.7 : 1.0)
             .padding(.horizontal, 18)
 
-            Button {
-                Task {
-                    try? await AppStore.sync()
-                    await membership.refreshEntitlement()
+            HStack(spacing: 18) {
+                Button {
+                    Task {
+                        try? await membership.restorePurchases()
+                    }
+                } label: {
+                    Text(L10n.t("membership_restore_purchases"))
+                        .font(.system(size: 13))
+                        .foregroundColor(FigmaTheme.subtext)
                 }
-            } label: {
-                Text(L10n.t("membership_restore_purchases"))
-                    .font(.system(size: 13))
-                    .foregroundColor(FigmaTheme.subtext)
+                Button {
+                    Task {
+                        await membership.presentOfferCodeRedemption()
+                    }
+                } label: {
+                    Text(L10n.t("membership_redeem_offer_code"))
+                        .font(.system(size: 13))
+                        .foregroundColor(FigmaTheme.subtext)
+                }
             }
 
             Text(L10n.t("membership_auto_renew_note"))

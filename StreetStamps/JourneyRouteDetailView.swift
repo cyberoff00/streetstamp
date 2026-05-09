@@ -359,7 +359,12 @@ struct JourneyRouteDetailView: View {
         let key = journey.stableCityKey ?? ""
         guard !key.isEmpty, key != "Unknown|" else { return }
 
-        // Single source of truth: CachedCity.displayTitle
+        if let custom = CityDisplayOverrideStore.shared.override(for: key) {
+            await MainActor.run { localizedCityTitle = custom }
+            return
+        }
+
+        // Single source of truth: CachedCity.displayTitle (also applies override)
         if let cachedCity = cachedCitiesByKey[key] {
             let title = cachedCity.displayTitle
             if !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -368,21 +373,8 @@ struct JourneyRouteDetailView: View {
             }
         }
 
-        // Fallback for journeys without a city card: async geocode
-        _ = JourneyCityNamePresentation.parentRegionKey(for: journey, cachedCitiesByKey: cachedCitiesByKey)
-
         let locale = LanguagePreference.shared.displayLocale
-        if let cached = CityNameTranslationCache.shared.cachedName(cityKey: key, localeID: locale.identifier),
-           !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            await MainActor.run { localizedCityTitle = cached }
-            return
-        }
-
-        guard let start = journey.startCoordinate, start.isValid else { return }
-        let level = cachedCitiesByKey[key]?.identityLevel
-            ?? CityPlacemarkResolver.inferIdentityLevel(cityKey: key, iso2: journey.countryISO2)
-        let anchor = CLLocationCoordinate2D(latitude: start.latitude, longitude: start.longitude)
-        if let title = await CityNameTranslationCache.shared.translate(cityKey: key, anchor: anchor, level: level, locale: locale),
+        if let title = CNCityNameLookup.shared.displayName(for: key, locale: locale),
            !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             await MainActor.run { localizedCityTitle = title }
         }

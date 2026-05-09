@@ -217,10 +217,6 @@ struct LifelogView: View {
     @AppStorage("streetstamps.lifelog.mood.prompted.day") private var moodPromptedDay = ""
     @State private var activeLifelogHint: LifelogHintItem? = nil
     @State private var lifelogHintTask: Task<Void, Never>? = nil
-#if DEBUG
-    @AppStorage("streetstamps.debug.lifelog.mapDiagnosticsEnabled") private var mapDiagnosticsEnabled = true
-    @State private var diagnosticsAppearAt: Date? = nil
-#endif
 
     private var isDarkAppearance: Bool {
         (MapLayerStyle(rawValue: layerStyleRaw) ?? .mutedDark).isDarkStyle
@@ -243,46 +239,6 @@ struct LifelogView: View {
     private var farRouteSegments: [RenderRouteSegment] {
         renderSnapshot.farRouteSegments
     }
-
-#if DEBUG
-    private var diagnosticsOverlayReady: Bool {
-        mapContentReady &&
-        (
-            !renderSnapshot.farRouteSegments.isEmpty ||
-            renderSnapshot.selectedDayCenterCoordinate != nil ||
-            currentDisplayLocation != nil
-        )
-    }
-
-    private var diagnosticsStatusPanel: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("OVERLAY \(diagnosticsOverlayReady ? "READY" : "WAIT")")
-            Text("OVERLAY \(diagnosticsOverlayReady ? "READY" : "WAIT")")
-        }
-        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-        .foregroundColor(.white)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(Color.black.opacity(0.72))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-
-    private func diagnosticsLog(_ message: String) {
-        guard mapDiagnosticsEnabled else { return }
-        print("[LifelogMapDiag] \(message)")
-    }
-
-    private func diagnosticsUpdateIfNeeded(reason: String = "") {
-        guard mapDiagnosticsEnabled else { return }
-        let elapsedMs = diagnosticsAppearAt.map { Int(Date().timeIntervalSince($0) * 1000) } ?? -1
-        diagnosticsLog(
-            "\(reason) t=\(elapsedMs)ms " +
-            "mapContentReady=\(mapContentReady) " +
-            "overlayReady=\(diagnosticsOverlayReady)"
-        )
-    }
-#endif
-
 
     private var currentDisplayLocation: CLLocation? {
         let source: CLLocation? = locationHub.currentLocation ?? locationHub.lastKnownLocation
@@ -313,20 +269,6 @@ struct LifelogView: View {
                     location: locationHub.currentLocation,
                     lightBackground: !(MapLayerStyle(rawValue: layerStyleRaw) ?? .mutedDark).useWhiteWeatherParticles
                 )
-#if DEBUG
-                if mapDiagnosticsEnabled {
-                    VStack {
-                        HStack {
-                            Spacer()
-                            diagnosticsStatusPanel
-                        }
-                        .padding(.top, 92)
-                        .padding(.trailing, 12)
-                        Spacer()
-                    }
-                    .allowsHitTesting(false)
-                }
-#endif
 
                 VStack(spacing: 0) {
                     VStack(spacing: 0) {
@@ -431,18 +373,6 @@ struct LifelogView: View {
         .animation(.easeInOut(duration: 0.3), value: activeLifelogHint?.id)
         .onAppear {
             isOnScreen = true
-#if DEBUG
-            if mapDiagnosticsEnabled {
-                diagnosticsAppearAt = Date()
-                diagnosticsLog(
-                    "onAppear " +
-                    "locationHub=\(locationHub.currentLocation != nil) " +
-                    "lastKnown=\(locationHub.lastKnownLocation != nil) " +
-                    "lifelogLocation=\(lifelogStore.currentLocation != nil)"
-                )
-                diagnosticsUpdateIfNeeded(reason: "appear")
-            }
-#endif
             didCenterOnEnter = false
             didAutoFitToRoute = false
             seedSelectedDayIfNeeded()
@@ -500,9 +430,6 @@ struct LifelogView: View {
         .onChange(of: locationCenterKey) { _, _ in
             guard isOnScreen else { return }
             centerOnCurrent(force: !didCenterOnEnter)
-#if DEBUG
-            diagnosticsUpdateIfNeeded(reason: "locationCenterKey")
-#endif
         }
         .onChange(of: tileRevisionKey) { _, _ in
             guard isOnScreen else { return }
@@ -1144,12 +1071,6 @@ struct LifelogView: View {
             "far=\(snapshot.farRouteSegments.count) high=\(snapshot.isHighQuality)"
         )
         renderSnapshot = snapshot
-#if DEBUG
-        diagnosticsLog(
-            "snapshot apply generation=\(generation) farSegs=\(snapshot.farRouteSegments.count)"
-        )
-        diagnosticsUpdateIfNeeded(reason: "renderSnapshot")
-#endif
 
         // Only act on high-quality snapshots. Placeholders have no route data and
         // clearing pendingRecenterDay on them would cause the real snapshot to be ignored.

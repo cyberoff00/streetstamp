@@ -36,6 +36,7 @@ final class FilmCameraDropManager: ObservableObject {
         var presets: [CameraPreset] = [.plain]
         if isUnlockedForCurrentUser(defaults: defaults) {
             presets.append(.fujiCCD)
+            presets.append(.photobooth)
         }
         return presets
     }

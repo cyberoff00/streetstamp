@@ -146,20 +146,8 @@ struct PostcardComposerView: View {
                 await MainActor.run { localizedCityNamesByID[key] = fallback }
             }
 
-            let anchor = city.anchor?.cl ?? city.journeyIds.compactMap { id in
-                journeyStore.journeys.first(where: { $0.id == id })?.startCoordinate
-            }.first
-            guard let anchor, anchor.isValid else { continue }
-
             let locale = LanguagePreference.shared.displayLocale
-            if let cached = CityNameTranslationCache.shared.cachedName(cityKey: key, localeID: locale.identifier),
-               !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                let resolved = normalizedPrefetchedCityName(for: city, candidateTitle: cached)
-                await MainActor.run { localizedCityNamesByID[key] = resolved }
-                continue
-            }
-
-            if let title = await CityNameTranslationCache.shared.translate(cityKey: key, anchor: anchor, level: city.identityLevel, locale: locale),
+            if let title = CNCityNameLookup.shared.displayName(for: key, locale: locale),
                !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 let resolved = normalizedPrefetchedCityName(for: city, candidateTitle: title)
                 await MainActor.run { localizedCityNamesByID[key] = resolved }

@@ -4,25 +4,10 @@ import XCTest
 final class FirstProfileSetupPresentationTests: XCTestCase {
     func test_releasePresentationRequiresPendingSetup() {
         XCTAssertTrue(
-            FirstProfileSetupPresentation.shouldPresent(
-                requiresProfileSetup: true,
-                debugOverrideEnabled: false
-            )
+            FirstProfileSetupPresentation.shouldPresent(requiresProfileSetup: true)
         )
         XCTAssertFalse(
-            FirstProfileSetupPresentation.shouldPresent(
-                requiresProfileSetup: false,
-                debugOverrideEnabled: false
-            )
-        )
-    }
-
-    func test_debugOverrideForcesPresentationWithoutPendingSetup() {
-        XCTAssertTrue(
-            FirstProfileSetupPresentation.shouldPresent(
-                requiresProfileSetup: false,
-                debugOverrideEnabled: true
-            )
+            FirstProfileSetupPresentation.shouldPresent(requiresProfileSetup: false)
         )
     }
 }

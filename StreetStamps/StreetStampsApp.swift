@@ -2,6 +2,7 @@ import Combine
 import SwiftUI
 import UIKit
 import UserNotifications
+import RevenueCat
 #if canImport(FirebaseCore)
 import FirebaseCore
 #endif
@@ -59,11 +60,8 @@ enum JourneyDeletionSyncRunner {
 }
 
 enum FirstProfileSetupPresentation {
-    static func shouldPresent(
-        requiresProfileSetup: Bool,
-        debugOverrideEnabled: Bool
-    ) -> Bool {
-        requiresProfileSetup || debugOverrideEnabled
+    static func shouldPresent(requiresProfileSetup: Bool) -> Bool {
+        requiresProfileSetup
     }
 }
 
@@ -99,30 +97,10 @@ struct StreetStampsApp: App {
     @State private var trackTileDirty: Bool = false
     @State private var profileSwitchTask: Task<Void, Never>?
     @State private var pendingUpdatePrompt: PendingUpdatePrompt?
-#if DEBUG
-    @State private var showDebugFirstProfileSetupPreview = true
-#endif
-
-    private var debugFirstProfileSetupOverrideEnabled: Bool {
-#if DEBUG
-        return showDebugFirstProfileSetupPreview
-#else
-        return false
-#endif
-    }
 
     @ViewBuilder
     private var firstProfileSetupScreen: some View {
-#if DEBUG
-        FirstProfileSetupView(
-            isDebugPreview: showDebugFirstProfileSetupPreview && !sessionStore.requiresProfileSetup,
-            onDismissDebugPreview: {
-                showDebugFirstProfileSetupPreview = false
-            }
-        )
-#else
         FirstProfileSetupView()
-#endif
     }
 
     private var dailyTrackingPrecision: DailyTrackingPrecision {
@@ -339,9 +317,6 @@ struct StreetStampsApp: App {
 
     init() {
         BackendConfig.resetToDefault()
-        #if DEBUG
-        UserDefaults.standard.set(true, forKey: "streetstamps.debug.lifelog.mapDiagnosticsEnabled")
-        #endif
         #if canImport(FirebaseCore)
         if BackendConfig.firebaseBackupRuntimeEnabled,
            FirebaseApp.app() == nil,
@@ -349,9 +324,23 @@ struct StreetStampsApp: App {
             FirebaseApp.configure()
         }
         #endif
+
+        #if DEBUG
+        Purchases.logLevel = .debug
+        #else
+        Purchases.logLevel = .warn
+        #endif
+        Purchases.configure(withAPIKey: "appl_lgQllosipiiEpwoJtfTRpGpWCHC")
+
         let session = UserSessionStore()
         UserScopedProfileStateStore.initializeCurrentUser(session.activeLocalProfileID)
         _sessionStore = StateObject(wrappedValue: session)
+
+        if let accountID = session.accountUserID, !accountID.isEmpty {
+            Task.detached {
+                _ = try? await Purchases.shared.logIn(accountID)
+            }
+        }
 
         let paths = StoragePath(userID: session.activeLocalProfileID)
         let jStore = JourneyStore(paths: paths)
@@ -466,17 +455,10 @@ struct StreetStampsApp: App {
                 isPresented: Binding(
                     get: {
                         FirstProfileSetupPresentation.shouldPresent(
-                            requiresProfileSetup: sessionStore.requiresProfileSetup,
-                            debugOverrideEnabled: debugFirstProfileSetupOverrideEnabled
+                            requiresProfileSetup: sessionStore.requiresProfileSetup
                         )
                     },
-                    set: { presented in
-#if DEBUG
-                        if !presented {
-                            showDebugFirstProfileSetupPreview = false
-                        }
-#endif
-                    }
+                    set: { _ in }
                 )
             ) {
                 firstProfileSetupScreen
@@ -557,10 +539,21 @@ struct StreetStampsApp: App {
                     limit: 4,
                     renderMaskByJourney: renderMaskSnapshot
                 )
-                rebuildTrackTiles()
-                lifelogRenderCache.scheduleWarmupRecentDays(
-                    countryISO2: lifelogStore.countryISO2 ?? locationHub.countryISO2
-                )
+                // Splash-window warmup, in order:
+                //   1. await trackTile rebuild so the manifest is current
+                //   2. then start lifelog render warmup — by that point
+                //      launchPendingWarmupIfPossible's manifest guard passes,
+                //      so the warmup actually runs instead of silently no-oping
+                //      and waiting for the onChange(refreshRevision) retry hop.
+                // The whole chain runs inside the same .task that owns the
+                // startup phases, so it shares the splash window without
+                // blocking the splash itself.
+                Task { @MainActor in
+                    await rebuildTrackTilesAsync()
+                    lifelogRenderCache.scheduleWarmupRecentDays(
+                        countryISO2: lifelogStore.countryISO2 ?? locationHub.countryISO2
+                    )
+                }
 
                 // Phase 3: Deferred non-critical services. The auth prompt check
                 // is a no-op if feature flags haven't resolved yet; the
@@ -649,7 +642,6 @@ struct StreetStampsApp: App {
                     // Load journey, lifelog, city cache, and track tiles in parallel.
                     // All four do heavy disk I/O — running them concurrently avoids
                     // serializing the stall on the main thread during profile switch.
-                    CityNameTranslationCache.shared.clearAll()
                     async let journeyLoad: () = journeyStore.loadAsync()
                     async let lifelogLoad: () = lifelogStore.loadAsync()
                     async let cityCacheLoad: () = cityCache.rebindAsync(paths: paths)
@@ -717,6 +709,22 @@ struct StreetStampsApp: App {
                     StartupWarmupService.shared.start(
                         cities: deferredCities, appearanceRaw: deferredAR, renderCacheStore: deferredRC, limit: 16, renderMaskByJourney: deferredMasks
                     )
+                }
+            }
+            .onChange(of: sessionStore.activeLocalProfileID) { _, _ in
+                Task {
+                    let accountID = sessionStore.accountUserID
+                    if let accountID, !accountID.isEmpty {
+                        _ = try? await Purchases.shared.logIn(accountID)
+                    } else if !Purchases.shared.isAnonymous {
+                        _ = try? await Purchases.shared.logOut()
+                        // After logout, the new anonymous appUserId starts
+                        // empty. Re-attach the device's Apple ID transactions
+                        // so users who go account → guest don't see premium
+                        // disappear just because their Worldo account changed.
+                        try? await MembershipStore.shared.restorePurchases()
+                    }
+                    await MembershipStore.shared.refreshEntitlement()
                 }
             }
             .onChange(of: sessionStore.reauthenticationPromptVersion) { _, version in

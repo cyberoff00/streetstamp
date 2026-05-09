@@ -169,12 +169,15 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
     }
 
     /// Passive lifelog mode with dynamic moving/stationary adaptation.
-    /// Starts in stationary profile; upgrades precision when movement is detected,
-    /// then calms back down when the user stops. `pausesLocationUpdatesAutomatically`
-    /// stays true so iOS can fully pause GPS during extended stillness.
-    /// Significant location changes + visit monitoring act as fallback wakeups
-    /// when iOS pauses regular updates.
-    func startPassiveLifelog() {
+    /// Initial profile is decided by the caller: idle/cold-start uses
+    /// `.stationary` (battery-friendly); paths that follow active tracking
+    /// (e.g. journey just ended while user is still moving) should pass
+    /// `.moving` so the first minutes don't lose continuity to a coarse
+    /// stationary profile + tight accuracy gate downstream.
+    /// `pausesLocationUpdatesAutomatically` stays true so iOS can fully pause
+    /// GPS during extended stillness. Significant location changes + visit
+    /// monitoring act as fallback wakeups when iOS pauses regular updates.
+    func startPassiveLifelog(initialState: PassiveLocationState = .stationary) {
         stop()
 
         manager.allowsBackgroundLocationUpdates = true
@@ -190,13 +193,13 @@ final class SystemLocationSource: NSObject, LocationSource, CLLocationManagerDel
         passiveVisitCount = 0
         lastPauseDate = nil
 
-        applyPassiveProfile(for: .stationary)
+        applyPassiveProfile(for: initialState)
         manager.startUpdatingLocation()
         manager.startMonitoringSignificantLocationChanges()
         manager.startMonitoringVisits()
         requestImmediateLocationRefresh()
         #if DEBUG
-        print("📍 [Passive] started: updatingLocation + significantChange + visits")
+        print("📍 [Passive] started initialState=\(initialState): updatingLocation + significantChange + visits")
         #endif
     }
 

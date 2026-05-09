@@ -29,27 +29,4 @@ final class FirstProfileSetupViewModelTests: XCTestCase {
         XCTAssertEqual(presentation.skipButtonTopOffset, -6)
     }
 
-    func test_debugPreviewSkipWithoutTokenDismissesImmediately() {
-        XCTAssertTrue(
-            FirstProfileSetupDebugPreviewBehavior.shouldDismissImmediately(
-                for: .skip,
-                isDebugPreview: true,
-                hasAccessToken: false
-            )
-        )
-        XCTAssertFalse(
-            FirstProfileSetupDebugPreviewBehavior.shouldDismissImmediately(
-                for: .confirm,
-                isDebugPreview: true,
-                hasAccessToken: false
-            )
-        )
-        XCTAssertFalse(
-            FirstProfileSetupDebugPreviewBehavior.shouldDismissImmediately(
-                for: .skip,
-                isDebugPreview: false,
-                hasAccessToken: false
-            )
-        )
-    }
 }

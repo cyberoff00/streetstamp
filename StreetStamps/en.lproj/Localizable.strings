@@ -1111,6 +1111,10 @@
 "membership_save_badge" = "SAVE";
 "membership_subscribe_button" = "Subscribe";
 "membership_restore_purchases" = "Restore Purchases";
+"membership_redeem_offer_code" = "Redeem Code";
+"membership_refund_processed_title" = "Refund Processed";
+"membership_refund_processed_message" = "Your subscription refund has been processed. The welcome bonus coins (1500) granted with the subscription have been reclaimed; coins you earned from steps and other normal activity are unaffected.";
+"membership_refund_processed_ok" = "OK";
 "membership_auto_renew_note" = "Subscription auto-renews. Cancel anytime in Settings.";
 "membership_welcome_bonus_title" = "Welcome Bonus!";
 "membership_welcome_bonus_message" = "You've received %d coins! Go get some gear and customize your look!";
@@ -1309,3 +1313,8 @@
 "memory_empty_action_start" = "Start a journey";
 "postcard_no_city_hint" = "Start a journey to unlock cities and earn postcard opportunities for each city";
 "network_unstable_retrying" = "Network unstable, retrying...";
+"reset" = "Reset";
+"city_edit_display_name" = "Edit Display Name";
+"city_edit_display_name_title" = "Rename City";
+"city_edit_display_name_placeholder" = "Display name";
+"city_edit_display_name_hint" = "Show this card with a custom name. The city's identity is not changed.";

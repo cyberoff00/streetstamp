@@ -341,6 +341,8 @@ actor CloudKitSyncService {
             for (key, value) in restored {
                 if SettingsCloudKitSync.mergeOnRestoreKeys.contains(key) {
                     Self.mergeEconomyFromCloud(remoteValue: value, defaults: defaults)
+                } else if SettingsCloudKitSync.lastWriteWinsKeys.contains(key) {
+                    Self.mergeLoadoutByModifiedAt(remoteValue: value, defaults: defaults)
                 } else {
                     defaults.set(value, forKey: key)
                 }
@@ -391,6 +393,42 @@ actor CloudKitSyncService {
                 defaults.set(data, forKey: UserScopedProfileStateStore.economyKey(for: userID))
             }
         }
+    }
+
+    static func mergeLoadoutByModifiedAt(remoteValue: Any, defaults: UserDefaults) {
+        guard let remoteData = remoteValue as? Data,
+              let remote = try? JSONDecoder().decode(RobotLoadout.self, from: remoteData) else {
+            return
+        }
+        let key = UserScopedProfileStateStore.globalAvatarLoadoutKey
+
+        let shouldOverwrite: Bool
+        if let localData = defaults.data(forKey: key),
+           let local = try? JSONDecoder().decode(RobotLoadout.self, from: localData) {
+            switch (local.modifiedAt, remote.modifiedAt) {
+            case let (localAt?, remoteAt?):
+                shouldOverwrite = remoteAt > localAt
+            case (nil, _?):
+                // Local predates the timestamp field; remote is from a stamped device — accept it.
+                shouldOverwrite = true
+            case (_?, nil):
+                // Local was just stamped; remote is legacy/unstamped — keep local.
+                shouldOverwrite = false
+            case (nil, nil):
+                // Neither side has a timestamp (first migration). Preserve prior behavior: accept cloud.
+                shouldOverwrite = true
+            }
+        } else {
+            shouldOverwrite = true
+        }
+
+        guard shouldOverwrite else { return }
+
+        defaults.set(remoteData, forKey: key)
+        if let userID = UserScopedProfileStateStore.activeLocalProfileID(defaults: defaults) {
+            defaults.set(remoteData, forKey: UserScopedProfileStateStore.avatarLoadoutKey(for: userID))
+        }
+        NotificationCenter.default.post(name: .avatarLoadoutDidChange, object: nil)
     }
 
     // MARK: - Full Restore

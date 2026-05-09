@@ -839,6 +839,14 @@ final class LifelogStore: ObservableObject {
     }
 
     private func ingest(_ loc: CLLocation) {
+        // Reject stale fixes. iOS may deliver a cached coordinate (sometimes
+        // minutes old, from a previous location) when resuming from
+        // pausesLocationUpdatesAutomatically — its lat/lon is real but no
+        // longer reflects "now", which produces wild jumps in the passive
+        // trail. CoreLocation best-practice; threshold mirrors typical fresh
+        // fix latency (≤2s) with generous slack.
+        let fixAge = Date().timeIntervalSince(loc.timestamp)
+        if fixAge > 30 { return }
         currentLocation = loc
         guard isEnabled else { return }
         // Journey in-progress owns point storage; Lifelog only stores passive points.

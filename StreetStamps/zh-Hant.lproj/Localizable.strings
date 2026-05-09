@@ -956,6 +956,10 @@
 "membership_save_badge" = "省錢";
 "membership_subscribe_button" = "訂閱";
 "membership_restore_purchases" = "恢復購買";
+"membership_redeem_offer_code" = "兌換碼";
+"membership_refund_processed_title" = "退款已處理";
+"membership_refund_processed_message" = "你的訂閱退款已處理完成。訂閱贈送的歡迎獎勵金幣（1500）已收回；你透過步數等正常獲得的金幣不受影響。";
+"membership_refund_processed_ok" = "知道了";
 "membership_auto_renew_note" = "訂閱自動續期，可隨時在「設定」中取消。";
 "membership_welcome_bonus_title" = "歡迎獎勵！";
 "membership_welcome_bonus_message" = "已贈送 %d 金幣，快去買裝備裝扮自己吧！";
@@ -1267,3 +1271,8 @@
 "resume_upper" = "繼續";
 "tab_memory" = "記憶";
 "network_unstable_retrying" = "網絡不穩，正在重試";
+"reset" = "重設";
+"city_edit_display_name" = "修改顯示名";
+"city_edit_display_name_title" = "重新命名城市";
+"city_edit_display_name_placeholder" = "顯示名";
+"city_edit_display_name_hint" = "用自訂名字顯示這張卡片。城市身分不變。";

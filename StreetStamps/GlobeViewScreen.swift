@@ -199,7 +199,6 @@ struct GlobeViewScreen: View {
             return
         }
         refreshGate = gate
-        isPreparingData = true
 
         let countryISO2 = lifelogStore.countryISO2
         let external = externalJourneys
@@ -208,11 +207,42 @@ struct GlobeViewScreen: View {
             for: nil,
             zoom: TrackRenderAdapter.unifiedRenderZoom
         )
-        print("🟡 [GlobeScreen] refreshGlobeData START: tileSegments=\(tileSegments.count) summary=\(summary.count) external=\(external?.count ?? -1) country=\(countryISO2 ?? "nil")")
         let cityISO2 = cityCache.cachedCities
             .filter { $0.isTemporary != true }
             .compactMap { $0.countryISO2?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
             .filter { $0.count == 2 }
+
+        // Cache fast-path: when no external override is provided, the resolved
+        // routes+countries are a deterministic function of (journey rev,
+        // passive rev, tile-refresh rev). Re-entering Globe with unchanged
+        // upstream data skips the entire passiveCountryRuns + resolve pipeline.
+        // External override paths skip the cache because external journeys
+        // are not part of the cache key.
+        if external == nil {
+            let cacheJourneyRev = store.trackTileRevision
+            let cachePassiveRev = lifelogStore.trackTileRevision
+            let cacheTileRev = trackTileStore.refreshRevision
+            if let hit = GlobeDataCache.shared.get(
+                journeyRevision: cacheJourneyRev,
+                passiveRevision: cachePassiveRev,
+                tileRefreshRevision: cacheTileRev
+            ) {
+                print("🟢 [GlobeScreen] cache HIT routes=\(hit.routes.count) countries=\(hit.countries.count)")
+                journeysForRender = hit.routes
+                visitedCountries = hit.countries
+                isPreparingData = false
+                var gate = refreshGate
+                let shouldRefreshAgain = gate.finish()
+                refreshGate = gate
+                if shouldRefreshAgain {
+                    refreshGlobeData()
+                }
+                return
+            }
+        }
+
+        isPreparingData = true
+        print("🟡 [GlobeScreen] refreshGlobeData START: tileSegments=\(tileSegments.count) summary=\(summary.count) external=\(external?.count ?? -1) country=\(countryISO2 ?? "nil")")
         Task(priority: .userInitiated) {
             let passiveCountryRuns = await lifelogStore.passiveCountryRuns()
             print("🟡 [GlobeScreen] passiveCountryRuns=\(passiveCountryRuns.count)")
@@ -234,6 +264,15 @@ struct GlobeViewScreen: View {
             let shouldFetchUnifiedSegments = GlobeRouteResolver.shouldFetchUnifiedSegments(tileSegments: tileSegments)
             guard shouldFetchUnifiedSegments else {
                 await MainActor.run {
+                    if external == nil {
+                        GlobeDataCache.shared.store(
+                            journeyRevision: store.trackTileRevision,
+                            passiveRevision: lifelogStore.trackTileRevision,
+                            tileRefreshRevision: trackTileStore.refreshRevision,
+                            routes: previewRoutes,
+                            countries: previewCountries
+                        )
+                    }
                     var gate = refreshGate
                     let shouldRefreshAgain = gate.finish()
                     refreshGate = gate
@@ -262,6 +301,16 @@ struct GlobeViewScreen: View {
             await MainActor.run {
                 journeysForRender = routes
                 visitedCountries = countries
+
+                if external == nil {
+                    GlobeDataCache.shared.store(
+                        journeyRevision: store.trackTileRevision,
+                        passiveRevision: lifelogStore.trackTileRevision,
+                        tileRefreshRevision: trackTileStore.refreshRevision,
+                        routes: routes,
+                        countries: countries
+                    )
+                }
 
                 var gate = refreshGate
                 let shouldRefreshAgain = gate.finish()

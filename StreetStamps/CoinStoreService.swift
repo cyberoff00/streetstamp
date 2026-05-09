@@ -9,6 +9,7 @@
 import Foundation
 import StoreKit
 import Combine
+import RevenueCat
 
 @MainActor
 final class CoinStoreService: ObservableObject {
@@ -58,20 +59,10 @@ final class CoinStoreService: ObservableObject {
 
     func purchase(_ product: Product) async -> Int? {
         do {
-            let result = try await product.purchase()
-            switch result {
-            case .success(let verification):
-                let transaction = try checkVerified(verification)
-                let coins = coinsForProduct(transaction.productID)
-                await transaction.finish()
-                return coins
-            case .userCancelled:
-                return nil
-            case .pending:
-                return nil
-            @unknown default:
-                return nil
-            }
+            let storeProduct = StoreProduct(sk2Product: product)
+            let result = try await Purchases.shared.purchase(product: storeProduct)
+            if result.userCancelled { return nil }
+            return coinsForProduct(product.id)
         } catch {
             errorMessage = error.localizedDescription
             return nil
@@ -84,22 +75,29 @@ final class CoinStoreService: ObservableObject {
         GearPricingConfig.coinPackages.first(where: { $0.productID == productID })?.coins ?? 0
     }
 
-    private func checkVerified<T>(_ result: VerificationResult<T>) throws -> T {
-        switch result {
-        case .unverified(_, let error):
-            throw error
-        case .verified(let value):
-            return value
-        }
-    }
-
     private func listenForTransactions() -> Task<Void, Never> {
-        Task.detached {
+        Task.detached { [weak self] in
             for await result in Transaction.updates {
                 if case .verified(let transaction) = result {
                     await transaction.finish()
+                    if transaction.revocationDate != nil {
+                        await self?.handleCoinPackRefund(productID: transaction.productID)
+                    }
                 }
             }
         }
+    }
+
+    /// Roll back coins for a refunded coin pack. Coins are consumable, so the
+    /// user may have already spent some — we deduct what we can and floor at
+    /// zero. Equipment already bought with refunded coins is not reclaimed
+    /// (consumable economy doesn't track per-coin provenance).
+    @MainActor
+    private func handleCoinPackRefund(productID: String) async {
+        let coins = coinsForProduct(productID)
+        guard coins > 0 else { return }
+        var economy = EquipmentEconomyStore.load()
+        economy.coins = max(0, economy.coins - coins)
+        EquipmentEconomyStore.save(economy)
     }
 }

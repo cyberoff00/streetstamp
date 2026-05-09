@@ -41,32 +41,50 @@ struct CoordinateCodable: Codable, Sendable {
     var lat: Double
     var lon: Double
     var t: Date?
+    /// Horizontal accuracy in meters at the time of fix (CLLocation.horizontalAccuracy).
+    /// Optional for backward compatibility — old journey files / CloudKit records / backend
+    /// JSONB without this field decode as `nil`. Consumers must default appropriately
+    /// (e.g. `?? 30` to treat unknown as good).
+    var acc: Double?
 }
 
 nonisolated extension CoordinateCodable: Hashable {
     nonisolated static func == (lhs: CoordinateCodable, rhs: CoordinateCodable) -> Bool {
-        lhs.lat == rhs.lat && lhs.lon == rhs.lon && lhs.t == rhs.t
+        lhs.lat == rhs.lat && lhs.lon == rhs.lon && lhs.t == rhs.t && lhs.acc == rhs.acc
     }
     nonisolated func hash(into hasher: inout Hasher) {
         hasher.combine(lat)
         hasher.combine(lon)
         hasher.combine(t)
+        hasher.combine(acc)
     }
 }
 
 nonisolated extension CoordinateCodable {
     var cl: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
 
+    /// Treat missing acc as good signal (30m) for legacy data.
+    var resolvedAccuracy: Double { acc ?? 30 }
+
     init(lat: Double, lon: Double) {
         self.lat = lat
         self.lon = lon
         self.t = nil
+        self.acc = nil
     }
 
     init(lat: Double, lon: Double, timestamp: Date?) {
         self.lat = lat
         self.lon = lon
         self.t = timestamp
+        self.acc = nil
+    }
+
+    init(lat: Double, lon: Double, timestamp: Date?, acc: Double?) {
+        self.lat = lat
+        self.lon = lon
+        self.t = timestamp
+        self.acc = acc
     }
 }
 
@@ -350,6 +368,10 @@ struct JourneyRoute: Codable {
     var overallMemoryImagePaths: [String] = []
     var overallMemoryRemoteImageURLs: [String] = []
     var privacyOptions: Set<JourneyPrivacyOption> = []
+    /// Per-journey route render style. Optional — `nil` means default (`.line`).
+    /// Premium-only and only effective on Mapbox engines; the SharingCard toggle
+    /// is hidden on MapKit styles, and live MapKit views ignore this field.
+    var routeRenderStyle: RouteRenderStyle? = nil
 
     // ✅ 加回普通 init，修复 “Missing argument for 'from'”
     init(
@@ -384,7 +406,8 @@ struct JourneyRoute: Codable {
         overallMemory: String? = nil,
         overallMemoryImagePaths: [String] = [],
         overallMemoryRemoteImageURLs: [String] = [],
-        privacyOptions: Set<JourneyPrivacyOption> = []
+        privacyOptions: Set<JourneyPrivacyOption> = [],
+        routeRenderStyle: RouteRenderStyle? = nil
     ) {
         self.id = id
         self.startTime = startTime
@@ -418,6 +441,7 @@ struct JourneyRoute: Codable {
         self.overallMemoryImagePaths = overallMemoryImagePaths
         self.overallMemoryRemoteImageURLs = overallMemoryRemoteImageURLs
         self.privacyOptions = privacyOptions
+        self.routeRenderStyle = routeRenderStyle
     }
 
     var isCompleted: Bool { endTime != nil && startTime != nil }
@@ -467,6 +491,7 @@ struct JourneyRoute: Codable {
         case exploreMode, trackingMode
         case visibility, sharedAt, customTitle, activityTag, overallMemory, overallMemoryImagePaths, overallMemoryRemoteImageURLs
         case privacyOptions
+        case routeRenderStyle
 
         // 兼容更老字段名（如果你确实历史里用过）
         case coords
@@ -520,6 +545,7 @@ struct JourneyRoute: Codable {
         overallMemoryImagePaths = try c.decodeIfPresent([String].self, forKey: .overallMemoryImagePaths) ?? []
         overallMemoryRemoteImageURLs = try c.decodeIfPresent([String].self, forKey: .overallMemoryRemoteImageURLs) ?? []
         privacyOptions = (try? c.decode(Set<JourneyPrivacyOption>.self, forKey: .privacyOptions)) ?? []
+        routeRenderStyle = try c.decodeIfPresent(RouteRenderStyle.self, forKey: .routeRenderStyle)
     }
 
     // ✅ 自己实现 encode，修复 Encodable 合成失败（并且你可以选择写出 coords 兼容）
@@ -578,6 +604,7 @@ struct JourneyRoute: Codable {
         if !privacyOptions.isEmpty {
             try c.encode(privacyOptions, forKey: .privacyOptions)
         }
+        try c.encodeIfPresent(routeRenderStyle, forKey: .routeRenderStyle)
     }
 }
 
@@ -1905,6 +1932,7 @@ struct MapView: View {
         var presets: [CameraPreset] = [.plain]
         if filmCameraDrop.isFilmCameraUnlocked {
             presets.append(.fujiCCD)
+            presets.append(.photobooth)
         }
         return presets
     }
@@ -2154,29 +2182,11 @@ struct MapView: View {
                 for: journeyRoute,
                 cachedCitiesByKey: cachedCitiesByKey
             )
-            Task {
-                let locale = LanguagePreference.shared.displayLocale
-                if let cached = CityNameTranslationCache.shared.cachedName(cityKey: key, localeID: locale.identifier),
-                   !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    await MainActor.run {
-                        journeyRoute.cityName = cached
-                        journeyRoute.currentCity = cached
-                    }
-                    return
-                }
-
-                if let start = journeyRoute.startCoordinate, start.isValid {
-                    let level = cachedCitiesByKey[key]?.identityLevel
-                        ?? CityPlacemarkResolver.inferIdentityLevel(cityKey: key, iso2: journeyRoute.countryISO2)
-                    let anchor = CLLocationCoordinate2D(latitude: start.latitude, longitude: start.longitude)
-                    if let title = await CityNameTranslationCache.shared.translate(cityKey: key, anchor: anchor, level: level, locale: locale),
-                       !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        await MainActor.run {
-                            journeyRoute.cityName = title
-                            journeyRoute.currentCity = title
-                        }
-                    }
-                }
+            let locale = LanguagePreference.shared.displayLocale
+            if let title = CNCityNameLookup.shared.displayName(for: key, locale: locale),
+               !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                journeyRoute.cityName = title
+                journeyRoute.currentCity = title
             }
         }
 
@@ -2289,10 +2299,8 @@ struct MapView: View {
                     from: resolvedKey,
                     fallback: canon.cityName
                 )
-                let display = await CityNameTranslationCache.shared.translate(
-                    cityKey: resolvedKey,
-                    anchor: loc.coordinate,
-                    level: canon.level,
+                let display = CNCityNameLookup.shared.displayName(
+                    for: resolvedKey,
                     locale: LanguagePreference.shared.displayLocale
                 )
                 await MainActor.run {
@@ -2321,11 +2329,11 @@ struct MapView: View {
 
             let cityKey = await MainActor.run { journeyRoute.cityKey }
             if !cityKey.isEmpty,
-               let cached = CityNameTranslationCache.shared.cachedName(cityKey: cityKey, localeID: LanguagePreference.shared.displayLocale.identifier),
-               !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+               let title = CNCityNameLookup.shared.displayName(for: cityKey, locale: LanguagePreference.shared.displayLocale),
+               !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 await MainActor.run {
-                    journeyRoute.cityName = cached
-                    journeyRoute.currentCity = cached
+                    journeyRoute.cityName = title
+                    journeyRoute.currentCity = title
                 }
             }
         }
@@ -2382,6 +2390,7 @@ struct MapView: View {
 
     private func syncJourneyCoordinatesIncremental(from coords: [CLLocationCoordinate2D]) {
         let timestamps = tracking.coordTimestamps
+        let accuracies = tracking.coordAccuracies
 
         if coords.isEmpty {
             journeyRoute.coordinates = []
@@ -2393,16 +2402,16 @@ struct MapView: View {
             lastSyncedCoordCount = journeyRoute.coordinates.count
         }
 
+        // Helper: build CoordinateCodable from parallel arrays at index `i`.
+        // Falls back gracefully if a side-array is shorter than coords (legacy recovery).
+        func makeCodable(at i: Int, coord: CLLocationCoordinate2D) -> CoordinateCodable {
+            let ts: Date? = i < timestamps.count ? timestamps[i] : nil
+            let acc: Double? = i < accuracies.count ? accuracies[i] : nil
+            return CoordinateCodable(lat: coord.latitude, lon: coord.longitude, timestamp: ts, acc: acc)
+        }
+
         if coords.count < lastSyncedCoordCount || journeyRoute.coordinates.count > coords.count {
-            journeyRoute.coordinates = zip(coords, timestamps).map {
-                CoordinateCodable(lat: $0.0.latitude, lon: $0.0.longitude, timestamp: $0.1)
-            }
-            // If timestamps array is shorter (legacy recovery), fill remaining without timestamp.
-            if coords.count > timestamps.count {
-                journeyRoute.coordinates += coords[timestamps.count...].map {
-                    CoordinateCodable(lat: $0.latitude, lon: $0.longitude)
-                }
-            }
+            journeyRoute.coordinates = coords.enumerated().map { i, c in makeCodable(at: i, coord: c) }
             lastSyncedCoordCount = coords.count
             return
         }
@@ -2413,9 +2422,7 @@ struct MapView: View {
 
         guard coords.count > lastSyncedCoordCount else { return }
         let appended = coords[lastSyncedCoordCount...].enumerated().map { offset, c in
-            let tsIdx = lastSyncedCoordCount + offset
-            let ts: Date? = tsIdx < timestamps.count ? timestamps[tsIdx] : nil
-            return CoordinateCodable(lat: c.latitude, lon: c.longitude, timestamp: ts)
+            makeCodable(at: lastSyncedCoordCount + offset, coord: c)
         }
         journeyRoute.coordinates.append(contentsOf: appended)
         lastSyncedCoordCount = coords.count

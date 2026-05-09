@@ -120,17 +120,35 @@ final class AppNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNoti
     // MARK: - Remote Notification Registration
 
     /// Call this after the user logs in or the app becomes active with a valid session.
+    /// On a build-number transition we first call `unregisterForRemoteNotifications()`
+    /// so iOS discards any cached APNs token from a previous build (e.g. a token
+    /// registered against `aps-environment=development` that would now be a sandbox
+    /// token on a production endpoint). Without this, iOS may keep returning the
+    /// stale token across App Store updates and the device never starts receiving
+    /// pushes again.
     static func registerForRemoteNotificationsIfAuthorized() {
         UNUserNotificationCenter.current().getNotificationSettings { settings in
             guard settings.authorizationStatus == .authorized ||
                   settings.authorizationStatus == .provisional else { return }
             DispatchQueue.main.async {
-                UIApplication.shared.registerForRemoteNotifications()
+                let currentBuild = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? ""
+                let lastBuild = UserDefaults.standard.string(forKey: lastRegistrationBuildKey)
+                if !currentBuild.isEmpty && lastBuild != currentBuild {
+                    UIApplication.shared.unregisterForRemoteNotifications()
+                    UserDefaults.standard.removeObject(forKey: pendingTokenKey)
+                    UserDefaults.standard.set(currentBuild, forKey: lastRegistrationBuildKey)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        UIApplication.shared.registerForRemoteNotifications()
+                    }
+                } else {
+                    UIApplication.shared.registerForRemoteNotifications()
+                }
             }
         }
     }
 
     private static let pendingTokenKey = "streetstamps.apns.pending_device_token"
+    private static let lastRegistrationBuildKey = "streetstamps.apns.last_registration_build.v1"
 
     func application(
         _ application: UIApplication,

@@ -32,11 +32,20 @@ struct GlobeCacheKey: Hashable, Sendable {
     let dayKey: String   // UTC day index, or "no-time" for legacy points
 }
 
+/// Shared across MapboxGlobeView instances so re-entering the Globe screen
+/// reuses already-built per-(journeyId, dayKey) artefacts. The cache is keyed
+/// by stable journey content hashes, so stale entries are inert: they're
+/// either matched (reused) or pruned at the end of each refresh
+/// (`cache.filter { seenCacheKeys.contains($0.key) }`).
+@MainActor
+private enum GlobeArtefactCache {
+    static var shared: [GlobeCacheKey: GlobeJourneyArtefact] = [:]
+}
+
 private final class GlobeMapViewHolder: ObservableObject {
     let mapView: MBMapView
     @Published var styleLoadRevision: Int = 0
     var renderPayload = GlobeRenderPayload()
-    var journeyCache: [GlobeCacheKey: GlobeJourneyArtefact] = [:]
 
     init() {
         // Keep a small but non-zero initial frame; the SwiftUI wrapper below
@@ -586,7 +595,7 @@ struct MapboxGlobeView: View {
         }
 
         let payload = mapHolder.renderPayload
-        let cacheSnapshot = mapHolder.journeyCache
+        let cacheSnapshot = GlobeArtefactCache.shared
 
         // True per-day incremental: each (journeyId, dayKey) bucket is
         // independently hashed. Adding a single point today only rebuilds
@@ -704,7 +713,7 @@ struct MapboxGlobeView: View {
 
         print("🟢 [Globe] refreshData: journeys=\(payload.journeys.count) reused=\(result.stats.reused) rebuilt=\(result.stats.rebuilt) footprints=\(result.fcs.0.features.count) routes=\(result.fcs.1.features.count) cities=\(result.fcs.2.features.count)")
 
-        mapHolder.journeyCache = result.cache
+        GlobeArtefactCache.shared = result.cache
         updateGeoJSONSource(id: footprintsSourceId, fc: result.fcs.0)
         updateGeoJSONSource(id: routesSourceId, fc: result.fcs.1)
         updateGeoJSONSource(id: citiesSourceId, fc: result.fcs.2)
