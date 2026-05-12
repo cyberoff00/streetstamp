@@ -225,7 +225,7 @@ struct PostcardPreviewView: View {
 
         let renderView = faceView
             .frame(width: width, height: height)
-            .background(Color.white)
+            .background(FigmaTheme.card)
 
         let renderer = ImageRenderer(content: renderView)
         renderer.scale = 2

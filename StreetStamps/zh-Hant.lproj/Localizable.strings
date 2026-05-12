@@ -538,6 +538,7 @@
 "postcard_to_prefix" = "寄给：";
 "postcard_upload_local_photo" = "上傳本地照片";
 "preparing_map" = "正在準備地圖…";
+"city_thumbnail_tap_to_retry" = "點擊重試";
 "processing" = "處理中...";
 "profile" = "個人主頁";
 "profile_cities_visited" = "到访城市";
@@ -753,6 +754,14 @@
 "journey_tag_add" = "加入標籤";
 "journey_tag_custom" = "自訂…";
 "journey_tag_custom_title" = "自訂標籤";
+"activity_tag_commute" = "通勤";
+"activity_tag_running" = "跑步";
+"activity_tag_travel" = "旅遊";
+"activity_tag_walking" = "散步";
+"activity_tag_cycling" = "騎行";
+"activity_tag_driving" = "駕車";
+"activity_tag_subway" = "地鐵";
+"activity_tag_hiking" = "登山";
 "share_activity_optional" = "活動类型（可不填）";
 "share_activity_placeholder" = "输入活動类型";
 "share_card" = "分享卡片";

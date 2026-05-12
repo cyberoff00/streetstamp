@@ -18,6 +18,7 @@ struct SofaProfileSceneView: View {
     let postcardPromptText: String?
     let onPostcardPromptTap: (() -> Void)?
     let promptBubbleStyle: PromptBubbleStyle
+    let inventory: RoomInventory
 
     init(
         state: ProfileSceneInteractionState,
@@ -26,7 +27,8 @@ struct SofaProfileSceneView: View {
         welcomeText: String = "Welcome!",
         postcardPromptText: String? = nil,
         onPostcardPromptTap: (() -> Void)? = nil,
-        promptBubbleStyle: PromptBubbleStyle = .plain
+        promptBubbleStyle: PromptBubbleStyle = .plain,
+        inventory: RoomInventory = .empty
     ) {
         self.state = state
         self.hostLoadout = hostLoadout
@@ -35,6 +37,7 @@ struct SofaProfileSceneView: View {
         self.postcardPromptText = postcardPromptText
         self.onPostcardPromptTap = onPostcardPromptTap
         self.promptBubbleStyle = promptBubbleStyle
+        self.inventory = inventory
     }
 
     var body: some View {
@@ -43,14 +46,7 @@ struct SofaProfileSceneView: View {
             let avatarSize = min(size.width * 0.34, size.height * 0.72)
 
             ZStack {
-                floorPlatform(size: size)
-                    .offset(y: size.height * 0.30)
-
-                couch(size: size)
-                    .offset(y: size.height * 0.16)
-
-                lamp(size: size)
-                    .offset(x: size.width * 0.30, y: -size.height * 0.06)
+                HalftoneRoomScene(inventory: inventory)
 
                 if let postcardPromptText {
                     postcardPrompt(text: postcardPromptText)
@@ -117,43 +113,6 @@ struct SofaProfileSceneView: View {
             .frame(width: size, height: size)
     }
 
-    private func couch(size: CGSize) -> some View {
-        ZStack(alignment: .bottom) {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color(red: 13.0 / 255.0, green: 148.0 / 255.0, blue: 136.0 / 255.0))
-                .frame(width: size.width * 0.58, height: size.height * 0.25)
-                .offset(y: -size.height * 0.03)
-
-            Capsule()
-                .fill(Color(red: 45.0 / 255.0, green: 212.0 / 255.0, blue: 191.0 / 255.0))
-                .frame(width: size.width * 0.64, height: size.height * 0.13)
-        }
-    }
-
-    private func floorPlatform(size: CGSize) -> some View {
-        Capsule()
-            .fill(Color(red: 15.0 / 255.0, green: 118.0 / 255.0, blue: 110.0 / 255.0).opacity(0.20))
-            .frame(width: size.width * 0.94, height: size.height * 0.20)
-            .blur(radius: 2)
-    }
-
-    private func lamp(size: CGSize) -> some View {
-        ZStack(alignment: .top) {
-            UnevenRoundedRectangle(
-                cornerRadii: .init(topLeading: 24, bottomLeading: 0, bottomTrailing: 0, topTrailing: 24),
-                style: .continuous
-            )
-            .fill(Color(red: 254.0 / 255.0, green: 240.0 / 255.0, blue: 138.0 / 255.0))
-            .frame(width: size.width * 0.14, height: size.height * 0.16)
-            .shadow(color: Color(red: 253.0 / 255.0, green: 224.0 / 255.0, blue: 71.0 / 255.0).opacity(0.55), radius: 20, x: 0, y: 10)
-
-            Rectangle()
-                .fill(Color.white.opacity(0.55))
-                .frame(width: 2, height: size.height * 0.28)
-                .offset(y: size.height * 0.16)
-        }
-    }
-
     @ViewBuilder
     private func promptBubble(text: String, bold: Bool, tailSide: PromptBubbleTailSide) -> some View {
         let bubble = Text(text)
@@ -161,7 +120,7 @@ struct SofaProfileSceneView: View {
             .foregroundColor(bold ? .black : Color(red: 75.0 / 255.0, green: 85.0 / 255.0, blue: 99.0 / 255.0))
             .padding(.horizontal, promptBubbleStyle == .chat ? 12 : 10)
             .padding(.vertical, promptBubbleStyle == .chat ? 7 : 6)
-            .background(Color.white)
+            .background(FigmaTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: promptBubbleStyle == .chat ? 14 : 10, style: .continuous))
             .shadow(color: Color.black.opacity(promptBubbleStyle == .chat ? 0.10 : 0.08), radius: 8, x: 0, y: 4)
 
@@ -172,7 +131,7 @@ struct SofaProfileSceneView: View {
                 bubble
 
                 promptBubbleTail
-                    .fill(Color.white)
+                    .fill(FigmaTheme.card)
                     .frame(width: 12, height: 8)
                     .padding(tailSide == .leading ? .leading : .trailing, 12)
                     .shadow(color: Color.black.opacity(0.06), radius: 2, x: 0, y: 2)

@@ -72,7 +72,10 @@ struct PopSharingCard: View {
     @State private var showVisibilityRestrictionAlert = false
     @State private var visibilityRestrictionMessage = ""
     private var canRenderCard: Bool { journey.coordinates.count >= 1 && !journey.isTooShort }
-    private let activityPresets: [String] = ["通勤", "跑步", "旅游", "散步", "骑行", "驾车", "地铁", "登山"]
+    private let activityPresetKeys: [String] = [
+        "activity_tag_commute", "activity_tag_running", "activity_tag_travel", "activity_tag_walking",
+        "activity_tag_cycling", "activity_tag_driving", "activity_tag_subway", "activity_tag_hiking"
+    ]
     private var maxOverallMemoryPhotos: Int { MembershipStore.shared.maxPhotosPerMemory }
 
     private var cachedCitiesByKey: [String: CachedCity] {
@@ -403,7 +406,8 @@ struct PopSharingCard: View {
                         .textInputAutocapitalization(.never)
 
                     Menu {
-                        ForEach(activityPresets, id: \.self) { item in
+                        ForEach(activityPresetKeys, id: \.self) { key in
+                            let item = L10n.t(key)
                             Button(item) {
                                 activityTag = item
                             }

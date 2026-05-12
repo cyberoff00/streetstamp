@@ -613,7 +613,7 @@ struct FriendsHubView: View {
                     .foregroundColor(FigmaTheme.text)
                     .frame(maxWidth: .infinity)
                     .frame(height: 40)
-                    .background(Color.white)
+                    .background(FigmaTheme.card)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -824,7 +824,7 @@ struct FriendsHubView: View {
                 }
             }
             .padding(4)
-            .background(Color.white)
+            .background(FigmaTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: 21, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 21, style: .continuous)
@@ -1312,9 +1312,13 @@ struct FriendsHubView: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(item.read ? Color(white: 0.97) : Color.white)
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .shadow(color: Color.black.opacity(0.04), radius: 14, x: 0, y: 5)
+            .background(item.read ? FigmaTheme.mutedBackground : FigmaTheme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.gray.opacity(0.08), lineWidth: 1)
+            )
+            .shadow(color: FigmaTheme.softShadow, radius: 8, x: 0, y: 3)
             .onTapGesture {
                 Task {
                     await notificationStore.markSingleRead(id: item.id, token: sessionStore.currentAccessToken)
@@ -2111,6 +2115,7 @@ private struct FriendProfileScreen: View {
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var flow: AppFlowCoordinator
     @EnvironmentObject private var blockStore: UserBlockStore
+    @EnvironmentObject private var postcardCenter: PostcardCenter
 
     let friendID: String
 
@@ -2183,25 +2188,28 @@ private struct FriendProfileScreen: View {
         ZStack(alignment: .top) {
             FigmaTheme.background.ignoresSafeArea()
 
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 14) {
-                    friendHeroSection(friend: f, sceneState: sceneState, activeCollectionPage: $activeCollectionPage)
+            VStack(spacing: 0) {
+                friendTopControls
 
+                ScrollView(showsIndicators: false) {
                     VStack(spacing: 14) {
-                        if let displayBio = resolvedBioText(for: f) {
-                            Text(displayBio)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(FigmaTheme.text.opacity(0.68))
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 10)
+                        friendHeroSection(friend: f, sceneState: sceneState, activeCollectionPage: $activeCollectionPage)
+
+                        VStack(spacing: 14) {
+                            if let displayBio = resolvedBioText(for: f) {
+                                Text(displayBio)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(FigmaTheme.text.opacity(0.68))
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal, 10)
+                            }
                         }
+                        .frame(maxWidth: 430)
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 32)
                     }
-                    .frame(maxWidth: 430)
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 32)
                 }
             }
-            .ignoresSafeArea(edges: .top)
         }
         .background(SwipeBackEnabler())
         .navigationBarBackButtonHidden(true)
@@ -2211,9 +2219,6 @@ private struct FriendProfileScreen: View {
         }
         .onDisappear {
             flow.popSidebarButtonHidden(token: sidebarHideToken)
-        }
-        .overlay(alignment: .top) {
-            friendTopControls
         }
         .overlay(alignment: .top) {
             if showStompToast {
@@ -2340,97 +2345,105 @@ private struct FriendProfileScreen: View {
     }
 
     private var friendTopControls: some View {
-        GeometryReader { proxy in
-            HStack {
-                AppBackButton()
+        HStack {
+            AppBackButton()
 
-                Spacer()
+            Spacer()
 
-                if isVisitorSeated && !isViewingOwnFriendProfile {
-                    Button {
-                        photoBoothSnapshot = friend ?? fallbackFriend
-                        showPhotoBooth = true
-                    } label: {
-                        Image(systemName: "camera.fill")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(.white)
-                            .frame(width: 38, height: 38)
-                            .background(
-                                Circle()
-                                    .fill(FigmaTheme.primary)
-                                    .shadow(color: FigmaTheme.primary.opacity(0.35), radius: 8, x: 0, y: 4)
-                            )
-                            .clipShape(Circle())
-                            .appMinTapTarget()
-                    }
-                    .buttonStyle(.plain)
-                    .transition(.scale.combined(with: .opacity))
+            if isVisitorSeated && !isViewingOwnFriendProfile {
+                Button {
+                    photoBoothSnapshot = friend ?? fallbackFriend
+                    showPhotoBooth = true
+                } label: {
+                    Image(systemName: "camera.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(width: 38, height: 38)
+                        .background(
+                            Circle()
+                                .fill(FigmaTheme.primary)
+                                .shadow(color: FigmaTheme.primary.opacity(0.35), radius: 8, x: 0, y: 4)
+                        )
+                        .clipShape(Circle())
+                        .appMinTapTarget()
                 }
-
-                if sessionStore.isLoggedIn && (sessionStore.accountUserID ?? "") != friendID {
-                    Menu {
-                        Button {
-                            showReportSheet = true
-                        } label: {
-                            Label(L10n.t("report_user"), systemImage: "exclamationmark.bubble")
-                        }
-                        Button(role: .destructive) {
-                            showBlockConfirm = true
-                        } label: {
-                            Label(L10n.t("block_user"), systemImage: "hand.raised")
-                        }
-                        Divider()
-                        Button(role: .destructive) {
-                            showDeleteFriendConfirm = true
-                        } label: {
-                            Label(L10n.t("friends_delete_friend"), systemImage: "person.crop.circle.badge.xmark")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundColor(FigmaTheme.text)
-                            .appMinTapTarget()
-                    }
-                    .disabled(isDeletingFriend)
-                } else {
-                    Color.clear
-                        .frame(width: 44, height: 44)
-                }
+                .buttonStyle(.plain)
+                .transition(.scale.combined(with: .opacity))
             }
-            .padding(.horizontal, 18)
-            .padding(.top, FriendProfileLayout.topControlsTopPadding)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+            if sessionStore.isLoggedIn && (sessionStore.accountUserID ?? "") != friendID {
+                Menu {
+                    Button {
+                        showReportSheet = true
+                    } label: {
+                        Label(L10n.t("report_user"), systemImage: "exclamationmark.bubble")
+                    }
+                    Button(role: .destructive) {
+                        showBlockConfirm = true
+                    } label: {
+                        Label(L10n.t("block_user"), systemImage: "hand.raised")
+                    }
+                    Divider()
+                    Button(role: .destructive) {
+                        showDeleteFriendConfirm = true
+                    } label: {
+                        Label(L10n.t("friends_delete_friend"), systemImage: "person.crop.circle.badge.xmark")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(FigmaTheme.text)
+                        .appMinTapTarget()
+                }
+                .disabled(isDeletingFriend)
+            } else {
+                Color.clear
+                    .frame(width: 44, height: 44)
+            }
         }
-        .frame(height: 96)
+        .padding(.horizontal, 18)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
     }
 
     private func friendHeroSection(friend: FriendProfileSnapshot, sceneState: ProfileSceneInteractionState, activeCollectionPage: Binding<FriendCollectionPageDestination?>) -> some View {
-        VStack(spacing: 0) {
-            ProfileHeroTopBackdrop {
-                GeometryReader { _ in
-                    VStack(spacing: 0) {
-                        Spacer(minLength: 72)
-
-                        SofaProfileSceneView(
-                            state: sceneState,
-                            hostLoadout: friend.loadout,
-                            visitorLoadout: visitorLoadout,
-                            welcomeText: L10n.t("friends_welcome"),
-                            postcardPromptText: sceneState.postcardPromptText,
-                            onPostcardPromptTap: sceneState.postcardPromptText == nil ? nil : {
-                                showPostcardComposer = true
-                            },
-                            promptBubbleStyle: .chat
-                        )
-                        .frame(maxWidth: 360)
-                        .padding(.horizontal, 30)
-                        .padding(.top, 0)
-                        .padding(.bottom, 16)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        let inventory = RoomInventory(
+            journeyCount: friend.stats.totalJourneys,
+            cityCount: friend.stats.totalUnlockedCities,
+            countryCount: Set(
+                friend.unlockedCityCards.compactMap { card -> String? in
+                    guard let iso = card.countryISO2?.trimmingCharacters(in: .whitespaces),
+                          !iso.isEmpty else { return nil }
+                    return iso.uppercased()
+                }
+            ).count,
+            postcardCount: postcardCenter.receivedItems.filter { $0.fromUserID == friend.id }.count,
+            levelCount: UserLevelProgress.from(completedJourneyCount: friend.stats.totalJourneys).level
+        )
+        return VStack(spacing: 0) {
+            ProfileHeroTopBackdrop(topCornerRadius: 28) {
+                VStack(spacing: 0) {
+                    SofaProfileSceneView(
+                        state: sceneState,
+                        hostLoadout: friend.loadout,
+                        visitorLoadout: visitorLoadout,
+                        welcomeText: L10n.t("friends_welcome"),
+                        postcardPromptText: sceneState.postcardPromptText,
+                        onPostcardPromptTap: sceneState.postcardPromptText == nil ? nil : {
+                            showPostcardComposer = true
+                        },
+                        promptBubbleStyle: .chat,
+                        inventory: inventory
+                    )
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 6)
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
                 }
             }
-            .frame(height: 376)
+            .frame(height: 268)
+            .frame(maxWidth: 430)
+            .padding(.horizontal, 20)
 
             VStack(spacing: 18) {
                 HStack(alignment: .top, spacing: 16) {
@@ -2877,14 +2890,14 @@ private extension View {
 
     func friendAvatarCardStyle() -> some View {
         self
-            .background(Color.white)
+            .background(FigmaTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
             .shadow(color: Color.black.opacity(0.04), radius: 20, x: 0, y: 8)
     }
 
     func friendFeatureCardStyle() -> some View {
         self
-            .background(Color.white)
+            .background(FigmaTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
             .shadow(color: Color.black.opacity(0.04), radius: 20, x: 0, y: 8)
     }
@@ -3272,7 +3285,7 @@ private struct FriendCollectionScreen: View {
             }
         }
         .padding(4)
-        .background(Color.white)
+        .background(FigmaTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 21, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 21, style: .continuous)

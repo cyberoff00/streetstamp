@@ -94,7 +94,7 @@ struct TooltipBubble: View {
                             .foregroundColor(FigmaTheme.primary)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 5)
-                            .background(Color.white)
+                            .background(FigmaTheme.card)
                             .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)

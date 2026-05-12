@@ -155,7 +155,7 @@ struct PostcardFrontFaceView: View {
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .background(
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(Color.white)
+                .fill(FigmaTheme.card)
         )
     }
 

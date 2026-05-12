@@ -409,7 +409,7 @@ struct PostcardComposerView: View {
                 .frame(height: 120)
                 .scrollContentBackground(.hidden)
                 .padding(8)
-                .background(Color.white)
+                .background(FigmaTheme.card)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .onChange(of: messageText) { _, newValue in
                     if newValue.count > 80 {
@@ -476,7 +476,7 @@ private extension PostcardComposerView {
 private extension View {
     func postcardFeatureCardStyle() -> some View {
         self
-            .background(Color.white)
+            .background(FigmaTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
             .shadow(color: Color.black.opacity(0.04), radius: 20, x: 0, y: 8)
     }

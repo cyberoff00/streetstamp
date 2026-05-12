@@ -716,7 +716,7 @@ struct JourneyMemoryCalendarRangePopover: View {
         }
         .padding(14)
         .frame(width: 292)
-        .background(Color.white)
+        .background(FigmaTheme.card)
     }
 
     private var monthGrid: some View {
@@ -1123,7 +1123,10 @@ enum JourneyEntryPreviewText {
 // =======================================================
 
 struct JourneyMemoryDetailView: View {
-    private static let activityTagPresets: [String] = ["通勤", "跑步", "旅游", "散步", "骑行", "驾车", "地铁", "登山"]
+    private static let activityTagPresetKeys: [String] = [
+        "activity_tag_commute", "activity_tag_running", "activity_tag_travel", "activity_tag_walking",
+        "activity_tag_cycling", "activity_tag_driving", "activity_tag_subway", "activity_tag_hiking"
+    ]
 
     let journey: JourneyRoute
     let memories: [JourneyMemory]
@@ -1731,7 +1734,8 @@ struct JourneyMemoryDetailView: View {
         let foreground = hasTag ? FigmaTheme.secondary : FigmaTheme.secondary.opacity(0.7)
         let background = hasTag ? FigmaTheme.secondary.opacity(0.12) : FigmaTheme.secondary.opacity(0.06)
         return Menu {
-            ForEach(Self.activityTagPresets, id: \.self) { item in
+            ForEach(Self.activityTagPresetKeys, id: \.self) { key in
+                let item = L10n.t(key)
                 Button(item) { draftActivityTag = item }
             }
             Divider()
@@ -3262,7 +3266,7 @@ private struct EditableMemoryImagesView: View {
             .foregroundColor(Color.black.opacity(0.65))
             .background(
                 Circle()
-                    .fill(Color.white.opacity(0.92))
+                    .fill(FigmaTheme.card.opacity(0.92))
                     .frame(width: 26, height: 26)
             )
             .appMinTapTarget()

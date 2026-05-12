@@ -985,15 +985,26 @@ enum TrackTileRebuildPolicy {
 }
 
 private func configureGlobalTabBarAppearance() {
-    let appearance = UITabBarAppearance()
-    appearance.configureWithOpaqueBackground()
-    appearance.backgroundColor = .white
-    appearance.shadowColor = UIColor.black.withAlphaComponent(0.08)
+    let parchment = UIColor(FigmaTheme.background)
 
-    UITabBar.appearance().standardAppearance = appearance
+    let tabAppearance = UITabBarAppearance()
+    tabAppearance.configureWithOpaqueBackground()
+    tabAppearance.backgroundColor = parchment
+    tabAppearance.shadowColor = UIColor.black.withAlphaComponent(0.08)
+
+    UITabBar.appearance().standardAppearance = tabAppearance
     if #available(iOS 15.0, *) {
-        UITabBar.appearance().scrollEdgeAppearance = appearance
+        UITabBar.appearance().scrollEdgeAppearance = tabAppearance
     }
+
+    let navAppearance = UINavigationBarAppearance()
+    navAppearance.configureWithOpaqueBackground()
+    navAppearance.backgroundColor = parchment
+    navAppearance.shadowColor = .clear
+
+    UINavigationBar.appearance().standardAppearance = navAppearance
+    UINavigationBar.appearance().scrollEdgeAppearance = navAppearance
+    UINavigationBar.appearance().compactAppearance = navAppearance
 }
 
 private extension StreetStampsApp {

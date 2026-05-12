@@ -3595,7 +3595,7 @@ private var hasUnsavedChanges: Bool {
         }
         .padding(.horizontal, 24)
         .frame(height: 58)
-        .background(Color.white)
+        .background(FigmaTheme.background)
     }
 
     private var content: some View {
@@ -3678,7 +3678,7 @@ private var hasUnsavedChanges: Bool {
             .padding(.top, 8)
             .padding(.bottom, 8)
             .frame(minHeight: 290)
-            .background(Color.white)
+            .background(FigmaTheme.background)
             .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
             .padding(.horizontal, 12)
             .padding(.top, 12)
@@ -4015,59 +4015,71 @@ struct MemoryEditorPage: View {
     }
 
     private var footer: some View {
-        HStack {
-            HStack(spacing: 12) {
-                Button(action: launchCameraPicker) {
-                    Image(systemName: "camera")
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundColor(FigmaTheme.text.opacity(0.82))
-                        .appMinTapTarget()
-                }
-                .buttonStyle(.plain)
-                .disabled(!canAddPhoto)
-                .opacity(canAddPhoto ? 1 : 0.35)
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(FigmaTheme.border.opacity(0.9))
+                .frame(height: 1)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 14)
 
-                Button(action: launchPhotoLibraryPicker) {
-                    Image(systemName: "photo")
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundColor(FigmaTheme.text.opacity(0.82))
-                        .appMinTapTarget()
-                }
-                .buttonStyle(.plain)
-                .disabled(!canAddPhoto)
-                .opacity(canAddPhoto ? 1 : 0.35)
-            }
-            Spacer()
-
-            HStack(spacing: 10) {
-                if onDelete != nil {
-                    Button { showDeleteConfirm = true } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.red.opacity(0.9))
+            HStack {
+                HStack(spacing: 12) {
+                    Button(action: launchCameraPicker) {
+                        Image(systemName: "camera")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(FigmaTheme.text.opacity(0.82))
                             .frame(width: 48, height: 48)
-                            .background(Color.red.opacity(0.10))
+                            .background(Color.black.opacity(0.04))
                             .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
-                }
+                    .disabled(!canAddPhoto)
+                    .opacity(canAddPhoto ? 1 : 0.35)
 
-                Button(action: onSave) {
-                    Text(L10n.t("save").uppercased())
-                        .font(.system(size: 14, weight: .semibold))
-                        .tracking(-0.3)
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 30)
-                        .frame(height: 48)
-                        .background(UITheme.accent)
-                        .clipShape(Capsule(style: .continuous))
-                        .shadow(color: UITheme.accent.opacity(0.22), radius: 10, x: 0, y: 3)
+                    Button(action: launchPhotoLibraryPicker) {
+                        Image(systemName: "photo")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(FigmaTheme.text.opacity(0.82))
+                            .frame(width: 48, height: 48)
+                            .background(Color.black.opacity(0.04))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canAddPhoto)
+                    .opacity(canAddPhoto ? 1 : 0.35)
                 }
-                .buttonStyle(.plain)
+                Spacer()
+
+                HStack(spacing: 10) {
+                    if onDelete != nil {
+                        Button { showDeleteConfirm = true } label: {
+                            Image(systemName: "trash")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.red.opacity(0.9))
+                                .frame(width: 48, height: 48)
+                                .background(Color.red.opacity(0.10))
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Button(action: onSave) {
+                        Text(L10n.t("save").uppercased())
+                            .font(.system(size: 14, weight: .semibold))
+                            .tracking(-0.3)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 30)
+                            .frame(height: 48)
+                            .background(UITheme.accent)
+                            .clipShape(Capsule(style: .continuous))
+                            .shadow(color: UITheme.accent.opacity(0.22), radius: 10, x: 0, y: 3)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 20)
         }
-        .padding(.horizontal, 24)
-        .padding(.bottom, 20)
     }
 
     private var header: some View {
@@ -4084,7 +4096,7 @@ struct MemoryEditorPage: View {
         }
         .padding(.horizontal, 24)
         .frame(height: 58)
-        .background(Color.white)
+        .background(FigmaTheme.background)
     }
 
     private func storeEditedImages(_ images: [UIImage], writesToPhotoLibrary: Bool) {

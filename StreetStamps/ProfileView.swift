@@ -23,6 +23,7 @@ struct ProfileView: View {
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var socialStore: SocialGraphStore
     @EnvironmentObject private var notificationStore: SocialNotificationStore
+    @EnvironmentObject private var postcardCenter: PostcardCenter
     @EnvironmentObject private var flow: AppFlowCoordinator
     @ObservedObject private var languagePreference = LanguagePreference.shared
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
@@ -247,22 +248,36 @@ struct ProfileView: View {
             isVisitorSeated: false,
             isInteractionInFlight: false
         )
+        let inventory = RoomInventory(
+            journeyCount: store.journeys.count,
+            cityCount: cityCache.cachedCities.count,
+            countryCount: Set(
+                cityCache.cachedCities.compactMap { city -> String? in
+                    guard let iso = city.countryISO2?.trimmingCharacters(in: .whitespaces),
+                          !iso.isEmpty else { return nil }
+                    return iso.uppercased()
+                }
+            ).count,
+            postcardCount: postcardCenter.receivedItems.count,
+            levelCount: cachedLevelProgress.level
+        )
 
         return VStack(spacing: 0) {
             ZStack(alignment: .topTrailing) {
                 ProfileHeroTopBackdrop(topCornerRadius: 28) {
-                    VStack {
+                    VStack(spacing: 0) {
                         SofaProfileSceneView(
                             state: sceneState,
-                            hostLoadout: loadout
+                            hostLoadout: loadout,
+                            inventory: inventory
                         )
-                        .frame(maxWidth: 340)
-                        .padding(.horizontal, 18)
-                        .padding(.top, 22)
-                        .padding(.bottom, 14)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 6)
+                        .padding(.top, 8)
+                        .padding(.bottom, 4)
                     }
                 }
-                .frame(height: 252)
+                .frame(height: 268)
 
                 if featureFlags.socialEnabled,
                    ProfileHeaderPresentation.showsNotificationCloud(notificationCount: notificationStore.notifications.count) {
@@ -274,7 +289,7 @@ struct ProfileView: View {
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundColor(Color(red: 0.22, green: 0.45, blue: 0.89))
                                 .frame(width: 30, height: 30)
-                                .background(Color.white.opacity(0.95))
+                                .background(FigmaTheme.card.opacity(0.95))
                                 .clipShape(Circle())
                                 .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
 
@@ -300,7 +315,7 @@ struct ProfileView: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .background(Color.white)
+        .background(FigmaTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 28, style: .continuous)
@@ -580,9 +595,13 @@ struct ProfileView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(item.read ? Color(white: 0.97) : Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .shadow(color: Color.black.opacity(0.04), radius: 14, x: 0, y: 5)
+        .background(item.read ? FigmaTheme.mutedBackground : FigmaTheme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.gray.opacity(0.08), lineWidth: 1)
+        )
+        .shadow(color: FigmaTheme.softShadow, radius: 8, x: 0, y: 3)
         .onTapGesture {
             guard featureFlags.socialEnabled else { return }
             Task {
@@ -860,7 +879,7 @@ struct InviteFriendSheet: View {
                                 .scaledToFit()
                                 .frame(width: 210, height: 210)
                                 .padding(10)
-                                .background(Color.white)
+                                .background(FigmaTheme.card)
                                 .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -868,7 +887,7 @@ struct InviteFriendSheet: View {
                                 )
                         } else {
                             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                .fill(Color.white)
+                                .fill(FigmaTheme.card)
                                 .frame(width: 220, height: 220)
                                 .overlay {
                                     ProgressView()
@@ -936,7 +955,7 @@ struct InviteFriendSheet: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 20)
-                    .background(Color.white)
+                    .background(FigmaTheme.card)
                     .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                     .shadow(color: Color.black.opacity(0.04), radius: 16, x: 0, y: 6)
 
@@ -993,7 +1012,7 @@ struct InviteFriendSheet: View {
                         .buttonStyle(.plain)
                     }
                     .padding(14)
-                    .background(Color.white)
+                    .background(FigmaTheme.card)
                     .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                     .shadow(color: Color.black.opacity(0.03), radius: 12, x: 0, y: 4)
                 }
@@ -1465,7 +1484,7 @@ private final class ProfileInviteScannerViewController: UIViewController, AVCapt
 private extension View {
     func figmaAvatarCardStyle() -> some View {
         self
-            .background(Color.white)
+            .background(FigmaTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 28, style: .continuous)
@@ -1476,7 +1495,7 @@ private extension View {
 
     func profileFeatureCardStyle() -> some View {
         self
-            .background(Color.white)
+            .background(FigmaTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -1812,7 +1831,7 @@ struct EquipmentCard: View {
             }
         }
         .padding(10)
-        .background(Color.white)
+        .background(FigmaTheme.card)
         .cornerRadius(14)
         .overlay(
             RoundedRectangle(cornerRadius: 14)

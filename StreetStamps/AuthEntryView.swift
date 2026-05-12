@@ -254,7 +254,7 @@ struct AuthEntryView: View {
             .foregroundColor(FigmaTheme.text)
             .frame(maxWidth: .infinity)
             .frame(height: 56)
-            .background(Color.white)
+            .background(FigmaTheme.card)
             .clipShape(Capsule())
             .overlay(
                 Capsule()

@@ -1,7 +1,6 @@
 import SwiftUI
 
 struct AppSplashView: View {
-    private let brandGreen = Color(red: 0.0, green: 182.0 / 255.0, blue: 122.0 / 255.0)
     private let brandRed = Color(red: 1.0, green: 92.0 / 255.0, blue: 92.0 / 255.0)
 
     @State private var drawProgress: CGFloat = 1
@@ -12,7 +11,7 @@ struct AppSplashView: View {
     var body: some View {
         GeometryReader { _ in
             ZStack {
-                brandGreen.ignoresSafeArea()
+                FigmaTheme.primary.ignoresSafeArea()
                 SplashMapLines()
                     .opacity(0.1)
                     .ignoresSafeArea()
@@ -225,11 +224,11 @@ private struct SplashPixelRunner: View {
                 Rectangle().fill(.white).frame(width: 1 * u, height: 2 * u).offset(x: 7 * u, y: 8 * u)
 
                 // Eyes
-                Rectangle().fill(brandGreen).frame(width: 1 * u, height: 1 * u).offset(x: 4 * u, y: 4 * u)
-                Rectangle().fill(brandGreen).frame(width: 1 * u, height: 1 * u).offset(x: 7 * u, y: 4 * u)
+                Rectangle().fill(eyeColor).frame(width: 1 * u, height: 1 * u).offset(x: 4 * u, y: 4 * u)
+                Rectangle().fill(eyeColor).frame(width: 1 * u, height: 1 * u).offset(x: 7 * u, y: 4 * u)
             }
         }
     }
 
-    private let brandGreen = Color(red: 0.0, green: 182.0 / 255.0, blue: 122.0 / 255.0)
+    private let eyeColor = FigmaTheme.primary
 }

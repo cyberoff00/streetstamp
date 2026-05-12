@@ -124,7 +124,7 @@ struct MemoryDetailExportView: View {
                 .padding(.top, 8)
         }
         .padding(16)
-        .background(Color.white)
+        .background(FigmaTheme.card)
     }
 
     /// Load image downscaled for export to reduce memory pressure.

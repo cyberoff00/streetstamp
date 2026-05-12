@@ -129,11 +129,11 @@ private struct LifelogBottomCardView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(Color.white.opacity(0.95))
+        .background(FigmaTheme.background.opacity(0.95))
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+                .stroke(Color.gray.opacity(0.08), lineWidth: 1)
         }
         .shadow(color: Color.black.opacity(0.10), radius: 16, x: 0, y: 8)
         .onReceive(NotificationCenter.default.publisher(for: .avatarLoadoutDidChange)) { _ in
@@ -221,7 +221,7 @@ struct LifelogView: View {
     private var isDarkAppearance: Bool {
         (MapLayerStyle(rawValue: layerStyleRaw) ?? .mutedDark).isDarkStyle
     }
-    private var panelBackground: Color { isDarkAppearance ? Color.black.opacity(0.80) : FigmaTheme.card.opacity(0.96) }
+    private var panelBackground: Color { isDarkAppearance ? Color.black.opacity(0.80) : FigmaTheme.background.opacity(0.96) }
     private var panelText: Color { isDarkAppearance ? .white : .black }
 
     private var locationCenterKey: Int {
@@ -517,7 +517,7 @@ struct LifelogView: View {
         .padding(.horizontal, 18)
         .padding(.top, 14)
         .padding(.bottom, 12)
-        .background(FigmaTheme.card.opacity(0.92).ignoresSafeArea(edges: .top))
+        .background(FigmaTheme.background.opacity(0.92).ignoresSafeArea(edges: .top))
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(FigmaTheme.border)
@@ -575,7 +575,7 @@ struct LifelogView: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(FigmaTheme.text)
                 .frame(width: 34, height: 34)
-                .background(Color.white.opacity(0.92))
+                .background(FigmaTheme.background.opacity(0.92))
                 .clipShape(Circle())
                 .shadow(color: Color.black.opacity(0.10), radius: 6, y: 2)
                 .appMinTapTarget()
@@ -655,7 +655,7 @@ struct LifelogView: View {
                 .fill((hasAlwaysPermission && lifelogStore.isEnabled) ? Color(red: 0.42, green: 0.78, blue: 0.58) : Color.gray.opacity(0.65))
                 .frame(width: 12, height: 12)
                 .frame(width: 34, height: 34)
-                .background(Color.white.opacity(0.92))
+                .background(FigmaTheme.background.opacity(0.92))
                 .clipShape(Circle())
                 .shadow(color: Color.black.opacity(0.10), radius: 6, y: 2)
         }
@@ -776,7 +776,7 @@ struct LifelogView: View {
                 topTrailingRadius: 30,
                 style: .continuous
             )
-            .fill(Color.white.opacity(0.94))
+            .fill(FigmaTheme.background.opacity(0.94))
             .ignoresSafeArea(edges: .bottom)  // ← 关键：白色延伸到底
         )
         .overlay(
@@ -787,7 +787,7 @@ struct LifelogView: View {
                 topTrailingRadius: 30,
                 style: .continuous
             )
-                .stroke(Color.black.opacity(0.04), lineWidth: 1)
+                .stroke(Color.gray.opacity(0.08), lineWidth: 1)
         )
         .shadow(color: Color.black.opacity(0.14), radius: 22, x: 0, y: 10)
         .background(
@@ -1402,11 +1402,11 @@ struct LifelogView: View {
                 }
             }
             .padding(20)
-            .background(FigmaTheme.card)
+            .background(FigmaTheme.background)
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(FigmaTheme.border, lineWidth: 1)
+                    .stroke(Color.gray.opacity(0.08), lineWidth: 1)
             )
             .shadow(color: Color.black.opacity(0.12), radius: 14, x: 0, y: 6)
             .padding(.horizontal, 18)
@@ -1481,11 +1481,11 @@ struct LifelogView: View {
             .padding(.top, LifelogStepMilestonePresentation.topPadding)
             .padding(.horizontal, LifelogStepMilestonePresentation.horizontalPadding)
             .padding(.bottom, 22)
-            .background(FigmaTheme.card)
+            .background(FigmaTheme.background)
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(FigmaTheme.border, lineWidth: 1)
+                    .stroke(Color.gray.opacity(0.08), lineWidth: 1)
             )
             .overlay(alignment: .topTrailing) {
                 if LifelogStepMilestonePresentation.closeButtonPlacement == .topTrailing {
@@ -1528,7 +1528,7 @@ struct LifelogView: View {
         .padding(.vertical, 5)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.white.opacity(0.90))
+                .fill(FigmaTheme.background.opacity(0.90))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -1867,11 +1867,11 @@ private struct AlwaysLocationGuideView: View {
             .padding(.top, 14)
             .padding(.horizontal, 22)
             .padding(.bottom, 22)
-            .background(FigmaTheme.card)
+            .background(FigmaTheme.background)
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(FigmaTheme.border, lineWidth: 1)
+                    .stroke(Color.gray.opacity(0.08), lineWidth: 1)
             )
             .overlay(alignment: .topTrailing) {
                 Button {

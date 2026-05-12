@@ -391,7 +391,7 @@ struct PostcardInboxView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(Color.white)
+        .background(FigmaTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 

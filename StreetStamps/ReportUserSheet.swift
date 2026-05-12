@@ -51,7 +51,7 @@ struct ReportUserSheet: View {
                         }
                     }
                 }
-                .background(Color.white)
+                .background(FigmaTheme.card)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .padding(.horizontal, 20)
 
@@ -60,7 +60,7 @@ struct ReportUserSheet: View {
                         .font(.system(size: 14))
                         .lineLimit(3...5)
                         .padding(12)
-                        .background(Color.white)
+                        .background(FigmaTheme.card)
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         .padding(.horizontal, 20)
                 }

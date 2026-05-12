@@ -81,6 +81,7 @@
 "unknown" = "未知";
 "memories" = "记忆";
 "preparing_map" = "正在准备地图…";
+"city_thumbnail_tap_to_retry" = "点击重试";
 "loading_map" = "正在加载地图…";
 "globe" = "地球";
 
@@ -522,6 +523,14 @@
 "journey_tag_add" = "添加标签";
 "journey_tag_custom" = "自定义…";
 "journey_tag_custom_title" = "自定义标签";
+"activity_tag_commute" = "通勤";
+"activity_tag_running" = "跑步";
+"activity_tag_travel" = "旅游";
+"activity_tag_walking" = "散步";
+"activity_tag_cycling" = "骑行";
+"activity_tag_driving" = "驾车";
+"activity_tag_subway" = "地铁";
+"activity_tag_hiking" = "登山";
 "share_activity_optional" = "活动类型（可不填）";
 "share_activity_placeholder" = "输入活动类型";
 "share_discard_message" = "这条旅程将不会被保存。";

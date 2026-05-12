@@ -174,7 +174,7 @@ struct UnlockCityModal: View {
                 .padding(.bottom, 16)
             }
             .frame(maxWidth: 360)
-            .background(Color.white)
+            .background(FigmaTheme.card)
             .cornerRadius(16)
             .padding(.horizontal, 18)
             .onAppear {

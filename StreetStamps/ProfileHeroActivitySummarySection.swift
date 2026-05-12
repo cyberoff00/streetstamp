@@ -24,7 +24,7 @@ struct ProfileHeroActivitySummarySection: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 18)
         .frame(maxWidth: .infinity)
-        .background(Color.white)
+        .background(FigmaTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 28, style: .continuous)
@@ -61,7 +61,7 @@ struct ProfileHeroActivitySummarySection: View {
         let midW: CGFloat   = 11
         let innerW: CGFloat = 9
 
-        let trackColor = Color(white: 0.95)
+        let trackColor = Color.black.opacity(0.06)
 
         let levelFrac = CGFloat(levelProgress.progress)
         // Outer=level(green), Middle=memories/50(orange), Inner=cities/20(blue)

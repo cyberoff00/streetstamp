@@ -69,7 +69,7 @@ struct ActivityRecordView: View {
         let cityProgress = Double(stats.totalUnlockedCities % 10) / 10.0
 
         return ZStack {
-            Circle().stroke(Color(white: 0.95), lineWidth: 24).frame(width: 200, height: 200)
+            Circle().stroke(WorldoPalette.hairline, lineWidth: 24).frame(width: 200, height: 200)
             Circle().trim(from: 0, to: CGFloat(levelProgress.progress))
                 .stroke(
                     LinearGradient(
@@ -81,7 +81,7 @@ struct ActivityRecordView: View {
                 )
                 .frame(width: 200, height: 200).rotationEffect(.degrees(-90))
 
-            Circle().stroke(Color(white: 0.95), lineWidth: 20).frame(width: 160, height: 160)
+            Circle().stroke(WorldoPalette.hairline, lineWidth: 20).frame(width: 160, height: 160)
             Circle().trim(from: 0, to: CGFloat(memoryProgress))
                 .stroke(
                     LinearGradient(
@@ -93,7 +93,7 @@ struct ActivityRecordView: View {
                 )
                 .frame(width: 160, height: 160).rotationEffect(.degrees(-90))
 
-            Circle().stroke(Color(white: 0.95), lineWidth: 16).frame(width: 120, height: 120)
+            Circle().stroke(WorldoPalette.hairline, lineWidth: 16).frame(width: 120, height: 120)
             Circle().trim(from: 0, to: CGFloat(cityProgress))
                 .stroke(
                     LinearGradient(

@@ -136,7 +136,7 @@ struct CollectionTabView: View {
             }
         }
         .padding(4)
-        .background(Color.white)
+        .background(FigmaTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 21, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 21, style: .continuous)

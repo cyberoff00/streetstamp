@@ -41,7 +41,7 @@ struct CompactActivityRingCard: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity)
-        .background(Color.white)
+        .background(FigmaTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 28, style: .continuous)
@@ -75,7 +75,7 @@ struct CompactActivityRingCard: View {
         .padding(.vertical, 24)
         .padding(.horizontal, 8)
         .frame(maxWidth: .infinity)
-        .background(Color.white)
+        .background(FigmaTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)

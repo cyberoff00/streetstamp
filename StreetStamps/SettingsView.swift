@@ -1010,7 +1010,7 @@ struct SettingsView: View {
                                         .scaledToFit()
                                         .frame(width: 220, height: 220)
                                         .padding(10)
-                                        .background(Color.white)
+                                        .background(FigmaTheme.card)
                                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                                     Spacer()
                                 }
@@ -1708,7 +1708,7 @@ struct SettingsView: View {
                     .frame(width: 56, height: 32)
 
                 Circle()
-                    .fill(Color.white)
+                    .fill(FigmaTheme.card)
                     .frame(width: 24, height: 24)
                     .padding(.horizontal, 4)
                     .shadow(color: Color.black.opacity(0.15), radius: 4, x: 0, y: 2)

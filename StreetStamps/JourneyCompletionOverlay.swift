@@ -11,7 +11,7 @@ struct JourneyCompletionOverlay: View {
 
     // MARK: - Brand colors (same as AppSplashView)
 
-    private let brandGreen = Color(red: 0.0, green: 182.0 / 255.0, blue: 122.0 / 255.0)
+    private let brandGreen = FigmaTheme.primary
 
 
     // MARK: - Animation state

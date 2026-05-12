@@ -78,6 +78,7 @@
 "unknown" = "Unknown";
 "memories" = "Memories";
 "preparing_map" = "Preparing map…";
+"city_thumbnail_tap_to_retry" = "Tap to retry";
 "loading_map" = "Loading map…";
 "globe" = "Globe";
 
@@ -464,7 +465,7 @@
 "photo_count" = "Photos %d/%d";
 "processing" = "PROCESSING...";
 "profile_display_name_placeholder" = "MYDEARFRIENDK";
-"profile_title" = "PROFILE";
+"profile_title" = "Profile";
 "activity_record_title" = "ACTIVITY RECORD";
 "activity_stat_journeys" = "JOURNEYS";
 "activity_stat_memories" = "MEMORIES";
@@ -533,6 +534,14 @@
 "journey_tag_add" = "ADD TAG";
 "journey_tag_custom" = "Custom…";
 "journey_tag_custom_title" = "Custom Tag";
+"activity_tag_commute" = "Commute";
+"activity_tag_running" = "Running";
+"activity_tag_travel" = "Travel";
+"activity_tag_walking" = "Walking";
+"activity_tag_cycling" = "Cycling";
+"activity_tag_driving" = "Driving";
+"activity_tag_subway" = "Subway";
+"activity_tag_hiking" = "Hiking";
 "share_activity_optional" = "Activity type (optional)";
 "share_activity_placeholder" = "Enter activity type";
 "share_discard_message" = "This journey will not be saved.";

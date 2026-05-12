@@ -5,11 +5,26 @@ import CoreLocation
 actor CityBoundaryService {
     static let shared = CityBoundaryService()
 
+    typealias SearchExecutor = @Sendable (
+        MKLocalSearch.Request,
+        @escaping @Sendable (MKLocalSearch.Response?) -> Void
+    ) -> SearchCancellationToken
+
     private var cache: [String: [CLLocationCoordinate2D]] = [:]
     private var inFlight: [String: [CheckedContinuation<[CLLocationCoordinate2D]?, Never>]] = [:]
 
     private let maxFetchSpanDegrees: CLLocationDegrees = 4.5
     private let maxAnchorDistanceMeters: CLLocationDistance = 250_000
+    private let searchTimeoutNanoseconds: UInt64
+    private let searchExecutor: SearchExecutor
+
+    init(
+        searchTimeoutNanoseconds: UInt64 = 6_000_000_000,
+        searchExecutor: @escaping SearchExecutor = CityBoundaryService.defaultSearchExecutor
+    ) {
+        self.searchTimeoutNanoseconds = searchTimeoutNanoseconds
+        self.searchExecutor = searchExecutor
+    }
 
     func boundaryPolygon(
         cityKey: String,
@@ -61,11 +76,7 @@ actor CityBoundaryService {
             )
         }
 
-        let response: MKLocalSearch.Response? = await withCheckedContinuation { cont in
-            MKLocalSearch(request: request).start { resp, _ in
-                cont.resume(returning: resp)
-            }
-        }
+        let response = await runSearch(request)
         guard let response else { return nil }
 
         let region = response.boundingRegion
@@ -93,5 +104,71 @@ actor CityBoundaryService {
             CLLocationCoordinate2D(latitude: maxLat, longitude: maxLon),
             CLLocationCoordinate2D(latitude: maxLat, longitude: minLon)
         ]
+    }
+
+    private func runSearch(_ request: MKLocalSearch.Request) async -> MKLocalSearch.Response? {
+        await withCheckedContinuation { cont in
+            let state = SearchRequestState()
+            let token = searchExecutor(request) { response in
+                state.finish(cont, returning: response)
+            }
+
+            Task {
+                try? await Task.sleep(nanoseconds: searchTimeoutNanoseconds)
+                token.cancel()
+                state.finish(cont, returning: nil)
+            }
+        }
+    }
+}
+
+final class SearchCancellationToken: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelImpl: (() -> Void)?
+
+    init(_ cancelImpl: @escaping () -> Void) {
+        self.cancelImpl = cancelImpl
+    }
+
+    func cancel() {
+        lock.lock()
+        let cancelImpl = self.cancelImpl
+        self.cancelImpl = nil
+        lock.unlock()
+        cancelImpl?()
+    }
+}
+
+private final class SearchRequestState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var completed = false
+
+    func finish(
+        _ continuation: CheckedContinuation<MKLocalSearch.Response?, Never>,
+        returning response: MKLocalSearch.Response?
+    ) {
+        lock.lock()
+        guard !completed else {
+            lock.unlock()
+            return
+        }
+        completed = true
+        lock.unlock()
+        continuation.resume(returning: response)
+    }
+}
+
+private extension CityBoundaryService {
+    static func defaultSearchExecutor(
+        request: MKLocalSearch.Request,
+        completion: @escaping @Sendable (MKLocalSearch.Response?) -> Void
+    ) -> SearchCancellationToken {
+        let search = MKLocalSearch(request: request)
+        search.start { response, _ in
+            completion(response)
+        }
+        return SearchCancellationToken {
+            search.cancel()
+        }
     }
 }

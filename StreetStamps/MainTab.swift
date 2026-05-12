@@ -270,7 +270,6 @@ struct MainTabView: View {
         }
         .tint(FigmaTheme.primary)
         .toolbarColorScheme(.light, for: .tabBar)
-        .toolbarBackground(.white, for: .tabBar)
         .toolbarBackground(.visible, for: .tabBar)
         .background(
             TabBarSelectionHapticObserver(currentTab: selectedTab)
