@@ -21,7 +21,6 @@ final class CityLocationManager: ObservableObject {
 
     /// ✅ 防止旧请求回写
     private var canonicalTask: Task<Void, Never>?
-    private var displayTask: Task<Void, Never>?
 
     func bind(to hub: LocationHub) {
         cancellable?.cancel()
@@ -43,7 +42,6 @@ final class CityLocationManager: ObservableObject {
 
         // 2) cancel stale callbacks (do NOT spam system geocoder)
         canonicalTask?.cancel()
-        displayTask?.cancel()
 
         // A) canonical (stable key) — globally rate-limited + cached
         canonicalTask = Task { [weak self] in
@@ -53,12 +51,9 @@ final class CityLocationManager: ObservableObject {
             guard let canon = await ReverseGeocodeService.shared.canonical(for: loc) else { return }
             if Task.isCancelled { return }
 
-            // Best-effort localized title: cached only (no new request here)
             let locale = LanguagePreference.shared.displayLocale
-            let cachedTitle = CityNameTranslationCache.shared.cachedName(
-                cityKey: canon.cityKey,
-                localeID: locale.identifier
-            )
+            let localizedTitle = CityDisplayOverrideStore.shared.override(for: canon.cityKey)
+                ?? CNCityNameLookup.shared.displayName(for: canon.cityKey, locale: locale)
 
             // Update canonical fields + ensure display updates immediately when cityKey changes
             await MainActor.run {
@@ -70,34 +65,13 @@ final class CityLocationManager: ObservableObject {
                     self.canonicalCityKey = canon.cityKey
                 }
 
-                // If we moved to a new city, never keep the old label.
                 if cityChanged {
-                    self.displayName = cachedTitle ?? canon.cityName
-                } else if let cachedTitle {
-                    // Same city, but we might have learned a localized title later.
-                    self.displayName = cachedTitle
+                    self.displayName = localizedTitle ?? canon.cityName
+                } else if let localizedTitle {
+                    self.displayName = localizedTitle
                 } else if self.displayName == "Unknown" || self.displayName == L10n.t("unknown") {
                     self.displayName = canon.cityName
                 }
-            }
-
-            // B) display localization: only once per cityKey (de-dupe in service)
-            if cachedTitle != nil {
-                return
-            }
-
-            displayTask = Task { [weak self] in
-                guard let self else { return }
-                if Task.isCancelled { return }
-                let title = await CityNameTranslationCache.shared.translate(
-                    cityKey: canon.cityKey,
-                    anchor: loc.coordinate,
-                    level: canon.level,
-                    locale: LanguagePreference.shared.displayLocale
-                )
-                if Task.isCancelled { return }
-                guard let title else { return }
-                await MainActor.run { self.displayName = title }
             }
         }
     }

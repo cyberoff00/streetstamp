@@ -489,9 +489,7 @@ final class BackendAPIClient {
         return { [weak self] request in
             let session: URLSession
             if let self {
-                self.sessionLock.lock()
-                session = self.primaryURLSession
-                self.sessionLock.unlock()
+                session = self.sessionLock.withLock { self.primaryURLSession }
             } else {
                 session = URLSession.shared
             }

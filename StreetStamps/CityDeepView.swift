@@ -52,6 +52,8 @@ struct CityDeepView: View {
     @State private var cachedJourneys: [JourneyRoute] = []
 
     @State private var editingMemory: JourneyMemory? = nil
+    @State private var pendingMemoryCluster: [JourneyMemory] = []
+    @State private var showMemoryClusterPicker = false
     @State private var showMemoriesOnMap = true
     @State private var isEditingMask: Bool = false
     @State private var showEraserIntro: Bool = false
@@ -339,17 +341,18 @@ struct CityDeepView: View {
             .filter { $0.locationStatus != .pending }
         guard !all.isEmpty else { return [] }
 
-        return all
-            .sorted { $0.timestamp < $1.timestamp }
-            .map { m in
-                let mapped = JourneyMemoryMapCoordinateResolver.mapCoordinate(
-                    for: m,
-                    fallbackCountryISO2: effectiveCountryISO2,
-                    fallbackCityKey: activeCityKey,
-                    engine: currentEngine
-                )
-                return MemoryGroup(id: m.id, key: m.id, coordinate: mapped, items: [m])
-            }
+        let entries = all.map { m in
+            (memory: m, coordinate: JourneyMemoryMapCoordinateResolver.mapCoordinate(
+                for: m,
+                fallbackCountryISO2: effectiveCountryISO2,
+                fallbackCityKey: activeCityKey,
+                engine: currentEngine
+            ))
+        }
+
+        return MemoryClusterer.cluster(entries).map { c in
+            MemoryGroup(id: c.id, key: c.key, coordinate: c.coordinate, items: c.items)
+        }
     }
 
     private func regionByFitting(_ coords: [CLLocationCoordinate2D]) -> MKCoordinateRegion? {
@@ -481,7 +484,6 @@ struct CityDeepView: View {
     }
 
     var body: some View {
-        let isDataLoading = !store.hasLoaded || store.isLoading
         ZStack(alignment: .top) {
             UnifiedMapView(
                 segments: mapSegments(),
@@ -493,8 +495,13 @@ struct CityDeepView: View {
                 callbacks: MapCallbacks(
                     onSelectMemories: { memories in
                         guard !isEditingMask else { return }
-                        guard let latest = memories.sorted(by: { $0.timestamp > $1.timestamp }).first else { return }
-                        editingMemory = latest
+                        let sorted = memories.sorted { $0.timestamp > $1.timestamp }
+                        if sorted.count > 1 {
+                            pendingMemoryCluster = sorted
+                            showMemoryClusterPicker = true
+                        } else if let latest = sorted.first {
+                            editingMemory = latest
+                        }
                     },
                     onEraseBrushSwept: { coord, radius in
                         handleEraseBrushSwept(at: coord, radiusMeters: radius)
@@ -632,6 +639,16 @@ struct CityDeepView: View {
                 .environmentObject(sessionStore)
             }
         }
+        .sheet(isPresented: $showMemoryClusterPicker) {
+            MemoryClusterPickerSheet(
+                memories: pendingMemoryCluster,
+                userID: sessionStore.currentUserID,
+                isPresented: $showMemoryClusterPicker,
+                onSelect: { memory in
+                    editingMemory = memory
+                }
+            )
+        }
         .alert(L10n.t("city_deep_eraser_intro_title"), isPresented: $showEraserIntro) {
             Button(L10n.t("cancel"), role: .cancel) {}
             Button(L10n.t("city_deep_eraser_intro_continue")) {
@@ -651,7 +668,7 @@ struct CityDeepView: View {
         .onDisappear {
             flow.popSidebarButtonHidden(token: sidebarHideToken)
         }
-        .onChange(of: activeCityKey) { _ in
+        .onChange(of: activeCityKey) { _, _ in
             fetchedBoundaryPolygon = nil
             cachedJourneys = buildCurrentJourneys()
             isEditingMask = false
@@ -659,27 +676,27 @@ struct CityDeepView: View {
             refreshRegionAndBoundary()
             refreshDisplayTitleFromCardKey()
         }
-        .onChange(of: store.metadataRevision) { _ in
+        .onChange(of: store.metadataRevision) { _, _ in
             cachedJourneys = buildCurrentJourneys()
         }
-        .onChange(of: locale) { _ in
+        .onChange(of: locale) { _, _ in
             refreshDisplayTitleFromCardKey()
         }
-        .onChange(of: languagePreference.currentLanguage) { _ in
+        .onChange(of: languagePreference.currentLanguage) { _, _ in
             refreshDisplayTitleFromCardKey()
         }
         .task(id: activeCityKey) {
             guard let cached = activeCachedCity else { return }
             let locale = LanguagePreference.shared.displayLocale
-            if let translated = await CityNameTranslationCache.shared.translateIfNeeded(cached, locale: locale) {
+            if let translated = CNCityNameLookup.shared.displayName(for: cached.cityKey, locale: locale) {
                 displayTitle = translated
             }
         }
-        .onChange(of: cachedJourneys.count) { _ in
+        .onChange(of: cachedJourneys.count) { _, _ in
             refreshRegionAndBoundary()
             if isEditingMask { rebuildEditPointTemplates() }
         }
-        .onChange(of: layerStyleRaw) { _ in
+        .onChange(of: layerStyleRaw) { _, _ in
             // Eraser brush is Mapbox-only — switching to a MapKit style mid-edit
             // must drop the user out of edit mode, otherwise the gesture stack
             // breaks pinch zoom on MapKit.
@@ -692,7 +709,7 @@ struct CityDeepView: View {
             if isEditingMask { rebuildEditPointTemplates() }
             refreshRegionAndBoundary()
         }
-        .onChange(of: isEditingMask) { editing in
+        .onChange(of: isEditingMask) { _, editing in
             if editing {
                 rebuildEditPointTemplates()
             } else {

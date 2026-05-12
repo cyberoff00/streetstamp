@@ -81,6 +81,7 @@
 "unknown" = "未知";
 "memories" = "记忆";
 "preparing_map" = "正在准备地图…";
+"city_thumbnail_tap_to_retry" = "点击重试";
 "loading_map" = "正在加载地图…";
 "globe" = "地球";
 
@@ -117,15 +118,15 @@
 "city_library_header_city" = "你的城市印章";
 
 /* City Library - Empty state */
-"city_empty_title" = "还没有城市印章";
-"city_empty_subtitle" = "生成一张城市卡，或完成一次旅程来解锁你的第一座城市。";
+"city_empty_title" = "还没有城市卡";
+"city_empty_subtitle" = "你探索过的每一次旅程都会成为专属的城市卡片";
 
 /* Card stats */
 "city_stats_line" = "%d 次探索 · %d 条记忆";
 
 "library_city_title" = "城市卡";
-"library_empty_title" = "还没有城市印章";
-"library_empty_subtitle" = "生成一张城市卡，或完成一次旅程来解锁你的第一座城市。";
+"library_empty_title" = "还没有城市卡";
+"library_empty_subtitle" = "你探索过的每一次旅程都会成为专属的城市卡片";
 "friend_city_cards_empty_title" = "TA 暂无城市卡";
 "friend_city_cards_empty_subtitle" = "TA 还没有解锁城市卡。";
 "city_card_stats" = "%d 次探索 · %d 条记忆";
@@ -200,6 +201,8 @@
 "delete_city_alert_message" = "“%@” 将从你的城市卡中移除，无法撤销。";
 "delete" = "删除";
 "cancel" = "取消";
+"memory_picker_title" = "选择记忆";
+"memory_picker_no_note" = "无内容";
 "profile_tagline_travel_enthusiastic" = "旅行爱好者";
 "profile_no_items_title" = "还没有收集到任何物品";
 "profile_no_items_desc" = "完成旅程即可获得装备和物品";
@@ -470,6 +473,18 @@
 "settings_level_rules_intro" = "当前等级规则";
 "settings_check_updates_title" = "检查更新";
 "settings_check_updates_placeholder" = "检查更新";
+"settings_check_updates_checking_title" = "正在检查更新";
+"settings_check_updates_checking_message" = "正在从 App Store 获取最新版本……";
+"settings_check_updates_up_to_date_title" = "已是最新版本";
+"settings_check_updates_up_to_date_message" = "当前版本 %@ 已是最新。";
+"settings_check_updates_available_title" = "发现新版本";
+"settings_check_updates_available_message" = "App Store 上已有新版本 %@。";
+"settings_check_updates_available_message_with_notes" = "App Store 上已有新版本 %@。\n\n更新内容：\n%@";
+"settings_check_updates_action_update" = "前往更新";
+"settings_check_updates_action_later" = "稍后再说";
+"settings_check_updates_action_skip" = "跳过此版本";
+"settings_check_updates_failed_title" = "检查更新失败";
+"settings_check_updates_failed_message" = "无法连接到 App Store，请检查网络后稍后再试。";
 "settings_live_activity_title" = "实时活动";
 "settings_live_activity_desc" = "在锁屏和灵动岛显示当前追踪进度。";
 "settings_live_activity_system_disabled_desc" = "请前往 设置 -> Worldo -> 实时活动 开启。";
@@ -505,6 +520,17 @@
 "settings_title" = "设置";
 "settings_voice_broadcast_desc" = "在里程碑播报距离、用时和平均配速。";
 "settings_voice_broadcast_title" = "语音播报";
+"journey_tag_add" = "添加标签";
+"journey_tag_custom" = "自定义…";
+"journey_tag_custom_title" = "自定义标签";
+"activity_tag_commute" = "通勤";
+"activity_tag_running" = "跑步";
+"activity_tag_travel" = "旅游";
+"activity_tag_walking" = "散步";
+"activity_tag_cycling" = "骑行";
+"activity_tag_driving" = "驾车";
+"activity_tag_subway" = "地铁";
+"activity_tag_hiking" = "登山";
 "share_activity_optional" = "活动类型（可不填）";
 "share_activity_placeholder" = "输入活动类型";
 "share_discard_message" = "这条旅程将不会被保存。";
@@ -1104,10 +1130,17 @@
 "membership_save_badge" = "省钱";
 "membership_subscribe_button" = "订阅";
 "membership_restore_purchases" = "恢复购买";
+"membership_redeem_offer_code" = "兑换码";
+"membership_refund_processed_title" = "退款已处理";
+"membership_refund_processed_message" = "你的订阅退款已处理完成。订阅赠送的欢迎奖励金币（1500）已收回；你通过步数等正常获得的金币不受影响。";
+"membership_refund_processed_ok" = "知道了";
 "membership_auto_renew_note" = "订阅自动续期，可随时在「设置」中取消。";
 "membership_welcome_bonus_title" = "欢迎奖励！";
 "membership_welcome_bonus_message" = "已赠送 %d 金币，快去买装备装扮自己吧！";
 "membership_welcome_bonus_ok" = "知道了";
+"membership_icloud_auto_enabled_title" = "已开启 iCloud 同步";
+"membership_icloud_auto_enabled_message" = "已开启 iCloud 同步，数据将在后台逐步备份。可在设置中关闭。";
+"membership_icloud_auto_enabled_ok" = "知道了";
 "membership_products_unavailable" = "产品暂不可用，请稍后再试。";
 
 "error_network_unavailable" = "网络不可用，请检查网络连接";
@@ -1136,7 +1169,7 @@
 "hint_map_memory" = "点击拍照或添加笔记，记录沿途点滴";
 "hint_map_finish" = "点击旗帜结束并保存旅程";
 "hint_visibility_toggle" = "选择谁可以看到这次旅程 — 私密、好友或公开";
-"hint_journey_saved" = "旅程已保存！前往「记忆」查看旅程和城市卡";
+"hint_journey_saved" = "两种方式留下你的城市记忆，城市卡片记录城市轨迹，记忆归档你的旅途图文";
 "hint_journey_saved_action" = "去看看";
 "hint_city_card_collect" = "你的第一张城市轨迹卡！探索更多旅程，收集更多城市";
 
@@ -1175,6 +1208,7 @@
 "about_us_traveler_needs_content" = "Worldo里我最喜欢的板块是很简单的Journey Memory，也就是最后旅程被归档的图文所呈现的形态。我认为做APP会时常感到气馁的点是它并没有那么像创作，也并不像是一个人的游戏，决定成功的因素绝不仅仅是产品本身，同时一款产品的产生却会有成千上万的竞品随之而来，那为什么是我。想到最后我觉得可以回到我为什么依然喜欢一个最简单的记录功能。我觉得新其实更多时候只是既有东西的组合，组合好了就会达成某种和谐，这种和谐会产生一些能量。也就是说它实现了我个人最核心的需求，旅行者的需求，后来在火车上飞机上我都自然开始写点东西，拍点东西，就像是一种图文和时空和谐的归位，我觉得什么都对了。初版Worldo被测试的时候我在济州岛，爬汉拿山那天我用它记录了一路的旅程，后来我也经常和朋友炫耀导出的游记，这世界还存在游记吗？";
 "about_us_cyber_dog_title" = "赛博遛狗的故事";
 "about_us_cyber_dog_content" = "一个朋友打算在装备里画了一只小狗，因为她想到她的小狗安迪以后死了，她散步的时候可以看到地图里自己带着赛博小狗一起，然后还没画她就痛哭一场。很萌，我想要做的就是这种很萌的东西。又有一天我在为生活的一切，为这款app焦虑的时候，骑着车记录着轨迹，我突然觉得没关系，即使最后是自娱自乐也没关系。我为朋友们建造了一个赛博空间，这个空间只有30个人也是另一种伟大的故事。";
+"about_us_aside_header" = "话外";
 "about_worldo_header" = "关于 WORLDO";
 "brand_tagline_journey_memory" = "旅程记忆";
 "brand_wordmark" = "worldo";
@@ -1269,11 +1303,21 @@
 "photo_discovery_from_photos" = "来自相册";
 "photo_count_format" = "%d 张照片";
 "photo_discovery_unlock_all" = "解锁全部发现的城市";
-"photo_scan_confirm_title" = "从相册导入";
-"photo_scan_confirm_message" = "扫描照片中的位置信息，将未记录旅程的城市添加为城市卡片。";
+"photo_scan_confirm_title" = "从相册导入（会员专属）";
+"photo_scan_confirm_message" = "考虑到您在未使用 Worldo 前遗落的行程，会员可开启从照片中扫描城市的功能。";
 "photo_scan_confirm_start" = "开始扫描";
 "empty_city_guide_hint" = "暂无城市卡，开启旅程解锁城市或右上角通过相册导入历史城市";
-"city_empty_title" = "暂无城市卡";
-"city_empty_desc" = "开启旅程解锁城市，\n或右上角通过相册导入";
+"city_empty_title" = "还没有城市卡";
+"city_empty_desc" = "你探索过的每一次旅程都会成为专属的城市卡片";
+"city_empty_explainer" = "你探索过的每一次旅程都会成为专属的城市卡片";
+"memory_empty_explainer" = "你的旅程图文会被归档为一份游记";
+"city_empty_action_start" = "开始一次旅程";
+"city_empty_action_import" = "从相册导入历史城市";
+"memory_empty_action_start" = "开始一次旅程";
 "postcard_no_city_hint" = "开启旅程解锁城市，才能获得对应城市的明信片发送机会";
 "network_unstable_retrying" = "网络不稳，正在重试";
+"reset" = "重置";
+"city_edit_display_name" = "修改显示名";
+"city_edit_display_name_title" = "重命名城市";
+"city_edit_display_name_placeholder" = "显示名";
+"city_edit_display_name_hint" = "用自定义名字显示这张卡片。城市身份不变。";

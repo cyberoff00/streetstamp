@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import Combine
 
 enum FriendIdentityPresentation {
     static func displayName(
@@ -477,28 +478,38 @@ final class SocialGraphStore: ObservableObject {
     }
 
     private func persistToDisk() {
-        do {
-            let paths = StoragePath(userID: activeUserID)
-            try paths.ensureBaseDirectoriesExist()
-            let data = try JSONEncoder().encode(friends)
-            try data.write(to: fileURL, options: .atomic)
-        } catch {
-            print("❌ SocialGraph save failed:", error)
+        let snapshot = friends
+        let userID = activeUserID
+        let url = fileURL
+        Task.detached(priority: .utility) {
+            do {
+                let paths = StoragePath(userID: userID)
+                try paths.ensureBaseDirectoriesExist()
+                let data = try JSONEncoder().encode(snapshot)
+                try data.write(to: url, options: .atomic)
+            } catch {
+                print("❌ SocialGraph save failed:", error)
+            }
         }
     }
 
     private func persistMyProfileToDisk() {
-        do {
-            let paths = StoragePath(userID: activeUserID)
-            try paths.ensureBaseDirectoriesExist()
-            if let profile = cachedMyProfile {
-                let data = try JSONEncoder().encode(profile)
-                try data.write(to: myProfileFileURL, options: .atomic)
-            } else {
-                try? FileManager.default.removeItem(at: myProfileFileURL)
+        let snapshot = cachedMyProfile
+        let userID = activeUserID
+        let url = myProfileFileURL
+        Task.detached(priority: .utility) {
+            do {
+                let paths = StoragePath(userID: userID)
+                try paths.ensureBaseDirectoriesExist()
+                if let profile = snapshot {
+                    let data = try JSONEncoder().encode(profile)
+                    try data.write(to: url, options: .atomic)
+                } else {
+                    try? FileManager.default.removeItem(at: url)
+                }
+            } catch {
+                print("❌ SocialGraph myProfile save failed:", error)
             }
-        } catch {
-            print("❌ SocialGraph myProfile save failed:", error)
         }
     }
 

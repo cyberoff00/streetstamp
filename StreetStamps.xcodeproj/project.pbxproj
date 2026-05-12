@@ -14,6 +14,7 @@
 		C1A100012F30000100AA0001 /* StreetStampsWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = C1A100012F30000100AA0005 /* StreetStampsWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		CD3F63C12F47C9BD003DACD7 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = CD3F63C02F47C9BD003DACD7 /* GoogleService-Info.plist */; };
 		CD3F63C22F47D201003DACD7 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = CD3F63C32F47D201003DACD7 /* GoogleSignIn */; };
+		CD5BC0CD2FAAA74000A17A11 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = CD5BC0CC2FAAA74000A17A11 /* RevenueCat */; };
 		F9A100012F5A100000000001 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = F9A100022F5A100000000001 /* FirebaseAuth */; };
 		F9A100032F5A100000000001 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = F9A100042F5A100000000001 /* FirebaseCore */; };
 /* End PBXBuildFile section */
@@ -168,6 +169,7 @@
 			files = (
 				F9A100032F5A100000000001 /* FirebaseCore in Frameworks */,
 				F9A100012F5A100000000001 /* FirebaseAuth in Frameworks */,
+				CD5BC0CD2FAAA74000A17A11 /* RevenueCat in Frameworks */,
 				CD3F63C22F47D201003DACD7 /* GoogleSignIn in Frameworks */,
 				B5C3188A2F14F27E00397BE9 /* MapboxMaps in Frameworks */,
 			);
@@ -292,6 +294,7 @@
 				CD3F63C32F47D201003DACD7 /* GoogleSignIn */,
 				F9A100022F5A100000000001 /* FirebaseAuth */,
 				F9A100042F5A100000000001 /* FirebaseCore */,
+				CD5BC0CC2FAAA74000A17A11 /* RevenueCat */,
 			);
 			productName = StreetStamps;
 			productReference = B5F75DB62F0D641D00FEF837 /* StreetStamps.app */;
@@ -364,6 +367,7 @@
 				B5C3186E2F14F07C00397BE9 /* XCRemoteSwiftPackageReference "mapbox-maps-ios" */,
 				CD3F63BD2F47C725003DACD7 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
 				CD3F64AD2F47D024003DACD7 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				CD5BC0CB2FAAA67400A17A11 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = B5F75DB72F0D641D00FEF837 /* Products */;
@@ -509,6 +513,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = XNPB3GQ7SF;
@@ -521,6 +526,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.claire.streetstamps.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -536,7 +542,7 @@
 				CODE_SIGN_ENTITLEMENTS = TrackingWidgeExtension.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 37;
+				CURRENT_PROJECT_VERSION = 45;
 				DEVELOPMENT_TEAM = XNPB3GQ7SF;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TrackingWidge/Info.plist;
@@ -548,12 +554,15 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.claire.streetstamps.TrackingWidge;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
@@ -568,9 +577,12 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
 				CODE_SIGN_ENTITLEMENTS = TrackingWidgeExtension.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 37;
-				DEVELOPMENT_TEAM = XNPB3GQ7SF;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Distribution";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 45;
+				DEVELOPMENT_TEAM = "";
+				"DEVELOPMENT_TEAM[sdk=iphoneos*]" = XNPB3GQ7SF;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TrackingWidge/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = TrackingWidge;
@@ -581,11 +593,16 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.claire.streetstamps.TrackingWidge;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = worldowidge;
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
@@ -600,13 +617,15 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = StreetStamps/StreetStampsDebug.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 37;
+				CURRENT_PROJECT_VERSION = 45;
 				DEVELOPMENT_TEAM = XNPB3GQ7SF;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = StreetStamps/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Streetstamp;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
 				INFOPLIST_KEY_NSCameraUsageDescription = "我们需要访问您的摄像头来拍摄旅程照片";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "我们需要您的位置来持续追踪您的旅程";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "我们需要您的位置来追踪您的旅程";
@@ -623,12 +642,16 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.claire.streetstamps;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
@@ -642,13 +665,17 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = StreetStamps/StreetStamps.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 37;
-				DEVELOPMENT_TEAM = XNPB3GQ7SF;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Distribution";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 45;
+				DEVELOPMENT_TEAM = "";
+				"DEVELOPMENT_TEAM[sdk=iphoneos*]" = XNPB3GQ7SF;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = StreetStamps/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Streetstamp;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
 				INFOPLIST_KEY_NSCameraUsageDescription = "我们需要访问您的摄像头来拍摄旅程照片";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "我们需要您的位置来持续追踪您的旅程";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "我们需要您的位置来追踪您的旅程";
@@ -665,12 +692,17 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.claire.streetstamps;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = World;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
@@ -731,7 +763,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = NO;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -789,7 +821,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = NO;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -803,14 +835,16 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = StreetStampsWatch/StreetStampsWatch.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 36;
+				CURRENT_PROJECT_VERSION = 45;
 				DEVELOPMENT_TEAM = XNPB3GQ7SF;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = StreetStampsWatch/Info.plist;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.claire.streetstamps.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = watchos;
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -828,14 +862,18 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = StreetStampsWatch/StreetStampsWatch.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 36;
-				DEVELOPMENT_TEAM = XNPB3GQ7SF;
+				"CODE_SIGN_IDENTITY[sdk=watchos*]" = "iPhone Distribution";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 45;
+				DEVELOPMENT_TEAM = "";
+				"DEVELOPMENT_TEAM[sdk=watchos*]" = XNPB3GQ7SF;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = StreetStampsWatch/Info.plist;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.claire.streetstamps.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				"PROVISIONING_PROFILE_SPECIFIER[sdk=watchos*]" = worldowatch;
 				SDKROOT = watchos;
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -924,6 +962,14 @@
 				minimumVersion = 12.9.0;
 			};
 		};
+		CD5BC0CB2FAAA67400A17A11 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/RevenueCat/purchases-ios-spm.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.70.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -936,6 +982,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = CD3F63BD2F47C725003DACD7 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
 			productName = GoogleSignIn;
+		};
+		CD5BC0CC2FAAA74000A17A11 /* RevenueCat */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CD5BC0CB2FAAA67400A17A11 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
+			productName = RevenueCat;
 		};
 		F9A100022F5A100000000001 /* FirebaseAuth */ = {
 			isa = XCSwiftPackageProductDependency;

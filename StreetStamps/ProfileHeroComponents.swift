@@ -17,7 +17,10 @@ struct ProfileHeroTopBackdrop<Content: View>: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            Color(red: 224.0 / 255.0, green: 241.0 / 255.0, blue: 237.0 / 255.0)
+            // Parchment matches the room scene's own background so there is no
+            // visible mint border around the sofa. The hero section reads as one
+            // continuous surface; the halftone decorations carry all the visual weight.
+            FigmaTheme.background
 
             content
         }
@@ -40,12 +43,16 @@ struct ProfileHeroLevelPill: View {
 
     var body: some View {
         Text(String(format: L10n.t("level_format"), level))
-            .font(.system(size: 10, weight: .bold, design: .rounded))
-            .foregroundColor(Color(red: 15.0 / 255.0, green: 118.0 / 255.0, blue: 110.0 / 255.0))
+            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            .tracking(0.6)
+            .foregroundColor(WorldoPalette.signal)
             .padding(.horizontal, 9)
             .padding(.vertical, 4)
-            .background(Color(red: 204.0 / 255.0, green: 251.0 / 255.0, blue: 241.0 / 255.0))
+            .background(WorldoPalette.lime.opacity(0.55))
             .clipShape(Capsule())
+            .overlay(
+                Capsule().stroke(Color.gray.opacity(0.08), lineWidth: 1)
+            )
     }
 }
 
@@ -69,20 +76,20 @@ struct ProfileHeroStatsCard: View {
 
                 if index < items.count - 1 {
                     Rectangle()
-                        .fill(Color(red: 249.0 / 255.0, green: 250.0 / 255.0, blue: 251.0 / 255.0))
+                        .fill(WorldoPalette.hairline.opacity(0.6))
                         .frame(width: 1, height: 44)
                 }
             }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 16)
-        .background(Color.white)
+        .background(FigmaTheme.card)
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color(red: 243.0 / 255.0, green: 244.0 / 255.0, blue: 246.0 / 255.0), lineWidth: 1)
+                .stroke(Color.gray.opacity(0.08), lineWidth: 1)
         }
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+        .shadow(color: FigmaTheme.softShadow, radius: 6, x: 0, y: 2)
     }
 }
 

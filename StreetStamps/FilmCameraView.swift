@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import AVFoundation
 import CoreImage
 import CoreMotion
@@ -10,18 +11,49 @@ import CoreMotion
 enum CameraPreset: String, CaseIterable, Identifiable {
     case plain
     case fujiCCD
+    case photobooth
 
     var id: String { rawValue }
 
     var displayLabel: String {
         switch self {
         case .plain: return "PLAIN"
-        case .fujiCCD: return "FUJI"
+        case .fujiCCD: return "01"
+        case .photobooth: return "02"
         }
     }
 
-    var appliesFilmFilter: Bool { self == .fujiCCD }
+    var appliesFilmFilter: Bool { self != .plain }
     var showsFilmFrame: Bool { self == .fujiCCD }
+
+    /// Default EV bias applied on capture device when this preset becomes
+    /// active. iPhone auto-exposure tends to over-expose indoor scenes with
+    /// white walls / room lighting, and post-processing can't recover clipped
+    /// highlights — so 01 starts the user at -0.5 EV. The EV slider remains
+    /// available for manual override from this baseline.
+    var defaultExposureBias: Float {
+        switch self {
+        case .fujiCCD: return -0.5
+        case .plain, .photobooth: return 0
+        }
+    }
+}
+
+/// Sub-mode for the Fuji preset, selectable inside the viewfinder when FUJI is the
+/// active preset. Indoor and outdoor scenes need fundamentally different tuning;
+/// the user picks which is active before capturing.
+enum FujiScene: String, CaseIterable, Identifiable {
+    case indoor
+    case outdoor
+
+    var id: String { rawValue }
+
+    var displayLabel: String {
+        switch self {
+        case .indoor: return "IN"
+        case .outdoor: return "OUT"
+        }
+    }
 }
 
 // =======================================================
@@ -37,8 +69,12 @@ struct FilmCameraView: View {
 
     @StateObject private var camera = FilmCameraEngine()
     @State private var selectedPreset: CameraPreset
+    @State private var fujiScene: FujiScene = .outdoor
     @State private var shutterFlash = false
     @State private var capturedImage: UIImage?
+    @State private var rawCapturedImage: UIImage?
+    @State private var liveTuning: FilmFilterEngine.FujiTuning?
+    @State private var showTuningPanel: Bool = false
     @State private var showReview = false
     @State private var shutterScale: CGFloat = 1.0
     @State private var filmCounter: Int = Int.random(in: 1...24)
@@ -55,7 +91,7 @@ struct FilmCameraView: View {
 
     private let dateStampFormatter: DateFormatter = {
         let f = DateFormatter()
-        f.dateFormat = "'04   yy   MM   dd"
+        f.dateFormat = "'01   yy   MM   dd"
         return f
     }()
 
@@ -96,9 +132,13 @@ struct FilmCameraView: View {
         .statusBarHidden()
         .onAppear {
             camera.startSession()
+            camera.setExposureBias(selectedPreset.defaultExposureBias)
         }
         .onDisappear {
             camera.stopSession()
+        }
+        .onChange(of: selectedPreset) { _, newPreset in
+            camera.setExposureBias(newPreset.defaultExposureBias)
         }
     }
 
@@ -133,6 +173,11 @@ struct FilmCameraView: View {
                 zoomIndicator
                     .frame(width: viewfinderW, height: viewfinderH, alignment: .top)
                     .allowsHitTesting(false)
+
+                // Vertical EV exposure compensation strip — pro-camera style, lives
+                // on the right edge of the viewfinder. Always visible, drag to set.
+                verticalEVSlider
+                    .frame(width: viewfinderW, height: viewfinderH, alignment: .trailing)
             }
             .frame(width: viewfinderW, height: viewfinderH)
             .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
@@ -181,7 +226,7 @@ struct FilmCameraView: View {
                 Spacer()
 
                 VStack(spacing: 1) {
-                    Text("FUJI")
+                    Text("WORLDO")
                         .font(.system(size: 8.5, weight: .heavy))
                         .tracking(4)
                         .foregroundColor(chromeLight.opacity(0.9))
@@ -190,7 +235,7 @@ struct FilmCameraView: View {
                         .fill(chrome.opacity(0.4))
                         .frame(width: 36, height: 0.5)
 
-                    Text("CCD")
+                    Text(selectedPreset == .plain ? "—" : selectedPreset.displayLabel)
                         .font(.system(size: 10.5, weight: .bold, design: .monospaced))
                         .tracking(2)
                         .foregroundColor(.white.opacity(0.45))
@@ -252,6 +297,76 @@ struct FilmCameraView: View {
     }
 
     // =====================================================
+    // MARK: - Vertical EV Slider
+    // Pro-camera style strip on the right edge of the viewfinder. Drag the
+    // knob up/down to bias exposure -2 .. +2 stops at capture time. Always
+    // visible but minimal footprint; numeric value chip floats next to the
+    // knob only when EV is non-zero, so the UI stays clean at the default.
+    // =====================================================
+
+    private var verticalEVSlider: some View {
+        GeometryReader { geo in
+            let h = geo.size.height
+            let evValue = Double(camera.exposureBias)
+            // Map -2 (top) .. +2 (bottom) is unintuitive; standard cameras put
+            // + on top and - on bottom, so we invert.
+            let knobY = (1 - (evValue + 2) / 4) * h
+            let active = abs(evValue) > 0.05
+
+            ZStack {
+                // Track — thin vertical line, full height
+                Rectangle()
+                    .fill(Color.white.opacity(0.20))
+                    .frame(width: 1)
+                    .frame(maxHeight: .infinity)
+
+                // Center reference tick at EV = 0
+                Rectangle()
+                    .fill(Color.white.opacity(0.35))
+                    .frame(width: 5, height: 0.5)
+
+                // Knob — short horizontal capsule, amber when EV != 0
+                Capsule()
+                    .fill(active ? amber : Color.white.opacity(0.85))
+                    .frame(width: 12, height: 2)
+                    .shadow(color: .black.opacity(0.45), radius: 0.5, y: 0.5)
+                    .position(x: geo.size.width / 2, y: knobY)
+
+                // Numeric value chip (only when non-zero), floats left of knob
+                if active {
+                    Text(String(format: "%+.1f", camera.exposureBias))
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundColor(amber)
+                        .monospacedDigit()
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.black.opacity(0.65))
+                        .clipShape(Capsule())
+                        .position(x: -16, y: knobY)
+                        .transition(.opacity)
+                }
+            }
+            .frame(width: geo.size.width, height: h)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        let y = max(0, min(h, value.location.y))
+                        let evRaw = Float((1 - y / h) * 4 - 2)
+                        let stepped = (evRaw * 10).rounded() / 10
+                        let clamped = max(-2.0 as Float, min(2.0 as Float, stepped))
+                        if abs(clamped - camera.exposureBias) > 0.001 {
+                            camera.setExposureBias(clamped)
+                        }
+                    }
+            )
+            .animation(.easeInOut(duration: 0.15), value: active)
+        }
+        .frame(width: 28, height: 140)
+        .padding(.trailing, 12)
+    }
+
+    // =====================================================
     // MARK: - Film Frame Border
     // =====================================================
 
@@ -273,7 +388,7 @@ struct FilmCameraView: View {
                 Spacer()
 
                 HStack(alignment: .center) {
-                    Text("FUJI  CCD  04")
+                    Text("WORLDO  01")
                         .font(.system(size: 6.5, weight: .bold, design: .monospaced))
                         .tracking(1.2)
                         .foregroundColor(amber.opacity(0.45))
@@ -354,6 +469,55 @@ struct FilmCameraView: View {
                     .font(.system(size: 14, weight: .light))
                     .foregroundColor(isSelected ? .white.opacity(0.9) : .white.opacity(0.25))
             }
+        } else if preset == .photobooth {
+            // Photobooth: macOS Photo Booth-style retro camera with rainbow flash bar
+            ZStack {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color(white: 0.08))
+                    .frame(width: 40, height: 30)
+
+                // Camera body (deep blue retro)
+                RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                    .fill(LinearGradient(
+                        colors: [Color(red: 0.30, green: 0.52, blue: 0.76),
+                                 Color(red: 0.18, green: 0.36, blue: 0.58)],
+                        startPoint: .top, endPoint: .bottom))
+                    .frame(width: 28, height: 16)
+                    .offset(y: 3)
+
+                // Rainbow flash bar
+                HStack(spacing: 0) {
+                    Rectangle().fill(Color(red: 0.91, green: 0.30, blue: 0.23)).frame(width: 4.4)
+                    Rectangle().fill(Color(red: 0.96, green: 0.65, blue: 0.14)).frame(width: 4.4)
+                    Rectangle().fill(Color(red: 0.97, green: 0.83, blue: 0.30)).frame(width: 4.4)
+                    Rectangle().fill(Color(red: 0.42, green: 0.69, blue: 0.30)).frame(width: 4.4)
+                    Rectangle().fill(Color(red: 0.29, green: 0.56, blue: 0.85)).frame(width: 4.4)
+                }
+                .frame(height: 4)
+                .clipShape(RoundedRectangle(cornerRadius: 0.8, style: .continuous))
+                .offset(y: -8)
+
+                // Lens
+                Circle()
+                    .fill(RadialGradient(
+                        colors: [Color(white: 0.18), Color(white: 0.04)],
+                        center: .center, startRadius: 0.5, endRadius: 5.5))
+                    .frame(width: 11, height: 11)
+                    .offset(y: 3)
+                Circle()
+                    .stroke(Color.white.opacity(0.18), lineWidth: 0.5)
+                    .frame(width: 11, height: 11)
+                    .offset(y: 3)
+                Circle()
+                    .fill(Color.white.opacity(0.35))
+                    .frame(width: 2.2, height: 2.2)
+                    .offset(x: -2.4, y: 1)
+            }
+            .frame(width: 40, height: 30)
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(isSelected ? amber.opacity(0.7) : Color.clear, lineWidth: 1)
+            )
         } else {
             // Film camera — scaled-down version of filmCameraCenterDrop
             ZStack {
@@ -439,6 +603,7 @@ struct FilmCameraView: View {
 
                 Button {
                     camera.flipCamera()
+                    camera.setExposureBias(selectedPreset.defaultExposureBias)
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 } label: {
                     ZStack {
@@ -560,7 +725,7 @@ struct FilmCameraView: View {
 
                     if selectedPreset.showsFilmFrame {
                         HStack {
-                            Text("FUJI CCD 04")
+                            Text("WORLDO 01")
                                 .font(.system(size: 7, weight: .medium, design: .monospaced))
                                 .tracking(1)
                                 .foregroundColor(Color.gray.opacity(0.35))
@@ -623,6 +788,50 @@ struct FilmCameraView: View {
                 .padding(.bottom, geo.safeAreaInsets.bottom + 16)
             }
         }
+        .overlay(alignment: .topTrailing) {
+            if selectedPreset == .fujiCCD {
+                tuneButton
+                    .padding(.top, geo.safeAreaInsets.top + 12)
+                    .padding(.trailing, 16)
+            }
+        }
+        .sheet(isPresented: $showTuningPanel) {
+            FilmTuningPanel(
+                tuning: Binding(
+                    get: { liveTuning ?? defaultTuning(for: fujiScene) },
+                    set: { liveTuning = $0 }
+                ),
+                defaultTuning: defaultTuning(for: fujiScene),
+                onDismiss: { showTuningPanel = false }
+            )
+            .presentationDetents([.medium, .large])
+        }
+        .onChange(of: liveTuning) { _, _ in
+            if let raw = rawCapturedImage {
+                capturedImage = processCapturedImage(raw)
+            }
+        }
+    }
+
+    // =====================================================
+    // MARK: - Tune Button (Live tuning trigger)
+    // =====================================================
+
+    private var tuneButton: some View {
+        Button {
+            if liveTuning == nil {
+                liveTuning = defaultTuning(for: fujiScene)
+            }
+            showTuningPanel = true
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(width: 36, height: 36)
+                .background(Color.black.opacity(0.55))
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
     }
 
     // =====================================================
@@ -641,15 +850,33 @@ struct FilmCameraView: View {
 
         camera.capturePhoto { image in
             guard let image else { return }
-            let processed = self.selectedPreset.appliesFilmFilter
-                ? FilmFilterEngine.applyToCapture(image)
-                : image
+            self.rawCapturedImage = image
+            let processed = self.processCapturedImage(image)
             if self.selectedPreset.showsFilmFrame {
                 self.filmCounter = min(self.filmCounter + 1, 36)
             }
             self.capturedImage = processed
             self.showReview = true
         }
+    }
+
+    /// Apply the active CCD pipeline to a captured raw image.
+    /// If the user has opened the tuning panel and modified sliders, that
+    /// custom `liveTuning` is used; otherwise we fall back to the scene default.
+    private func processCapturedImage(_ raw: UIImage) -> UIImage {
+        guard selectedPreset.appliesFilmFilter else { return raw }
+        if selectedPreset == .fujiCCD, let tuning = liveTuning {
+            return FilmFilterEngine.applyToCapture(raw, tuning: tuning)
+        }
+        return FilmFilterEngine.applyToCapture(
+            raw,
+            preset: selectedPreset,
+            fujiScene: fujiScene
+        )
+    }
+
+    private func defaultTuning(for scene: FujiScene) -> FilmFilterEngine.FujiTuning {
+        scene == .indoor ? .indoor : .outdoor
     }
 }
 
@@ -663,6 +890,7 @@ final class FilmCameraEngine: NSObject, ObservableObject {
     @Published var isUsingFrontCamera = false
     @Published var isSessionReady = false
     @Published var zoomFactor: CGFloat = 1.0
+    @Published var exposureBias: Float = 0   // -2.0 .. +2.0 EV stops
 
     private let zoomCeiling: CGFloat = 5.0
     private var currentDevice: AVCaptureDevice?
@@ -733,9 +961,12 @@ final class FilmCameraEngine: NSObject, ObservableObject {
 
             self.captureSession.commitConfiguration()
             self.applyZoomLocked(1.0)
+            // Reset EV — front/back devices have independent exposure state,
+            // and "0 EV" is the safest neutral starting point on flip.
             DispatchQueue.main.async {
                 self.isUsingFrontCamera = wantFront
                 self.zoomFactor = 1.0
+                self.exposureBias = 0
             }
         }
     }
@@ -758,6 +989,27 @@ final class FilmCameraEngine: NSObject, ObservableObject {
             DispatchQueue.main.async { self.zoomFactor = clamped }
         } catch {
             // Ignore — zoom is a non-critical enhancement.
+        }
+    }
+
+    /// Apply EV exposure compensation to the active capture device.
+    /// Range is clamped to the device's reported min/max exposure target bias
+    /// (typically -8 .. +8, but UI surfaces -2 .. +2 to match user intuition).
+    /// This is the single highest-leverage knob for fixing iPhone's frequent
+    /// indoor over-exposure of selfies / scenes with bright backgrounds —
+    /// post-processing can't recover information already clipped at capture.
+    func setExposureBias(_ ev: Float) {
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.currentDevice else { return }
+            let clamped = max(device.minExposureTargetBias, min(device.maxExposureTargetBias, ev))
+            do {
+                try device.lockForConfiguration()
+                device.setExposureTargetBias(clamped, completionHandler: nil)
+                device.unlockForConfiguration()
+                DispatchQueue.main.async { self.exposureBias = clamped }
+            } catch {
+                // Ignore — EV is a non-critical enhancement.
+            }
         }
     }
 

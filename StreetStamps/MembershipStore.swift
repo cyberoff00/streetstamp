@@ -10,6 +10,7 @@
 import Foundation
 import StoreKit
 import Combine
+import RevenueCat
 
 // MARK: - Tier Definition
 
@@ -124,21 +125,41 @@ enum MembershipTierConfig {
         case .premium: return false
         }
     }
+
+    // MARK: Map Matching (snap journey to road network)
+
+    /// Premium-only feature. Cost-bearing (Mapbox API per-request pricing).
+    /// Non-premium users see the journey's raw / corrected route; premium users
+    /// get the route snapped to actual roads after journey completion.
+    static func mapMatchingEnabled(for tier: MembershipTier) -> Bool {
+        switch tier {
+        case .free:    return false
+        case .premium: return true
+        }
+    }
 }
 
 // MARK: - Store
 
 @MainActor
-final class MembershipStore: ObservableObject {
+final class MembershipStore: NSObject, ObservableObject {
     static let shared = MembershipStore()
 
     @Published private(set) var tier: MembershipTier = .free
     @Published private(set) var expirationDate: Date?
 
+    /// Set when a refund is detected so the UI can present a notice that
+    /// the welcome bonus coins have been clawed back.
+    @Published var showRefundProcessedAlert = false
+
     private let tierKey = "streetstamps.membership.tier"
     private let expirationKey = "streetstamps.membership.expiration"
     private let sandboxPurchasedOnceKey = "streetstamps.membership.sandbox_purchased_once"
-    static let welcomeBonusGrantedKey = "streetstamps.membership.welcome_bonus_granted"
+    nonisolated static let welcomeBonusGrantedKey = "streetstamps.membership.welcome_bonus_granted"
+
+    /// RevenueCat entitlement identifier. Configured in the RevenueCat
+    /// dashboard with both monthly and yearly products attached.
+    static let entitlementID = "premium"
 
     /// TestFlight builds and App Store review use sandbox receipts. Production
     /// App Store users get a regular `receipt`. This is the standard way to
@@ -153,20 +174,20 @@ final class MembershipStore: ObservableObject {
     /// a full review session without re-subscribing.
     private static let sandboxGrantSeconds: TimeInterval = 86400 * 30
 
-    private var transactionListener: Task<Void, Never>?
-
     var isPremium: Bool {
         guard tier == .premium else { return false }
         // Treat a cached-premium tier whose expiration has already passed as
-        // free until refreshEntitlement() syncs the real StoreKit state. This
-        // prevents users from continuing to access premium features in the
-        // window between subscription expiry and Transaction.updates delivery.
+        // free until refreshEntitlement() syncs real entitlement state.
         if let exp = expirationDate, exp < Date() { return false }
         return true
     }
 
-    private init() {
-        // Restore cached tier from UserDefaults
+    private static let revenueCatInitialImportKey = "streetstamps.membership.revenuecat_initial_import_done"
+
+    private override init() {
+        super.init()
+        // Restore cached tier from UserDefaults so the first frame doesn't
+        // flash "free" while RevenueCat fetches the real customerInfo.
         if let raw = UserDefaults.standard.string(forKey: tierKey),
            let cached = MembershipTier(rawValue: raw) {
             tier = cached
@@ -175,11 +196,23 @@ final class MembershipStore: ObservableObject {
             expirationDate = Date(timeIntervalSince1970: ts)
         }
 
-        transactionListener = listenForTransactions()
-    }
+        Purchases.shared.delegate = self
 
-    deinit {
-        transactionListener?.cancel()
+        // First launch with RevenueCat: import existing StoreKit transactions
+        // so users who subscribed pre-migration appear in RevenueCat with the
+        // correct entitlement. Only mark complete on successful restore so a
+        // transient network failure doesn't permanently strand the user with
+        // their real subscription invisible to RevenueCat.
+        if !UserDefaults.standard.bool(forKey: Self.revenueCatInitialImportKey) {
+            Task {
+                do {
+                    _ = try await Purchases.shared.restorePurchases()
+                    UserDefaults.standard.set(true, forKey: Self.revenueCatInitialImportKey)
+                } catch {
+                    // Will retry on next launch.
+                }
+            }
+        }
     }
 
     // MARK: - Convenience Accessors
@@ -194,42 +227,49 @@ final class MembershipStore: ObservableObject {
     var coinsPerStepMilestone: Int { MembershipTierConfig.coinsPerStepMilestone(for: tier) }
     var iCloudSyncEnabled: Bool { MembershipTierConfig.iCloudSyncEnabled(for: tier) }
     var gpxExportEnabled: Bool { MembershipTierConfig.gpxExportEnabled(for: tier) }
+    var mapMatchingEnabled: Bool { MembershipTierConfig.mapMatchingEnabled(for: tier) }
 
     var isMapboxStyleLocked: Bool {
         MembershipTierConfig.isMapboxStyleLocked(for: tier)
     }
 
-    // MARK: - StoreKit 2 Subscription Verification
+    // MARK: - Subscription Verification (via RevenueCat)
 
-    /// App Store subscription product ID for premium membership.
+    /// App Store subscription product IDs. Kept exposed because
+    /// MembershipSubscriptionView still loads StoreKit Products by ID for
+    /// price/display, and identifies the yearly plan for the "save" badge.
     static let subscriptionProductID = "com.streetstamps.premium.monthly"
     static let yearlyProductID = "com.streetstamps.premium.yearly"
-    private static var subscriptionProductIDs: Set<String> {
-        [subscriptionProductID, yearlyProductID]
-    }
 
     /// Check current entitlement on launch or after purchase.
+    /// Source of truth is RevenueCat's customerInfo, which reflects Apple's
+    /// real-time subscription state across devices and survives transient
+    /// StoreKit sync gaps (e.g. during region change).
     func refreshEntitlement() async {
-        var foundActive = false
-        var latestExpiration: Date?
-
-        for await result in Transaction.currentEntitlements {
-            guard case .verified(let transaction) = result else { continue }
-            if Self.subscriptionProductIDs.contains(transaction.productID) {
-                foundActive = true
-                if let exp = transaction.expirationDate {
-                    if latestExpiration == nil || exp > latestExpiration! {
-                        latestExpiration = exp
-                    }
-                }
-            }
+        do {
+            let info = try await Purchases.shared.customerInfo()
+            applyCustomerInfo(info)
+        } catch {
+            // RevenueCat fetch failed (no network, server down, etc.).
+            // Keep cached tier — the cache fallback in applyCustomerInfo's
+            // free branch already handles the "stale but still in paid period"
+            // case, and silently ignoring lets the next refresh recover.
         }
+    }
 
+    /// Apply a RevenueCat customerInfo snapshot. Detects natural transitions
+    /// (free → premium, premium → free at expiration) and revocation events
+    /// (refund, family sharing removal). Revocation goes through the dedicated
+    /// `handleRevocation` path so welcome bonus coins are clawed back; natural
+    /// expiration leaves earned coins alone.
+    private func applyCustomerInfo(_ info: CustomerInfo) {
+        let entitlement = info.entitlements[Self.entitlementID]
+        let isActive = entitlement?.isActive == true
         let isSandbox = Self.isSandboxEnvironment
 
-        if foundActive {
+        if isActive, let entitlement = entitlement {
             let wasFreeBefore = tier == .free
-            var expiration = latestExpiration
+            var expiration = entitlement.expirationDate
             if isSandbox {
                 // Reviewer/tester completed a real purchase flow — extend the
                 // 5-minute sandbox window to 30 days so they keep premium for
@@ -238,17 +278,65 @@ final class MembershipStore: ObservableObject {
                 UserDefaults.standard.set(true, forKey: sandboxPurchasedOnceKey)
             }
             applyTier(.premium, expiration: expiration)
-            if wasFreeBefore && !welcomeBonusGranted {
-                awardWelcomeBonus()
+            if wasFreeBefore {
+                autoEnableICloudSyncIfNeeded()
+                // Strategy A: skip the welcome bonus when the entitlement
+                // doesn't auto-renew. Free offer codes (press / influencer
+                // gifts) typically activate as non-renewing — we still give
+                // them premium access but withhold the 1500-coin freebie that
+                // would otherwise dilute the gear economy. Trials and intro
+                // offers still set willRenew=true and remain eligible.
+                if !welcomeBonusGranted && entitlement.willRenew {
+                    awardWelcomeBonus()
+                }
             }
-        } else if isSandbox && UserDefaults.standard.bool(forKey: sandboxPurchasedOnceKey) {
+            return
+        }
+
+        if isSandbox && UserDefaults.standard.bool(forKey: sandboxPurchasedOnceKey) {
             // Sandbox auto-renewal exhausted (max 6 cycles) but tester
             // previously completed the purchase flow — preserve premium so
             // the test build doesn't flip back to free mid-session.
             applyTier(.premium, expiration: Date().addingTimeInterval(Self.sandboxGrantSeconds))
-        } else {
-            applyTier(.free, expiration: nil)
+            return
         }
+
+        // Revocation detection: previously premium, RevenueCat now reports
+        // inactive, but the entitlement's recorded expiration date is still
+        // in the future → refund or family sharing removal. Coins clawed back.
+        let wasPremium = tier == .premium
+        if wasPremium, let recordedExp = entitlement?.expirationDate, recordedExp > Date() {
+            handleRevocation()
+            return
+        }
+
+        // Cache fallback: RevenueCat sees no entitlement, but our cached
+        // expiration (last confirmed by Apple) is still in the future. This
+        // covers transient StoreKit sync gaps after Apple ID region change
+        // or brief RevenueCat outages. We stop honoring the cache once the
+        // recorded expiration naturally passes.
+        if let cachedExp = expirationDate, cachedExp > Date() {
+            return
+        }
+
+        applyTier(.free, expiration: nil)
+    }
+
+    /// Revoke premium immediately and roll back the welcome bonus.
+    /// Triggered when a refund or family sharing removal cuts a subscription
+    /// short. Coins the user already spent above the granted bonus stay at
+    /// zero — we cannot retroactively reclaim consumed coins.
+    /// The `welcomeBonusGranted` marker is intentionally NOT reset: a user
+    /// who subscribes, spends the bonus on gear, then refunds would otherwise
+    /// be able to re-subscribe and farm an unlimited supply of free gear.
+    private func handleRevocation() {
+        applyTier(.free, expiration: nil)
+        if welcomeBonusGranted {
+            var economy = EquipmentEconomyStore.load()
+            economy.coins = max(0, economy.coins - MembershipTierConfig.premiumWelcomeBonus)
+            EquipmentEconomyStore.save(economy)
+        }
+        showRefundProcessedAlert = true
     }
 
     /// Award the one-time 1500 coin welcome bonus on first premium subscription.
@@ -263,19 +351,52 @@ final class MembershipStore: ObservableObject {
     /// Set by `awardWelcomeBonus` so the UI can show a congratulations alert.
     @Published var showWelcomeBonusAlert = false
 
-    /// Purchase a subscription product.
+    /// Set when premium just activated and iCloud sync was auto-enabled.
+    /// UI presents a follow-up alert; AppRuntimeCoordinator triggers the
+    /// force-full upload. Both consumers clear it after handling.
+    @Published var pendingICloudAutoEnableNotice = false
+
+    /// Flip the iCloud sync flag on first activation per premium cycle so
+    /// the user gets the feature without manually toggling. Idempotent: if
+    /// the user has already turned it on (or off then on) this is a no-op.
+    private func autoEnableICloudSyncIfNeeded() {
+        guard !AppSettings.isICloudSyncEnabled else { return }
+        UserDefaults.standard.set(true, forKey: AppSettings.iCloudSyncEnabledKey)
+        // Persist the full-upload intent so it survives if the first attempt is
+        // interrupted by an app kill or iCloud being temporarily unavailable.
+        UserDefaults.standard.set(true, forKey: AppSettings.pendingFullSyncAfterAutoEnableKey)
+        pendingICloudAutoEnableNotice = true
+    }
+
+    /// Purchase a subscription product. RevenueCat finishes the transaction
+    /// for us and pushes the resulting customerInfo through the delegate, so
+    /// we just inspect the returned snapshot to report success. The view layer
+    /// loads StoreKit Products directly for price/display and passes one in;
+    /// RevenueCat needs its own StoreProduct wrapper, hence the conversion.
     func purchase(_ product: Product) async throws -> Bool {
-        let result = try await product.purchase()
-        switch result {
-        case .success(let verification):
-            let transaction = try checkVerified(verification)
-            await transaction.finish()
-            await refreshEntitlement()
-            return true
-        case .userCancelled, .pending:
-            return false
-        @unknown default:
-            return false
+        let storeProduct = StoreProduct(sk2Product: product)
+        let result = try await Purchases.shared.purchase(product: storeProduct)
+        if result.userCancelled { return false }
+        applyCustomerInfo(result.customerInfo)
+        return result.customerInfo.entitlements[Self.entitlementID]?.isActive == true
+    }
+
+    /// Restore purchases on demand (Settings / paywall "Restore" button).
+    /// Forces a sync with Apple and re-applies the resulting customerInfo.
+    func restorePurchases() async throws {
+        let info = try await Purchases.shared.restorePurchases()
+        applyCustomerInfo(info)
+    }
+
+    /// Present Apple's offer code redemption sheet. Called from paywall and
+    /// settings; the redeemed offer flows back through Transaction.updates →
+    /// PurchasesDelegate so we don't need to handle the result here.
+    @available(iOS 14.0, *)
+    func presentOfferCodeRedemption() async {
+        do {
+            try await Purchases.shared.presentCodeRedemptionSheet()
+        } catch {
+            // User cancelled or sheet unavailable — nothing to do.
         }
     }
 
@@ -317,21 +438,18 @@ final class MembershipStore: ObservableObject {
         UserScopedProfileStateStore.saveCurrentWelcomeBonusGranted(true)
     }
 
-    private func checkVerified<T>(_ result: VerificationResult<T>) throws -> T {
-        switch result {
-        case .unverified(_, let error): throw error
-        case .verified(let value): return value
-        }
-    }
+}
 
-    private func listenForTransactions() -> Task<Void, Never> {
-        Task.detached { [weak self] in
-            for await result in Transaction.updates {
-                if case .verified(let transaction) = result {
-                    await transaction.finish()
-                    await self?.refreshEntitlement()
-                }
-            }
+// MARK: - PurchasesDelegate
+
+extension MembershipStore: PurchasesDelegate {
+    /// RevenueCat pushes a fresh customerInfo whenever entitlement state
+    /// changes — initial fetch, purchase, renewal, refund, family sharing
+    /// changes. This is the only listener we need; the old StoreKit
+    /// `Transaction.updates` task is no longer required.
+    nonisolated func purchases(_ purchases: Purchases, receivedUpdated customerInfo: CustomerInfo) {
+        Task { @MainActor in
+            self.applyCustomerInfo(customerInfo)
         }
     }
 }

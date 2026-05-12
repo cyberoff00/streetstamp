@@ -79,7 +79,7 @@ struct ProfilePostcardEntryCard: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 18)
         .frame(maxWidth: .infinity)
-        .background(Color.white)
+        .background(FigmaTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)

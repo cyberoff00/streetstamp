@@ -25,6 +25,8 @@ struct JourneyRouteDetailView: View {
     @State private var initialCameraCommand: MapCameraCommand? = nil
     @State private var editingMemory: JourneyMemory? = nil
     @State private var viewingMemory: JourneyMemory? = nil
+    @State private var pendingMemoryCluster: [JourneyMemory] = []
+    @State private var showMemoryClusterPicker = false
     @State private var sidebarHideToken = UUID().uuidString
     @State private var localizedCityTitle: String? = nil
     @AppStorage(MapLayerStyle.storageKey) private var layerStyleRaw = MapLayerStyle.current.rawValue
@@ -110,15 +112,19 @@ struct JourneyRouteDetailView: View {
 
     private var mapAnnotations: [MapAnnotationItem] {
         guard let j = journey else { return [] }
-        return j.memories.filter { $0.locationStatus != .pending }.map { memory in
-            let engine = (MapLayerStyle(rawValue: layerStyleRaw) ?? .mutedDark).engine
-            let mapped = JourneyMemoryMapCoordinateResolver.mapCoordinate(
-                for: memory,
-                fallbackCountryISO2: j.countryISO2,
-                fallbackCityKey: j.cityKey,
-                engine: engine
-            )
-            return MapAnnotationItem(id: memory.id, coordinate: mapped, kind: .memoryGroup(key: memory.id, items: [memory]))
+        let engine = (MapLayerStyle(rawValue: layerStyleRaw) ?? .mutedDark).engine
+        let entries = j.memories
+            .filter { $0.locationStatus != .pending }
+            .map { memory in
+                (memory: memory, coordinate: JourneyMemoryMapCoordinateResolver.mapCoordinate(
+                    for: memory,
+                    fallbackCountryISO2: j.countryISO2,
+                    fallbackCityKey: j.cityKey,
+                    engine: engine
+                ))
+            }
+        return MemoryClusterer.cluster(entries).map { c in
+            MapAnnotationItem(id: c.id, coordinate: c.coordinate, kind: .memoryGroup(key: c.key, items: c.items))
         }
     }
 
@@ -131,12 +137,17 @@ struct JourneyRouteDetailView: View {
                 config: .journeyDetail(),
                 callbacks: MapCallbacks(
                     onSelectMemories: { memories in
-                        guard let memory = memories.first else { return }
-                        switch JourneyRouteDetailInteractionPolicy.destinationForMemoryTap(isReadOnly: isReadOnly) {
-                        case .editMemory:
-                            editingMemory = memory
-                        case .viewMemory:
-                            viewingMemory = memory
+                        let sorted = memories.sorted { $0.timestamp > $1.timestamp }
+                        if sorted.count > 1 {
+                            pendingMemoryCluster = sorted
+                            showMemoryClusterPicker = true
+                        } else if let memory = sorted.first {
+                            switch JourneyRouteDetailInteractionPolicy.destinationForMemoryTap(isReadOnly: isReadOnly) {
+                            case .editMemory:
+                                editingMemory = memory
+                            case .viewMemory:
+                                viewingMemory = memory
+                            }
                         }
                     }
                 )
@@ -171,6 +182,16 @@ struct JourneyRouteDetailView: View {
             }
         }
         .overlay {
+            if isReadOnly, let loadout = friendLoadout, let j = journey {
+                let distText = FriendJourneyDistancePresentation.makeDistanceText(
+                    currentLocation: locationHub.currentLocation,
+                    lastKnownLocation: locationHub.lastKnownLocation,
+                    journeyEndCoordinate: j.coordinates.last?.cl
+                )
+                FriendMapCharacterOverlay(friendLoadout: loadout, distanceText: distText)
+            }
+        }
+        .overlay {
             if let tappedMemory = viewingMemory {
                 MemoryDetailPage(
                     memory: tappedMemory,
@@ -179,8 +200,6 @@ struct JourneyRouteDetailView: View {
                         set: { if !$0 { viewingMemory = nil } }
                     ),
                     allowsEditing: false,
-                    maxCardWidth: 300,
-                    maxCardHeight: 440,
                     onUpdated: { _ in },
                     userID: userID
                 )
@@ -219,21 +238,11 @@ struct JourneyRouteDetailView: View {
                 .environmentObject(sessionStore)
             }
         }
-        .overlay {
-            if isReadOnly, let loadout = friendLoadout, let j = journey {
-                let distText = FriendJourneyDistancePresentation.makeDistanceText(
-                    currentLocation: locationHub.currentLocation,
-                    lastKnownLocation: locationHub.lastKnownLocation,
-                    journeyEndCoordinate: j.coordinates.last?.cl
-                )
-                FriendMapCharacterOverlay(friendLoadout: loadout, distanceText: distText)
-            }
-        }
         .onAppear {
             flow.pushSidebarButtonHidden(token: sidebarHideToken)
             refreshRegion()
         }
-        .onChange(of: journey?.id) { _ in
+        .onChange(of: journey?.id) { _, _ in
             refreshRegion()
         }
         .task(id: "\(journey?.id ?? "")|\(languagePreference.currentLanguage ?? "sys")") {
@@ -256,6 +265,21 @@ struct JourneyRouteDetailView: View {
             if let shareImage {
                 ShareSheet(activityItems: [shareImage])
             }
+        }
+        .sheet(isPresented: $showMemoryClusterPicker) {
+            MemoryClusterPickerSheet(
+                memories: pendingMemoryCluster,
+                userID: userID ?? sessionStore.currentUserID,
+                isPresented: $showMemoryClusterPicker,
+                onSelect: { memory in
+                    switch JourneyRouteDetailInteractionPolicy.destinationForMemoryTap(isReadOnly: isReadOnly) {
+                    case .editMemory:
+                        editingMemory = memory
+                    case .viewMemory:
+                        viewingMemory = memory
+                    }
+                }
+            )
         }
     }
 
@@ -335,7 +359,12 @@ struct JourneyRouteDetailView: View {
         let key = journey.stableCityKey ?? ""
         guard !key.isEmpty, key != "Unknown|" else { return }
 
-        // Single source of truth: CachedCity.displayTitle
+        if let custom = CityDisplayOverrideStore.shared.override(for: key) {
+            await MainActor.run { localizedCityTitle = custom }
+            return
+        }
+
+        // Single source of truth: CachedCity.displayTitle (also applies override)
         if let cachedCity = cachedCitiesByKey[key] {
             let title = cachedCity.displayTitle
             if !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -344,21 +373,8 @@ struct JourneyRouteDetailView: View {
             }
         }
 
-        // Fallback for journeys without a city card: async geocode
-        let parentRegionKey = JourneyCityNamePresentation.parentRegionKey(for: journey, cachedCitiesByKey: cachedCitiesByKey)
-
         let locale = LanguagePreference.shared.displayLocale
-        if let cached = CityNameTranslationCache.shared.cachedName(cityKey: key, localeID: locale.identifier),
-           !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            await MainActor.run { localizedCityTitle = cached }
-            return
-        }
-
-        guard let start = journey.startCoordinate, start.isValid else { return }
-        let level = cachedCitiesByKey[key]?.identityLevel
-            ?? CityPlacemarkResolver.inferIdentityLevel(cityKey: key, iso2: journey.countryISO2)
-        let anchor = CLLocationCoordinate2D(latitude: start.latitude, longitude: start.longitude)
-        if let title = await CityNameTranslationCache.shared.translate(cityKey: key, anchor: anchor, level: level, locale: locale),
+        if let title = CNCityNameLookup.shared.displayName(for: key, locale: locale),
            !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             await MainActor.run { localizedCityTitle = title }
         }

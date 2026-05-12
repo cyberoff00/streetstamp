@@ -33,30 +33,62 @@ enum LiveTrackingRefreshPolicy {
     }
 }
 
-struct CoordinateCodable: Codable, Hashable, Sendable {
+// CoordinateCodable's Hashable conformance must NOT be MainActor-isolated.
+// In a SwiftUI-importing file under Xcode 17 / Swift 6 strict concurrency,
+// synthesized conformances get inferred MainActor — breaks every Set / Dict
+// usage from nonisolated routes. Mark conformance explicitly nonisolated.
+struct CoordinateCodable: Codable, Sendable {
     var lat: Double
     var lon: Double
-    /// GPS timestamp from CLLocation. Nil for legacy data recorded before this field existed.
     var t: Date?
+    /// Horizontal accuracy in meters at the time of fix (CLLocation.horizontalAccuracy).
+    /// Optional for backward compatibility — old journey files / CloudKit records / backend
+    /// JSONB without this field decode as `nil`. Consumers must default appropriately
+    /// (e.g. `?? 30` to treat unknown as good).
+    var acc: Double?
 }
 
-extension CoordinateCodable {
+nonisolated extension CoordinateCodable: Hashable {
+    nonisolated static func == (lhs: CoordinateCodable, rhs: CoordinateCodable) -> Bool {
+        lhs.lat == rhs.lat && lhs.lon == rhs.lon && lhs.t == rhs.t && lhs.acc == rhs.acc
+    }
+    nonisolated func hash(into hasher: inout Hasher) {
+        hasher.combine(lat)
+        hasher.combine(lon)
+        hasher.combine(t)
+        hasher.combine(acc)
+    }
+}
+
+nonisolated extension CoordinateCodable {
     var cl: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
+
+    /// Treat missing acc as good signal (30m) for legacy data.
+    var resolvedAccuracy: Double { acc ?? 30 }
 
     init(lat: Double, lon: Double) {
         self.lat = lat
         self.lon = lon
         self.t = nil
+        self.acc = nil
     }
 
     init(lat: Double, lon: Double, timestamp: Date?) {
         self.lat = lat
         self.lon = lon
         self.t = timestamp
+        self.acc = nil
+    }
+
+    init(lat: Double, lon: Double, timestamp: Date?, acc: Double?) {
+        self.lat = lat
+        self.lon = lon
+        self.t = timestamp
+        self.acc = acc
     }
 }
 
-extension Array where Element == CoordinateCodable {
+nonisolated extension Array where Element == CoordinateCodable {
     var clCoords: [CLLocationCoordinate2D] { map(\.cl) }
 }
 
@@ -336,6 +368,10 @@ struct JourneyRoute: Codable {
     var overallMemoryImagePaths: [String] = []
     var overallMemoryRemoteImageURLs: [String] = []
     var privacyOptions: Set<JourneyPrivacyOption> = []
+    /// Per-journey route render style. Optional — `nil` means default (`.line`).
+    /// Premium-only and only effective on Mapbox engines; the SharingCard toggle
+    /// is hidden on MapKit styles, and live MapKit views ignore this field.
+    var routeRenderStyle: RouteRenderStyle? = nil
 
     // ✅ 加回普通 init，修复 “Missing argument for 'from'”
     init(
@@ -370,7 +406,8 @@ struct JourneyRoute: Codable {
         overallMemory: String? = nil,
         overallMemoryImagePaths: [String] = [],
         overallMemoryRemoteImageURLs: [String] = [],
-        privacyOptions: Set<JourneyPrivacyOption> = []
+        privacyOptions: Set<JourneyPrivacyOption> = [],
+        routeRenderStyle: RouteRenderStyle? = nil
     ) {
         self.id = id
         self.startTime = startTime
@@ -404,6 +441,7 @@ struct JourneyRoute: Codable {
         self.overallMemoryImagePaths = overallMemoryImagePaths
         self.overallMemoryRemoteImageURLs = overallMemoryRemoteImageURLs
         self.privacyOptions = privacyOptions
+        self.routeRenderStyle = routeRenderStyle
     }
 
     var isCompleted: Bool { endTime != nil && startTime != nil }
@@ -453,6 +491,7 @@ struct JourneyRoute: Codable {
         case exploreMode, trackingMode
         case visibility, sharedAt, customTitle, activityTag, overallMemory, overallMemoryImagePaths, overallMemoryRemoteImageURLs
         case privacyOptions
+        case routeRenderStyle
 
         // 兼容更老字段名（如果你确实历史里用过）
         case coords
@@ -506,6 +545,7 @@ struct JourneyRoute: Codable {
         overallMemoryImagePaths = try c.decodeIfPresent([String].self, forKey: .overallMemoryImagePaths) ?? []
         overallMemoryRemoteImageURLs = try c.decodeIfPresent([String].self, forKey: .overallMemoryRemoteImageURLs) ?? []
         privacyOptions = (try? c.decode(Set<JourneyPrivacyOption>.self, forKey: .privacyOptions)) ?? []
+        routeRenderStyle = try c.decodeIfPresent(RouteRenderStyle.self, forKey: .routeRenderStyle)
     }
 
     // ✅ 自己实现 encode，修复 Encodable 合成失败（并且你可以选择写出 coords 兼容）
@@ -564,6 +604,7 @@ struct JourneyRoute: Codable {
         if !privacyOptions.isEmpty {
             try c.encode(privacyOptions, forKey: .privacyOptions)
         }
+        try c.encodeIfPresent(routeRenderStyle, forKey: .routeRenderStyle)
     }
 }
 
@@ -1262,6 +1303,8 @@ struct MapView: View {
     @State private var lastSyncedCoordCount = 0
 
     @State private var editingMemory: JourneyMemory? = nil
+    @State private var pendingMemoryCluster: [JourneyMemory] = []
+    @State private var showMemoryClusterPicker = false
     @State private var lastCoordinateSnapshotPersistAt: Date? = nil
     @State private var activeMapHint: OnboardingGuideStore.Hint?
     @State private var mapHintTask: Task<Void, Never>?
@@ -1370,11 +1413,11 @@ struct MapView: View {
         mapRootWithPresentations
             .onAppear { onMapViewAppear() }
             .onDisappear { onMapViewDisappear() }
-            .onChange(of: journeyRoute.memories) { _ in groupedMemoriesCache = computeGroupedMemories() }
-            .onChange(of: showMemoryEditor) { visible in
+            .onChange(of: journeyRoute.memories) { _, _ in groupedMemoriesCache = computeGroupedMemories() }
+            .onChange(of: showMemoryEditor) { _, visible in
                 if !visible { editingMemory = nil; cameraPreloadedPaths = [] }
             }
-            .onChange(of: flow.pendingWidgetCaptureSignal) { signal in
+            .onChange(of: flow.pendingWidgetCaptureSignal) { _, signal in
                 guard signal > 0 else { return }
                 openCaptureFromWidget()
             }
@@ -1498,6 +1541,17 @@ struct MapView: View {
                 }
             }
             .animation(.spring(response: 0.3, dampingFraction: 0.78), value: showMemoryEditor)
+        }
+        .sheet(isPresented: $showMemoryClusterPicker) {
+            MemoryClusterPickerSheet(
+                memories: pendingMemoryCluster,
+                userID: sessionStore.currentUserID,
+                isPresented: $showMemoryClusterPicker,
+                onSelect: { memory in
+                    editingMemory = memory
+                    showMemoryEditor = true
+                }
+            )
         }
         .overlay {
             if let hint = activeMapHint {
@@ -1712,9 +1766,13 @@ struct MapView: View {
             callbacks: MapCallbacks(
                 onSelectMemories: { items in
                     let sorted = items.sorted { $0.timestamp > $1.timestamp }
-                    guard let first = sorted.first else { return }
-                    editingMemory = first
-                    showMemoryEditor = true
+                    if sorted.count > 1 {
+                        pendingMemoryCluster = sorted
+                        showMemoryClusterPicker = true
+                    } else if let first = sorted.first {
+                        editingMemory = first
+                        showMemoryEditor = true
+                    }
                 },
                 onGestureStateChanged: { interacting in
                     isUserInteractingWithMap = interacting
@@ -1874,6 +1932,7 @@ struct MapView: View {
         var presets: [CameraPreset] = [.plain]
         if filmCameraDrop.isFilmCameraUnlocked {
             presets.append(.fujiCCD)
+            presets.append(.photobooth)
         }
         return presets
     }
@@ -2119,33 +2178,15 @@ struct MapView: View {
         // the display title using the locale-aware cache/key without mutating the cityKey.
         let key = (journeyRoute.startCityKey ?? journeyRoute.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
         if !key.isEmpty && key != "Unknown|" {
-            let parentRegionKey = JourneyCityNamePresentation.parentRegionKey(
+            _ = JourneyCityNamePresentation.parentRegionKey(
                 for: journeyRoute,
                 cachedCitiesByKey: cachedCitiesByKey
             )
-            Task {
-                let locale = LanguagePreference.shared.displayLocale
-                if let cached = CityNameTranslationCache.shared.cachedName(cityKey: key, localeID: locale.identifier),
-                   !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    await MainActor.run {
-                        journeyRoute.cityName = cached
-                        journeyRoute.currentCity = cached
-                    }
-                    return
-                }
-
-                if let start = journeyRoute.startCoordinate, start.isValid {
-                    let level = cachedCitiesByKey[key]?.identityLevel
-                        ?? CityPlacemarkResolver.inferIdentityLevel(cityKey: key, iso2: journeyRoute.countryISO2)
-                    let anchor = CLLocationCoordinate2D(latitude: start.latitude, longitude: start.longitude)
-                    if let title = await CityNameTranslationCache.shared.translate(cityKey: key, anchor: anchor, level: level, locale: locale),
-                       !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        await MainActor.run {
-                            journeyRoute.cityName = title
-                            journeyRoute.currentCity = title
-                        }
-                    }
-                }
+            let locale = LanguagePreference.shared.displayLocale
+            if let title = CNCityNameLookup.shared.displayName(for: key, locale: locale),
+               !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                journeyRoute.cityName = title
+                journeyRoute.currentCity = title
             }
         }
 
@@ -2258,10 +2299,8 @@ struct MapView: View {
                     from: resolvedKey,
                     fallback: canon.cityName
                 )
-                let display = await CityNameTranslationCache.shared.translate(
-                    cityKey: resolvedKey,
-                    anchor: loc.coordinate,
-                    level: canon.level,
+                let display = CNCityNameLookup.shared.displayName(
+                    for: resolvedKey,
                     locale: LanguagePreference.shared.displayLocale
                 )
                 await MainActor.run {
@@ -2290,11 +2329,11 @@ struct MapView: View {
 
             let cityKey = await MainActor.run { journeyRoute.cityKey }
             if !cityKey.isEmpty,
-               let cached = CityNameTranslationCache.shared.cachedName(cityKey: cityKey, localeID: LanguagePreference.shared.displayLocale.identifier),
-               !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+               let title = CNCityNameLookup.shared.displayName(for: cityKey, locale: LanguagePreference.shared.displayLocale),
+               !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 await MainActor.run {
-                    journeyRoute.cityName = cached
-                    journeyRoute.currentCity = cached
+                    journeyRoute.cityName = title
+                    journeyRoute.currentCity = title
                 }
             }
         }
@@ -2351,6 +2390,7 @@ struct MapView: View {
 
     private func syncJourneyCoordinatesIncremental(from coords: [CLLocationCoordinate2D]) {
         let timestamps = tracking.coordTimestamps
+        let accuracies = tracking.coordAccuracies
 
         if coords.isEmpty {
             journeyRoute.coordinates = []
@@ -2362,16 +2402,16 @@ struct MapView: View {
             lastSyncedCoordCount = journeyRoute.coordinates.count
         }
 
+        // Helper: build CoordinateCodable from parallel arrays at index `i`.
+        // Falls back gracefully if a side-array is shorter than coords (legacy recovery).
+        func makeCodable(at i: Int, coord: CLLocationCoordinate2D) -> CoordinateCodable {
+            let ts: Date? = i < timestamps.count ? timestamps[i] : nil
+            let acc: Double? = i < accuracies.count ? accuracies[i] : nil
+            return CoordinateCodable(lat: coord.latitude, lon: coord.longitude, timestamp: ts, acc: acc)
+        }
+
         if coords.count < lastSyncedCoordCount || journeyRoute.coordinates.count > coords.count {
-            journeyRoute.coordinates = zip(coords, timestamps).map {
-                CoordinateCodable(lat: $0.0.latitude, lon: $0.0.longitude, timestamp: $0.1)
-            }
-            // If timestamps array is shorter (legacy recovery), fill remaining without timestamp.
-            if coords.count > timestamps.count {
-                journeyRoute.coordinates += coords[timestamps.count...].map {
-                    CoordinateCodable(lat: $0.latitude, lon: $0.longitude)
-                }
-            }
+            journeyRoute.coordinates = coords.enumerated().map { i, c in makeCodable(at: i, coord: c) }
             lastSyncedCoordCount = coords.count
             return
         }
@@ -2382,9 +2422,7 @@ struct MapView: View {
 
         guard coords.count > lastSyncedCoordCount else { return }
         let appended = coords[lastSyncedCoordCount...].enumerated().map { offset, c in
-            let tsIdx = lastSyncedCoordCount + offset
-            let ts: Date? = tsIdx < timestamps.count ? timestamps[tsIdx] : nil
-            return CoordinateCodable(lat: c.latitude, lon: c.longitude, timestamp: ts)
+            makeCodable(at: lastSyncedCoordCount + offset, coord: c)
         }
         journeyRoute.coordinates.append(contentsOf: appended)
         lastSyncedCoordCount = coords.count
@@ -2880,8 +2918,8 @@ struct MemoryDetailPage: View {
         memory: JourneyMemory,
         isPresented: Binding<Bool>,
         allowsEditing: Bool,
-        maxCardWidth: CGFloat = 340,
-        maxCardHeight: CGFloat = 520,
+        maxCardWidth: CGFloat = 430,
+        maxCardHeight: CGFloat = 540,
         onUpdated: @escaping (JourneyMemory?) -> Void,
         userID: String? = nil
     ) {
@@ -2894,128 +2932,41 @@ struct MemoryDetailPage: View {
         self.userID = userID
     }
 
+    private var trimmedTitle: String { memory.title.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmedNotes: String { memory.notes.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var hasTitle: Bool { !trimmedTitle.isEmpty }
+    private var hasNotes: Bool { !trimmedNotes.isEmpty }
+    private var hasPhotos: Bool { !memory.imagePaths.isEmpty || !memory.remoteImageURLs.isEmpty }
+    private var resolvedUserID: String { userID ?? sessionStore.currentUserID }
+
     var body: some View {
         ZStack {
-            Color.black.opacity(0.4)
+            Color.black.opacity(0.14)
                 .ignoresSafeArea()
                 .onTapGesture { isPresented = false }
 
-            VStack(spacing: 0) {
-                HStack {
-                    Text(L10n.key("tab_memory"))
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.gray)
+            VStack {
+                Spacer().frame(height: 92)
 
-                    Spacer()
-
-                    HStack(spacing: 10) {
-                        if allowsEditing {
-                            Button { showEditor = true } label: {
-                                Image(systemName: "square.and.pencil")
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundColor(.gray)
-                                    .appMinTapTarget()
-                            }
-                        }
-
-                        AppCloseButton(style: .filled) {
-                            isPresented = false
-                        }
-                    }
+                VStack(spacing: 0) {
+                    header
+                    content
+                    footer
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .frame(maxWidth: maxCardWidth)
+                .background(FigmaTheme.mutedBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
+                .shadow(color: Color.black.opacity(0.14), radius: 20, x: 0, y: 8)
 
-                Divider()
-
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        if !memory.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Text(memory.title)
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(FigmaTheme.text)
-                        }
-
-                        if !memory.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Text(memory.notes)
-                                .font(.system(size: 14))
-                                .foregroundColor(FigmaTheme.text.opacity(0.85))
-                        }
-
-                        if !memory.imagePaths.isEmpty || !memory.remoteImageURLs.isEmpty {
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 10) {
-                                    ForEach(Array(memory.imagePaths.enumerated()), id: \.offset) { idx, p in
-                                        ZStack {
-                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                .fill(Color(UIColor(white: 0.92, alpha: 1)))
-                                                .frame(width: 88, height: 88)
-
-                                            if let img = PhotoStore.loadImage(named: p, userID: userID ?? sessionStore.currentUserID) {
-                                                Image(uiImage: img)
-                                                    .resizable()
-                                                    .scaledToFill()
-                                                    .frame(width: 88, height: 88)
-                                                    .clipped()
-                                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                            }
-                                        }
-                                        .onTapGesture {
-                                            viewerIndex = idx
-                                            showViewer = true
-                                        }
-                                    }
-                                    // Show remote URLs only when no local files exist (social fallback for own device or friend view).
-                                    if memory.imagePaths.isEmpty {
-                                        ForEach(Array(memory.remoteImageURLs.enumerated()), id: \.offset) { idx, rawURL in
-                                            if let url = URL(string: rawURL) {
-                                                CachedRemoteImage(url: url) { $0.resizable() } placeholder: {
-                                                    ProgressView()
-                                                        .frame(width: 88, height: 88)
-                                                } failure: {
-                                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                        .fill(Color(UIColor(white: 0.92, alpha: 1)))
-                                                        .frame(width: 88, height: 88)
-                                                        .overlay {
-                                                            Image(systemName: "exclamationmark.triangle")
-                                                                .foregroundColor(.secondary)
-                                                        }
-                                                }
-                                                .scaledToFill()
-                                                .frame(width: 88, height: 88)
-                                                .clipped()
-                                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                                .onTapGesture {
-                                                    viewerIndex = idx
-                                                    showViewer = true
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                .padding(.vertical, 4)
-                            }
-                        }
-
-                        Divider()
-
-                        Text(memory.timestamp.formatted(date: .abbreviated, time: .shortened))
-                            .font(.system(size: 11))
-                            .foregroundColor(.gray)
-                            .padding(.top, 4)
-                    }
-                    .padding(16)
-                }
-                .frame(maxWidth: maxCardWidth, maxHeight: maxCardHeight)
+                Spacer()
             }
-            .background(Color.white)
-            .cornerRadius(12)
+            .padding(.horizontal, 18)
         }
         .fullScreenCover(isPresented: $showViewer) {
             PhotoViewer(
                 imagePaths: memory.imagePaths,
                 remoteImageURLs: memory.remoteImageURLs,
-                userID: userID ?? sessionStore.currentUserID,
+                userID: resolvedUserID,
                 startIndex: viewerIndex,
                 onClose: { showViewer = false }
             )
@@ -3037,17 +2988,168 @@ struct MemoryDetailPage: View {
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.78), value: showEditor)
         .onAppear {
-            // ✅ If user left mid-edit (Back gesture), automatically resume editing.
             let uid = sessionStore.currentUserID
             let mid = memory.id
             if MemoryDraftResumeStore.shouldResume(userID: uid, memoryID: mid),
                MemoryDraftStore.load(userID: uid, memoryID: mid) != nil {
                 showEditor = true
             } else {
-                // Keep resume flag clean if draft was cleared.
                 MemoryDraftResumeStore.set(false, userID: uid, memoryID: mid)
             }
         }
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Text(L10n.key("tab_memory"))
+                .font(.system(size: 20, weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .foregroundColor(FigmaTheme.text)
+
+            Spacer()
+
+            if allowsEditing {
+                Button { showEditor = true } label: {
+                    Image(systemName: "square.and.pencil")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(FigmaTheme.text.opacity(0.85))
+                        .frame(width: 32, height: 32)
+                        .background(Color.black.opacity(0.04))
+                        .clipShape(Circle())
+                        .appMinTapTarget()
+                }
+                .buttonStyle(.plain)
+            }
+
+            AppCloseButton(style: .circleSubtle) {
+                isPresented = false
+            }
+        }
+        .padding(.horizontal, 24)
+        .frame(height: 58)
+        .background(Color.white)
+    }
+
+    private var content: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                if hasTitle {
+                    Text(trimmedTitle)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(FigmaTheme.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 6)
+                }
+
+                if hasNotes {
+                    ScrollView {
+                        Text(trimmedNotes)
+                            .font(MemoryTypography.fontSwiftUI)
+                            .foregroundColor(MemoryTypography.textColorSwiftUI)
+                            .lineSpacing(MemoryTypography.lineSpacing)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 4)
+                    }
+                    .frame(minHeight: 188, maxHeight: 240)
+                }
+
+                if hasPhotos {
+                    photoStrip
+                }
+            }
+            .padding(.top, 8)
+            .padding(.bottom, 8)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+        .frame(minHeight: 290)
+        .background(Color.white)
+        .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+        .padding(.horizontal, 12)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+    }
+
+    private var photoStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(Array(memory.imagePaths.enumerated()), id: \.offset) { idx, p in
+                    photoThumb(localPath: p)
+                        .onTapGesture {
+                            viewerIndex = idx
+                            showViewer = true
+                        }
+                }
+                if memory.imagePaths.isEmpty {
+                    ForEach(Array(memory.remoteImageURLs.enumerated()), id: \.offset) { idx, raw in
+                        if let url = URL(string: raw) {
+                            remoteThumb(url: url)
+                                .onTapGesture {
+                                    viewerIndex = idx
+                                    showViewer = true
+                                }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 4)
+            .padding(.bottom, 4)
+        }
+    }
+
+    @ViewBuilder
+    private func photoThumb(localPath: String) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(UIColor(white: 0.92, alpha: 1)))
+                .frame(width: 88, height: 88)
+            if let img = PhotoStore.loadImage(named: localPath, userID: resolvedUserID) {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 88, height: 88)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func remoteThumb(url: URL) -> some View {
+        CachedRemoteImage(url: url) { $0.resizable() } placeholder: {
+            ProgressView()
+                .frame(width: 88, height: 88)
+        } failure: {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(UIColor(white: 0.92, alpha: 1)))
+                .frame(width: 88, height: 88)
+                .overlay {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundColor(.secondary)
+                }
+        }
+        .scaledToFill()
+        .frame(width: 88, height: 88)
+        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private var footer: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "clock")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(FigmaTheme.subtext)
+            Text(memory.timestamp.formatted(date: .abbreviated, time: .shortened))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(FigmaTheme.subtext)
+            Spacer()
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 12)
     }
 }
 
@@ -3372,10 +3474,10 @@ private var hasUnsavedChanges: Bool {
             .padding(.horizontal, 18)
         }
         
-.onChange(of: title) { _ in scheduleDraftPersist() }
-.onChange(of: notes) { _ in scheduleDraftPersist() }
-.onChange(of: imagePaths) { _ in persistDraft() }
-.onChange(of: mirrorSelfie) { _ in persistDraft() }
+.onChange(of: title) { _, _ in scheduleDraftPersist() }
+.onChange(of: notes) { _, _ in scheduleDraftPersist() }
+.onChange(of: imagePaths) { _, _ in persistDraft() }
+.onChange(of: mirrorSelfie) { _, _ in persistDraft() }
 .interactiveDismissDisabled(hasUnsavedChanges)
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             // ✅ If the app is backgrounded / killed, keep the draft
@@ -3399,7 +3501,7 @@ private var hasUnsavedChanges: Bool {
                 mode: mode,
                 onComplete: { edited in
                     activePhotoFlow = nil
-                    storeEditedImages(edited, writesToPhotoLibrary: false)
+                    storeEditedImages(edited, writesToPhotoLibrary: mode.isCamera)
                 },
                 onCancel: {
                     activePhotoFlow = nil
@@ -3493,7 +3595,7 @@ private var hasUnsavedChanges: Bool {
         }
         .padding(.horizontal, 24)
         .frame(height: 58)
-        .background(Color.white)
+        .background(FigmaTheme.background)
     }
 
     private var content: some View {
@@ -3576,7 +3678,7 @@ private var hasUnsavedChanges: Bool {
             .padding(.top, 8)
             .padding(.bottom, 8)
             .frame(minHeight: 290)
-            .background(Color.white)
+            .background(FigmaTheme.background)
             .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
             .padding(.horizontal, 12)
             .padding(.top, 12)
@@ -3758,11 +3860,14 @@ struct PhotoThumb: View {
             }
         }
         .task(id: path) {
+            image = nil
             let uid = userID
             let p = path
-            image = await Task.detached(priority: .userInitiated) {
+            let loaded = await Task.detached(priority: .userInitiated) {
                 PhotoStore.loadImage(named: p, userID: uid)
             }.value
+            guard !Task.isCancelled else { return }
+            image = loaded
         }
     }
 }
@@ -3830,7 +3935,7 @@ struct MemoryEditorPage: View {
                 mode: mode,
                 onComplete: { edited in
                     activePhotoFlow = nil
-                    storeEditedImages(edited, writesToPhotoLibrary: false)
+                    storeEditedImages(edited, writesToPhotoLibrary: mode.isCamera)
                 },
                 onCancel: {
                     activePhotoFlow = nil
@@ -3910,59 +4015,71 @@ struct MemoryEditorPage: View {
     }
 
     private var footer: some View {
-        HStack {
-            HStack(spacing: 12) {
-                Button(action: launchCameraPicker) {
-                    Image(systemName: "camera")
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundColor(FigmaTheme.text.opacity(0.82))
-                        .appMinTapTarget()
-                }
-                .buttonStyle(.plain)
-                .disabled(!canAddPhoto)
-                .opacity(canAddPhoto ? 1 : 0.35)
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(FigmaTheme.border.opacity(0.9))
+                .frame(height: 1)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 14)
 
-                Button(action: launchPhotoLibraryPicker) {
-                    Image(systemName: "photo")
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundColor(FigmaTheme.text.opacity(0.82))
-                        .appMinTapTarget()
-                }
-                .buttonStyle(.plain)
-                .disabled(!canAddPhoto)
-                .opacity(canAddPhoto ? 1 : 0.35)
-            }
-            Spacer()
-
-            HStack(spacing: 10) {
-                if onDelete != nil {
-                    Button { showDeleteConfirm = true } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.red.opacity(0.9))
+            HStack {
+                HStack(spacing: 12) {
+                    Button(action: launchCameraPicker) {
+                        Image(systemName: "camera")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(FigmaTheme.text.opacity(0.82))
                             .frame(width: 48, height: 48)
-                            .background(Color.red.opacity(0.10))
+                            .background(Color.black.opacity(0.04))
                             .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
-                }
+                    .disabled(!canAddPhoto)
+                    .opacity(canAddPhoto ? 1 : 0.35)
 
-                Button(action: onSave) {
-                    Text(L10n.t("save").uppercased())
-                        .font(.system(size: 14, weight: .semibold))
-                        .tracking(-0.3)
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 30)
-                        .frame(height: 48)
-                        .background(UITheme.accent)
-                        .clipShape(Capsule(style: .continuous))
-                        .shadow(color: UITheme.accent.opacity(0.22), radius: 10, x: 0, y: 3)
+                    Button(action: launchPhotoLibraryPicker) {
+                        Image(systemName: "photo")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(FigmaTheme.text.opacity(0.82))
+                            .frame(width: 48, height: 48)
+                            .background(Color.black.opacity(0.04))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canAddPhoto)
+                    .opacity(canAddPhoto ? 1 : 0.35)
                 }
-                .buttonStyle(.plain)
+                Spacer()
+
+                HStack(spacing: 10) {
+                    if onDelete != nil {
+                        Button { showDeleteConfirm = true } label: {
+                            Image(systemName: "trash")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.red.opacity(0.9))
+                                .frame(width: 48, height: 48)
+                                .background(Color.red.opacity(0.10))
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Button(action: onSave) {
+                        Text(L10n.t("save").uppercased())
+                            .font(.system(size: 14, weight: .semibold))
+                            .tracking(-0.3)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 30)
+                            .frame(height: 48)
+                            .background(UITheme.accent)
+                            .clipShape(Capsule(style: .continuous))
+                            .shadow(color: UITheme.accent.opacity(0.22), radius: 10, x: 0, y: 3)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 20)
         }
-        .padding(.horizontal, 24)
-        .padding(.bottom, 20)
     }
 
     private var header: some View {
@@ -3979,7 +4096,7 @@ struct MemoryEditorPage: View {
         }
         .padding(.horizontal, 24)
         .frame(height: 58)
-        .background(Color.white)
+        .background(FigmaTheme.background)
     }
 
     private func storeEditedImages(_ images: [UIImage], writesToPhotoLibrary: Bool) {

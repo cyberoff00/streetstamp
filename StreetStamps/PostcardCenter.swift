@@ -1,5 +1,6 @@
 import Foundation
 import os
+import Combine
 
 extension Notification.Name {
     static let postcardSentGoToInbox = Notification.Name("postcardSentGoToInbox")
@@ -63,6 +64,13 @@ final class PostcardCenter: ObservableObject {
     /// a slow/stale fetch from overwriting a newer optimistic insert.
     private var sentItemsGeneration: UInt64 = 0
 
+    /// Skip a non-forced `refreshFromBackend` if a successful refresh happened
+    /// within this window. Tuned to the typical "leave and re-enter" gap so
+    /// reactions don't visibly pop in on every navigation, while pull-to-refresh
+    /// and post-send/post-publish callers can still bypass via `force: true`.
+    private static let refreshDebounceWindow: TimeInterval = 5
+    private var lastRefreshSucceededAt: Date?
+
     private let logger = Logger(subsystem: "StreetStamps", category: "PostcardSend")
 
     private var activeUserID: String
@@ -86,15 +94,18 @@ final class PostcardCenter: ObservableObject {
         if didRecover {
             PostcardDraftStore.save(loaded, userID: userID)
         }
+        self.sentItems = PostcardInboxStore.loadSent(userID: userID)
+        self.receivedItems = PostcardInboxStore.loadReceived(userID: userID)
     }
 
     func switchUser(_ userID: String) {
         guard !userID.isEmpty, userID != activeUserID else { return }
         activeUserID = userID
         drafts = PostcardDraftStore.load(userID: userID)
-        sentItems = []
-        receivedItems = []
+        sentItems = PostcardInboxStore.loadSent(userID: userID)
+        receivedItems = PostcardInboxStore.loadReceived(userID: userID)
         lastSyncError = nil
+        lastRefreshSucceededAt = nil
     }
 
     func createDraft(
@@ -201,8 +212,12 @@ final class PostcardCenter: ObservableObject {
         }
     }
 
-    func refreshFromBackend(token: String?) async {
+    func refreshFromBackend(token: String?, force: Bool = false) async {
         guard let token, !token.isEmpty else { return }
+        if !force, let last = lastRefreshSucceededAt,
+           Date().timeIntervalSince(last) < Self.refreshDebounceWindow {
+            return
+        }
         let generationAtStart = sentItemsGeneration
         do {
             async let sentTask = BackendAPIClient.shared.fetchPostcards(token: token, box: "sent")
@@ -223,6 +238,9 @@ final class PostcardCenter: ObservableObject {
 
             receivedItems = received.items.sorted(by: { $0.sentAt > $1.sentAt })
             lastSyncError = nil
+            lastRefreshSucceededAt = Date()
+            PostcardInboxStore.saveSent(sentItems, userID: activeUserID)
+            PostcardInboxStore.saveReceived(receivedItems, userID: activeUserID)
         } catch {
             if Self.isCancellationError(error) {
                 return

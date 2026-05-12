@@ -286,6 +286,14 @@ enum LifelogRenderSnapshotBuilder {
                 countryISO2: run.countryISO2,
                 cityKey: run.cityKey
             )
+            #if DEBUG
+            LifelogGapDiagnostics.log(
+                day: key.day,
+                run: run,
+                perRunBudget: perRunBudget,
+                segments: farRouteSegments
+            )
+            #endif
             return LifelogSegmentedRenderGroup(
                 sourceType: run.sourceType,
                 rawCoordsWGS84: run.coordsWGS84,
@@ -462,3 +470,69 @@ enum LifelogRenderSnapshotBuilder {
         }
     }
 }
+
+#if DEBUG
+enum LifelogGapDiagnostics {
+    private static let dayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    static func log(
+        day: Date,
+        run: LifelogAttributedCoordinateRun,
+        perRunBudget: Int,
+        segments: [RenderRouteSegment]
+    ) {
+        let dashed = segments.filter { $0.style == .dashed }
+        let solid = segments.filter { $0.style == .solid }
+
+        let dayStr = dayFormatter.string(from: day)
+        let runStart = timeFormatter.string(from: run.startTimestamp)
+        let runEnd = timeFormatter.string(from: run.endTimestamp)
+        let preCount = run.coordsWGS84.count
+        let postCount = min(preCount, perRunBudget)
+        let firstCoord = run.coordsWGS84.first.map { String(format: "(%.5f,%.5f)", $0.latitude, $0.longitude) } ?? "-"
+        let lastCoord = run.coordsWGS84.last.map { String(format: "(%.5f,%.5f)", $0.latitude, $0.longitude) } ?? "-"
+        print("[LifelogGapDiag] day=\(dayStr) run=\(run.sourceType) \(runStart)-\(runEnd) pre=\(preCount) post=\(postCount) budget=\(perRunBudget) country=\(run.countryISO2 ?? "-") solid=\(solid.count) dashed=\(dashed.count) startCoord=\(firstCoord) endCoord=\(lastCoord)")
+        guard !dashed.isEmpty else { return }
+
+        for (i, seg) in dashed.enumerated() {
+            guard seg.coords.count >= 2 else { continue }
+            var maxHop: Double = 0
+            var maxHopIndex = 0
+            var totalDist: Double = 0
+            for j in 1..<seg.coords.count {
+                let a = seg.coords[j-1]
+                let b = seg.coords[j]
+                let d = CLLocation(latitude: a.latitude, longitude: a.longitude)
+                    .distance(from: CLLocation(latitude: b.latitude, longitude: b.longitude))
+                totalDist += d
+                if d > maxHop { maxHop = d; maxHopIndex = j }
+            }
+            let s = seg.coords.first!
+            let e = seg.coords.last!
+            let hop = seg.coords[maxHopIndex - 1]
+            let hopNext = seg.coords[maxHopIndex]
+            print(String(format: "[LifelogGapDiag]   dashed[%d] coords=%d totalDist=%.0fm maxHop=%.0fm start=(%.5f,%.5f) end=(%.5f,%.5f) maxHopAt=(%.5f,%.5f)->(%.5f,%.5f)",
+                         i,
+                         seg.coords.count,
+                         totalDist,
+                         maxHop,
+                         s.latitude, s.longitude,
+                         e.latitude, e.longitude,
+                         hop.latitude, hop.longitude,
+                         hopNext.latitude, hopNext.longitude))
+        }
+    }
+}
+#endif

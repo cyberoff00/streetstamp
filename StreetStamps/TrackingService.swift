@@ -4,6 +4,40 @@ import UIKit
 import Combine
 import UserNotifications
 
+/// Global ingest constants — see docs/plans/2026-05-04-tracking-ingest-relaxation-design.md
+enum Ingest {
+    /// Soft acceptance threshold — outside fallback, points with acc > this are dropped.
+    static let maxAcceptableAccuracy: Double = 200
+    /// Absolute hard ceiling — anything above is pure noise.
+    static let absoluteMaxAccuracy: Double = 500
+    /// Physical speed upper bound for any ground/air movement (~180 km/h).
+    static let physicalSpeedLimit: Double = 50
+
+    static let warmupSeconds: TimeInterval = 30
+    /// If all warmup-buffer points fall within this radius around centroid → use centroid as start.
+    static let warmupConvergeRadius: Double = 50
+
+    /// V-rebound: candidate offset > this → considered a potential jump.
+    static let vReboundOffsetNormal: Double = 100
+    static let vReboundOffsetFallback: Double = 300
+    /// V-rebound: next fix returning within this radius of the original anchor → confirms jump.
+    static let vReboundReturnNormal: Double = 20
+    static let vReboundReturnFallback: Double = 50
+    static let vReboundMaxDt: TimeInterval = 10
+
+    /// Sudden-acceleration: implied speed > median × this multiplier + base → suspicious.
+    static let suddenAccelMultiplier: Double = 5
+    static let suddenAccelBase: Double = 5
+    static let suddenAccelMinSpeed: Double = 8
+
+    /// Segment-style hysteresis (avoid solid/dashed flapping at acc ≈ 200).
+    static let segmentSolidToDashed: Double = 230
+    static let segmentDashedToSolid: Double = 170
+
+    /// First N seconds after lock when we don't apply mode-specific config tightening.
+    static let modeAdjustmentWarmup: TimeInterval = 90
+}
+
 @MainActor
 final class TrackingService: ObservableObject {
 
@@ -23,6 +57,10 @@ final class TrackingService: ObservableObject {
     private(set) var coords: [CLLocationCoordinate2D] = []
     /// GPS timestamps parallel to `coords`. Same count, same order.
     private(set) var coordTimestamps: [Date] = []
+    /// CLLocation.horizontalAccuracy at fix time, parallel to `coords`. Same count, same order.
+    /// Persisted into JourneyRoute.coordinates[i].acc so post-finalize logic (DP simplification,
+    /// historical replay dashed reconstruction) can use per-point accuracy.
+    private(set) var coordAccuracies: [Double] = []
 
     @Published var totalDistance: Double = 0
     /// Total horizontal (2D) distance in meters.
@@ -88,8 +126,28 @@ final class TrackingService: ObservableObject {
 
     // MARK: - Quality / UX
 
-    @Published var isLocationLocked: Bool = false
     @Published var lastHorizontalAccuracy: CLLocationAccuracy = -1
+
+    // MARK: - Warmup / Fallback state (PR 1.2 — replaces lock)
+
+    /// Holds points received during the first 30 seconds of a journey.
+    /// At warmup expiry: convergent buffer → centroid; divergent → flush in time order;
+    /// empty → fallback mode (accept acc up to 500m).
+    private struct WarmupBufferEntry {
+        let loc: CLLocation
+    }
+    private var warmupBuffer: [WarmupBufferEntry] = []
+    private var warmupExpired: Bool = false
+    /// Set to true when warmup expires with empty buffer (no acc≤200 fix in 30s).
+    /// Loosens jump-detection thresholds and accepts acc up to 500m for the rest of the journey.
+    private var fallbackMode: Bool = false
+
+    /// Suspended jump candidate awaiting confirmation by the next fix (V-rebound or follow-through).
+    private struct JumpCandidate {
+        let anchor: CLLocation
+        let candidate: CLLocation
+    }
+    private var pendingJumpCandidate: JumpCandidate?
 
     // MARK: - Internal state
 
@@ -97,6 +155,9 @@ final class TrackingService: ObservableObject {
     private var rawCoords: [CLLocationCoordinate2D] = []
     /// Parallel array: GPS timestamp for each entry in rawCoords.
     private var rawTimestamps: [Date] = []
+    /// Parallel array: horizontalAccuracy at fix time for each entry in rawCoords.
+    /// Maintained alongside rawCoords/rawTimestamps; published as `coordAccuracies`.
+    private var rawAccuracies: [Double] = []
     private var acceptedLocations: [CLLocation] = []
 
     var latestReliableLocationForMemories: CLLocation? {
@@ -111,8 +172,6 @@ final class TrackingService: ObservableObject {
 
     var foregroundMinDistance: Double = 8
     var backgroundMinDistance: Double = 10
-
-    var maxAcceptableAccuracy: Double = 70
 
     // MARK: - Elevation accumulation knobs
 
@@ -151,14 +210,8 @@ final class TrackingService: ObservableObject {
     private var isInForegroundStationaryPowerMode: Bool = false
     private var deferredWeakDriftJump: DeferredWeakDriftJump?
 
-    var lockAccuracy: Double = 25
-    var lockConsecutiveCount: Int = 2
-    private var lockStreak: Int = 0
-
-    var maxPlausibleSpeed: Double = 18.0
-    var maxJumpDistance: Double = 120.0
-    var hardJumpDistance: Double = 350.0
-    var dropJumpDistanceWhenAccuracyBad: Double = 180.0
+    /// Soft drift signal. Used as informational threshold by drift detection / segment style /
+    /// distance accumulation decisions. Not a hard filter — see `Ingest.maxAcceptableAccuracy`.
     var accuracyBadThreshold: Double = 120.0
 
     // MARK: - Dashed policy
@@ -320,6 +373,7 @@ final class TrackingService: ObservableObject {
     private var latestRenderUnifiedSegmentsForMap: [RenderRouteSegment] = []
     private var latestRenderLiveTailForMap: [CLLocationCoordinate2D] = []
     private let motionHub = MotionActivityHub.shared
+    private let pedometerHub = PedometerHub.shared
     /// Dynamic debounce to reduce CPU/GPU wakeups without changing live-tracking UX.
     /// - While actively tracking (and not paused): keep original 10Hz.
     /// - Otherwise: relax updates; also respect iOS Low Power Mode.
@@ -483,7 +537,10 @@ final class TrackingService: ObservableObject {
         
         rawCoords.removeAll()
         rawTimestamps.removeAll()
+        rawAccuracies.removeAll()
         coords.removeAll()
+        coordTimestamps.removeAll()
+        coordAccuracies.removeAll()
         totalDistance = 0
         totalAscent = 0
         totalDescent = 0
@@ -497,8 +554,14 @@ final class TrackingService: ObservableObject {
         deferredWeakDriftJump = nil
         recentSignalInterruption = nil
 
-        isLocationLocked = false
-        lockStreak = 0
+        // PR 1.2: warmup / fallback / jump-candidate state reset
+        warmupBuffer.removeAll(keepingCapacity: true)
+        warmupExpired = false
+        fallbackMode = false
+        pendingJumpCandidate = nil
+
+        // PR 5: pedometer for step-count distance validation
+        pedometerHub.start(from: Date())
 
         speedSamples.removeAll(keepingCapacity: true)
         self.mode = .unknown
@@ -585,9 +648,7 @@ final class TrackingService: ObservableObject {
     private func applyModeConfig(_ config: TrackingModeConfig) {
         foregroundMinDistance = config.foregroundMinDistance
         backgroundMinDistance = config.backgroundMinDistance
-        maxAcceptableAccuracy = config.maxAcceptableAccuracy
-        lockAccuracy = config.lockAccuracy
-        
+
         stationaryBaseMinMoveMeters = config.stationaryMinMoveMeters
         stationarySpeedThreshold = config.stationarySpeedThreshold
         stationaryHoldSeconds = config.stationaryHoldSeconds
@@ -669,6 +730,9 @@ final class TrackingService: ObservableObject {
         isTracking = false
         isPaused = false
 
+        // PR 5: pedometer no longer needed when not tracking.
+        pedometerHub.stop()
+
         // Return location manager to low-power mode when tracking stops.
         isInForegroundStationaryPowerMode = false
         stationarySince = nil
@@ -681,7 +745,11 @@ final class TrackingService: ObservableObject {
             )
             switch action {
             case .startPassive:
-                hub.startPassiveLifelog()
+                // Journey just ended — user was demonstrably moving until a moment
+                // ago. Start passive in .moving so the first 2.5 minutes keep
+                // high-precision GPS instead of dropping to ~100m accuracy and
+                // losing the post-journey trail to the accuracy gate.
+                hub.startPassiveLifelog(initialState: .moving)
             case .stayIdle, .requestSingleRefresh:
                 hub.stop()
             }
@@ -792,12 +860,15 @@ final class TrackingService: ObservableObject {
 
         // For historical/ended journeys we want deterministic playback from snapshot.
         let timestamps = journey.displayRouteCoordinates.map { $0.t }
+        let accuracies = journey.displayRouteCoordinates.map { $0.resolvedAccuracy }
         if !isTracking || journey.endTime != nil {
             rawCoords = ext
             rawTimestamps = timestamps.map { $0 ?? .distantPast }
+            rawAccuracies = accuracies
         } else if rawCoords.isEmpty {
             rawCoords = ext
             rawTimestamps = timestamps.map { $0 ?? .distantPast }
+            rawAccuracies = accuracies
         }
         if totalDistance <= 0, journey.distance > 0 { totalDistance = journey.distance }
         if totalAscent <= 0, journey.elevationGain > 0 { totalAscent = journey.elevationGain }
@@ -807,7 +878,9 @@ final class TrackingService: ObservableObject {
             lastLocation = CLLocation(latitude: last.latitude, longitude: last.longitude)
         }
 
-        isLocationLocked = true
+        // Loading historical journey: skip warmup, jump straight to runtime ingest path.
+        warmupExpired = true
+        warmupBuffer.removeAll(keepingCapacity: true)
 
         internalSegments = [RouteSegment(id: UUID().uuidString, style: .solid, coords: ext)]
         flushPublishedState(force: true)
@@ -944,7 +1017,8 @@ final class TrackingService: ObservableObject {
         let recoveryDelay = loc.timestamp.timeIntervalSince(recentSignalInterruption.anchor.timestamp)
         let interruptionDelay = loc.timestamp.timeIntervalSince(recentSignalInterruption.interruptedAt)
         let recoveryDistance = loc.distance(from: recentSignalInterruption.anchor)
-        let trustedAccuracy = loc.horizontalAccuracy <= max(lockAccuracy, weakAccuracyThreshold)
+        // PR 1.2: lockAccuracy was removed; weakAccuracyThreshold (35) is the right "trusted" bar here.
+        let trustedAccuracy = loc.horizontalAccuracy <= weakAccuracyThreshold
 
         guard trustedAccuracy else { return false }
         guard interruptionDelay >= 6 else { return false }
@@ -963,14 +1037,13 @@ final class TrackingService: ObservableObject {
 
         guard isTracking else { return }
         guard !isPaused else { return } // keep blue dot, stop recording
-        if loc.horizontalAccuracy < 0 { return }
 
-        // iOS may re-deliver cached fixes during signal recovery, background→
-        // foreground transitions, or near-tunnel reacquisition. The cached fix
-        // carries its original (now-stale) GPS timestamp. If we accept it,
-        // routeCoordinates ends up with non-monotonic timestamps and the same
-        // (lat, lon, t) tuple sprinkled across the array — which renders as
-        // ghost zigzag lines and inflates totalDistance.
+        // ============================================================
+        // L1: 废弃点过滤（绝对硬过滤）
+        // ============================================================
+        if loc.horizontalAccuracy < 0 { return }
+        if loc.horizontalAccuracy > Ingest.absoluteMaxAccuracy { return }   // > 500m 视为噪声
+        // iOS may re-deliver cached fixes (timestamp is stale). Drop them.
         if loc.timestamp.timeIntervalSinceNow < -30 { return }
         if let lastTs = rawTimestamps.last, loc.timestamp <= lastTs { return }
 
@@ -982,54 +1055,41 @@ final class TrackingService: ObservableObject {
         let gapSec = isActive ? gapSecondsThreshold : backgroundGapSecondsThreshold
         let gapDist = isActive ? gapDistanceThreshold : backgroundGapDistanceThreshold
 
-        // Accuracy bands
+        // Accuracy bands (soft signals — used by drift / segment style / distance decisions only)
         let acc = loc.horizontalAccuracy
         let accuracyVeryBad = (acc >= accuracyBadThreshold)     // e.g. >= 120
         let accuracyWeak = (acc >= weakAccuracyThreshold)       // e.g. >= 35
 
-        // =========================================================
-        // 0) GPS lock stage: require stable accuracy before recording
-        // =========================================================
+        // ============================================================
+        // L2: Warmup 30 秒缓冲（取代旧 lock 阶段）
+        //   ≤ 200m 的 fix 进 buffer，> 200m 直接丢
+        //   30 秒到达 → buffer 收敛 → centroid 起点
+        //                buffer 散开 → 全写
+        //                buffer 为空 → fallbackMode = true（后续接受 ≤ 500m）
+        // ============================================================
+        if !warmupExpired {
+            let started = trackingStartedAt ?? loc.timestamp
+            let elapsed = loc.timestamp.timeIntervalSince(started)
 
-        // High-speed pre-check: loc.speed is Doppler-based and reliable even when
-        // positional accuracy is poor (tunnels, weak satellite coverage on train).
-        // If iOS confirms we are moving fast, relax accuracy gates so the lock can
-        // be acquired despite degraded GPS — drift is not a concern at high speed.
-        // Threshold: 5 m/s ≈ 18 km/h, safely above cycling but below any transit.
-        // effectiveMaxAccuracy / effectiveLockAccuracy are LOCAL; they do not mutate
-        // the stored config and reset to the normal values on the next stationary trip.
-        let highSpeedConfirmed = loc.speed >= 5.0
-        let effectiveMaxAccuracy = highSpeedConfirmed ? max(maxAcceptableAccuracy, 150.0) : maxAcceptableAccuracy
-        let effectiveLockAccuracy = highSpeedConfirmed ? max(lockAccuracy, 80.0) : lockAccuracy
-
-        if !isLocationLocked {
-            // If accuracy is terrible, don't progress lock streak
-            if acc > effectiveMaxAccuracy {
-                lockStreak = 0
-                droppedByAccuracyCount += 1
+            if elapsed < Ingest.warmupSeconds {
+                if acc <= Ingest.maxAcceptableAccuracy {
+                    warmupBuffer.append(.init(loc: loc))
+                } else {
+                    droppedByAccuracyCount += 1
+                }
                 return
             }
 
-            if acc <= effectiveLockAccuracy { lockStreak += 1 } else { lockStreak = 0 }
-            if lockStreak < lockConsecutiveCount { return }
-
-            isLocationLocked = true
-            acceptedLocations.removeAll(keepingCapacity: true)
-            acceptedLocations.append(loc)
-
-            // ✅ lock point becomes base; safe to set lastLocation
-            lastLocation = loc
-            resetOneEuro() // start filter fresh at lock
-
-            rawCoords.append(loc.coordinate)
-            rawTimestamps.append(loc.timestamp)
-            appendPointToInternalSegments(coord: loc.coordinate, at: loc.timestamp, preferredStyle: .solid)
-            lastRecordedLocationForStationary = loc
-            stationarySince = nil
-            recentSignalInterruption = nil
-            publishIfNeeded()
-            rebuildRenderCache(force: false)
-            return
+            // 30 秒到达：决定起点路径
+            warmupExpired = true
+            if warmupBuffer.isEmpty {
+                fallbackMode = true
+                // 当前 fix（可能 acc>200）继续走 runtime 路径，由 L3.4 fallback 分支接受
+            } else {
+                flushWarmupBuffer()
+                // 当前 fix 继续走 runtime 路径
+            }
+            // Fall through ↓
         }
 
         // =========================================================
@@ -1040,6 +1100,7 @@ final class TrackingService: ObservableObject {
             resetOneEuro()
             rawCoords.append(loc.coordinate)
             rawTimestamps.append(loc.timestamp)
+            rawAccuracies.append(loc.horizontalAccuracy)
             appendPointToInternalSegments(coord: loc.coordinate, at: loc.timestamp, preferredStyle: .solid)
             lastRecordedLocationForStationary = loc
             stationarySince = nil
@@ -1185,35 +1246,57 @@ final class TrackingService: ObservableObject {
             ((dt >= missingGapSecondsThreshold) && (d2d >= 500)) ||
             (d2d  >= missingGapDistanceThreshold)
 
+        // Soft drift signal — used by gap-style decision below, NOT a hard filter.
         let isDriftLike: Bool =
             accuracyVeryBad &&
             (dt <= 30) &&
-            (d2d >= dropJumpDistanceWhenAccuracyBad)
+            (d2d >= 180)
 
-        // Drift-like: if NOT turning, drop
-        if isDriftLike && !keepBecauseTurn {
-            noteSignalInterruptionCandidate(anchor: last, droppedAt: loc.timestamp)
+        // ============================================================
+        // L3: 跳点独立检测（不依赖 accuracy 门槛）
+        // ============================================================
+
+        // L3.1: 物理上限（180 km/h，所有地面/飞行场景的合理上界）
+        if d2d / dt > Ingest.physicalSpeedLimit, !keepBecauseTurn {
             droppedByJumpCount += 1
             return
         }
 
-        // Accuracy hard gate:
-        // if too bad and not turning -> drop
-        // effectiveMaxAccuracy is already speed-adjusted above (150m when high-speed confirmed).
-        if acc > effectiveMaxAccuracy && !keepBecauseTurn {
-            noteSignalInterruptionCandidate(anchor: last, droppedAt: loc.timestamp)
-            droppedByAccuracyCount += 1
+        // L3.2: V 字回弹判定（前一次留下的 candidate 看是否被当前 fix 确认为跳点）
+        let vReboundOffset = fallbackMode ? Ingest.vReboundOffsetFallback : Ingest.vReboundOffsetNormal
+        let vReboundReturn = fallbackMode ? Ingest.vReboundReturnFallback : Ingest.vReboundReturnNormal
+        if let pending = pendingJumpCandidate {
+            let backToAnchor = loc.distance(from: pending.anchor)
+            let pendingOffset = pending.candidate.distance(from: pending.anchor)
+            let totalDt = loc.timestamp.timeIntervalSince(pending.anchor.timestamp)
+            if pendingOffset > vReboundOffset && backToAnchor < vReboundReturn && totalDt < Ingest.vReboundMaxDt {
+                // 中间 candidate 被确认为跳点 → 已在前一次 return 时丢弃，这里只清状态
+                pendingJumpCandidate = nil
+                droppedByJumpCount += 1
+                // 当前 fix 是 V 字回弹的尾点，跟 anchor 重合 → 直接进 L3.4 / L4
+            } else if totalDt > Ingest.vReboundMaxDt {
+                // 观察窗口超时但没回到 anchor → candidate 是真实移动，追溯接受
+                retroactivelyAcceptCandidate(pending.candidate)
+                pendingJumpCandidate = nil
+            }
+            // 还在窗口内但不构成 V 字 → 保留 candidate，继续观察后续 fix
+        }
+
+        // L3.3: 突然加速暂存（速度突然飙升 → 暂存观察，下一个 fix 决定接受/丢弃）
+        let recentMedianSpeed = computeRecentMedianSpeed()
+        let suddenAccel = (impliedSpeed > recentMedianSpeed * Ingest.suddenAccelMultiplier + Ingest.suddenAccelBase)
+                       && (impliedSpeed > Ingest.suddenAccelMinSpeed)
+        if suddenAccel, !keepBecauseTurn, pendingJumpCandidate == nil {
+            pendingJumpCandidate = JumpCandidate(anchor: last, candidate: loc)
             return
         }
 
-        // Speed-based outlier drop (only when NOT migration candidate)
-        if !isMigrationCandidate {
-            if d2d > maxJumpDistance && impliedSpeed > maxPlausibleSpeed {
-                if !keepBecauseTurn {
-                    droppedByJumpCount += 1
-                    return
-                }
-            }
+        // L3.4: accuracy 软过滤（fallback 模式接受 ≤ 500m，正常模式接受 ≤ 200m）
+        let acceptanceCeiling: Double = fallbackMode ? Ingest.absoluteMaxAccuracy : Ingest.maxAcceptableAccuracy
+        if acc > acceptanceCeiling && !keepBecauseTurn {
+            noteSignalInterruptionCandidate(anchor: last, droppedAt: loc.timestamp)
+            droppedByAccuracyCount += 1
+            return
         }
 
         // Gap-like -> dashed (be conservative: prefer solid unless we truly lost signal / jumped)
@@ -1267,13 +1350,56 @@ final class TrackingService: ObservableObject {
         // 5) Distance accumulation (2D horizontal distance)
         //    don't add nonsense on very bad accuracy unless migration
         //    Daily mode: count missing (dashed) segment mileage as requested.
+        // PR 5: validate via CoreMotion activity + CMPedometer step count to
+        //       suppress GPS drift virtual distance (e.g. user sitting in cafe).
         // =========================================================
+
+        // PR 5: when CoreMotion confidently says stationary, drop the fix entirely.
+        // This prevents indoor GPS drift (200m of zigzag points) from being written
+        // to the route at all — distance-only gating wasn't enough since drift points
+        // would still show as a visible line on the map.
+        // Low-confidence stationary falls through to GPS-only path (CoreMotion uncertain
+        // → don't override GPS).
+        let activity = motionHub.snapshot
+        let confidentlyStationary = activity.kind == .stationary && activity.confidence != .low
+        if confidentlyStationary {
+            droppedByStationaryCount += 1
+            return
+        }
+
         let shouldAccumulateDistance: Bool = {
             guard (!accuracyVeryBad || isMigrationCandidate) else { return false }
             if isMissingSegment {
                 return trackingMode == .daily
             }
-            return true
+
+            // PR 5: activity-based dispatch. Returns false → don't accumulate this segment.
+            switch activity.kind {
+            case .stationary:
+                // Low-confidence stationary only (confident case already returned above
+                // and dropped the fix entirely). At low confidence CoreMotion is uncertain,
+                // so trust GPS — this recovers the 5-15s startup window where activity hasn't
+                // switched from .stationary to .walking/.running yet, which previously
+                // discarded real movement at the start of every trip.
+                return true
+
+            case .walking, .running:
+                // Step-count validation: GPS says moved >5m but pedometer says zero
+                // steps in last 30s → GPS drift, drop. Skip if confidence is low
+                // (CoreMotion uncertain about walking classification).
+                guard activity.confidence != .low else { return true }
+                let recentSteps = pedometerHub.stepsInLast(30)
+                if recentSteps == 0 && d2d > 5 { return false }
+                return true
+
+            case .cycling, .automotive:
+                // No step-count validation possible; trust GPS.
+                return true
+
+            case .unknown:
+                // Pre-CoreMotion-warmup or unsupported device: preserve current behavior.
+                return true
+            }
         }()
 
         if shouldAccumulateDistance {
@@ -1317,10 +1443,18 @@ final class TrackingService: ObservableObject {
         // =========================================================
         rawCoords.append(outCoord)
         rawTimestamps.append(loc.timestamp)
+        rawAccuracies.append(loc.horizontalAccuracy)
 
         if isMissingSegment, let from = missingFromCoord {
             appendMissingConnectionSegment(from: from, to: outCoord, at: loc.timestamp)
         } else {
+            // L4: segment style is decided purely by gap detection (distance-based).
+            //   Rationale: historical journey replay rebuilds dashed via
+            //   `RouteRenderingPipeline.segmentByDistance`, which only knows about
+            //   inter-point distance. Tracking-phase dashed must use the same signal,
+            //   otherwise tracking shows dashed but replay shows solid (inconsistent UX).
+            //   acc-based dashed (low-confidence segments) was experimented with but
+            //   removed since `coordinates` schema doesn't persist per-point accuracy.
             let style: SegmentStyle = isGapLike ? .dashed : .solid
             appendPointToInternalSegments(coord: outCoord, at: loc.timestamp, preferredStyle: style)
         }
@@ -1491,9 +1625,9 @@ final class TrackingService: ObservableObject {
     }
 
     private func scheduleLongStationaryReminderNotification() {
-        let center = UNUserNotificationCenter.current()
         let categoryID = longStationaryCategoryID
-        center.getNotificationSettings { [longStationaryNotificationID] settings in
+        let notifID = longStationaryNotificationID
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
             guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { return }
 
             let content = UNMutableNotificationContent()
@@ -1504,12 +1638,15 @@ final class TrackingService: ObservableObject {
             content.categoryIdentifier = categoryID
 
             let request = UNNotificationRequest(
-                identifier: longStationaryNotificationID,
+                identifier: notifID,
                 content: content,
                 trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
             )
-            center.removePendingNotificationRequests(withIdentifiers: [longStationaryNotificationID])
-            center.add(request)
+            // Re-fetch the singleton inside @Sendable closure: UNUserNotificationCenter
+            // doesn't conform to Sendable, so capturing it crosses a boundary.
+            let inner = UNUserNotificationCenter.current()
+            inner.removePendingNotificationRequests(withIdentifiers: [notifID])
+            inner.add(request)
         }
     }
 
@@ -1526,8 +1663,7 @@ final class TrackingService: ObservableObject {
     }
 
     private func scheduleAutoPauseNotification() {
-        let center = UNUserNotificationCenter.current()
-        center.getNotificationSettings { settings in
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
             guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { return }
             let content = UNMutableNotificationContent()
             content.title = L10n.t("auto_pause_notification_title")
@@ -1539,7 +1675,7 @@ final class TrackingService: ObservableObject {
                 content: content,
                 trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
             )
-            center.add(request)
+            UNUserNotificationCenter.current().add(request)
         }
     }
 
@@ -1562,6 +1698,7 @@ final class TrackingService: ObservableObject {
             // Non-@Published: direct assign without triggering objectWillChange
             self.coords = self.rawCoords
             self.coordTimestamps = self.rawTimestamps
+            self.coordAccuracies = self.rawAccuracies
             // Bump lightweight version counter (triggers onReceive in MapView)
             self.coordVersion += 1
             // Single @Published update for all render state
@@ -1716,10 +1853,85 @@ final class TrackingService: ObservableObject {
         lastModeChangeAt = now
 
         // ✅ 日常模式下，根据检测到的交通方式动态调整参数
+        // PR 1.2 防御 A: journey 启动后 90 秒内不切换 adjusted 配置
+        // —— 防止"早期慢走识别为 walk → 收紧密度参数 → 后续 GPS 变差时锁不上"的恶性反馈。
         if trackingMode == .daily {
+            let elapsed = now.timeIntervalSince(trackingStartedAt ?? now)
+            guard elapsed >= Ingest.modeAdjustmentWarmup else { return }
             let adjustedConfig = modeConfig.adjusted(for: newMode)
             applyModeConfig(adjustedConfig)
         }
         // 运动模式不做动态调整，保持高精度
+    }
+
+    // MARK: - PR 1.2 helpers (warmup / jump-candidate)
+
+    /// Decide warmup buffer outcome:
+    ///   convergent (all within `warmupConvergeRadius` of centroid) → emit single centroid as start
+    ///   divergent → emit all entries in time order
+    private func flushWarmupBuffer() {
+        let entries = warmupBuffer
+        warmupBuffer.removeAll(keepingCapacity: true)
+        guard !entries.isEmpty else { return }
+
+        let centroid = centroidCoordinate(of: entries.map(\.loc))
+        let centroidLoc = CLLocation(latitude: centroid.latitude, longitude: centroid.longitude)
+        let allWithinRadius = entries.allSatisfy { $0.loc.distance(from: centroidLoc) < Ingest.warmupConvergeRadius }
+
+        if allWithinRadius {
+            // Convergent: single centroid point as journey start.
+            // Use the median accuracy of the buffer entries — a centroid's accuracy
+            // is approximately the GPS uncertainty radius the cluster fell within.
+            let firstTs = entries.first!.loc.timestamp
+            let medianAcc = entries.map(\.loc.horizontalAccuracy).sorted()[entries.count / 2]
+            rawCoords.append(centroid)
+            rawTimestamps.append(firstTs)
+            rawAccuracies.append(medianAcc)
+            appendPointToInternalSegments(coord: centroid, at: firstTs, preferredStyle: .solid)
+            lastLocation = centroidLoc
+            lastRecordedLocationForStationary = centroidLoc
+            acceptedLocations.append(centroidLoc)
+        } else {
+            // Divergent: write all entries in time order
+            for entry in entries {
+                rawCoords.append(entry.loc.coordinate)
+                rawTimestamps.append(entry.loc.timestamp)
+                rawAccuracies.append(entry.loc.horizontalAccuracy)
+                appendPointToInternalSegments(coord: entry.loc.coordinate, at: entry.loc.timestamp, preferredStyle: .solid)
+                acceptedLocations.append(entry.loc)
+            }
+            if let last = entries.last {
+                lastLocation = last.loc
+                lastRecordedLocationForStationary = last.loc
+            }
+        }
+        publishIfNeeded()
+        rebuildRenderCache(force: false)
+    }
+
+    /// Take a previously-suspended jump candidate and run it through the runtime ingest path
+    /// (called when the V-rebound observation window expires without a rebound).
+    private func retroactivelyAcceptCandidate(_ candidate: CLLocation) {
+        // Re-enter ingest with this fix; pendingJumpCandidate already cleared by caller.
+        // L1 / L2 already passed (candidate originally came from L3 path), so go straight to L4 write.
+        // Keep it simple: just re-call ingest. Monotonic timestamp check ensures we don't double-write.
+        ingest(candidate)
+    }
+
+    /// Median speed (m/s) over the last 60 seconds of speed samples.
+    /// Returns 0 if insufficient samples — suddenAccel check then becomes a function of absolute speed.
+    private func computeRecentMedianSpeed() -> Double {
+        let now = Date()
+        let recent = speedSamples.filter { now.timeIntervalSince($0.t) <= 60 }.map(\.v).sorted()
+        guard !recent.isEmpty else { return 0 }
+        return recent[recent.count / 2]
+    }
+
+    /// Geometric centroid of a list of CLLocations.
+    private func centroidCoordinate(of locations: [CLLocation]) -> CLLocationCoordinate2D {
+        guard !locations.isEmpty else { return CLLocationCoordinate2D(latitude: 0, longitude: 0) }
+        let lat = locations.map(\.coordinate.latitude).reduce(0, +) / Double(locations.count)
+        let lon = locations.map(\.coordinate.longitude).reduce(0, +) / Double(locations.count)
+        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
     }
 }

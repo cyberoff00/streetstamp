@@ -219,8 +219,11 @@ final class RenderMaskStore: ObservableObject {
         let snapshot: [String: [Int]] = maskByJourney.mapValues { Array($0).sorted() }
         let url = paths.renderMaskURL
         let cachesDir = paths.cachesDir
-        let fm = paths.fm
         saveQueue.async {
+            // FileManager doesn't conform to Sendable, so we can't capture
+            // `paths.fm` across a @Sendable boundary. Create a fresh instance
+            // — thread-safe for these basic ops and effectively zero-cost.
+            let fm = FileManager()
             do {
                 var isDir: ObjCBool = false
                 if !fm.fileExists(atPath: cachesDir.path, isDirectory: &isDir) || !isDir.boolValue {

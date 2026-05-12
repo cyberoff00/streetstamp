@@ -6,7 +6,7 @@ enum DailyTrackingPrecision: String, CaseIterable {
     case highPrecision
     case lowPrecision
 
-    static let defaultPrecision: DailyTrackingPrecision = .lowPrecision
+    static let defaultPrecision: DailyTrackingPrecision = .highPrecision
 
     var titleKey: String {
         switch self {

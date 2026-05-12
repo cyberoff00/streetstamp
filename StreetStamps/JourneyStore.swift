@@ -8,8 +8,9 @@ extension Notification.Name {
 
 /// Stores the ordered list of journey IDs.
 /// Keeping this tiny lets us load list screens quickly and avoid decoding big routes.
-final class JourneysIndexStore {
-    private let fm = FileManager.default
+final class JourneysIndexStore: @unchecked Sendable {
+    // See JourneyFileStore.swift for why we don't use FileManager.default.
+    private let fm = FileManager()
     private let filename = "index.json"
     private let baseURL: URL
 
@@ -93,8 +94,13 @@ final class JourneyStore: ObservableObject {
     @Published private(set) var metadataRevision: Int = 0
     var syncHooks: SyncHooks = .disabled
 
-    private var fileStore: JourneysFileStore
-    private var indexStore: JourneysIndexStore
+    // nonisolated: these helpers are pure file I/O wrappers, no MainActor
+    // dependency. Marking nonisolated lets them be referenced from
+    // `ioQueue.async { [weak self] ... }` closures without the 432 Swift 6
+    // strict-concurrency warnings (which on iOS 26 SDK can become runtime
+    // hops/deadlocks instead of compile-time errors).
+    nonisolated(unsafe) private var fileStore: JourneysFileStore
+    nonisolated(unsafe) private var indexStore: JourneysIndexStore
     private var userID: String
 
     private let ioQueue = DispatchQueue(label: "ss.journeys.store", qos: .utility)

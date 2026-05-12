@@ -21,7 +21,13 @@ struct StoragePath: Sendable {
     let userID: String
     let fm: FileManager
 
-    init(userID: String, fm: FileManager = .default) {
+    // FileManager.default is @MainActor in iOS 18+ SDK. Using `.default` as a
+    // default param taints `init` and every property/method with MainActor
+    // isolation, generating ~50 cross-actor warnings throughout the codebase
+    // and (worse) silently inserting MainActor hops into background tasks
+    // that read these paths. A fresh `FileManager()` is thread-safe for the
+    // operations we use (urls(for:), createDirectory, fileExists, contents).
+    init(userID: String, fm: FileManager = FileManager()) {
         self.userID = userID
         self.fm = fm
     }

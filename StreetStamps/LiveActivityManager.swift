@@ -289,7 +289,7 @@ final class LiveActivityManager: ObservableObject {
         stopUpdateTimer()
         
         updateTimer = Timer.scheduledTimer(withTimeInterval: Self.updateInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 self?.timerFired()
             }
         }
@@ -330,7 +330,11 @@ final class LiveActivityManager: ObservableObject {
         CFNotificationCenterAddObserver(
             CFNotificationCenterGetDarwinNotifyCenter(),
             nil,
-            darwinWidgetActionCallback,
+            { _, _, _, _, _ in
+                DispatchQueue.main.async {
+                    LiveActivityManager.shared.checkPendingWidgetActions()
+                }
+            },
             "com.streetstamps.widgetAction" as CFString,
             nil,
             .deliverImmediately

@@ -2,6 +2,7 @@ import Combine
 import SwiftUI
 import UIKit
 import UserNotifications
+import RevenueCat
 #if canImport(FirebaseCore)
 import FirebaseCore
 #endif
@@ -9,6 +10,13 @@ import FirebaseCore
 struct JourneyDeletionSyncFailure: Equatable {
     let journeyID: String
     let message: String
+}
+
+struct PendingUpdatePrompt: Identifiable {
+    let id = UUID()
+    let latestVersion: String
+    let releaseNotes: String?
+    let appStoreURL: URL
 }
 
 @MainActor
@@ -52,11 +60,8 @@ enum JourneyDeletionSyncRunner {
 }
 
 enum FirstProfileSetupPresentation {
-    static func shouldPresent(
-        requiresProfileSetup: Bool,
-        debugOverrideEnabled: Bool
-    ) -> Bool {
-        requiresProfileSetup || debugOverrideEnabled
+    static func shouldPresent(requiresProfileSetup: Bool) -> Bool {
+        requiresProfileSetup
     }
 }
 
@@ -91,30 +96,11 @@ struct StreetStampsApp: App {
     @State private var trackTileRebuildTask: Task<Void, Never>?
     @State private var trackTileDirty: Bool = false
     @State private var profileSwitchTask: Task<Void, Never>?
-#if DEBUG
-    @State private var showDebugFirstProfileSetupPreview = true
-#endif
-
-    private var debugFirstProfileSetupOverrideEnabled: Bool {
-#if DEBUG
-        return showDebugFirstProfileSetupPreview
-#else
-        return false
-#endif
-    }
+    @State private var pendingUpdatePrompt: PendingUpdatePrompt?
 
     @ViewBuilder
     private var firstProfileSetupScreen: some View {
-#if DEBUG
-        FirstProfileSetupView(
-            isDebugPreview: showDebugFirstProfileSetupPreview && !sessionStore.requiresProfileSetup,
-            onDismissDebugPreview: {
-                showDebugFirstProfileSetupPreview = false
-            }
-        )
-#else
         FirstProfileSetupView()
-#endif
     }
 
     private var dailyTrackingPrecision: DailyTrackingPrecision {
@@ -153,12 +139,78 @@ struct StreetStampsApp: App {
         )
     }
 
+    private func retryStalledJourneyUploads() async {
+        guard AppSettings.isICloudSyncEnabled else { return }
+        let localUserID = sessionStore.activeLocalProfileID
+        let pendingIDs = AppSettings.pendingJourneyUploadIDs(for: localUserID)
+        guard !pendingIDs.isEmpty else { return }
+
+        let allJourneys = await MainActor.run { journeyStore.journeys }
+        let toRetry = allJourneys.filter { pendingIDs.contains($0.id) }
+
+        // Journeys in pending but no longer in the store were deleted — clean up.
+        let existingIDs = Set(toRetry.map(\.id))
+        let ghostIDs = Array(pendingIDs.subtracting(existingIDs))
+        if !ghostIDs.isEmpty {
+            AppSettings.clearJourneyPendingUploads(ghostIDs, for: localUserID)
+        }
+
+        guard !toRetry.isEmpty else { return }
+        await CloudKitSyncService.shared.retryJourneyUploads(toRetry, localUserID: localUserID)
+    }
+
+    private func retryStalledJourneyDeletions() async {
+        guard AppSettings.isICloudSyncEnabled else { return }
+        let localUserID = sessionStore.activeLocalProfileID
+        let pendingIDs = AppSettings.pendingJourneyDeletionIDs(for: localUserID)
+        guard !pendingIDs.isEmpty else { return }
+        await CloudKitSyncService.shared.retryJourneyDeletions(Array(pendingIDs), localUserID: localUserID)
+    }
+
     private func syncPendingCloudChanges(userID: String, reason: String) async {
         await CloudKitSyncService.shared.syncCurrentState(
             userID: userID,
             journeyStore: journeyStore,
             lifelogStore: lifelogStore,
             reason: reason
+        )
+    }
+
+    private func performICloudAutoEnableForceFullUpload() async {
+        // If iCloud is currently unavailable, the persistent flag keeps the intent
+        // alive so the next scenePhase == .active triggers a retry automatically.
+        let available = await CloudKitSyncService.shared.isAvailable()
+        guard available else {
+            print("☁️ iCloud unavailable at auto-enable time; will retry on next activation")
+            return
+        }
+
+        // Clear the retry flag before the upload attempt.  If the attempt is
+        // interrupted mid-way, failed lifelog day batches remain dirty via the
+        // persistent pendingCloudUploadDayKeys tracker and are retried on the
+        // next incremental sync.
+        AppSettings.clearPendingFullSyncAfterAutoEnable()
+
+        // Extend background execution budget so a backgrounded upload gets ~30s
+        // of grace before the OS suspends the process.
+        let bgTask = UIApplication.shared.beginBackgroundTask(withName: "icloud_auto_enable_upload") {
+            // Expiry handler: OS is about to suspend — nothing to clean up here
+            // since the persistent dirty tracker will resume on next launch.
+        }
+        defer { UIApplication.shared.endBackgroundTask(bgTask) }
+
+        journeyStore.flushPersist()
+        lifelogStore.flushPersistNow()
+        let localUserID = sessionStore.activeLocalProfileID
+        let accountID = sessionStore.accountUserID ?? localUserID
+        await CloudKitSyncService.shared.syncCurrentState(
+            userID: accountID,
+            localUserID: localUserID,
+            journeyStore: journeyStore,
+            lifelogStore: lifelogStore,
+            reason: "membership_auto_enable",
+            forceFullJourneyUpload: true,
+            forceFullLifelogUpload: true
         )
     }
 
@@ -204,11 +256,12 @@ struct StreetStampsApp: App {
             },
             deleteJourney: { journeyID in
                 Task {
+                    let localUserID = await MainActor.run { sessionStore.activeLocalProfileID }
                     await JourneyDeletionSyncRunner.run(
                         journeyID: journeyID,
                         failureStore: failureStore,
                         cloudDeletion: {
-                            await CloudKitSyncService.shared.syncJourneyDeletion(id: journeyID)
+                            await CloudKitSyncService.shared.syncJourneyDeletion(id: journeyID, localUserID: localUserID)
                         },
                         migrationDeletion: {
                             try await JourneyCloudMigrationService.syncDeletedJourney(
@@ -264,9 +317,6 @@ struct StreetStampsApp: App {
 
     init() {
         BackendConfig.resetToDefault()
-        #if DEBUG
-        UserDefaults.standard.set(true, forKey: "streetstamps.debug.lifelog.mapDiagnosticsEnabled")
-        #endif
         #if canImport(FirebaseCore)
         if BackendConfig.firebaseBackupRuntimeEnabled,
            FirebaseApp.app() == nil,
@@ -274,9 +324,23 @@ struct StreetStampsApp: App {
             FirebaseApp.configure()
         }
         #endif
+
+        #if DEBUG
+        Purchases.logLevel = .debug
+        #else
+        Purchases.logLevel = .warn
+        #endif
+        Purchases.configure(withAPIKey: "appl_lgQllosipiiEpwoJtfTRpGpWCHC")
+
         let session = UserSessionStore()
         UserScopedProfileStateStore.initializeCurrentUser(session.activeLocalProfileID)
         _sessionStore = StateObject(wrappedValue: session)
+
+        if let accountID = session.accountUserID, !accountID.isEmpty {
+            Task.detached {
+                _ = try? await Purchases.shared.logIn(accountID)
+            }
+        }
 
         let paths = StoragePath(userID: session.activeLocalProfileID)
         let jStore = JourneyStore(paths: paths)
@@ -346,6 +410,32 @@ struct StreetStampsApp: App {
                     .zIndex(999)
                 }
             }
+            .alert(
+                L10n.t("settings_check_updates_available_title"),
+                isPresented: Binding(
+                    get: { pendingUpdatePrompt != nil },
+                    set: { if !$0 { pendingUpdatePrompt = nil } }
+                ),
+                presenting: pendingUpdatePrompt
+            ) { prompt in
+                Button(L10n.t("settings_check_updates_action_update")) {
+                    UIApplication.shared.open(prompt.appStoreURL)
+                    pendingUpdatePrompt = nil
+                }
+                Button(L10n.t("settings_check_updates_action_later"), role: .cancel) {
+                    pendingUpdatePrompt = nil
+                }
+                Button(L10n.t("settings_check_updates_action_skip"), role: .destructive) {
+                    AppUpdateChecker.skipVersion(prompt.latestVersion)
+                    pendingUpdatePrompt = nil
+                }
+            } message: { prompt in
+                if let notes = prompt.releaseNotes, !notes.isEmpty {
+                    Text(String(format: L10n.t("settings_check_updates_available_message_with_notes"), prompt.latestVersion, notes))
+                } else {
+                    Text(String(format: L10n.t("settings_check_updates_available_message"), prompt.latestVersion))
+                }
+            }
             .fullScreenCover(isPresented: $showAuthEntry) {
                 AuthEntryView(
                     onContinueGuest: {
@@ -365,17 +455,10 @@ struct StreetStampsApp: App {
                 isPresented: Binding(
                     get: {
                         FirstProfileSetupPresentation.shouldPresent(
-                            requiresProfileSetup: sessionStore.requiresProfileSetup,
-                            debugOverrideEnabled: debugFirstProfileSetupOverrideEnabled
+                            requiresProfileSetup: sessionStore.requiresProfileSetup
                         )
                     },
-                    set: { presented in
-#if DEBUG
-                        if !presented {
-                            showDebugFirstProfileSetupPreview = false
-                        }
-#endif
-                    }
+                    set: { _ in }
                 )
             ) {
                 firstProfileSetupScreen
@@ -456,10 +539,21 @@ struct StreetStampsApp: App {
                     limit: 4,
                     renderMaskByJourney: renderMaskSnapshot
                 )
-                rebuildTrackTiles()
-                lifelogRenderCache.scheduleWarmupRecentDays(
-                    countryISO2: lifelogStore.countryISO2 ?? locationHub.countryISO2
-                )
+                // Splash-window warmup, in order:
+                //   1. await trackTile rebuild so the manifest is current
+                //   2. then start lifelog render warmup — by that point
+                //      launchPendingWarmupIfPossible's manifest guard passes,
+                //      so the warmup actually runs instead of silently no-oping
+                //      and waiting for the onChange(refreshRevision) retry hop.
+                // The whole chain runs inside the same .task that owns the
+                // startup phases, so it shares the splash window without
+                // blocking the splash itself.
+                Task { @MainActor in
+                    await rebuildTrackTilesAsync()
+                    lifelogRenderCache.scheduleWarmupRecentDays(
+                        countryISO2: lifelogStore.countryISO2 ?? locationHub.countryISO2
+                    )
+                }
 
                 // Phase 3: Deferred non-critical services. The auth prompt check
                 // is a no-op if feature flags haven't resolved yet; the
@@ -478,6 +572,19 @@ struct StreetStampsApp: App {
                     try? await Task.sleep(nanoseconds: 800_000_000)
                     applyIdleLocationPolicy(requestSingleRefreshWhenIdle: true)
                     syncMotionActivityPolicy()
+                }
+
+                // Auto check for App Store updates after splash dismisses,
+                // throttled to once per 24h, skipped versions suppressed.
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    if case let .updateAvailable(version, notes, url)? = await AppUpdateChecker.autoCheckIfDue() {
+                        pendingUpdatePrompt = PendingUpdatePrompt(
+                            latestVersion: version,
+                            releaseNotes: notes,
+                            appStoreURL: url
+                        )
+                    }
                 }
 
                 // Phase 4: Deferred remaining city warmup
@@ -535,7 +642,6 @@ struct StreetStampsApp: App {
                     // Load journey, lifelog, city cache, and track tiles in parallel.
                     // All four do heavy disk I/O — running them concurrently avoids
                     // serializing the stall on the main thread during profile switch.
-                    CityNameTranslationCache.shared.clearAll()
                     async let journeyLoad: () = journeyStore.loadAsync()
                     async let lifelogLoad: () = lifelogStore.loadAsync()
                     async let cityCacheLoad: () = cityCache.rebindAsync(paths: paths)
@@ -605,15 +711,47 @@ struct StreetStampsApp: App {
                     )
                 }
             }
+            .onChange(of: sessionStore.activeLocalProfileID) { _, _ in
+                Task {
+                    let accountID = sessionStore.accountUserID
+                    if let accountID, !accountID.isEmpty {
+                        _ = try? await Purchases.shared.logIn(accountID)
+                    } else if !Purchases.shared.isAnonymous {
+                        _ = try? await Purchases.shared.logOut()
+                        // After logout, the new anonymous appUserId starts
+                        // empty. Re-attach the device's Apple ID transactions
+                        // so users who go account → guest don't see premium
+                        // disappear just because their Worldo account changed.
+                        try? await MembershipStore.shared.restorePurchases()
+                    }
+                    await MembershipStore.shared.refreshEntitlement()
+                }
+            }
             .onChange(of: sessionStore.reauthenticationPromptVersion) { _, version in
                 guard version > 0 else { return }
                 showAuthEntry = true
+            }
+            .onChange(of: sessionStore.sessionRefreshVersion) { _, _ in
+                if sessionStore.isLoggedIn {
+                    AppNotificationDelegate.registerForRemoteNotificationsIfAuthorized()
+                    AppNotificationDelegate.uploadPendingPushTokenIfNeeded(
+                        accessToken: sessionStore.currentAccessToken
+                    )
+                    Task { @MainActor in
+                        await notificationStore.refresh(token: sessionStore.currentAccessToken)
+                    }
+                    notificationStore.startPolling { [sessionStore] in
+                        sessionStore.currentAccessToken
+                    }
+                } else {
+                    notificationStore.stopPolling()
+                }
             }
     }
 
     private var appContentWithLifecycleHandlers: some View {
         appContentWithSessionHandlers
-            .onChange(of: scenePhase) { phase in
+            .onChange(of: scenePhase) { _, phase in
                 // Best-effort: reduce data loss when the app is backgrounded or suspended.
                 if phase == .background || phase == .inactive {
                     journeyStore.flushPersist()
@@ -630,6 +768,17 @@ struct StreetStampsApp: App {
                     UNUserNotificationCenter.current().setBadgeCount(0)
                     publishStore.handleSceneActivation()
                     Task { await MembershipStore.shared.refreshEntitlement() }
+                    // Retry the full post-membership-enable upload if iCloud was
+                    // unavailable when the user first subscribed.
+                    if AppSettings.hasPendingFullSyncAfterAutoEnable {
+                        Task { await performICloudAutoEnableForceFullUpload() }
+                    }
+                    // Retry individual journeys that failed their incremental upload
+                    // (network error, iCloud unavailable, app killed mid-hook).
+                    Task { await retryStalledJourneyUploads() }
+                    // Same idea for deletions: a stalled delete leaves the CK record
+                    // alive and would resurrect the journey on a future restore.
+                    Task { await retryStalledJourneyDeletions() }
                     applyIdleLocationPolicy(requestSingleRefreshWhenIdle: true)
                     syncMotionActivityPolicy()
                     lifelogRenderCache.markTodayDirty(
@@ -703,6 +852,10 @@ struct StreetStampsApp: App {
             .onReceive(NotificationCenter.default.publisher(for: .lifelogCountryAttributionDidChange)) { notification in
                 let countryISO2 = notification.userInfo?["countryISO2"] as? String
                 lifelogRenderCache.noteCountryAttributionRefresh(countryISO2: countryISO2)
+            }
+            .onReceive(MembershipStore.shared.$pendingICloudAutoEnableNotice) { pending in
+                guard pending else { return }
+                Task { await performICloudAutoEnableForceFullUpload() }
             }
     }
 
@@ -832,15 +985,26 @@ enum TrackTileRebuildPolicy {
 }
 
 private func configureGlobalTabBarAppearance() {
-    let appearance = UITabBarAppearance()
-    appearance.configureWithOpaqueBackground()
-    appearance.backgroundColor = .white
-    appearance.shadowColor = UIColor.black.withAlphaComponent(0.08)
+    let parchment = UIColor(FigmaTheme.background)
 
-    UITabBar.appearance().standardAppearance = appearance
+    let tabAppearance = UITabBarAppearance()
+    tabAppearance.configureWithOpaqueBackground()
+    tabAppearance.backgroundColor = parchment
+    tabAppearance.shadowColor = UIColor.black.withAlphaComponent(0.08)
+
+    UITabBar.appearance().standardAppearance = tabAppearance
     if #available(iOS 15.0, *) {
-        UITabBar.appearance().scrollEdgeAppearance = appearance
+        UITabBar.appearance().scrollEdgeAppearance = tabAppearance
     }
+
+    let navAppearance = UINavigationBarAppearance()
+    navAppearance.configureWithOpaqueBackground()
+    navAppearance.backgroundColor = parchment
+    navAppearance.shadowColor = .clear
+
+    UINavigationBar.appearance().standardAppearance = navAppearance
+    UINavigationBar.appearance().scrollEdgeAppearance = navAppearance
+    UINavigationBar.appearance().compactAppearance = navAppearance
 }
 
 private extension StreetStampsApp {

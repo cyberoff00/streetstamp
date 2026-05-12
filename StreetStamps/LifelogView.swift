@@ -129,11 +129,11 @@ private struct LifelogBottomCardView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(Color.white.opacity(0.95))
+        .background(FigmaTheme.background.opacity(0.95))
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+                .stroke(Color.gray.opacity(0.08), lineWidth: 1)
         }
         .shadow(color: Color.black.opacity(0.10), radius: 16, x: 0, y: 8)
         .onReceive(NotificationCenter.default.publisher(for: .avatarLoadoutDidChange)) { _ in
@@ -196,6 +196,11 @@ struct LifelogView: View {
     @State private var bottomDockHeight: CGFloat = 0
     @State private var renderSnapshot: LifelogRenderSnapshot = .empty
     @State private var renderTask: Task<Void, Never>? = nil
+    // SwiftUI TabView keeps every tab's view alive even when off-screen.
+    // Without this gate, every GPS tick (~2s) fires `.onChange(tileRevisionKey)`
+    // → schedules a full render task → cascades MainActor work that starves
+    // every other tab's image fetches and pull-to-refresh handlers.
+    @State private var isOnScreen = false
     @State private var mapContentReady = false
     @State private var renderGenerationState = LifelogRenderGenerationState()
     @State private var pendingRecenterDay: Date? = nil
@@ -212,15 +217,11 @@ struct LifelogView: View {
     @AppStorage("streetstamps.lifelog.mood.prompted.day") private var moodPromptedDay = ""
     @State private var activeLifelogHint: LifelogHintItem? = nil
     @State private var lifelogHintTask: Task<Void, Never>? = nil
-#if DEBUG
-    @AppStorage("streetstamps.debug.lifelog.mapDiagnosticsEnabled") private var mapDiagnosticsEnabled = true
-    @State private var diagnosticsAppearAt: Date? = nil
-#endif
 
     private var isDarkAppearance: Bool {
         (MapLayerStyle(rawValue: layerStyleRaw) ?? .mutedDark).isDarkStyle
     }
-    private var panelBackground: Color { isDarkAppearance ? Color.black.opacity(0.80) : FigmaTheme.card.opacity(0.96) }
+    private var panelBackground: Color { isDarkAppearance ? Color.black.opacity(0.80) : FigmaTheme.background.opacity(0.96) }
     private var panelText: Color { isDarkAppearance ? .white : .black }
 
     private var locationCenterKey: Int {
@@ -238,46 +239,6 @@ struct LifelogView: View {
     private var farRouteSegments: [RenderRouteSegment] {
         renderSnapshot.farRouteSegments
     }
-
-#if DEBUG
-    private var diagnosticsOverlayReady: Bool {
-        mapContentReady &&
-        (
-            !renderSnapshot.farRouteSegments.isEmpty ||
-            renderSnapshot.selectedDayCenterCoordinate != nil ||
-            currentDisplayLocation != nil
-        )
-    }
-
-    private var diagnosticsStatusPanel: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("OVERLAY \(diagnosticsOverlayReady ? "READY" : "WAIT")")
-            Text("OVERLAY \(diagnosticsOverlayReady ? "READY" : "WAIT")")
-        }
-        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-        .foregroundColor(.white)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(Color.black.opacity(0.72))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-
-    private func diagnosticsLog(_ message: String) {
-        guard mapDiagnosticsEnabled else { return }
-        print("[LifelogMapDiag] \(message)")
-    }
-
-    private func diagnosticsUpdateIfNeeded(reason: String = "") {
-        guard mapDiagnosticsEnabled else { return }
-        let elapsedMs = diagnosticsAppearAt.map { Int(Date().timeIntervalSince($0) * 1000) } ?? -1
-        diagnosticsLog(
-            "\(reason) t=\(elapsedMs)ms " +
-            "mapContentReady=\(mapContentReady) " +
-            "overlayReady=\(diagnosticsOverlayReady)"
-        )
-    }
-#endif
-
 
     private var currentDisplayLocation: CLLocation? {
         let source: CLLocation? = locationHub.currentLocation ?? locationHub.lastKnownLocation
@@ -308,20 +269,6 @@ struct LifelogView: View {
                     location: locationHub.currentLocation,
                     lightBackground: !(MapLayerStyle(rawValue: layerStyleRaw) ?? .mutedDark).useWhiteWeatherParticles
                 )
-#if DEBUG
-                if mapDiagnosticsEnabled {
-                    VStack {
-                        HStack {
-                            Spacer()
-                            diagnosticsStatusPanel
-                        }
-                        .padding(.top, 92)
-                        .padding(.trailing, 12)
-                        Spacer()
-                    }
-                    .allowsHitTesting(false)
-                }
-#endif
 
                 VStack(spacing: 0) {
                     VStack(spacing: 0) {
@@ -425,18 +372,7 @@ struct LifelogView: View {
         }
         .animation(.easeInOut(duration: 0.3), value: activeLifelogHint?.id)
         .onAppear {
-#if DEBUG
-            if mapDiagnosticsEnabled {
-                diagnosticsAppearAt = Date()
-                diagnosticsLog(
-                    "onAppear " +
-                    "locationHub=\(locationHub.currentLocation != nil) " +
-                    "lastKnown=\(locationHub.lastKnownLocation != nil) " +
-                    "lifelogLocation=\(lifelogStore.currentLocation != nil)"
-                )
-                diagnosticsUpdateIfNeeded(reason: "appear")
-            }
-#endif
+            isOnScreen = true
             didCenterOnEnter = false
             didAutoFitToRoute = false
             seedSelectedDayIfNeeded()
@@ -479,30 +415,32 @@ struct LifelogView: View {
                 Task { await runHealthAndPopupFlow() }
             }
         }
-        .onChange(of: showAlwaysLocationGuide) { isShown in
+        .onChange(of: showAlwaysLocationGuide) { _, isShown in
             guard !isShown else { return }
             Task { await runHealthAndPopupFlow() }
         }
         .onDisappear {
+            isOnScreen = false
             renderTask?.cancel()
             renderTask = nil
         }
-        .onChange(of: lifelogStore.availableDays) { _ in
+        .onChange(of: lifelogStore.availableDays) { _, _ in
             seedSelectedDayIfNeeded()
         }
-        .onChange(of: locationCenterKey) { _ in
+        .onChange(of: locationCenterKey) { _, _ in
+            guard isOnScreen else { return }
             centerOnCurrent(force: !didCenterOnEnter)
-#if DEBUG
-            diagnosticsUpdateIfNeeded(reason: "locationCenterKey")
-#endif
         }
-        .onChange(of: tileRevisionKey) { _ in
+        .onChange(of: tileRevisionKey) { _, _ in
+            guard isOnScreen else { return }
             scheduleRenderSnapshotRefresh(debounceNanoseconds: 400_000_000)
         }
-        .onChange(of: lifelogCountryISO2) { _ in
+        .onChange(of: lifelogCountryISO2) { _, _ in
+            guard isOnScreen else { return }
             scheduleRenderSnapshotRefresh()
         }
-        .onChange(of: selectedDay) { _ in
+        .onChange(of: selectedDay) { _, _ in
+            guard isOnScreen else { return }
             scheduleRenderSnapshotRefresh()
             guard isStepPopupVisible else { return }
             Task {
@@ -548,7 +486,7 @@ struct LifelogView: View {
             )
         )
         .ignoresSafeArea()
-        .onChange(of: cameraCommand?.id) { _ in
+        .onChange(of: cameraCommand?.id) { _, _ in
             if let cmd = cameraCommand {
                 unifiedCameraCommand = .setRegion(cmd.region, animated: cmd.animated)
             }
@@ -579,7 +517,7 @@ struct LifelogView: View {
         .padding(.horizontal, 18)
         .padding(.top, 14)
         .padding(.bottom, 12)
-        .background(FigmaTheme.card.opacity(0.92).ignoresSafeArea(edges: .top))
+        .background(FigmaTheme.background.opacity(0.92).ignoresSafeArea(edges: .top))
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(FigmaTheme.border)
@@ -637,7 +575,7 @@ struct LifelogView: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(FigmaTheme.text)
                 .frame(width: 34, height: 34)
-                .background(Color.white.opacity(0.92))
+                .background(FigmaTheme.background.opacity(0.92))
                 .clipShape(Circle())
                 .shadow(color: Color.black.opacity(0.10), radius: 6, y: 2)
                 .appMinTapTarget()
@@ -717,7 +655,7 @@ struct LifelogView: View {
                 .fill((hasAlwaysPermission && lifelogStore.isEnabled) ? Color(red: 0.42, green: 0.78, blue: 0.58) : Color.gray.opacity(0.65))
                 .frame(width: 12, height: 12)
                 .frame(width: 34, height: 34)
-                .background(Color.white.opacity(0.92))
+                .background(FigmaTheme.background.opacity(0.92))
                 .clipShape(Circle())
                 .shadow(color: Color.black.opacity(0.10), radius: 6, y: 2)
         }
@@ -838,7 +776,7 @@ struct LifelogView: View {
                 topTrailingRadius: 30,
                 style: .continuous
             )
-            .fill(Color.white.opacity(0.94))
+            .fill(FigmaTheme.background.opacity(0.94))
             .ignoresSafeArea(edges: .bottom)  // ← 关键：白色延伸到底
         )
         .overlay(
@@ -849,7 +787,7 @@ struct LifelogView: View {
                 topTrailingRadius: 30,
                 style: .continuous
             )
-                .stroke(Color.black.opacity(0.04), lineWidth: 1)
+                .stroke(Color.gray.opacity(0.08), lineWidth: 1)
         )
         .shadow(color: Color.black.opacity(0.14), radius: 22, x: 0, y: 10)
         .background(
@@ -858,7 +796,7 @@ struct LifelogView: View {
                     .onAppear {
                         bottomDockHeight = proxy.size.height
                     }
-                    .onChange(of: proxy.size.height) { h in
+                    .onChange(of: proxy.size.height) { _, h in
                         bottomDockHeight = h
                     }
             }
@@ -1133,12 +1071,6 @@ struct LifelogView: View {
             "far=\(snapshot.farRouteSegments.count) high=\(snapshot.isHighQuality)"
         )
         renderSnapshot = snapshot
-#if DEBUG
-        diagnosticsLog(
-            "snapshot apply generation=\(generation) farSegs=\(snapshot.farRouteSegments.count)"
-        )
-        diagnosticsUpdateIfNeeded(reason: "renderSnapshot")
-#endif
 
         // Only act on high-quality snapshots. Placeholders have no route data and
         // clearing pendingRecenterDay on them would cause the real snapshot to be ignored.
@@ -1470,11 +1402,11 @@ struct LifelogView: View {
                 }
             }
             .padding(20)
-            .background(FigmaTheme.card)
+            .background(FigmaTheme.background)
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(FigmaTheme.border, lineWidth: 1)
+                    .stroke(Color.gray.opacity(0.08), lineWidth: 1)
             )
             .shadow(color: Color.black.opacity(0.12), radius: 14, x: 0, y: 6)
             .padding(.horizontal, 18)
@@ -1549,11 +1481,11 @@ struct LifelogView: View {
             .padding(.top, LifelogStepMilestonePresentation.topPadding)
             .padding(.horizontal, LifelogStepMilestonePresentation.horizontalPadding)
             .padding(.bottom, 22)
-            .background(FigmaTheme.card)
+            .background(FigmaTheme.background)
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(FigmaTheme.border, lineWidth: 1)
+                    .stroke(Color.gray.opacity(0.08), lineWidth: 1)
             )
             .overlay(alignment: .topTrailing) {
                 if LifelogStepMilestonePresentation.closeButtonPlacement == .topTrailing {
@@ -1596,7 +1528,7 @@ struct LifelogView: View {
         .padding(.vertical, 5)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.white.opacity(0.90))
+                .fill(FigmaTheme.background.opacity(0.90))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -1935,11 +1867,11 @@ private struct AlwaysLocationGuideView: View {
             .padding(.top, 14)
             .padding(.horizontal, 22)
             .padding(.bottom, 22)
-            .background(FigmaTheme.card)
+            .background(FigmaTheme.background)
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(FigmaTheme.border, lineWidth: 1)
+                    .stroke(Color.gray.opacity(0.08), lineWidth: 1)
             )
             .overlay(alignment: .topTrailing) {
                 Button {

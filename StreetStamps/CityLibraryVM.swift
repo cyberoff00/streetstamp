@@ -9,9 +9,10 @@ enum CityDisplayResolver {
         fallbackTitle: String,
         locale: Locale = LanguagePreference.shared.displayLocale
     ) -> String {
-        let localeID = locale.identifier
-        if localeID.hasPrefix("en") { return fallbackTitle }
-        if let translated = CityNameTranslationCache.shared.cachedName(cityKey: cityKey, localeID: localeID) {
+        if let custom = CityDisplayOverrideStore.shared.override(for: cityKey) {
+            return custom
+        }
+        if let translated = CNCityNameLookup.shared.displayName(for: cityKey, locale: locale) {
             return translated
         }
         return fallbackTitle
@@ -23,6 +24,15 @@ enum CityDisplayResolver {
             .dropFirst()
             .first
             .map(String.init)
+    }
+
+    static func cityName(from cityKey: String) -> String? {
+        let raw = cityKey
+            .split(separator: "|", omittingEmptySubsequences: false)
+            .first
+            .map(String.init)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return raw.isEmpty ? nil : raw
     }
 }
 
@@ -72,42 +82,9 @@ struct City: Identifiable {
 final class CityLibraryVM: ObservableObject {
     @Published var cities: [City] = []
     private weak var cityCache: CityCache?
-    private var networkObserver: AnyCancellable?
-    private var retryTask: Task<Void, Never>?
-
     func load(journeyStore: JourneyStore, cityCache: CityCache) {
         self.cityCache = cityCache
         self.cities = Self.buildCities(journeyStore: journeyStore, cityCache: cityCache)
-        retryTask?.cancel()
-        retryTask = Task {
-            await prefetchDisplayNamesDetached()
-        }
-        observeNetworkChanges()
-    }
-
-    /// On network path change (VPN toggle, reconnect), retry untranslated cities.
-    private func observeNetworkChanges() {
-        // Only subscribe once
-        guard networkObserver == nil else { return }
-        networkObserver = NotificationCenter.default
-            .publisher(for: ReverseGeocodeService.networkPathDidChange)
-            .debounce(for: .seconds(2), scheduler: DispatchQueue.main)
-            .sink { [weak self] _ in
-                guard let self else { return }
-                self.retryUntranslatedCities()
-            }
-    }
-
-    private func retryUntranslatedCities() {
-        let localeID = LanguagePreference.shared.effectiveLocaleIdentifier
-        guard !localeID.hasPrefix("en") else { return }
-        // Only retry cities whose displayName still equals the English fallback name
-        let untranslated = cities.filter { $0.displayName == nil || $0.displayName == $0.name }
-        guard !untranslated.isEmpty else { return }
-        retryTask?.cancel()
-        retryTask = Task {
-            await retryPrefetchDetached(cityIDs: Set(untranslated.map(\.id)))
-        }
     }
 
     func upsertCity(cityKey: String, journeyStore: JourneyStore, cityCache: CityCache) {
@@ -139,9 +116,6 @@ final class CityLibraryVM: ObservableObject {
             removeCity(cityKey: trimmedKey)
         }
         sortCities()
-        Task {
-            await prefetchDisplayNameDetached(cityID: trimmedKey)
-        }
     }
 
     func removeCity(cityKey: String) {
@@ -262,9 +236,24 @@ final class CityLibraryVM: ObservableObject {
         var out: [City] = grouped.values.map { aggregate in
             City(
                 displayName: {
+                    if let custom = CityDisplayOverrideStore.shared.override(for: aggregate.cityKey) {
+                        return custom
+                    }
+
                     let localeID = LanguagePreference.shared.effectiveLocaleIdentifier
                     if localeID.hasPrefix("en") { return aggregate.fallbackName }
-                    return CityNameTranslationCache.shared.cachedName(cityKey: aggregate.cityKey, localeID: localeID) ?? aggregate.fallbackName
+
+                    let enCity = CityDisplayResolver.cityName(from: aggregate.cityKey) ?? aggregate.fallbackName
+                    let iso2 = CityDisplayResolver.iso2(from: aggregate.cityKey) ?? (aggregate.countryISO2 ?? "")
+                    let province = aggregate.availableLevelNamesEN?["admin"]
+
+                    guard let zh = CNCityNameLookup.shared.zhName(enCity: enCity, province: province, iso2: iso2) else {
+                        #if DEBUG
+                        print("[CityName-miss] cityKey=\(aggregate.cityKey) en=\(enCity) prov=\(province ?? "nil") iso2=\(iso2)")
+                        #endif
+                        return aggregate.fallbackName
+                    }
+                    return localeID.hasPrefix("zh-Hant") ? CNCityNameLookup.toTraditional(zh) : zh
                 }(),
                 id: aggregate.cityKey,
                 name: aggregate.fallbackName,
@@ -295,91 +284,6 @@ final class CityLibraryVM: ObservableObject {
             return $0.name < $1.name
         }
         return out
-    }
-
-    // MARK: - City name localization
-    /// Resolve localized city names for city cards via CityNameTranslationCache.
-    /// English names are already available from CachedCity.canonicalNameEN.
-    /// For non-English locales, we async-translate through the translation cache.
-    /// After first pass, automatically retries failed cities once after a delay.
-    private nonisolated func prefetchDisplayNamesDetached() async {
-        let failedIDs = await translateCities(cityIDs: nil)
-        guard !failedIDs.isEmpty, !Task.isCancelled else { return }
-
-        // Delayed retry for cities that failed (e.g. geocoder throttle, VPN routing issue)
-        try? await Task.sleep(nanoseconds: 8_000_000_000) // 8s
-        guard !Task.isCancelled else { return }
-        _ = await translateCities(cityIDs: failedIDs)
-    }
-
-    /// Retry translation for specific untranslated cities (called on network path change).
-    private nonisolated func retryPrefetchDetached(cityIDs: Set<String>) async {
-        _ = await translateCities(cityIDs: cityIDs)
-    }
-
-    /// Translate a set of cities (or all if cityIDs is nil). Returns IDs that failed.
-    private nonisolated func translateCities(cityIDs: Set<String>?) async -> Set<String> {
-        let snapshot: [City] = await MainActor.run { self.cities }
-        let displayLocale = LanguagePreference.shared.displayLocale
-        let localeID = displayLocale.identifier
-
-        if localeID.hasPrefix("en") { return [] }
-
-        let targets = cityIDs == nil ? snapshot : snapshot.filter { cityIDs!.contains($0.id) }
-        var failed = Set<String>()
-
-        for city in targets {
-            guard !Task.isCancelled else { break }
-            let level: CityPlacemarkResolver.CardLevel = await MainActor.run {
-                self.cityCache?.cachedCities.first(where: { $0.cityKey == city.id })?.identityLevel ?? city.identityLevel
-            }
-            let translated = await CityNameTranslationCache.shared.translate(
-                cityKey: city.id,
-                anchor: city.anchor,
-                level: level,
-                locale: displayLocale
-            )
-            if let translated, !translated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                await MainActor.run {
-                    if let idx = self.cities.firstIndex(where: { $0.id == city.id }) {
-                        self.cities[idx].displayName = translated
-                    }
-                }
-            } else if CityNameTranslationCache.isTranslatable(cityKey: city.id, localeID: localeID) {
-                // Only count as "failed" if the city SHOULD have been translated but wasn't
-                failed.insert(city.id)
-            }
-        }
-        return failed
-    }
-
-    private nonisolated func prefetchDisplayNameDetached(cityID: String) async {
-        let city: City? = await MainActor.run {
-            self.cities.first(where: { $0.id == cityID })
-        }
-        guard let city else { return }
-        let displayLocale = LanguagePreference.shared.displayLocale
-        let localeID = displayLocale.identifier
-
-        // If current locale is English, name is already correct
-        if localeID.hasPrefix("en") { return }
-
-        let level: CityPlacemarkResolver.CardLevel = await MainActor.run {
-            self.cityCache?.cachedCities.first(where: { $0.cityKey == city.id })?.identityLevel ?? city.identityLevel
-        }
-        let translated = await CityNameTranslationCache.shared.translate(
-            cityKey: city.id,
-            anchor: city.anchor,
-            level: level,
-            locale: displayLocale
-        )
-        if let translated, !translated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            await MainActor.run {
-                if let idx = self.cities.firstIndex(where: { $0.id == cityID }) {
-                    self.cities[idx].displayName = translated
-                }
-            }
-        }
     }
 
 }

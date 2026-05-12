@@ -138,7 +138,7 @@ struct CoachMarkTourModifier: ViewModifier {
                             .background(
                                 GeometryReader { bubbleGeo in
                                     Color.clear.onAppear { bubbleSize = bubbleGeo.size }
-                                        .onChange(of: currentIndex) { _ in
+                                        .onChange(of: currentIndex) { _, _ in
                                             // Reset for re-measure on step change
                                             bubbleSize = bubbleGeo.size
                                         }

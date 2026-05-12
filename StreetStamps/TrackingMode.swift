@@ -53,13 +53,15 @@ enum TrackingMode: String, Codable, CaseIterable {
 }
 
 /// 追踪模式配置参数
+///
+/// PR 1.2: 精度类参数已从此结构移除。所有 mode 共享全局 ingest 精度门槛
+/// （`Ingest.maxAcceptableAccuracy = 200`），不再按 mode 区分 lock/maxAccept。
+/// 物理上 GPS 精度跟环境（卫星几何/遮挡）有关，跟运动模式无关。
 struct TrackingModeConfig {
     // MARK: - 采点参数
     let foregroundMinDistance: Double      // 前台最小采点距离
     let backgroundMinDistance: Double      // 后台最小采点距离
-    let maxAcceptableAccuracy: Double      // 最大可接受精度
-    let lockAccuracy: Double               // GPS锁定精度阈值
-    
+
     // MARK: - 平滑参数
     let enableOneEuroFilter: Bool          // 是否启用OneEuro滤波
     let oneEuroMinCutoff: Double           // OneEuro最小截止频率
@@ -87,13 +89,11 @@ struct TrackingModeConfig {
     
     // MARK: - 预设配置
     
-    /// 运动模式：高精度，适合跑步/骑行（类似Nike Run/Keep）
+    /// 运动模式：高密度采点 + 强平滑 + 不抽稀。精度门槛跟 daily 共用全局值。
     static let sport = TrackingModeConfig(
         foregroundMinDistance: 3,           // 3米采一次（高密度）
         backgroundMinDistance: 5,
-        maxAcceptableAccuracy: 30,          // 要求精度更高
-        lockAccuracy: 15,
-        
+
         enableOneEuroFilter: true,          // 启用平滑
         oneEuroMinCutoff: 1.0,
         oneEuroBeta: 0.05,
@@ -114,12 +114,11 @@ struct TrackingModeConfig {
         renderDebounceInterval: 0.16        // 约6Hz渲染，保留实时感同时降低前台重绘
     )
     
-    /// 日常模式：省电，适合8小时daytrip
+    /// 日常模式：省电，适合8小时daytrip。
+    /// 同时也是 walk 场景的统一配置（walk 不再单独 adjusted，物理上 daily/walk 是同一类）。
     static let daily = TrackingModeConfig(
-        foregroundMinDistance: 12,          // 12米采一次（低密度）
-        backgroundMinDistance: 25,
-        maxAcceptableAccuracy: 50,          // 收紧精度门槛，过滤噪声点
-        lockAccuracy: 35,
+        foregroundMinDistance: 10,          // 10米采一次（吸收原 walk 的 8m，daily 12m 的中位）
+        backgroundMinDistance: 20,
 
         // 开启 OneEuro 平滑：即使是日常模式也要平滑，
         // 否则慢走（公园、散步）场景 GPS 抖动会形成 zigzag。
@@ -127,20 +126,20 @@ struct TrackingModeConfig {
         enableOneEuroFilter: true,
         oneEuroMinCutoff: 1.2,
         oneEuroBeta: 0.08,
-        
+
         turnKeepAngle: 25,                  // 更宽松的转弯检测
-        
-        gapSecondsThreshold: 60,            // 1分钟才算gap
-        gapDistanceThreshold: 1500,
-        
-        stationaryMinMoveMeters: 15,        // 15米内算静止
+
+        gapSecondsThreshold: 180,           // 3分钟才算gap（少画虚线）
+        gapDistanceThreshold: 2000,
+
+        stationaryMinMoveMeters: 12,        // 12米内算静止（吸收原 walk）
         stationarySpeedThreshold: 0.8,
         stationaryHoldSeconds: 10,          // 10秒静止就切省电
-        
+
         deltaPersistInterval: 180,          // 3分钟存一次
         enableStorageDownsample: true,      // 启用存盘抽稀
-        storageMaxPointsPerHour: 200,       // 每小时最多200点
-        
+        storageMaxPointsPerHour: 250,       // 每小时最多250点（略放宽）
+
         renderDebounceInterval: 0.5         // 2Hz渲染，更适合日常长时记录
     )
     
@@ -163,41 +162,21 @@ extension TrackingModeConfig {
         
         switch travelMode {
         case .walk:
-            // 慢走（公园、散步）场景：GPS 抖动易在树荫下形成 zigzag。
-            // 参数整体收紧 —— 拒绝低精度点 + OneEuro 更强平滑 + 静止阈值更大。
-            return TrackingModeConfig(
-                foregroundMinDistance: 8,
-                backgroundMinDistance: 15,
-                maxAcceptableAccuracy: 45,     // 60 → 45：拒绝精度差点
-                lockAccuracy: 25,              // 30 → 25：首次锁定要求更严
-                enableOneEuroFilter: true,
-                oneEuroMinCutoff: 0.9,         // 1.3 → 0.9：慢走更强平滑
-                oneEuroBeta: 0.04,
-                turnKeepAngle: 22,
-                gapSecondsThreshold: 45,
-                gapDistanceThreshold: 800,
-                stationaryMinMoveMeters: 12,   // 10 → 12：抑制 GPS 小抖动
-                stationarySpeedThreshold: 0.6,
-                stationaryHoldSeconds: 8,
-                deltaPersistInterval: deltaPersistInterval,
-                enableStorageDownsample: true,
-                storageMaxPointsPerHour: 300,
-                renderDebounceInterval: 0.2
-            )
-            
+            // walk 与 daily base 合并 —— 物理上 daily 和 walk 都是"地面慢速"。
+            // 不再单独 adjusted，落到 .unknown 分支返回 daily base 配置。
+            return self
+
         case .run:
-            // 跑步时即使在日常模式也提高精度
+            // 跑步：高密度采点 + 强平滑
             return TrackingModeConfig(
                 foregroundMinDistance: 5,
                 backgroundMinDistance: 8,
-                maxAcceptableAccuracy: 45,
-                lockAccuracy: 25,
                 enableOneEuroFilter: true,  // 跑步时启用平滑
                 oneEuroMinCutoff: 1.1,
                 oneEuroBeta: 0.06,
                 turnKeepAngle: 18,
-                gapSecondsThreshold: 30,
-                gapDistanceThreshold: 500,
+                gapSecondsThreshold: 60,            // 30 → 60：少画虚线
+                gapDistanceThreshold: 800,          // 500 → 800
                 stationaryMinMoveMeters: 5,
                 stationarySpeedThreshold: 0.4,
                 stationaryHoldSeconds: 15,
@@ -206,19 +185,17 @@ extension TrackingModeConfig {
                 storageMaxPointsPerHour: 800,
                 renderDebounceInterval: 0.1
             )
-            
+
         case .transit:
             return TrackingModeConfig(
                 foregroundMinDistance: 15,
                 backgroundMinDistance: 30,
-                maxAcceptableAccuracy: 80,
-                lockAccuracy: 40,
                 enableOneEuroFilter: false,
                 oneEuroMinCutoff: oneEuroMinCutoff,
                 oneEuroBeta: oneEuroBeta,
                 turnKeepAngle: 20,
-                gapSecondsThreshold: 60,
-                gapDistanceThreshold: 1200,
+                gapSecondsThreshold: 120,           // 60 → 120
+                gapDistanceThreshold: 2000,         // 1200 → 2000
                 stationaryMinMoveMeters: 20,
                 stationarySpeedThreshold: 1.0,
                 stationaryHoldSeconds: 8,
@@ -232,14 +209,12 @@ extension TrackingModeConfig {
             return TrackingModeConfig(
                 foregroundMinDistance: 9,
                 backgroundMinDistance: 16,
-                maxAcceptableAccuracy: 65,
-                lockAccuracy: 30,
                 enableOneEuroFilter: true,
                 oneEuroMinCutoff: 1.05,
                 oneEuroBeta: 0.05,
                 turnKeepAngle: 18,
-                gapSecondsThreshold: 45,
-                gapDistanceThreshold: 900,
+                gapSecondsThreshold: 90,            // 45 → 90
+                gapDistanceThreshold: 1500,         // 900 → 1500
                 stationaryMinMoveMeters: 12,
                 stationarySpeedThreshold: 0.9,
                 stationaryHoldSeconds: 12,
@@ -248,19 +223,17 @@ extension TrackingModeConfig {
                 storageMaxPointsPerHour: 500,
                 renderDebounceInterval: 0.12
             )
-            
+
         case .drive, .motorcycle:
             return TrackingModeConfig(
                 foregroundMinDistance: 25,
                 backgroundMinDistance: 50,
-                maxAcceptableAccuracy: 100,
-                lockAccuracy: 50,
                 enableOneEuroFilter: false,
                 oneEuroMinCutoff: oneEuroMinCutoff,
                 oneEuroBeta: oneEuroBeta,
                 turnKeepAngle: 18,
-                gapSecondsThreshold: 90,
-                gapDistanceThreshold: 2000,
+                gapSecondsThreshold: 180,           // 90 → 180
+                gapDistanceThreshold: 3000,         // 2000 → 3000
                 stationaryMinMoveMeters: 30,
                 stationarySpeedThreshold: 1.5,
                 stationaryHoldSeconds: 5,
@@ -269,19 +242,17 @@ extension TrackingModeConfig {
                 storageMaxPointsPerHour: 120,
                 renderDebounceInterval: 0.3
             )
-            
+
         case .flight:
             return TrackingModeConfig(
                 foregroundMinDistance: 500,
                 backgroundMinDistance: 1000,
-                maxAcceptableAccuracy: 300,
-                lockAccuracy: 150,
                 enableOneEuroFilter: false,
                 oneEuroMinCutoff: oneEuroMinCutoff,
                 oneEuroBeta: oneEuroBeta,
                 turnKeepAngle: 45,
-                gapSecondsThreshold: 180,
-                gapDistanceThreshold: 10000,
+                gapSecondsThreshold: 300,           // 180 → 300
+                gapDistanceThreshold: 15000,        // 10000 → 15000
                 stationaryMinMoveMeters: 100,
                 stationarySpeedThreshold: 5.0,
                 stationaryHoldSeconds: 60,

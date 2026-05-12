@@ -78,6 +78,7 @@
 "unknown" = "Unknown";
 "memories" = "Memories";
 "preparing_map" = "Preparing map…";
+"city_thumbnail_tap_to_retry" = "Tap to retry";
 "loading_map" = "Loading map…";
 "globe" = "Globe";
 
@@ -120,15 +121,15 @@
 "city_library_header_city" = "Your City Stamps";
 
 /* City Library - Empty state */
-"city_empty_title" = "No city stamps yet";
-"city_empty_subtitle" = "Generate a city card, or finish a journey to unlock your first city.";
+"city_empty_title" = "No city cards yet";
+"city_empty_subtitle" = "Every journey you take adds to its city card";
 
 /* Card stats */
 "city_stats_line" = "%d explorations · %d memories";
 
 "library_city_title" = "City Cards";
-"library_empty_title" = "No city stamps yet";
-"library_empty_subtitle" = "Generate a city card, or finish a journey to unlock your first city.";
+"library_empty_title" = "No city cards yet";
+"library_empty_subtitle" = "Every journey you take adds to its city card";
 "friend_city_cards_empty_title" = "No city cards yet";
 "friend_city_cards_empty_subtitle" = "This friend has not unlocked any city cards yet.";
 "city_card_stats" = "%d explorations · %d memories";
@@ -204,6 +205,8 @@
 "delete_city_alert_message" = "“%@” will be removed from your City Cards. This can't be undone.";
 "delete" = "Delete";
 "cancel" = "Cancel";
+"memory_picker_title" = "Choose Memory";
+"memory_picker_no_note" = "No content";
 "profile_tagline_travel_enthusiastic" = "Travel Enthusiastic";
 "profile_no_items_title" = "No items collected yet";
 "profile_no_items_desc" = "Complete journeys to earn equipment and items";
@@ -462,7 +465,7 @@
 "photo_count" = "Photos %d/%d";
 "processing" = "PROCESSING...";
 "profile_display_name_placeholder" = "MYDEARFRIENDK";
-"profile_title" = "PROFILE";
+"profile_title" = "Profile";
 "activity_record_title" = "ACTIVITY RECORD";
 "activity_stat_journeys" = "JOURNEYS";
 "activity_stat_memories" = "MEMORIES";
@@ -481,6 +484,18 @@
 "settings_level_rules_intro" = "CURRENT LEVEL RULES";
 "settings_check_updates_title" = "CHECK FOR UPDATES";
 "settings_check_updates_placeholder" = "Check for Updates";
+"settings_check_updates_checking_title" = "Checking for Updates";
+"settings_check_updates_checking_message" = "Looking for the latest version on the App Store...";
+"settings_check_updates_up_to_date_title" = "You're Up to Date";
+"settings_check_updates_up_to_date_message" = "You're already on the latest version (%@).";
+"settings_check_updates_available_title" = "New Version Available";
+"settings_check_updates_available_message" = "Version %@ is available on the App Store.";
+"settings_check_updates_available_message_with_notes" = "Version %@ is available on the App Store.\n\nWhat's New:\n%@";
+"settings_check_updates_action_update" = "Update";
+"settings_check_updates_action_later" = "Later";
+"settings_check_updates_action_skip" = "Skip This Version";
+"settings_check_updates_failed_title" = "Couldn't Check for Updates";
+"settings_check_updates_failed_message" = "Unable to reach the App Store. Please check your connection and try again later.";
 "settings_live_activity_title" = "LIVE ACTIVITY";
 "settings_live_activity_desc" = "Show current tracking progress on the Lock Screen and Dynamic Island.";
 "settings_live_activity_system_disabled_desc" = "Turn on Live Activities in Settings -> Worldo -> Live Activities.";
@@ -516,6 +531,17 @@
 "settings_title" = "SETTINGS";
 "settings_voice_broadcast_desc" = "Broadcast distance, elapsed time, and average pace at milestones.";
 "settings_voice_broadcast_title" = "VOICE BROADCAST";
+"journey_tag_add" = "ADD TAG";
+"journey_tag_custom" = "Custom…";
+"journey_tag_custom_title" = "Custom Tag";
+"activity_tag_commute" = "Commute";
+"activity_tag_running" = "Running";
+"activity_tag_travel" = "Travel";
+"activity_tag_walking" = "Walking";
+"activity_tag_cycling" = "Cycling";
+"activity_tag_driving" = "Driving";
+"activity_tag_subway" = "Subway";
+"activity_tag_hiking" = "Hiking";
 "share_activity_optional" = "Activity type (optional)";
 "share_activity_placeholder" = "Enter activity type";
 "share_discard_message" = "This journey will not be saved.";
@@ -1094,10 +1120,17 @@
 "membership_save_badge" = "SAVE";
 "membership_subscribe_button" = "Subscribe";
 "membership_restore_purchases" = "Restore Purchases";
+"membership_redeem_offer_code" = "Redeem Code";
+"membership_refund_processed_title" = "Refund Processed";
+"membership_refund_processed_message" = "Your subscription refund has been processed. The welcome bonus coins (1500) granted with the subscription have been reclaimed; coins you earned from steps and other normal activity are unaffected.";
+"membership_refund_processed_ok" = "OK";
 "membership_auto_renew_note" = "Subscription auto-renews. Cancel anytime in Settings.";
 "membership_welcome_bonus_title" = "Welcome Bonus!";
 "membership_welcome_bonus_message" = "You've received %d coins! Go get some gear and customize your look!";
 "membership_welcome_bonus_ok" = "Got it";
+"membership_icloud_auto_enabled_title" = "iCloud Sync Is On";
+"membership_icloud_auto_enabled_message" = "iCloud Sync is on. Your data will be backed up in the background. You can turn it off in Settings.";
+"membership_icloud_auto_enabled_ok" = "Got it";
 "membership_products_unavailable" = "Products are currently unavailable. Please try again later.";
 
 "friends_activity_record_title" = "ACTIVITY RECORD";
@@ -1142,7 +1175,7 @@
 "hint_map_memory" = "Tap to take a photo or add a note along the way";
 "hint_map_finish" = "Tap the flag to finish and save your journey";
 "hint_visibility_toggle" = "Choose who can see this journey — Private, Friends, or Public";
-"hint_journey_saved" = "Journey saved! Check your journeys and city cards in Memory";
+"hint_journey_saved" = "Two ways to keep your city memories: city cards capture your trails, memories archive your journey photos and notes";
 "hint_journey_saved_action" = "Go to Memory";
 "hint_city_card_collect" = "Your first city track card! Explore more to collect more cities";
 
@@ -1174,13 +1207,14 @@
 "about_us_title" = "About Us";
 "about_us_location" = "London";
 "about_us_traveler_needs" = "What Travelers Need";
-"about_us_intro" = "Worldo是我独立开发的第二款产品，没有什么灵光一闪的时刻，没有什么激动人心组建团队大干一场的氛围，我只是想到了，然后就开始做了，或许别的个人开发者也是这样。但我依然应该为这个产品写点什么，关于为什么是Worldo。\n\n满足\"我\"而不是想象的用户。互联网产品喜欢聊需求，聊用户，用户喜欢这个，不喜欢那个，用户如何被讨好，被引导。但当我不是一个资本家，我还应该带着这样的心去做产品吗？在无数失去信心的时候，我只是提醒自己我需要无限逼近我，那我也会是很多人，于是所有的需求都变得一样重要。";
-"about_us_walking" = "那我喜欢什么。我喜欢散步，我在很多地方走来走去，拍一些照片，做一点记录。这个市面上有很多高精运动软件，数字让我们产生对生活的掌控感，数字也让我们焦虑。如果我不是一个跑者，我只是在一个城市，又到了另一个城市，我路过了一个公园，在夜路上遇到一只狐狸，在一家咖啡店呆了一下午，城市里，城市间，这样的东西应该如何被悄无声息得记录下来。数字本身是没有美感的，线条或许是有美满的，记忆是真正重要的，带着这样的想法，我脑中几乎立刻有了Worldo应有的样子。我们的照片，文字，和一段段旅程轨迹如何被一个载体所容纳，装帧，而不是散落在过去。GoogleMap可以实现一些工具性的作用，我想实现互补的一面。";
-"about_us_gamification" = "其次我喜欢游戏化的概念，我时常期望自己能够喜欢游戏，仿佛这样生活会更简单一点。但实际上我也并不玩游戏，我只是在想象中觉得种花采蘑菇去朋友家窜门换装都很有意思，但这也只不过是我对生活的一种期待投射。我希望Worldo能满足我这样的期待，记录下我家到朋友家的路径，我装扮成怎样出门，我买了一盆植物，朋友收养了一只猫的故事，worldo理应存在于二点五次元，我如何为我的线下生活丰荣，都应该同时获得线下线上双份的满足感，从而我更愿意认真得对待我的生活。worldo今天除了最核心的世界轨迹城市记忆收集的功能以外，用到了像素小人，只是因为我和朋友们都很喜欢很萌的元素。我们为它配置了各种装备，也特地做了社交功能，我希望即使我和朋友在不同城市，但我可以去好友的主页坐一坐，看看他们最近的旅程。在未来我还会不遗余力加入任何我想要的元素，例如和好友一起的旅行可以出现在一个电子地图，收藏别人的记忆，地图会配合天气下雨，但你也可以去买一把雨伞，等等等等。";
-"about_us_ai_era" = "最后，AI时代app已死，这是我在整个开发过程中时常刷到的，每次都激起我的一阵恐慌，那我做的事情还有意义吗，我所消耗的精力值得吗？也许在科技巨头眼里都是没有意义的，我也思考如果什么都被ai化了，我们到底可以留下什么。我想到了我很喜欢的一些物件，ccd，胶片机，cd机，ipod，因为音乐，照片的永恒实现了古早载体的迷人，而我同时喜欢着作品和创造作品的工具，worldo会是一个开始。";
-"about_us_traveler_needs_content" = "Worldo里我最喜欢的板块是很简单的Journey Memory，也就是最后旅程被归档的图文所呈现的形态。我认为做APP会时常感到气馁的点是它并没有那么像创作，也并不像是一个人的游戏，决定成功的因素绝不仅仅是产品本身，同时一款产品的产生却会有成千上万的竞品随之而来，那为什么是我。想到最后我觉得可以回到我为什么依然喜欢一个最简单的记录功能。我觉得新其实更多时候只是既有东西的组合，组合好了就会达成某种和谐，这种和谐会产生一些能量。也就是说它实现了我个人最核心的需求，旅行者的需求，后来在火车上飞机上我都自然开始写点东西，拍点东西，就像是一种图文和时空和谐的归位，我觉得什么都对了。初版Worldo被测试的时候我在济州岛，爬汉拿山那天我用它记录了一路的旅程，后来我也经常和朋友炫耀导出的游记，这世界还存在游记吗？";
+"about_us_intro" = "Worldo is the second product I've built as a solo developer. There was no lightning-strike moment, no thrilling rally-the-team energy — I just had the idea and started making it. Maybe other indie developers feel the same way. Even so, I think I should write something about this product, about why it's Worldo.\n\nServe \"me\" instead of an imagined user. Internet products love to talk about needs, about users — what users like, what they don't, how they should be charmed and steered. But when I'm not a capitalist, do I still need to approach products with that mindset? In countless moments of losing faith, I just remind myself that I need to get as close as possible to who I really am, and that I will also resemble many other people — so every need becomes equally important.";
+"about_us_walking" = "So what do I like. I like walking. I wander around in many places, take some photos, jot down a little. There are plenty of high-precision sports apps out there — numbers give us a sense of control over life, and numbers also make us anxious. If I'm not a runner, if I'm just moving from one city to another, passing a park, meeting a fox on a night road, spending an afternoon in a café — within cities, between cities — how should this kind of thing be recorded, quietly. Numbers themselves have no beauty; lines maybe do; memory is what truly matters. With that in mind, the shape of Worldo became almost immediately clear to me. How can our photos, words, and the trails of each journey be held by something — bound, framed — instead of being scattered into the past. Google Maps does its utilitarian job; I wanted to build the complementary side.";
+"about_us_gamification" = "I also like the idea of gamification. I often wish I could enjoy games — somehow life would feel simpler that way. But honestly I don't really play games. I just imagine that planting flowers, picking mushrooms, dropping by a friend's place, changing outfits — all of that sounds fun. Really, that's just my projection of what I hope life could be. I want Worldo to fit that hope: to record the path from my home to a friend's, what I wore out the door, the plant I bought, the story of the cat my friend adopted. Worldo should live in a 2.5-dimensional space, where everything I do to enrich my offline life also earns me a doubled satisfaction, online and offline at once, so that I'm more willing to take my own life seriously. Today, beyond its core function of collecting world trails and city memories, Worldo uses pixel characters — just because my friends and I love things that are cute. We give them outfits, and we built the social features on purpose, because even when my friends and I live in different cities, I want to be able to drop by their profile, sit there for a moment, and see their recent journeys. In the future I'll keep adding any element I want — trips with friends shown on a shared digital map, the ability to collect other people's memories, maps that rain when the weather rains (but you can also go buy an umbrella), and so on, and so on.";
+"about_us_ai_era" = "Finally — \"apps are dead in the AI era.\" That's what I kept seeing during the entire development process, and every time it gave me a wave of panic. Does what I'm doing still have meaning? Is the energy I'm spending worth it? Maybe in the eyes of the tech giants none of it does. And I keep thinking: if everything ends up AI-ified, what is it that we actually get to keep? I think of objects I love — CCD cameras, film cameras, CD players, the iPod. The permanence of music and photographs is what gives those old-time vessels their charm, and I love both the works and the tools that make them. Worldo is meant to be a beginning.";
+"about_us_traveler_needs_content" = "My favorite part of Worldo is the very simple Journey Memory — the final form a journey takes once it's archived as words and images. The discouraging thing about making an app is that it doesn't quite feel like creation, and it isn't really a single-player game either. What decides success is never just the product itself, and the moment one product appears, thousands of competitors come along with it. So why me. Thinking it through, I come back to why I still love such a simple recording feature. I think \"new\" is, more often than not, just a combination of things that already exist — and when the combination clicks, a kind of harmony forms, and that harmony produces some energy. Which is to say, Worldo answered my own most essential need: the need of a traveler. Later, on trains and on planes, I'd naturally start writing a little, shooting a little — as if words and images had finally found their place in time and space. It felt like everything was right. When the first version of Worldo was being tested I was on Jeju Island; the day I climbed Hallasan I used it to record the entire route, and afterward I'd often show off the exported travelogue to friends. Do travelogues even still exist in this world?";
 "about_us_cyber_dog_title" = "The Cyber Dog Story";
-"about_us_cyber_dog_content" = "一个朋友打算在装备里画了一只小狗，因为她想到她的小狗安迪以后死了，她散步的时候可以看到地图里自己带着赛博小狗一起，然后还没画她就痛哭一场。很萌，我想要做的就是这种很萌的东西。又有一天我在为生活的一切，为这款app焦虑的时候，骑着车记录着轨迹，我突然觉得没关系，即使最后是自娱自乐也没关系。我为朋友们建造了一个赛博空间，这个空间只有30个人也是另一种伟大的故事。";
+"about_us_cyber_dog_content" = "A friend was going to draw a little dog into the avatar gear, because she imagined that one day, after her dog Andy was gone, she could go for a walk and still see herself on the map walking with a cyber dog by her side — and before she even started drawing, she burst into tears. So cute. That's exactly the kind of cute thing I want to make. And another day, while I was anxious about life, anxious about this app, riding my bike with the trail recording, I suddenly thought it was okay — even if in the end this is just something I do to amuse myself, it's okay. I built a small cyber space for my friends; if that space only ever holds thirty people, that's its own kind of great story.";
+"about_us_aside_header" = "Aside";
 "about_worldo_header" = "ABOUT WORLDO";
 "brand_tagline_journey_memory" = "Journey Memory";
 "brand_wordmark" = "worldo";
@@ -1275,11 +1309,21 @@
 "photo_discovery_from_photos" = "From Photos";
 "photo_count_format" = "%d photos";
 "photo_discovery_unlock_all" = "Unlock all discovered cities";
-"photo_scan_confirm_title" = "Import from Photos";
-"photo_scan_confirm_message" = "Scan location data in your photos to add visited cities as city cards.";
+"photo_scan_confirm_title" = "Import from Photos (Members Only)";
+"photo_scan_confirm_message" = "For trips you took before using Worldo, members can enable scanning cities from your photo library.";
 "photo_scan_confirm_start" = "Start Scanning";
 "empty_city_guide_hint" = "No city cards yet. Start a journey or tap the top-right button to import from your photos.";
 "city_empty_title" = "No city cards yet";
-"city_empty_desc" = "Start a journey to unlock cities,\nor import from photos via top-right";
+"city_empty_desc" = "Every journey you take adds to its city card";
+"city_empty_explainer" = "Every journey you take adds to its city card";
+"memory_empty_explainer" = "Photos and notes you record along the way become a travel journal";
+"city_empty_action_start" = "Start a journey";
+"city_empty_action_import" = "Import cities from photos";
+"memory_empty_action_start" = "Start a journey";
 "postcard_no_city_hint" = "Start a journey to unlock cities and earn postcard opportunities for each city";
 "network_unstable_retrying" = "Network unstable, retrying...";
+"reset" = "Reset";
+"city_edit_display_name" = "Edit Display Name";
+"city_edit_display_name_title" = "Rename City";
+"city_edit_display_name_placeholder" = "Display name";
+"city_edit_display_name_hint" = "Show this card with a custom name. The city's identity is not changed.";

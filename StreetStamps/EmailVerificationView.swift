@@ -36,7 +36,7 @@ struct EmailVerificationView: View {
                 .disabled(isSubmitting)
                 .frame(maxWidth: .infinity)
                 .frame(height: 54)
-                .background(Color.white)
+                .background(FigmaTheme.card)
                 .foregroundColor(.black)
                 .overlay(
                     RoundedRectangle(cornerRadius: 24, style: .continuous)

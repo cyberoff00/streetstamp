@@ -20,8 +20,15 @@ enum JourneyRoutePostProcessor {
 
         if updated.matchedCoordinates.isEmpty {
             let correctedCL = updated.correctedCoordinates.clCoords.filter(CLLocationCoordinate2DIsValid)
-            if let matched = await mapMatchIfPossible(coords: correctedCL, trackingMode: updated.trackingMode),
-               matched.count >= 2 {
+
+            // 1. Premium users: try Mapbox Map Matching (HMM, returns user's actual path snapped to roads).
+            if let matched = await tryMapboxMatching(route: updated, coords: correctedCL) {
+                updated.matchedCoordinates = matched.map { .init(lat: $0.latitude, lon: $0.longitude) }
+            }
+            // 2. Fallback: existing MKDirections anchor routing (works for all users; lower quality —
+            //    rewrites user path as "shortest route between anchors").
+            else if let matched = await mapMatchIfPossible(coords: correctedCL, trackingMode: updated.trackingMode),
+                    matched.count >= 2 {
                 updated.matchedCoordinates = matched.map { .init(lat: $0.latitude, lon: $0.longitude) }
             }
         }
@@ -31,6 +38,56 @@ enum JourneyRoutePostProcessor {
         }
 
         return updated
+    }
+
+    // MARK: - Mapbox Map Matching path (premium-gated)
+
+    /// Try Mapbox map matching. Returns nil if any of:
+    ///   - User is not premium (membership gate — no user toggle, premium auto-on, free auto-off)
+    ///   - Profile decision says skip (e.g. flight average speed)
+    ///   - Mapbox API failed / timed out / low confidence
+    /// Caller falls back to MKDirections anchor routing on nil.
+    private static func tryMapboxMatching(
+        route: JourneyRoute,
+        coords: [CLLocationCoordinate2D]
+    ) async -> [CLLocationCoordinate2D]? {
+        // Membership gate (read on MainActor): free → off, premium → on.
+        let isPremium = await MainActor.run { MembershipStore.shared.mapMatchingEnabled }
+        guard isPremium else { return nil }
+
+        // Profile decision: skip flight; daily/sport default walking; high-speed → driving.
+        guard let profile = profileForRoute(route, coords: coords) else { return nil }
+
+        do {
+            let result = try await MapboxMapMatching.match(
+                coordinates: coords,
+                profile: profile,
+                accuracies: nil   // Per-point accuracy not currently persisted; let Mapbox use default radius.
+            )
+            return result.coordinates
+        } catch {
+            #if DEBUG
+            print("[Mapbox match] failed for journey \(route.id): \(error)")
+            #endif
+            return nil
+        }
+    }
+
+    /// Decide Mapbox routing profile by journey context.
+    /// - Returns: nil to skip matching (e.g. flight, near-stationary trace).
+    private static func profileForRoute(
+        _ route: JourneyRoute,
+        coords: [CLLocationCoordinate2D]
+    ) -> MapboxMapMatching.Profile? {
+        // Compute average speed from journey duration + distance.
+        guard let start = route.startTime, let end = route.endTime else { return .walking }
+        let duration = end.timeIntervalSince(start)
+        guard duration >= 60 else { return nil }   // Sub-minute traces aren't worth matching.
+
+        let avgSpeed = route.distance / duration   // m/s
+        if avgSpeed > 50 { return nil }            // Flight: skip — Mapbox has no flight network.
+        if avgSpeed > 8  { return .driving }       // > 30 km/h → driving network.
+        return .walking                             // Default: walking covers most pedestrian + slow cycling cases.
     }
 
     private static func mapMatchIfPossible(

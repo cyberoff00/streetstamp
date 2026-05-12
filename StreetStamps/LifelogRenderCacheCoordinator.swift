@@ -30,9 +30,10 @@ final class LifelogRenderCacheCoordinator: ObservableObject {
     private var pendingWarmupRequest: (anchorDay: Date, countryISO2: String?)?
     private var hasDirtyToday = false
     private var todayDirtyCountryISO2: String?
-    /// Snapshot restored from disk during bind(), available immediately
-    /// for the first cachedRenderSnapshot() call.
-    private var restoredDiskSnapshot: LifelogRenderSnapshot?
+    /// Snapshots restored from disk during bind(), keyed by startOfDay.
+    /// Covers up to `recentDayCount` days so cold starts after the first one
+    /// can serve any recent day immediately, not just today.
+    private var restoredDiskSnapshots: [Date: LifelogRenderSnapshot] = [:]
 
     func bind(
         journeyStore: JourneyStore,
@@ -101,9 +102,8 @@ final class LifelogRenderCacheCoordinator: ObservableObject {
             )
             return fallback.renderSnapshot(in: viewport)
         }
-        if let restored = restoredDiskSnapshot,
-           let restoredDay = restored.selectedDay,
-           Calendar.current.isDate(restoredDay, inSameDayAs: key.day) {
+        let dayKey = Calendar.current.startOfDay(for: key.day)
+        if let restored = restoredDiskSnapshots[dayKey] {
             debugLog("disk cache hit day=\(debugDayString(key.day))")
             return restored
         }
@@ -197,7 +197,7 @@ final class LifelogRenderCacheCoordinator: ObservableObject {
 
     func markTodayDirty(countryISO2: String?) {
         invalidateDaySnapshots(day: Date())
-        restoredDiskSnapshot = nil
+        restoredDiskSnapshots[Calendar.current.startOfDay(for: Date())] = nil
         hasDirtyToday = true
         todayDirtyCountryISO2 = countryISO2
         guard todayRefreshTask == nil else { return }
@@ -265,37 +265,27 @@ final class LifelogRenderCacheCoordinator: ObservableObject {
             return buildFallbackFromRawPoints(for: key)
         }
         let existing = bestExistingSnapshot(for: key.day, countryISO2: key.countryISO2)
-        let task = Task<LifelogSegmentedDaySnapshot?, Never>(priority: .utility) {
+        // Single Task.detached: tile lookup + builder run in one off-main hop.
+        // Was previously a Task wrapping a Task.detached; the outer hop served
+        // no purpose since the inner detached call ran nonisolated builder code.
+        let task = Task<LifelogSegmentedDaySnapshot?, Never>.detached(priority: .userInitiated) { [trackTileStore] in
             let segments = trackTileStore.tiles(
                 for: nil,
                 zoom: TrackRenderAdapter.unifiedRenderZoom,
                 day: key.day
             )
-            guard !segments.isEmpty else {
-                await MainActor.run {
-                    self.debugLog("day snapshot empty tiles day=\(self.debugDayString(key.day))")
-                }
-                return nil
-            }
-            await MainActor.run {
-                self.debugLog(
-                    "day snapshot build day=\(self.debugDayString(key.day)) " +
-                    "segments=\(segments.count) existing=\(existing != nil)"
+            guard !segments.isEmpty else { return nil }
+            if let existing {
+                return LifelogRenderSnapshotBuilder.mergeDaySnapshot(
+                    existing: existing,
+                    latestKey: key,
+                    latestSegments: segments
                 )
             }
-            return await Task.detached(priority: .utility) {
-                if let existing {
-                    return LifelogRenderSnapshotBuilder.mergeDaySnapshot(
-                        existing: existing,
-                        latestKey: key,
-                        latestSegments: segments
-                    )
-                }
-                return LifelogRenderSnapshotBuilder.buildDaySnapshot(
-                    key: key,
-                    segments: segments
-                )
-            }.value
+            return LifelogRenderSnapshotBuilder.buildDaySnapshot(
+                key: key,
+                segments: segments
+            )
         }
         inFlightDayTasks[key] = task
         let snapshot = await task.value
@@ -309,10 +299,17 @@ final class LifelogRenderCacheCoordinator: ObservableObject {
         pruneOlderDaySnapshots(for: key)
         daySnapshots[key] = snapshot
         trimDayCache(anchorDay: key.day)
-        // Persist today's snapshot for instant cold-start restore.
-        if Calendar.current.isDateInToday(key.day) {
-            restoredDiskSnapshot = nil
-            saveToDisk(snapshot.allDayRenderSnapshot)
+        // Persist any recent-day snapshot so cold starts beyond the first
+        // serve all 7 days from disk immediately. The disk file is rewritten
+        // with the current in-memory recent-day set (small JSON, off main).
+        let dayKey = Calendar.current.startOfDay(for: key.day)
+        let recentDays = Set(LifelogRenderWarmupPlanner.recentDays(
+            anchorDay: Date(),
+            count: Self.recentDayCount
+        ).map { Calendar.current.startOfDay(for: $0) })
+        if recentDays.contains(dayKey) {
+            restoredDiskSnapshots[dayKey] = nil
+            saveRecentDaysToDisk()
         }
         return snapshot
     }
@@ -438,7 +435,11 @@ final class LifelogRenderCacheCoordinator: ObservableObject {
             anchorDay: request.anchorDay,
             count: Self.recentDayCount
         )
-        warmupTask = Task(priority: .background) { [weak self] in
+        // .userInitiated so the splash-window warmup is not throttled by the
+        // OS the way .background is. The caller (cold-start Phase 2) waits on
+        // this so user-perceptible latency depends on it completing before
+        // the user reaches LifelogView.
+        warmupTask = Task(priority: .userInitiated) { [weak self] in
             guard let self else { return }
             for day in days {
                 guard !Task.isCancelled else { return }
@@ -478,8 +479,25 @@ final class LifelogRenderCacheCoordinator: ObservableObject {
     private func restoreFromDisk() {
         guard let url = diskCacheURL else { return }
         guard FileManager.default.fileExists(atPath: url.path) else { return }
+        let allowedDays = Set(LifelogRenderWarmupPlanner.recentDays(
+            anchorDay: Date(),
+            count: Self.recentDayCount
+        ).map { Calendar.current.startOfDay(for: $0) })
         do {
             let data = try Data(contentsOf: url)
+            // V2 (multi-day) first; fall back to legacy V1 (single today snapshot).
+            if let cachedV2 = try? JSONDecoder.iso8601Lifelog.decode(LifelogRenderSnapshotDiskCacheV2.self, from: data),
+               cachedV2.version >= 2 {
+                for entry in cachedV2.snapshots {
+                    let snapshot = entry.toRenderSnapshot()
+                    guard let day = snapshot.selectedDay else { continue }
+                    let dayKey = Calendar.current.startOfDay(for: day)
+                    guard allowedDays.contains(dayKey) else { continue }
+                    restoredDiskSnapshots[dayKey] = snapshot
+                }
+                debugLog("disk cache v2 restored days=\(restoredDiskSnapshots.count)")
+                return
+            }
             let cached = try JSONDecoder.iso8601Lifelog.decode(LifelogRenderSnapshotDiskCache.self, from: data)
             let snapshot = cached.toRenderSnapshot()
             guard let day = snapshot.selectedDay,
@@ -488,19 +506,29 @@ final class LifelogRenderCacheCoordinator: ObservableObject {
                 try? FileManager.default.removeItem(at: url)
                 return
             }
-            restoredDiskSnapshot = snapshot
-            debugLog("disk cache restored day=\(debugDayString(day)) far=\(snapshot.farRouteSegments.count)")
+            restoredDiskSnapshots[Calendar.current.startOfDay(for: day)] = snapshot
+            debugLog("disk cache v1 restored day=\(debugDayString(day)) far=\(snapshot.farRouteSegments.count)")
         } catch {
             debugLog("disk cache restore failed: \(error)")
             try? FileManager.default.removeItem(at: url)
         }
     }
 
-    private func saveToDisk(_ snapshot: LifelogRenderSnapshot) {
+    private func saveRecentDaysToDisk() {
         guard let url = diskCacheURL else { return }
+        let recentDays = Set(LifelogRenderWarmupPlanner.recentDays(
+            anchorDay: Date(),
+            count: Self.recentDayCount
+        ).map { Calendar.current.startOfDay(for: $0) })
+        // Snapshot in-memory entries on the main actor before hopping off,
+        // so the encode never touches mutable shared state.
+        let snapshots: [LifelogRenderSnapshot] = daySnapshots
+            .filter { recentDays.contains($0.key.day) }
+            .map { $0.value.allDayRenderSnapshot }
+        guard !snapshots.isEmpty else { return }
         Task.detached(priority: .utility) {
             do {
-                let cached = LifelogRenderSnapshotDiskCache(from: snapshot)
+                let cached = LifelogRenderSnapshotDiskCacheV2(snapshots: snapshots)
                 let data = try JSONEncoder.iso8601Lifelog.encode(cached)
                 try data.write(to: url, options: .atomic)
             } catch {
@@ -511,6 +539,19 @@ final class LifelogRenderCacheCoordinator: ObservableObject {
 }
 
 // MARK: - Codable disk cache format
+
+/// V2: multi-day disk cache. Each cold start can restore up to
+/// `recentDayCount` days, so users land on any recent day instantly
+/// rather than waiting for the warmup task to rebuild it.
+private struct LifelogRenderSnapshotDiskCacheV2: Codable {
+    let version: Int
+    let snapshots: [LifelogRenderSnapshotDiskCache]
+
+    init(snapshots: [LifelogRenderSnapshot]) {
+        self.version = 2
+        self.snapshots = snapshots.map { LifelogRenderSnapshotDiskCache(from: $0) }
+    }
+}
 
 private struct LifelogRenderSnapshotDiskCache: Codable {
     struct Coord: Codable {

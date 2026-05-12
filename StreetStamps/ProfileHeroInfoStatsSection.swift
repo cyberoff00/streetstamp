@@ -100,7 +100,7 @@ struct ProfileHeroInfoStatsSection<HeaderContent: View, TrailingContent: View>: 
 private extension View {
     func heroSurfaceCard(cornerRadius: CGFloat) -> some View {
         self
-            .background(Color.white)
+            .background(FigmaTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)

@@ -527,8 +527,6 @@ enum GuestDataRecoveryService {
     }
 
     private static func lifelogCount(paths: StoragePath) -> Int {
-        let fm = FileManager.default
-
         // Check sharded layout first
         let indexURL = paths.lifelogDayShardIndexURL
         if let data = try? Data(contentsOf: indexURL),

@@ -1,6 +1,29 @@
 import SwiftUI
 import CommonCrypto
 
+enum RemoteImageLoadTimeout {
+    static let diskCacheReadNanoseconds: UInt64 = 250_000_000
+
+    nonisolated static func withOptionalTimeout<T: Sendable>(
+        nanoseconds: UInt64,
+        operation: @escaping @Sendable () async -> T?
+    ) async -> T? {
+        await withTaskGroup(of: T?.self) { group in
+            group.addTask {
+                await operation()
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: nanoseconds)
+                return Optional<T>.none
+            }
+
+            let firstFinished: T? = await group.next() ?? Optional<T>.none
+            group.cancelAll()
+            return firstFinished
+        }
+    }
+}
+
 /// Shared image loader with two-tier cache: NSCache (memory) + custom disk cache.
 /// Guarantees:
 /// - Instant display when returning to a previously viewed image (memory hit)
@@ -38,20 +61,22 @@ struct CachedRemoteImage<Placeholder: View, Failure: View>: View {
             }
         }
         .task(id: url) {
+            // Memory-cache hit: show instantly without flashing placeholder.
             if let cached = RemoteImageCache.shared.image(for: url) {
                 uiImage = cached
+                failed = false
                 return
             }
-            // Check our own disk cache (reliable, survives URLCache eviction)
-            if let diskData = RemoteImageDiskCache.shared.read(for: url),
-               let decoded = UIImage(data: diskData) {
+            uiImage = nil
+            failed = false
+            if let decoded = await Self.loadFromDiskCache(url: url) {
                 RemoteImageCache.shared.setImage(decoded, for: url)
                 uiImage = decoded
                 return
             }
             do {
                 let data = try await RemoteImageFetcher.shared.data(for: url)
-                guard let decoded = UIImage(data: data) else {
+                guard let decoded = await Self.decode(data: data) else {
                     failed = true
                     return
                 }
@@ -59,9 +84,41 @@ struct CachedRemoteImage<Placeholder: View, Failure: View>: View {
                 RemoteImageDiskCache.shared.write(data, for: url)
                 uiImage = decoded
             } catch {
-                if !Task.isCancelled { failed = true }
+                if !Task.isCancelled, !(error is CancellationError) {
+                    failed = true
+                }
             }
         }
+    }
+
+
+    nonisolated private static func loadFromDiskCache(url: URL) async -> UIImage? {
+        let result: UIImage? = await RemoteImageLoadTimeout.withOptionalTimeout(
+            nanoseconds: RemoteImageLoadTimeout.diskCacheReadNanoseconds
+        ) {
+            await Task.detached(priority: .utility) {
+                guard let data = RemoteImageDiskCache.shared.read(for: url) else { return nil }
+                guard !data.isEmpty else {
+                    RemoteImageDiskCache.shared.remove(for: url)
+                    return nil
+                }
+                guard let image = UIImage(data: data)?.preparingForDisplay() else {
+                    RemoteImageDiskCache.shared.remove(for: url)
+                    return nil
+                }
+                return image
+            }.value
+        }
+        if result == nil, RemoteImageDiskCache.shared.containsData(for: url) {
+            RemoteImageDiskCache.shared.remove(for: url)
+        }
+        return result
+    }
+
+    nonisolated private static func decode(data: Data) async -> UIImage? {
+        await Task.detached(priority: .utility) {
+            UIImage(data: data)?.preparingForDisplay()
+        }.value
     }
 }
 
@@ -76,11 +133,11 @@ final class RemoteImageCache: @unchecked Sendable {
         memoryCache.totalCostLimit = 40 * 1024 * 1024  // ~40 MB decoded
     }
 
-    func image(for url: URL) -> UIImage? {
+    nonisolated func image(for url: URL) -> UIImage? {
         memoryCache.object(forKey: url as NSURL)
     }
 
-    func setImage(_ image: UIImage, for url: URL) {
+    nonisolated func setImage(_ image: UIImage, for url: URL) {
         let cost = image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0
         memoryCache.setObject(image, forKey: url as NSURL, cost: cost)
     }
@@ -159,7 +216,7 @@ final class RemoteImageDiskCache: @unchecked Sendable {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
-    func read(for url: URL) -> Data? {
+    nonisolated func read(for url: URL) -> Data? {
         let path = filePath(for: url)
         guard let data = FileManager.default.contents(atPath: path.path) else { return nil }
         // Touch access date so LRU eviction keeps recently read files.
@@ -171,12 +228,23 @@ final class RemoteImageDiskCache: @unchecked Sendable {
         return data
     }
 
-    func write(_ data: Data, for url: URL) {
+    nonisolated func write(_ data: Data, for url: URL) {
         let path = filePath(for: url)
         ioQueue.async { [directory, maxBytes] in
             try? data.write(to: path, options: .atomic)
             // Evict oldest files when over budget.
             Self.evictIfNeeded(directory: directory, maxBytes: maxBytes)
+        }
+    }
+
+    nonisolated func containsData(for url: URL) -> Bool {
+        FileManager.default.fileExists(atPath: filePath(for: url).path)
+    }
+
+    nonisolated func remove(for url: URL) {
+        let path = filePath(for: url)
+        ioQueue.async {
+            try? FileManager.default.removeItem(at: path)
         }
     }
 

@@ -15,7 +15,6 @@ enum DataCleanupTool {
     /// 分析用户目录中的旅程，识别可疑的数据
     static func analyzeJourneys(userID: String) -> [JourneyOwnershipInfo] {
         let paths = StoragePath(userID: userID)
-        let fm = FileManager.default
 
         guard let indexData = try? Data(contentsOf: paths.journeysDir.appendingPathComponent("index.json")),
               let journeyIDs = try? JSONDecoder().decode([String].self, from: indexData) else {

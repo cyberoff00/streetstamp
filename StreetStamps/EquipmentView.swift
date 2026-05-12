@@ -52,6 +52,9 @@ struct EquipmentView: View {
 
     @Binding var loadout: RobotLoadout
     @ObservedObject private var store: AvatarCatalogStore = .shared
+    @EnvironmentObject private var journeyStore: JourneyStore
+    @EnvironmentObject private var cityCache: CityCache
+    @EnvironmentObject private var postcardCenter: PostcardCenter
 
     @State private var selectedCategoryId: String = "hair"
     @State private var tryOnLoadout: RobotLoadout? = nil
@@ -206,7 +209,7 @@ struct EquipmentView: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(FigmaTheme.text)
                         .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(Color.white)
+                        .background(FigmaTheme.card)
                         .clipShape(Capsule())
                         .overlay(Capsule().stroke(FigmaTheme.border, lineWidth: 1))
                 }
@@ -262,7 +265,7 @@ struct EquipmentView: View {
             .padding(.horizontal, 28)
             .padding(.vertical, 26)
             .frame(maxWidth: 300)
-            .background(Color.white)
+            .background(FigmaTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -350,7 +353,7 @@ struct EquipmentView: View {
                 }
                 .padding(.horizontal, 12)
                 .frame(height: 32)
-                .background(Color.white)
+                .background(FigmaTheme.card)
                 .clipShape(Capsule())
                 .overlay(
                     Capsule()
@@ -370,14 +373,34 @@ struct EquipmentView: View {
         .zIndex(2)
     }
 
+    private var avatarPreviewInventory: RoomInventory {
+        RoomInventory(
+            journeyCount: journeyStore.journeys.count,
+            cityCount: cityCache.cachedCities.count,
+            countryCount: Set(
+                cityCache.cachedCities.compactMap { city -> String? in
+                    guard let iso = city.countryISO2?.trimmingCharacters(in: .whitespaces),
+                          !iso.isEmpty else { return nil }
+                    return iso.uppercased()
+                }
+            ).count,
+            postcardCount: postcardCenter.receivedItems.count
+        )
+    }
+
     private var avatarPreviewCard: some View {
-        RoundedRectangle(cornerRadius: 36, style: .continuous)
-            .fill(Color(red: 224.0 / 255.0, green: 241.0 / 255.0, blue: 237.0 / 255.0))
-            .frame(height: 216)
-            .overlay {
-                RobotRendererView(size: 176, face: .front, loadout: effectiveLoadout)
-            }
-            .shadow(color: Color.black.opacity(0.06), radius: 24, x: 0, y: 6)
+        ZStack {
+            HalftoneWardrobeScene(inventory: avatarPreviewInventory)
+
+            RobotRendererView(size: 176, face: .front, loadout: effectiveLoadout)
+        }
+        .frame(height: 216)
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .stroke(Color.gray.opacity(0.08), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.06), radius: 24, x: 0, y: 6)
     }
 
     @ViewBuilder
@@ -457,11 +480,11 @@ struct EquipmentView: View {
             .padding(.vertical, 8)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.95))
+        .background(FigmaTheme.card.opacity(0.95))
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(FigmaTheme.border, lineWidth: 1)
+                .stroke(Color.gray.opacity(0.08), lineWidth: 1)
         )
         .overlay(alignment: .trailing) {
             categoryScrollHintOverlay
@@ -517,11 +540,11 @@ struct EquipmentView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(Color.white.opacity(0.95))
+        .background(FigmaTheme.card.opacity(0.95))
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(FigmaTheme.border, lineWidth: 1)
+                .stroke(Color.gray.opacity(0.08), lineWidth: 1)
         )
         .transition(.opacity.combined(with: .move(edge: .top)))
     }
@@ -588,7 +611,7 @@ struct EquipmentView: View {
     private func noneColorSwatch(isSelected: Bool, onTap: @escaping () -> Void) -> some View {
         Button(action: onTap) {
             ZStack {
-                Circle().fill(Color.white)
+                Circle().fill(FigmaTheme.card)
                 Capsule()
                     .fill(Color.red.opacity(0.7))
                     .frame(height: 2)
@@ -822,11 +845,11 @@ struct EquipmentView: View {
             }
             .padding(16)
             .frame(maxWidth: 340)
-            .background(Color.white)
+            .background(FigmaTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(FigmaTheme.border, lineWidth: 1)
+                    .stroke(Color.gray.opacity(0.08), lineWidth: 1)
             )
             .shadow(color: Color.black.opacity(0.18), radius: 20, x: 0, y: 10)
             .padding(.horizontal, 24)

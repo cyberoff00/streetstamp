@@ -135,7 +135,7 @@ struct PostcardInboxView: View {
                 PostcardComposerView(
                     friendID: friendID,
                     friendName: friendName,
-                    onSent: { Task { await refreshInbox() } }
+                    onSent: { Task { await refreshInbox(force: true) } }
                 )
             }
         }
@@ -152,11 +152,11 @@ struct PostcardInboxView: View {
         }
         .onChange(of: publishStore.status) { _, newStatus in
             if case .success = newStatus {
-                Task { await refreshInbox() }
+                Task { await refreshInbox(force: true) }
             }
         }
         .refreshable {
-            await refreshInbox()
+            await refreshInbox(force: true)
         }
         .onReceive(postcardCenter.$receivedItems) { _ in
             autoFocusReceivedIfNeeded()
@@ -322,7 +322,7 @@ struct PostcardInboxView: View {
         guard let messageID = pendingFocusMessageID, !messageID.isEmpty else { return }
         guard postcardCenter.receivedItems.contains(where: { $0.messageID == messageID }) else {
             Task {
-                await refreshInbox()
+                await refreshInbox(force: true)
                 guard postcardCenter.receivedItems.contains(where: { $0.messageID == messageID }) else { return }
                 selectedBox = .received
                 pendingFocusMessageID = nil
@@ -344,7 +344,7 @@ struct PostcardInboxView: View {
         return displayName
     }
 
-    private func refreshInbox() async {
+    private func refreshInbox(force: Bool = false) async {
         guard !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false }
@@ -352,7 +352,7 @@ struct PostcardInboxView: View {
         guard let token, !token.isEmpty else { return }
 
         retryBanner.beginOperation()
-        await postcardCenter.refreshFromBackend(token: token)
+        await postcardCenter.refreshFromBackend(token: token, force: force)
         if postcardCenter.lastSyncError == nil {
             retryBanner.operationSucceeded()
         } else {
@@ -384,14 +384,14 @@ struct PostcardInboxView: View {
                 .lineLimit(2)
             Spacer(minLength: 8)
             Button(L10n.t("retry")) {
-                Task { await refreshInbox() }
+                Task { await refreshInbox(force: true) }
             }
             .font(.system(size: 12, weight: .bold))
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(Color.white)
+        .background(FigmaTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
@@ -602,7 +602,7 @@ private struct PostcardCardRow: View {
         guard let messageID, let token else { return }
         let req = PostcardReactionRequest(reactionEmoji: emoji, comment: nil)
         do {
-            try await BackendAPIClient.shared.reactToPostcard(token: token, messageID: messageID, req: req)
+            _ = try await BackendAPIClient.shared.reactToPostcard(token: token, messageID: messageID, req: req)
             await MainActor.run {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) {
                     saveToastText = String(format: L10n.t("reaction_sent"), emoji)
@@ -756,7 +756,7 @@ private struct CommentInputSheet: View {
         isSending = true
         let req = PostcardReactionRequest(reactionEmoji: nil, comment: commentText)
         do {
-            try await BackendAPIClient.shared.reactToPostcard(token: token, messageID: messageID, req: req)
+            _ = try await BackendAPIClient.shared.reactToPostcard(token: token, messageID: messageID, req: req)
             await MainActor.run { dismiss() }
         } catch {
             await MainActor.run {

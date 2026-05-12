@@ -46,7 +46,7 @@ struct OnboardingCoachCard: View {
             }
         }
         .padding(14)
-        .background(Color.white)
+        .background(FigmaTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)

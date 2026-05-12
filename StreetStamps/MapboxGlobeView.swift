@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import MapboxMaps
 import Turf
 import CoreLocation
@@ -31,13 +32,27 @@ struct GlobeCacheKey: Hashable, Sendable {
     let dayKey: String   // UTC day index, or "no-time" for legacy points
 }
 
+/// Shared across MapboxGlobeView instances so re-entering the Globe screen
+/// reuses already-built per-(journeyId, dayKey) artefacts. The cache is keyed
+/// by stable journey content hashes, so stale entries are inert: they're
+/// either matched (reused) or pruned at the end of each refresh
+/// (`cache.filter { seenCacheKeys.contains($0.key) }`).
+@MainActor
+private enum GlobeArtefactCache {
+    static var shared: [GlobeCacheKey: GlobeJourneyArtefact] = [:]
+}
+
 private final class GlobeMapViewHolder: ObservableObject {
     let mapView: MBMapView
     @Published var styleLoadRevision: Int = 0
     var renderPayload = GlobeRenderPayload()
-    var journeyCache: [GlobeCacheKey: GlobeJourneyArtefact] = [:]
 
     init() {
+        // Keep a small but non-zero initial frame; the SwiftUI wrapper below
+        // hosts this view and uses autoresizing so the real size lands before
+        // CAMetalLayer renders. Don't read `UIScreen.main.bounds` here — on
+        // iOS 26 it can return `.zero` during pre-scene init and crash Mapbox
+        // with "invalid reuse after initialization failure".
         self.mapView = MBMapView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
     }
 
@@ -113,7 +128,7 @@ struct MapboxGlobeView: View {
                     await refreshData()
                     updateCountryGlow()
                 }
-                .onChange(of: mapHolder.styleLoadRevision) { rev in
+                .onChange(of: mapHolder.styleLoadRevision) { _, rev in
                     print("🔵 [Globe] onChange styleLoadRevision: \(rev)")
                     Task { await refreshData() }
                     updateCountryGlow()
@@ -580,7 +595,7 @@ struct MapboxGlobeView: View {
         }
 
         let payload = mapHolder.renderPayload
-        let cacheSnapshot = mapHolder.journeyCache
+        let cacheSnapshot = GlobeArtefactCache.shared
 
         // True per-day incremental: each (journeyId, dayKey) bucket is
         // independently hashed. Adding a single point today only rebuilds
@@ -698,7 +713,7 @@ struct MapboxGlobeView: View {
 
         print("🟢 [Globe] refreshData: journeys=\(payload.journeys.count) reused=\(result.stats.reused) rebuilt=\(result.stats.rebuilt) footprints=\(result.fcs.0.features.count) routes=\(result.fcs.1.features.count) cities=\(result.fcs.2.features.count)")
 
-        mapHolder.journeyCache = result.cache
+        GlobeArtefactCache.shared = result.cache
         updateGeoJSONSource(id: footprintsSourceId, fc: result.fcs.0)
         updateGeoJSONSource(id: routesSourceId, fc: result.fcs.1)
         updateGeoJSONSource(id: citiesSourceId, fc: result.fcs.2)
@@ -707,7 +722,7 @@ struct MapboxGlobeView: View {
     /// UTC day index since epoch — stable, locale-independent, cheap to compute,
     /// and groups into 24-hour buckets that align with most users' "what did I
     /// do today" mental model.
-    private static func dayKey(for t: Date) -> String {
+    nonisolated private static func dayKey(for t: Date) -> String {
         String(Int(t.timeIntervalSince1970 / 86_400))
     }
 
@@ -717,7 +732,7 @@ struct MapboxGlobeView: View {
     /// Each bucket carries enough overlap for the renderer to draw clean
     /// boundaries — but we accept that a walk crossing midnight will register
     /// as two separate solid runs at the day boundary.
-    private static func partitionCoordsByDay(_ pts: [CoordinateCodable]) -> [(dayKey: String, coords: [CoordinateCodable])] {
+    nonisolated private static func partitionCoordsByDay(_ pts: [CoordinateCodable]) -> [(dayKey: String, coords: [CoordinateCodable])] {
         guard !pts.isEmpty else { return [] }
 
         var groups: [(String, [CoordinateCodable])] = []
@@ -740,7 +755,7 @@ struct MapboxGlobeView: View {
     }
 
     /// Content hash for a single day's coord slice.
-    private static func dayContentHash(_ pts: [CoordinateCodable]) -> String {
+    nonisolated private static func dayContentHash(_ pts: [CoordinateCodable]) -> String {
         guard let first = pts.first, let last = pts.last else { return "empty" }
         let firstT = first.t.map { "\(Int($0.timeIntervalSince1970))" } ?? "nil"
         let lastT = last.t.map { "\(Int($0.timeIntervalSince1970))" } ?? "nil"
@@ -750,7 +765,7 @@ struct MapboxGlobeView: View {
     /// Build artefacts for one day's coord slice of one journey. Same expensive
     /// per-point work as before, just scoped to a single bucket so we can cache
     /// stale days indefinitely.
-    private static func buildArtefactForDay(
+    nonisolated private static func buildArtefactForDay(
         journeyId: String,
         coords pts: [CoordinateCodable],
         distanceKm: Double,
@@ -829,7 +844,7 @@ struct MapboxGlobeView: View {
 
     // MARK: - Route helpers
 
-    private static func routeSignature(_ coords: [CLLocationCoordinate2D]) -> String {
+    nonisolated private static func routeSignature(_ coords: [CLLocationCoordinate2D]) -> String {
         guard let first = coords.first, let last = coords.last else { return UUID().uuidString }
         let stride = max(1, coords.count / 6)
         var samples: [CLLocationCoordinate2D] = [first]
@@ -853,7 +868,7 @@ struct MapboxGlobeView: View {
         return min(forward, backward)
     }
 
-    private static func quantile(_ values: [Int], p: Double) -> Double {
+    nonisolated private static func quantile(_ values: [Int], p: Double) -> Double {
         guard !values.isEmpty else { return 1.0 }
         let sorted = values.sorted()
         let index = Int((Double(sorted.count - 1) * p).rounded())
@@ -862,7 +877,7 @@ struct MapboxGlobeView: View {
 
     /// Great-circle arc between two points, sampled into `points` intermediate coords.
     /// Used to render cross-city jumps as smooth curves along the globe.
-    private static func greatCircleArc(_ start: CLLocationCoordinate2D, _ end: CLLocationCoordinate2D, points: Int = 32) -> [CLLocationCoordinate2D] {
+    nonisolated private static func greatCircleArc(_ start: CLLocationCoordinate2D, _ end: CLLocationCoordinate2D, points: Int = 32) -> [CLLocationCoordinate2D] {
         let total = max(2, points)
 
         func toVec(_ c: CLLocationCoordinate2D) -> (Double, Double, Double) {
@@ -909,11 +924,11 @@ struct MapboxGlobeView: View {
     /// - Velocity above plausible max ⇒ GPS error, break.
     /// - Velocity below walking speed with non-trivial dt ⇒ stationary period,
     ///   break so we don't bridge through a coffee-shop sit.
-    private static let locomotionMinVelocityMps: Double = 0.3      // 1.08 km/h — slower than this ⇒ stationary
-    private static let implausibleVelocityMps: Double = 280        // 1000 km/h — faster than this ⇒ GPS error
-    private static let rapidSamplingDtSeconds: Double = 60         // bridge short dt unconditionally
-    private static let crossCityArcMeters: Double = 50_000         // ≥50 km jump ⇒ render as great-circle arc
-    private static let fallbackConnectMeters: Double = 2_000       // no-timestamp: connect only if <2km (matches lifelog gapDistanceMeters)
+    nonisolated private static let locomotionMinVelocityMps: Double = 0.3      // 1.08 km/h — slower than this ⇒ stationary
+    nonisolated private static let implausibleVelocityMps: Double = 280        // 1000 km/h — faster than this ⇒ GPS error
+    nonisolated private static let rapidSamplingDtSeconds: Double = 60         // bridge short dt unconditionally
+    nonisolated private static let crossCityArcMeters: Double = 50_000         // ≥50 km jump ⇒ render as great-circle arc
+    nonisolated private static let fallbackConnectMeters: Double = 2_000       // no-timestamp: connect only if <2km (matches lifelog gapDistanceMeters)
 
     private enum TransitionDecision {
         case continueSolid    // append cur to current solid run
@@ -923,7 +938,7 @@ struct MapboxGlobeView: View {
 
     /// Decide how to handle the transition from `prev` to `cur`. Uses per-point
     /// timestamps when available; otherwise falls back to a distance heuristic.
-    private static func classifyTransition(prev: CoordinateCodable, cur: CoordinateCodable, distanceMeters dd: Double) -> TransitionDecision {
+    nonisolated private static func classifyTransition(prev: CoordinateCodable, cur: CoordinateCodable, distanceMeters dd: Double) -> TransitionDecision {
         // No timestamp → we can't compute velocity. This is the common case for
         // passive country runs (LifelogAttributedCoordinateRun stores only
         // CLLocationCoordinate2D with no per-point time). Such points are sparse
@@ -958,7 +973,7 @@ struct MapboxGlobeView: View {
         return .breakSolid
     }
 
-    private static func makeCitiesFC(from cached: [CachedCity]) -> Turf.FeatureCollection {
+    nonisolated private static func makeCitiesFC(from cached: [CachedCity]) -> Turf.FeatureCollection {
         var feats: [Turf.Feature] = []
         var seen = Set<String>()
 
@@ -1033,6 +1048,26 @@ struct MapboxGlobeView: View {
 
 private struct MapboxViewContainer: UIViewRepresentable {
     let mapView: MBMapView
-    func makeUIView(context: Context) -> MBMapView { mapView }
-    func updateUIView(_ uiView: MBMapView, context: Context) {}
+
+    // Wrap the MapView in a plain UIView with autoresizing so SwiftUI's layout
+    // never hands a 0×0 frame directly to the Metal-backed map view. Without
+    // this wrapper, iOS 26 logs `CAMetalLayer ignoring invalid setDrawableSize`
+    // and the map sometimes never recovers.
+    func makeUIView(context: Context) -> UIView {
+        let host = UIView()
+        host.backgroundColor = .clear
+        host.autoresizesSubviews = true
+        mapView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        host.addSubview(mapView)
+        return host
+    }
+    func updateUIView(_ uiView: UIView, context: Context) {
+        // If SwiftUI ever resets the bounds to 0×0 mid-flight, restore from the
+        // host view's last known non-zero size instead of forwarding 0×0 down to
+        // the Metal layer.
+        if mapView.bounds.size != uiView.bounds.size,
+           uiView.bounds.width > 0, uiView.bounds.height > 0 {
+            mapView.frame = uiView.bounds
+        }
+    }
 }

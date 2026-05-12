@@ -254,7 +254,7 @@ struct AuthEntryView: View {
             .foregroundColor(FigmaTheme.text)
             .frame(maxWidth: .infinity)
             .frame(height: 56)
-            .background(Color.white)
+            .background(FigmaTheme.card)
             .clipShape(Capsule())
             .overlay(
                 Capsule()
@@ -476,7 +476,7 @@ struct AuthEntryView: View {
         var terms = AttributedString(L10n.t("auth_terms_of_service"))
         terms.link = URL(string: "https://cyberoff00.github.io/streetstamp/terms.html")
         terms.foregroundColor = accent
-        var and = AttributedString(L10n.t("auth_terms_and"))
+        let and = AttributedString(L10n.t("auth_terms_and"))
         var privacy = AttributedString(L10n.t("auth_terms_privacy_policy"))
         privacy.link = URL(string: "https://cyberoff00.github.io/streetstamp/privacy-policy.html")
         privacy.foregroundColor = accent

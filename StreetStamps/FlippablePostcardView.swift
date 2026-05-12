@@ -155,7 +155,7 @@ struct PostcardFrontFaceView: View {
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .background(
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(Color.white)
+                .fill(FigmaTheme.card)
         )
     }
 
@@ -202,9 +202,11 @@ struct PostcardFrontFaceView: View {
                     placeholder
                         .task(id: path) {
                             let targetSize = geo.size
-                            let loaded = await Self.loadAndDownsample(path: path, targetSize: targetSize)
+                            let loadPath = path
+                            let loaded = await Self.loadAndDownsample(path: loadPath, targetSize: targetSize)
+                            guard !Task.isCancelled else { return }
                             self.localImage = loaded
-                            self.localImagePath = path
+                            self.localImagePath = loadPath
                         }
                 }
             case .remoteURL(let raw):

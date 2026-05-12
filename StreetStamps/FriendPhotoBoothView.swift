@@ -89,7 +89,6 @@ struct FriendPhotoBoothView: View {
                             .transition(.opacity)
                     }
                 }
-                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: phase)
 
                 Spacer()
 

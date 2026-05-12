@@ -63,16 +63,6 @@ enum FirstProfileSetupSubmission: Equatable {
     }
 }
 
-enum FirstProfileSetupDebugPreviewBehavior {
-    static func shouldDismissImmediately(
-        for action: FirstProfileSetupAction,
-        isDebugPreview: Bool,
-        hasAccessToken: Bool
-    ) -> Bool {
-        isDebugPreview && action == .skip && !hasAccessToken
-    }
-}
-
 struct FirstProfileSetupView: View {
     @EnvironmentObject private var sessionStore: UserSessionStore
     @AppStorage("streetstamps.profile.displayName") private var profileName = "EXPLORER"
@@ -86,23 +76,8 @@ struct FirstProfileSetupView: View {
     private let presentation = FirstProfileSetupPresentationModel.minimal
     private let accent = FigmaTheme.primary
     private let warm = FigmaTheme.secondary
-    private let isDebugPreview: Bool
-    private let onDismissDebugPreview: (() -> Void)?
 
-    init() {
-        self.isDebugPreview = false
-        self.onDismissDebugPreview = nil
-    }
-
-    #if DEBUG
-    init(
-        isDebugPreview: Bool = false,
-        onDismissDebugPreview: (() -> Void)? = nil
-    ) {
-        self.isDebugPreview = isDebugPreview
-        self.onDismissDebugPreview = onDismissDebugPreview
-    }
-    #endif
+    init() {}
 
     var body: some View {
         ZStack {
@@ -125,7 +100,7 @@ struct FirstProfileSetupView: View {
                 .frame(maxWidth: .infinity)
             }
         }
-        .interactiveDismissDisabled(!debugPreviewEnabled)
+        .interactiveDismissDisabled(true)
         .fullScreenCover(isPresented: $showEquipmentEditor) {
             NavigationStack {
                 EquipmentView(loadout: $loadout)
@@ -150,14 +125,6 @@ struct FirstProfileSetupView: View {
                 nickname = suggestedNickname
             }
         }
-    }
-
-    private var debugPreviewEnabled: Bool {
-        #if DEBUG
-        isDebugPreview
-        #else
-        false
-        #endif
     }
 
     private var suggestedNickname: String {
@@ -402,21 +369,12 @@ struct FirstProfileSetupView: View {
             return
         }
         let token = sessionStore.currentAccessToken ?? ""
-        if FirstProfileSetupDebugPreviewBehavior.shouldDismissImmediately(
-            for: action,
-            isDebugPreview: debugPreviewEnabled,
-            hasAccessToken: !token.isEmpty
-        ) {
-            onDismissDebugPreview?()
-            return
-        }
 
         if action == .skip {
             let resolvedLoadout = loadout.normalizedForCurrentAvatar()
             AvatarLoadoutStore.save(resolvedLoadout)
             UserScopedProfileStateStore.saveCurrentLoadout(resolvedLoadout, for: sessionStore.currentUserID)
             sessionStore.markProfileSetupCompleted()
-            if debugPreviewEnabled { onDismissDebugPreview?() }
             return
         }
 
@@ -439,9 +397,6 @@ struct FirstProfileSetupView: View {
             UserScopedProfileStateStore.saveCurrentLoadout(resolvedLoadout, for: sessionStore.currentUserID)
             profileName = profile.displayName
             sessionStore.markProfileSetupCompleted()
-            if debugPreviewEnabled {
-                onDismissDebugPreview?()
-            }
         } catch {
             errorMessage = error.localizedDescription
         }

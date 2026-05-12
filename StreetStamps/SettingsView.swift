@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import Foundation
 import CoreLocation
 import UniformTypeIdentifiers
@@ -6,6 +7,102 @@ import AVFoundation
 import CoreImage.CIFilterBuiltins
 import Network
 import Darwin
+
+enum AppUpdateCheckResult {
+    case upToDate
+    case updateAvailable(latestVersion: String, releaseNotes: String?, appStoreURL: URL)
+    case unavailable
+}
+
+enum AppUpdateChecker {
+    static let appStoreID = "6760472632"
+    static let throttleInterval: TimeInterval = 24 * 60 * 60
+    private static let lastCheckTimeKey = "streetstamps.update_check.last_check_time"
+    private static let skippedVersionKey = "streetstamps.update_check.skipped_version"
+
+    static var currentVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+    }
+
+    static var appStoreReviewURL: URL? {
+        URL(string: "itms-apps://itunes.apple.com/app/id\(appStoreID)?action=write-review")
+    }
+
+    static var appStoreURL: URL? {
+        URL(string: "itms-apps://itunes.apple.com/app/id\(appStoreID)")
+    }
+
+    static var isCheckDue: Bool {
+        let last = UserDefaults.standard.double(forKey: lastCheckTimeKey)
+        if last == 0 { return true }
+        return Date().timeIntervalSince1970 - last >= throttleInterval
+    }
+
+    static var skippedVersion: String? {
+        UserDefaults.standard.string(forKey: skippedVersionKey)
+    }
+
+    static func recordCheckPerformed() {
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: lastCheckTimeKey)
+    }
+
+    static func skipVersion(_ version: String) {
+        UserDefaults.standard.set(version, forKey: skippedVersionKey)
+    }
+
+    /// For auto-launch prompt: only returns a result when a new version is
+    /// available, the throttle window has passed, and that version is not
+    /// already on the user's skip list. Returns nil otherwise.
+    static func autoCheckIfDue() async -> AppUpdateCheckResult? {
+        guard isCheckDue else { return nil }
+        let result = await check()
+        recordCheckPerformed()
+        if case .updateAvailable(let version, _, _) = result {
+            if skippedVersion == version { return nil }
+            return result
+        }
+        return nil
+    }
+
+    static func check() async -> AppUpdateCheckResult {
+        guard let url = URL(string: "https://itunes.apple.com/lookup?id=\(appStoreID)") else {
+            return .unavailable
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 10
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let results = json["results"] as? [[String: Any]],
+                  let first = results.first,
+                  let latest = first["version"] as? String, !latest.isEmpty else {
+                return .unavailable
+            }
+            let releaseNotes = first["releaseNotes"] as? String
+            let storeURL = appStoreURL ?? url
+            if compareVersions(latest, currentVersion) > 0 {
+                return .updateAvailable(latestVersion: latest, releaseNotes: releaseNotes, appStoreURL: storeURL)
+            } else {
+                return .upToDate
+            }
+        } catch {
+            return .unavailable
+        }
+    }
+
+    static func compareVersions(_ a: String, _ b: String) -> Int {
+        let aParts = a.split(separator: ".").compactMap { Int($0) }
+        let bParts = b.split(separator: ".").compactMap { Int($0) }
+        let count = max(aParts.count, bParts.count)
+        for i in 0..<count {
+            let av = i < aParts.count ? aParts[i] : 0
+            let bv = i < bParts.count ? bParts[i] : 0
+            if av != bv { return av < bv ? -1 : 1 }
+        }
+        return 0
+    }
+}
 
 enum SettingsAccountCardStyle: Equatable {
     case guest
@@ -292,6 +389,11 @@ struct SettingsView: View {
     @State private var iCloudAvailable = false
     @State private var isRestoringFromICloud = false
     @State private var showRestoreConfirmation = false
+    @State private var isCheckingForUpdate = false
+    @State private var showUpdateAlert = false
+    @State private var updateAlertTitle = ""
+    @State private var updateAlertMessage = ""
+    @State private var pendingUpdateStoreURL: URL?
     @State private var showMembershipGate: MembershipGatedFeature? = nil
     @State private var detailMessage = ""
     @State private var showDetailMessage = false
@@ -398,6 +500,18 @@ struct SettingsView: View {
         } message: {
             Text(String(format: L10n.t("coming_soon_message"), comingSoonTitle))
         }
+        .alert(updateAlertTitle, isPresented: $showUpdateAlert) {
+            if let url = pendingUpdateStoreURL {
+                Button(L10n.t("settings_check_updates_action_update")) {
+                    UIApplication.shared.open(url)
+                }
+                Button(L10n.t("settings_check_updates_action_later"), role: .cancel) {}
+            } else {
+                Button(L10n.t("ok"), role: .cancel) {}
+            }
+        } message: {
+            Text(updateAlertMessage)
+        }
         .alert(L10n.t("prompt"), isPresented: $showAccountMessage) {
             Button(L10n.t("ok"), role: .cancel) {}
         } message: {
@@ -433,6 +547,17 @@ struct SettingsView: View {
         .task {
             await refreshAccountIfPossible()
             await refreshICloudAvailability()
+        }
+        .onChange(of: sessionStore.sessionRefreshVersion) { _, _ in
+            didLoadAccountProfile = false
+            if sessionStore.isLoggedIn {
+                Task { await refreshAccountIfPossible(force: true) }
+            } else {
+                displayNameDraft = ""
+                displayNameInput = ""
+                exclusiveIDDraft = ""
+                accountEmail = ""
+            }
         }
         .sheet(isPresented: $showDisplayNameEditor) {
             displayNameEditorSheet
@@ -885,7 +1010,7 @@ struct SettingsView: View {
                                         .scaledToFit()
                                         .frame(width: 220, height: 220)
                                         .padding(10)
-                                        .background(Color.white)
+                                        .background(FigmaTheme.card)
                                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                                     Spacer()
                                 }
@@ -1282,11 +1407,12 @@ struct SettingsView: View {
                             icon: row.icon,
                             iconColor: row.iconColor,
                             badgeText: row.badgeText,
+                            isLoading: row.destination == .checkUpdates && isCheckingForUpdate,
                             rowHeight: row.rowHeight
                         ) {
                             switch row.destination {
                             case .checkUpdates:
-                                showPlaceholder(L10n.t("settings_check_updates_placeholder"))
+                                performUpdateCheck()
                             case .privacyPolicy:
                                 if let url = URL(string: "https://cyberoff00.github.io/streetstamp/privacy-policy.html") {
                                     UIApplication.shared.open(url)
@@ -1582,7 +1708,7 @@ struct SettingsView: View {
                     .frame(width: 56, height: 32)
 
                 Circle()
-                    .fill(Color.white)
+                    .fill(FigmaTheme.card)
                     .frame(width: 24, height: 24)
                     .padding(.horizontal, 4)
                     .shadow(color: Color.black.opacity(0.15), radius: 4, x: 0, y: 2)
@@ -1697,9 +1823,38 @@ struct SettingsView: View {
     }
 
     private func openAppStoreRating() {
-        // TODO: replace APP_ID with actual App Store ID
-        if let url = URL(string: "itms-apps://itunes.apple.com/app/idAPP_ID?action=write-review") {
+        if let url = AppUpdateChecker.appStoreReviewURL {
             UIApplication.shared.open(url)
+        }
+    }
+
+    private func performUpdateCheck() {
+        guard !isCheckingForUpdate else { return }
+        isCheckingForUpdate = true
+        Task {
+            let result = await AppUpdateChecker.check()
+            await MainActor.run {
+                isCheckingForUpdate = false
+                switch result {
+                case .upToDate:
+                    updateAlertTitle = L10n.t("settings_check_updates_up_to_date_title")
+                    updateAlertMessage = String(format: L10n.t("settings_check_updates_up_to_date_message"), AppUpdateChecker.currentVersion)
+                    pendingUpdateStoreURL = nil
+                case .updateAvailable(let latestVersion, let releaseNotes, let url):
+                    updateAlertTitle = L10n.t("settings_check_updates_available_title")
+                    if let notes = releaseNotes, !notes.isEmpty {
+                        updateAlertMessage = String(format: L10n.t("settings_check_updates_available_message_with_notes"), latestVersion, notes)
+                    } else {
+                        updateAlertMessage = String(format: L10n.t("settings_check_updates_available_message"), latestVersion)
+                    }
+                    pendingUpdateStoreURL = url
+                case .unavailable:
+                    updateAlertTitle = L10n.t("settings_check_updates_failed_title")
+                    updateAlertMessage = L10n.t("settings_check_updates_failed_message")
+                    pendingUpdateStoreURL = nil
+                }
+                showUpdateAlert = true
+            }
         }
     }
 

@@ -221,15 +221,17 @@ final class LocationHub: ObservableObject {
         geocodeInFlight = true
 
         geocoder.reverseGeocodeLocation(loc) { [weak self] placemarks, _ in
-            guard let self else { return }
-            self.geocodeInFlight = false
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.geocodeInFlight = false
 
-            guard let pm = placemarks?.first else { return }
-            guard let iso = pm.isoCountryCode?.uppercased(), !iso.isEmpty else { return }
+                guard let pm = placemarks?.first else { return }
+                guard let iso = pm.isoCountryCode?.uppercased(), !iso.isEmpty else { return }
 
-            self.lastGeocodeAt = now
-            self.lastGeocodedRegionKey = key
-            self.applyAuthoritativeCountryISO2(iso)
+                self.lastGeocodeAt = now
+                self.lastGeocodedRegionKey = key
+                self.applyAuthoritativeCountryISO2(iso)
+            }
         }
     }
 
@@ -317,13 +319,16 @@ final class LocationHub: ObservableObject {
     }
 
     /// Battery-friendly passive Lifelog recording (only used when no active journey is running).
-    func startPassiveLifelog() {
+    /// `initialState` controls the starting accuracy profile. Pass `.moving` when
+    /// passive is taking over right after active tracking ended so the first minutes
+    /// keep continuity instead of dropping to a coarse stationary profile.
+    func startPassiveLifelog(initialState: PassiveLocationState = .stationary) {
         #if DEBUG
         if mode == .mock { return }
         #endif
 
         if current === systemSource {
-            systemSource.startPassiveLifelog()
+            systemSource.startPassiveLifelog(initialState: initialState)
         } else {
             current.start()
         }

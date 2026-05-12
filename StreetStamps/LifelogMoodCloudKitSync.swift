@@ -34,10 +34,17 @@ actor LifelogMoodCloudKitSync {
         try await cloudKitSaveRecord(record, in: database)
     }
 
-    func uploadMoods(_ moods: [String: String]) async throws {
+    func uploadMoods(_ moods: [String: String]) async -> Set<String> {
+        var uploaded = Set<String>()
         for (dayKey, mood) in moods {
-            try await uploadMood(dayKey: dayKey, mood: mood)
+            do {
+                try await uploadMood(dayKey: dayKey, mood: mood)
+                uploaded.insert(dayKey)
+            } catch {
+                print("☁️ skipped lifelog mood \(dayKey):", error)
+            }
         }
+        return uploaded
     }
 
     func downloadSnapshots(modifiedAfter: Date? = nil) async throws -> [LifelogMoodCloudSnapshot] {

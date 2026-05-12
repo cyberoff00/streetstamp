@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 // =======================================================
 // MARK: - Film Camera Drop Manager
@@ -35,6 +36,7 @@ final class FilmCameraDropManager: ObservableObject {
         var presets: [CameraPreset] = [.plain]
         if isUnlockedForCurrentUser(defaults: defaults) {
             presets.append(.fujiCCD)
+            presets.append(.photobooth)
         }
         return presets
     }

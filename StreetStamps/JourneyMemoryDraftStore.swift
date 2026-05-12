@@ -12,14 +12,16 @@ struct JourneyMemoryDetailDraft: Codable, Equatable {
     var memories: [JourneyMemory]
     var focusedMemoryID: String?
     var journeyTitle: String
+    var activityTag: String
     var overallMemory: String
     var overallMemoryImagePaths: [String]
     var overallMemoryRemoteImageURLs: [String]
 
-    init(memories: [JourneyMemory], focusedMemoryID: String?, journeyTitle: String, overallMemory: String, overallMemoryImagePaths: [String], overallMemoryRemoteImageURLs: [String] = []) {
+    init(memories: [JourneyMemory], focusedMemoryID: String?, journeyTitle: String, activityTag: String = "", overallMemory: String, overallMemoryImagePaths: [String], overallMemoryRemoteImageURLs: [String] = []) {
         self.memories = memories
         self.focusedMemoryID = focusedMemoryID
         self.journeyTitle = journeyTitle
+        self.activityTag = activityTag
         self.overallMemory = overallMemory
         self.overallMemoryImagePaths = overallMemoryImagePaths
         self.overallMemoryRemoteImageURLs = overallMemoryRemoteImageURLs
@@ -30,6 +32,7 @@ struct JourneyMemoryDetailDraft: Codable, Equatable {
         memories = try container.decode([JourneyMemory].self, forKey: .memories)
         focusedMemoryID = try container.decodeIfPresent(String.self, forKey: .focusedMemoryID)
         journeyTitle = try container.decode(String.self, forKey: .journeyTitle)
+        activityTag = try container.decodeIfPresent(String.self, forKey: .activityTag) ?? ""
         overallMemory = try container.decode(String.self, forKey: .overallMemory)
         overallMemoryImagePaths = try container.decode([String].self, forKey: .overallMemoryImagePaths)
         overallMemoryRemoteImageURLs = try container.decodeIfPresent([String].self, forKey: .overallMemoryRemoteImageURLs) ?? []

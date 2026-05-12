@@ -121,14 +121,14 @@ struct AboutUsView: View {
 
     private var asideSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("话外")
+            Text(L10n.t("about_us_aside_header"))
                 .font(.system(size: 16, weight: .medium))
                 .foregroundColor(UITheme.softBlack)
 
             ForEach(Array(AboutUsContent.sections.dropFirst(2).enumerated()), id: \.offset) { _, section in
                 VStack(alignment: .leading, spacing: 10) {
                     if !section.title.isEmpty {
-                        Text(section.title)
+                        Text(localizedSectionTitle(for: section.title))
                             .font(.system(size: 16, weight: .regular))
                             .foregroundColor(Color(red: 0.26, green: 0.30, blue: 0.35))
                             .padding(.top, section.title == "旅行者的需求" ? 6 : 0)
@@ -138,6 +138,14 @@ struct AboutUsView: View {
                 }
                 .padding(.bottom, 14)
             }
+        }
+    }
+
+    private func localizedSectionTitle(for identity: String) -> String {
+        switch identity {
+        case "旅行者的需求": return L10n.t("about_us_traveler_needs")
+        case "赛博遛狗的故事": return L10n.t("about_us_cyber_dog_title")
+        default: return identity
         }
     }
 

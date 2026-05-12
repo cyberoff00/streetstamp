@@ -67,6 +67,11 @@ struct RobotLoadout: Codable, Equatable, Hashable {
     var hairColorHex: String = defaultHairColorHex
     var bodyColorHex: String = defaultBodyColorHex
 
+    // Last user-initiated mutation timestamp. Used by CloudKit restore to decide
+    // whether the cloud copy is newer than the local one. nil for legacy data
+    // saved before this field existed.
+    var modifiedAt: Date? = nil
+
     enum CodingKeys: String, CodingKey {
         case bodyId
         case headId
@@ -84,6 +89,7 @@ struct RobotLoadout: Codable, Equatable, Hashable {
         case expressionId
         case hairColorHex
         case bodyColorHex
+        case modifiedAt
     }
 
     init(
@@ -146,6 +152,7 @@ struct RobotLoadout: Codable, Equatable, Hashable {
         expressionId = try c.decodeIfPresent(String.self, forKey: .expressionId) ?? "expr_0001"
         hairColorHex = try c.decodeIfPresent(String.self, forKey: .hairColorHex) ?? Self.defaultHairColorHex
         bodyColorHex = try c.decodeIfPresent(String.self, forKey: .bodyColorHex) ?? Self.defaultBodyColorHex
+        modifiedAt = try c.decodeIfPresent(Date.self, forKey: .modifiedAt)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -166,6 +173,7 @@ struct RobotLoadout: Codable, Equatable, Hashable {
         try c.encode(expressionId, forKey: .expressionId)
         try c.encode(hairColorHex, forKey: .hairColorHex)
         try c.encode(bodyColorHex, forKey: .bodyColorHex)
+        try c.encodeIfPresent(modifiedAt, forKey: .modifiedAt)
     }
 
     static var defaultBoy: RobotLoadout {

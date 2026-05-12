@@ -10,6 +10,7 @@
 
 import Foundation
 import SwiftUI
+import Combine
 
 // MARK: - Catalog Models
 

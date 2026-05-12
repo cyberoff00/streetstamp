@@ -71,12 +71,7 @@ struct UnifiedTabPageHeader<Leading: View, Trailing: View>: View {
         .padding(.horizontal, horizontalPadding)
         .padding(.top, topPadding)
         .padding(.bottom, bottomPadding)
-        .background(FigmaTheme.card.opacity(0.92))
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(FigmaTheme.border)
-                .frame(height: 1)
-        }
+        .background(FigmaTheme.background)
     }
 }
 

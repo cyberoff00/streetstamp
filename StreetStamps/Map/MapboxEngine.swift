@@ -245,12 +245,12 @@ struct MapboxEngineView: UIViewRepresentable {
             }
         }
 
-        static func altitudeToZoom(_ altitude: CLLocationDistance, latitude: Double = 0) -> CGFloat {
+        nonisolated static func altitudeToZoom(_ altitude: CLLocationDistance, latitude: Double = 0) -> CGFloat {
             let C = 591657550.5 * cos(latitude * .pi / 180)
             return CGFloat(log2(C / max(1, altitude)))
         }
 
-        static func zoomToAltitude(_ zoom: CGFloat, latitude: Double = 0) -> CLLocationDistance {
+        nonisolated static func zoomToAltitude(_ zoom: CGFloat, latitude: Double = 0) -> CLLocationDistance {
             let C = 591657550.5 * cos(latitude * .pi / 180)
             return C / pow(2, Double(zoom))
         }
@@ -330,21 +330,20 @@ struct MapboxEngineView: UIViewRepresentable {
             }
         }
 
-        /// Find a layer position that places our overlays above 3D building
-        /// extrusions. Mapbox styles render fill-extrusion layers above
-        /// regular line layers, so without explicit positioning a route can
-        /// disappear behind 3D buildings at street zoom. Falls back to the
-        /// default top-of-stack position when no building layer is found.
+        /// Find a layer position that places our overlays above every 3D
+        /// building extrusion in the active style. Different Mapbox styles
+        /// (Standard, Streets, Outdoors, etc.) use different ids for their
+        /// extrusion layers, so an id-whitelist misses many cases and the
+        /// route ends up occluded by building tops. Walking the layer list
+        /// by *type* is style-agnostic. `allLayerIdentifiers` returns layers
+        /// in render order (bottom→top), so taking the last fill-extrusion
+        /// guarantees our anchor is above every extrusion in the stack.
+        /// Returns nil only when no extrusion exists — callers fall back to
+        /// `.default` (top of stack) which is also occlusion-free.
         private func aboveBuildingsPosition(_ mapboxMap: MapboxMap) -> LayerPosition? {
-            let candidates = [
-                "building-extrusion",
-                "3d-buildings",
-                "building-3d",
-                "building",
-                "building-outline"
-            ]
-            for c in candidates where mapboxMap.layerExists(withId: c) {
-                return .above(c)
+            let layers = mapboxMap.allLayerIdentifiers
+            if let topExtrusion = layers.last(where: { $0.type == .fillExtrusion }) {
+                return .above(topExtrusion.id)
             }
             return nil
         }
@@ -497,8 +496,9 @@ struct MapboxEngineView: UIViewRepresentable {
             if segSig != lastSegmentsSignature {
                 lastSegmentsSignature = segSig
                 let fc = buildRoutesFC(segments: ev.segments)
-                guard mapboxMap.sourceExists(withId: ev.routeSourceId) else { return }
-                mapboxMap.updateGeoJSONSource(withId: ev.routeSourceId, geoJSON: .featureCollection(fc))
+                if mapboxMap.sourceExists(withId: ev.routeSourceId) {
+                    mapboxMap.updateGeoJSONSource(withId: ev.routeSourceId, geoJSON: .featureCollection(fc))
+                }
             }
 
             if mapboxMap.sourceExists(withId: ev.tailSourceId) {

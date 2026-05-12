@@ -527,8 +527,21 @@ enum CityDeepRenderEngine {
         boundaryRegion: MKCoordinateRegion,
         journeyCoordsForMap: [CLLocationCoordinate2D]
     ) -> MKCoordinateRegion {
-        guard let journeyRegion = regionByFitting(journeyCoordsForMap), !journeyCoordsForMap.isEmpty else {
-            return boundaryRegion
+        // Photo-discovered cities reach this with `journeyCoordsForMap = [anchor]`
+        // — focusedJourneyCoords substitutes the anchor when no real journey
+        // points exist. A single point doesn't define a meaningful region, and
+        // CityBoundaryService can return a sub-locality polygon (e.g. a single
+        // neighborhood inside Shangrao) that produces a 4km box for a city that
+        // should fit in 20km. Treat <2 coords as "no journey constraint" and
+        // clamp the span up to a sensible city-level minimum.
+        guard let journeyRegion = regionByFitting(journeyCoordsForMap),
+              journeyCoordsForMap.count >= 2 else {
+            let minPhotoSpan: CLLocationDegrees = 0.18
+            let span = MKCoordinateSpan(
+                latitudeDelta: max(boundaryRegion.span.latitudeDelta, minPhotoSpan),
+                longitudeDelta: max(boundaryRegion.span.longitudeDelta, minPhotoSpan)
+            )
+            return MKCoordinateRegion(center: boundaryRegion.center, span: span)
         }
         let minZoomSpan: CLLocationDegrees = 0.04
         let targetSpan = MKCoordinateSpan(

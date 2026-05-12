@@ -62,6 +62,9 @@ struct PopSharingCard: View {
     @State private var overallMemory: String = ""
     @State private var overallMemoryImagePaths: [String] = []
     @State private var hideMapDetails = false
+    @State private var routeRenderStyle: RouteRenderStyle = .line
+    @ObservedObject private var membership = MembershipStore.shared
+    @AppStorage(MapLayerStyle.storageKey) private var sharingCardLayerStyleRaw = MapLayerStyle.current.rawValue
     @State private var privacyEnabled = false
     @State private var privacyTrimEndpoints = true
     @State private var privacyHideLandmarks = true
@@ -69,7 +72,10 @@ struct PopSharingCard: View {
     @State private var showVisibilityRestrictionAlert = false
     @State private var visibilityRestrictionMessage = ""
     private var canRenderCard: Bool { journey.coordinates.count >= 1 && !journey.isTooShort }
-    private let activityPresets: [String] = ["通勤", "跑步", "旅游", "散步", "骑行", "驾车", "地铁", "登山"]
+    private let activityPresetKeys: [String] = [
+        "activity_tag_commute", "activity_tag_running", "activity_tag_travel", "activity_tag_walking",
+        "activity_tag_cycling", "activity_tag_driving", "activity_tag_subway", "activity_tag_hiking"
+    ]
     private var maxOverallMemoryPhotos: Int { MembershipStore.shared.maxPhotosPerMemory }
 
     private var cachedCitiesByKey: [String: CachedCity] {
@@ -119,7 +125,7 @@ struct PopSharingCard: View {
                     mode: mode,
                     onComplete: { edited in
                         activePhotoFlow = nil
-                        appendOverallMemoryPhotos(edited, writesToPhotoLibrary: false)
+                        appendOverallMemoryPhotos(edited, writesToPhotoLibrary: mode.isCamera)
                     },
                     onCancel: {
                         activePhotoFlow = nil
@@ -155,6 +161,7 @@ struct PopSharingCard: View {
                 overallMemory = journey.overallMemory ?? ""
                 overallMemoryImagePaths = journey.overallMemoryImagePaths
                 hideMapDetails = (privacyMode == .hidden)
+                routeRenderStyle = journey.routeRenderStyle ?? .line
                 if finalCardImage == nil && canRenderCard {
                     finalCardImage = placeholderCard()
                     resolveTitleIfNeeded {
@@ -290,19 +297,39 @@ struct PopSharingCard: View {
                         .frame(maxHeight: 500)
                         .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
 
-                    Button {
-                        hideMapDetails.toggle()
-                        privacyMode = hideMapDetails ? .hidden : .exact
-                        guard canRenderCard else { return }
-                        generateShareCard()
-                    } label: {
-                        Image(systemName: hideMapDetails ? "eye.slash" : "eye")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.white)
-                            .frame(width: 36, height: 36)
-                            .background(Color.black.opacity(0.28))
-                            .clipShape(Circle())
-                            .appMinTapTarget()
+                    HStack(spacing: 8) {
+                        if isRouteStyleToggleAvailable {
+                            Button {
+                                let next: RouteRenderStyle = (routeRenderStyle == .dots) ? .line : .dots
+                                routeRenderStyle = next
+                                persistRouteRenderStyle(next)
+                                guard canRenderCard else { return }
+                                generateShareCard()
+                            } label: {
+                                Image(systemName: routeRenderStyle == .dots ? "circle.grid.2x2.fill" : "scribble.variable")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .frame(width: 36, height: 36)
+                                    .background(Color.black.opacity(0.28))
+                                    .clipShape(Circle())
+                                    .appMinTapTarget()
+                            }
+                        }
+
+                        Button {
+                            hideMapDetails.toggle()
+                            privacyMode = hideMapDetails ? .hidden : .exact
+                            guard canRenderCard else { return }
+                            generateShareCard()
+                        } label: {
+                            Image(systemName: hideMapDetails ? "eye.slash" : "eye")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(width: 36, height: 36)
+                                .background(Color.black.opacity(0.28))
+                                .clipShape(Circle())
+                                .appMinTapTarget()
+                        }
                     }
                     .padding(10)
 
@@ -379,7 +406,8 @@ struct PopSharingCard: View {
                         .textInputAutocapitalization(.never)
 
                     Menu {
-                        ForEach(activityPresets, id: \.self) { item in
+                        ForEach(activityPresetKeys, id: \.self) { key in
+                            let item = L10n.t(key)
                             Button(item) {
                                 activityTag = item
                             }
@@ -636,12 +664,19 @@ struct PopSharingCard: View {
     }
 
     private func visibilityDecision(for target: JourneyVisibility) -> JourneyVisibilityPolicy.Decision {
-        JourneyVisibilityPolicy.evaluateChange(
+        // Use the in-editor draft so adding an overall memory here unlocks the
+        // friends toggle immediately, before the user saves.
+        let draftHasOverallMemory =
+            !overallMemory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !overallMemoryImagePaths.isEmpty
+            || !journey.overallMemoryRemoteImageURLs.isEmpty
+        let hasMemory = !journey.memories.isEmpty || draftHasOverallMemory
+        return JourneyVisibilityPolicy.evaluateChange(
             current: selectedVisibility,
             target: target,
             isLoggedIn: sessionStore.isLoggedIn,
             journeyDistance: journey.distance,
-            memoryCount: journey.memories.count
+            hasMemory: hasMemory
         )
     }
 
@@ -679,6 +714,24 @@ struct PopSharingCard: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
             withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { showSavedToast = false }
         }
+    }
+
+    /// Pixel/dot route style is premium-only AND requires a Mapbox map style —
+    /// dots aren't rendered on the MapKit pipeline (toggle would be a no-op).
+    private var isRouteStyleToggleAvailable: Bool {
+        guard membership.isPremium else { return false }
+        let layer = MapLayerStyle(rawValue: sharingCardLayerStyleRaw) ?? .mutedDark
+        return layer.engine == .mapbox
+    }
+
+    /// Save the chosen render style onto the journey so JourneyRouteDetailView
+    /// renders consistently and re-opening the share card preserves the choice.
+    private func persistRouteRenderStyle(_ style: RouteRenderStyle) {
+        guard let idx = store.journeys.firstIndex(where: { $0.id == journey.id }) else { return }
+        var updated = store.journeys[idx]
+        updated.routeRenderStyle = style
+        store.upsertSnapshotThrottled(updated, coordCount: updated.coordinates.count)
+        store.flushPersist(journey: updated)
     }
 
     // MARK: - Generate card
@@ -729,6 +782,7 @@ struct PopSharingCard: View {
             privacy: privacy
             , countryISO2: journey.countryISO2
             , cityKey: journey.cityKey
+            , renderStyle: routeRenderStyle
         ) { img in
             withAnimation(.easeIn(duration: 0.15)) {
                 self.generatingProgress = 1.0
@@ -744,31 +798,23 @@ struct PopSharingCard: View {
 
         guard !safe.isEmpty else { done(); return }
 
-        // Use end location to resolve city name for title (localized)
-        if let last = safe.last {
-            let endLoc = CLLocation(latitude: last.latitude, longitude: last.longitude)
+        if safe.last != nil {
             let key = journey.cityKey
-            let parentRegionKey = JourneyCityNamePresentation.parentRegionKey(
+            _ = JourneyCityNamePresentation.parentRegionKey(
                 for: journey,
                 cachedCitiesByKey: cachedCitiesByKey
             )
 
-            Task {
-                let level = cachedCitiesByKey[key]?.identityLevel
-                    ?? CityPlacemarkResolver.inferIdentityLevel(cityKey: key, iso2: journey.countryISO2)
-                if let title = await CityNameTranslationCache.shared.translate(
-                    cityKey: key,
-                    anchor: endLoc.coordinate,
-                    level: level,
-                    locale: LanguagePreference.shared.displayLocale
-                ) {
-                    let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !t.isEmpty {
-                        await MainActor.run { self.resolvedTitle = t }
-                    }
+            if let title = CNCityNameLookup.shared.displayName(
+                for: key,
+                locale: LanguagePreference.shared.displayLocale
+            ) {
+                let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !t.isEmpty {
+                    self.resolvedTitle = t
                 }
-                await MainActor.run { done() }
             }
+            done()
             return
         }
 
@@ -785,6 +831,7 @@ struct PopSharingCard: View {
         privacy: ShareMapPrivacyMode,
        countryISO2: String?,
       cityKey: String?,
+        renderStyle: RouteRenderStyle = .line,
         completion: @escaping (UIImage) -> Void
     ) {
         makeMapSnapshotWithRoute(
@@ -792,43 +839,30 @@ struct PopSharingCard: View {
             fallbackCenter: fallbackCenter,
             privacy: privacy,
                countryISO2: countryISO2,
-            cityKey: cityKey
+            cityKey: cityKey,
+            renderStyle: renderStyle
         ) { mapImage in
 
             let canvasSize = CGSize(width: 900, height: 1200)
 
             let img = UIGraphicsImageRenderer(size: canvasSize).image { _ in
-                let bgColor = UIColor.white
                 let cardFill = UIColor(white: 0.985, alpha: 1)
                 let textPrimary = UIColor.white.withAlphaComponent(0.98)
                 let textSecondary = UIColor.white.withAlphaComponent(0.72)
 
-                let outerMargin: CGFloat = 34
                 let cardRadius: CGFloat = 34
                 let statsHeight: CGFloat = 188
                 let inset: CGFloat = 18
                 let dividerWidth: CGFloat = 1.5
 
-                bgColor.setFill()
-                UIBezierPath(rect: CGRect(origin: .zero, size: canvasSize)).fill()
-
-                let cardRect = CGRect(
-                    x: outerMargin,
-                    y: outerMargin,
-                    width: canvasSize.width - outerMargin * 2,
-                    height: canvasSize.height - outerMargin * 2
-                )
-
+                // Card now fills the entire canvas — outer corners stay transparent
+                // (rounded clip below) so receiving apps composite cleanly.
+                let cardRect = CGRect(origin: .zero, size: canvasSize)
                 let ctx = UIGraphicsGetCurrentContext()
-                ctx?.saveGState()
-                ctx?.setShadow(offset: .zero, blur: 18, color: UIColor.black.withAlphaComponent(0.12).cgColor)
-                cardFill.setFill()
-                UIBezierPath(roundedRect: cardRect, cornerRadius: cardRadius).fill()
-                ctx?.restoreGState()
 
                 UIBezierPath(roundedRect: cardRect, cornerRadius: cardRadius).addClip()
                 cardFill.setFill()
-                UIBezierPath(rect: CGRect(origin: .zero, size: canvasSize)).fill()
+                UIBezierPath(rect: cardRect).fill()
 
                 let mapRect = CGRect(
                     x: cardRect.minX + inset,
@@ -929,11 +963,6 @@ struct PopSharingCard: View {
                 drawValueAndLabel(value: String(format: "%.2f", max(0, distanceKm)), label: L10n.t("share_stat_distance"), cell: leftCell)
                 drawValueAndLabel(value: durationText, label: L10n.t("share_stat_time"), cell: midCell)
                 drawValueAndLabel(value: "\(memoryCount)", label: L10n.t("share_stat_memory"), cell: rightCell)
-
-                UIColor.black.withAlphaComponent(0.06).setStroke()
-                let innerStroke = UIBezierPath(roundedRect: cardRect.insetBy(dx: 1, dy: 1), cornerRadius: cardRadius)
-                innerStroke.lineWidth = 2
-                innerStroke.stroke()
             }
 
             DispatchQueue.main.async { completion(img) }
@@ -947,6 +976,7 @@ struct PopSharingCard: View {
         privacy: ShareMapPrivacyMode,
        countryISO2: String?,
       cityKey: String?,
+        renderStyle: RouteRenderStyle = .line,
         completion: @escaping (UIImage) -> Void
     ) {
         let snapshotSize = CGSize(width: 900, height: 1200)
@@ -979,7 +1009,8 @@ struct PopSharingCard: View {
                     privacy: privacy,
                     drawRobot: true,
                     countryISO2: countryISO2,
-                    cityKey: cityKey
+                    cityKey: cityKey,
+                    renderStyle: renderStyle
                 ) ?? (UIImage(systemName: "map") ?? UIImage())
                 DispatchQueue.main.async { completion(img) }
             }
@@ -1204,6 +1235,7 @@ struct ShareCardGenerator {
                 countryISO2: journey.countryISO2,
                 cityKey: journey.cityKey,
                 hideLandmarks: applyJourneyPrivacy && journey.shouldHideLandmarks,
+                renderStyle: journey.routeRenderStyle ?? .line,
                 completion: completion
             )
         }
@@ -1254,26 +1286,19 @@ struct ShareCardGenerator {
     ) {
         guard !coords.isEmpty else { done(nil); return }
 
-        if let last = coords.last {
-            let endLoc = CLLocation(latitude: last.latitude, longitude: last.longitude)
+        if coords.last != nil {
             let key = journey.cityKey
-            let parentRegionKey = JourneyCityNamePresentation.parentRegionKey(
+            _ = JourneyCityNamePresentation.parentRegionKey(
                 for: journey,
                 cachedCitiesByKey: cachedCitiesByKey
             )
 
-            Task {
-                let level = cachedCitiesByKey[key]?.identityLevel
-                    ?? CityPlacemarkResolver.inferIdentityLevel(cityKey: key, iso2: journey.countryISO2)
-                let title = await CityNameTranslationCache.shared.translate(
-                    cityKey: key,
-                    anchor: endLoc.coordinate,
-                    level: level,
-                    locale: LanguagePreference.shared.displayLocale
-                )
-                let t = title?.trimmingCharacters(in: .whitespacesAndNewlines)
-                await MainActor.run { done((t?.isEmpty ?? true) ? nil : t) }
-            }
+            let title = CNCityNameLookup.shared.displayName(
+                for: key,
+                locale: LanguagePreference.shared.displayLocale
+            )
+            let t = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+            done((t?.isEmpty ?? true) ? nil : t)
             return
         }
 
@@ -1291,6 +1316,7 @@ struct ShareCardGenerator {
         countryISO2: String?,
         cityKey: String?,
         hideLandmarks: Bool = false,
+        renderStyle: RouteRenderStyle = .line,
         completion: @escaping (UIImage) -> Void
     ) {
         makeMapSnapshotWithRoute(
@@ -1299,43 +1325,30 @@ struct ShareCardGenerator {
             privacy: privacy,
             countryISO2: countryISO2,
             cityKey: cityKey,
-            hideLandmarks: hideLandmarks
+            hideLandmarks: hideLandmarks,
+            renderStyle: renderStyle
         ) { mapImage in
 
             let canvasSize = CGSize(width: 900, height: 1200)
 
             let img = UIGraphicsImageRenderer(size: canvasSize).image { _ in
-                let bgColor = UIColor.white
                 let cardFill = UIColor(white: 0.985, alpha: 1)
                 let textPrimary = UIColor.white.withAlphaComponent(0.98)
                 let textSecondary = UIColor.white.withAlphaComponent(0.72)
 
-                let outerMargin: CGFloat = 34
                 let cardRadius: CGFloat = 34
                 let statsHeight: CGFloat = 188
                 let inset: CGFloat = 18
                 let dividerWidth: CGFloat = 1.5
 
-                bgColor.setFill()
-                UIBezierPath(rect: CGRect(origin: .zero, size: canvasSize)).fill()
-
-                let cardRect = CGRect(
-                    x: outerMargin,
-                    y: outerMargin,
-                    width: canvasSize.width - outerMargin * 2,
-                    height: canvasSize.height - outerMargin * 2
-                )
-
+                // Card now fills the entire canvas — outer corners stay transparent
+                // (rounded clip below) so receiving apps composite cleanly.
+                let cardRect = CGRect(origin: .zero, size: canvasSize)
                 let ctx = UIGraphicsGetCurrentContext()
-                ctx?.saveGState()
-                ctx?.setShadow(offset: .zero, blur: 18, color: UIColor.black.withAlphaComponent(0.12).cgColor)
-                cardFill.setFill()
-                UIBezierPath(roundedRect: cardRect, cornerRadius: cardRadius).fill()
-                ctx?.restoreGState()
 
                 UIBezierPath(roundedRect: cardRect, cornerRadius: cardRadius).addClip()
                 cardFill.setFill()
-                UIBezierPath(rect: CGRect(origin: .zero, size: canvasSize)).fill()
+                UIBezierPath(rect: cardRect).fill()
 
                 let mapRect = CGRect(
                     x: cardRect.minX + inset,
@@ -1433,11 +1446,6 @@ struct ShareCardGenerator {
                 drawValueAndLabel(value: String(format: "%.2f", max(0, distanceKm)), label: L10n.t("share_stat_distance"), cell: leftCell)
                 drawValueAndLabel(value: durationText, label: L10n.t("share_stat_time"), cell: midCell)
                 drawValueAndLabel(value: "\(memoryCount)", label: L10n.t("share_stat_memory"), cell: rightCell)
-
-                UIColor.black.withAlphaComponent(0.06).setStroke()
-                let innerStroke = UIBezierPath(roundedRect: cardRect.insetBy(dx: 1, dy: 1), cornerRadius: cardRadius)
-                innerStroke.lineWidth = 2
-                innerStroke.stroke()
             }
 
             DispatchQueue.main.async { completion(img) }
@@ -1454,6 +1462,7 @@ struct ShareCardGenerator {
         snapshotSize: CGSize = CGSize(width: 900, height: 1200),
         drawRobot: Bool = true,
         hideLandmarks: Bool = false,
+        renderStyle: RouteRenderStyle = .line,
         completion: @escaping (UIImage) -> Void
     ) {
         let scale: CGFloat = 2
@@ -1484,7 +1493,8 @@ struct ShareCardGenerator {
                     drawRobot: drawRobot,
                     countryISO2: countryISO2,
                     cityKey: cityKey,
-                    hideLandmarks: hideLandmarks
+                    hideLandmarks: hideLandmarks,
+                    renderStyle: renderStyle
                 ) ?? (UIImage(systemName: "map") ?? UIImage())
                 DispatchQueue.main.async { completion(img) }
             }
@@ -1628,7 +1638,8 @@ struct ShareCardGenerator {
         drawRobot: Bool,
         countryISO2: String?,
         cityKey: String?,
-        hideLandmarks: Bool = false
+        hideLandmarks: Bool = false,
+        renderStyle: RouteRenderStyle = .line
     ) async -> UIImage? {
         let shouldBlurBase = (privacy == .hidden) || hideLandmarks
         // Build segments in WGS84 for Mapbox — no coordinate adaptation.
@@ -1669,9 +1680,24 @@ struct ShareCardGenerator {
                 snapshotter.onNext(event: .styleLoaded) { [snapshotter] _ in
                     print("[SharingCard] ▶ styleLoaded fired, adding layers")
 
-                    // When blurring, skip adding route layers to the style —
-                    // routes will be drawn via CoreGraphics AFTER blurring the base map.
-                    if !shouldBlurBase {
+                    // Anchor route layers above every fill-extrusion in the loaded
+                    // style. Without this, default top-of-stack insertion is sometimes
+                    // not enough — extrusions in custom Studio styles can re-order
+                    // and end up occluding the route. Style-agnostic.
+                    let buildingsAnchor: LayerPosition? = {
+                        if let topExtrusion = snapshotter.allLayerIdentifiers.last(where: { $0.type == .fillExtrusion }) {
+                            return .above(topExtrusion.id)
+                        }
+                        return nil
+                    }()
+
+                    // Line mode adds the polyline layers to the style. Dots mode
+                    // intentionally adds nothing — the route is rasterized to a
+                    // pixel grid in the overlayHandler (CGContext) instead, since
+                    // no Mapbox vector primitive can produce true stair-stepping
+                    // pixel-art dots. Both branches skip when blurring (the
+                    // overlayHandler then draws the route on the blurred base).
+                    if !shouldBlurBase && renderStyle == .line {
                         let routeSourceId = "share-routes"
                         var src = GeoJSONSource(id: routeSourceId)
                         let feats: [Turf.Feature] = segments.compactMap { seg in
@@ -1691,7 +1717,11 @@ struct ShareCardGenerator {
                         glow.lineOpacity = .constant(isDark ? 0.30 : 0.25)
                         glow.lineWidth = .constant(Double(coreWidth + 6))
                         glow.lineBlur = .constant(5.0)
-                        try? snapshotter.addLayer(glow)
+                        if let anchor = buildingsAnchor {
+                            try? snapshotter.addLayer(glow, layerPosition: anchor)
+                        } else {
+                            try? snapshotter.addLayer(glow)
+                        }
 
                         var main = LineLayer(id: "share-main", source: routeSourceId)
                         main.filter = Exp(.eq) { Exp(.get) { "isGap" }; false }
@@ -1700,7 +1730,7 @@ struct ShareCardGenerator {
                         main.lineJoin = .constant(.round)
                         main.lineOpacity = .constant(1.0)
                         main.lineWidth = .constant(Double(coreWidth))
-                        try? snapshotter.addLayer(main)
+                        try? snapshotter.addLayer(main, layerPosition: .above("share-glow"))
 
                         var dash = LineLayer(id: "share-dash", source: routeSourceId)
                         dash.filter = Exp(.eq) { Exp(.get) { "isGap" }; true }
@@ -1710,7 +1740,7 @@ struct ShareCardGenerator {
                         dash.lineOpacity = .constant(0.5)
                         dash.lineDasharray = .constant([10, 10])
                         dash.lineWidth = .constant(Double(coreWidth) * 0.6)
-                        try? snapshotter.addLayer(dash)
+                        try? snapshotter.addLayer(dash, layerPosition: .above("share-main"))
                     }
 
                     // Camera: fit to route bounds with padding.
@@ -1718,7 +1748,10 @@ struct ShareCardGenerator {
                     snapshotter.setCamera(to: cam)
 
                     // overlayHandler: blur base map + draw routes + robot marker when needed.
-                    let overlayHandler: SnapshotOverlayHandler? = (shouldBlurBase || drawRobot) ? { overlay in
+                    // Dots mode always runs through here (rasterizer needs CGContext);
+                    // Line mode only when blurring (otherwise the LineLayers above handle it).
+                    let needsRouteOverlay = shouldBlurBase || (renderStyle == .dots)
+                    let overlayHandler: SnapshotOverlayHandler? = (needsRouteOverlay || drawRobot) ? { overlay in
                         guard let ctx = UIGraphicsGetCurrentContext() else { return }
 
                         if shouldBlurBase {
@@ -1729,7 +1762,12 @@ struct ShareCardGenerator {
                                 ctx.clear(CGRect(origin: .zero, size: CGSize(width: baseCG.width, height: baseCG.height)))
                                 blurred.draw(in: CGRect(origin: .zero, size: snapshotSize))
                             }
-                            // Draw routes via CoreGraphics on top of the blurred base
+                        }
+
+                        if needsRouteOverlay {
+                            // Draw routes via CoreGraphics. For .dots this routes to the
+                            // grid rasterizer; for .line (only reached when blurring) it
+                            // runs the standard glow/main/highlight stroke.
                             RouteSnapshotDrawer.draw(
                                 segments: segments,
                                 isFlightLike: isFlightLike,
@@ -1738,7 +1776,8 @@ struct ShareCardGenerator {
                                 coreColor: baseColor.withAlphaComponent(isDark ? 0.78 : 1.0),
                                 stroke: .init(coreWidth: coreWidth),
                                 glowColor: glowColor,
-                                isDarkMap: isDark
+                                isDarkMap: isDark,
+                                renderStyle: renderStyle
                             )
                         }
 

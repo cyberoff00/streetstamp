@@ -19,6 +19,7 @@ struct MembershipSubscriptionView: View {
     @State private var selectedProductID: String?
     @State private var productsLoadFinished = false
     @State private var activeInfoKey: String?
+    @State private var showICloudAutoEnableAlert = false
 
     private var sortedProducts: [Product] {
         products.sorted { $0.price < $1.price }
@@ -72,6 +73,47 @@ struct MembershipSubscriptionView: View {
         } message: {
             Text(String(format: L10n.t("membership_welcome_bonus_message"), MembershipTierConfig.premiumWelcomeBonus))
         }
+        .alert(
+            L10n.t("membership_icloud_auto_enabled_title"),
+            isPresented: $showICloudAutoEnableAlert
+        ) {
+            Button(L10n.t("membership_icloud_auto_enabled_ok"), role: .cancel) {
+                membership.pendingICloudAutoEnableNotice = false
+            }
+        } message: {
+            Text(L10n.t("membership_icloud_auto_enabled_message"))
+        }
+        .alert(
+            L10n.t("membership_refund_processed_title"),
+            isPresented: $membership.showRefundProcessedAlert
+        ) {
+            Button(L10n.t("membership_refund_processed_ok"), role: .cancel) {}
+        } message: {
+            Text(L10n.t("membership_refund_processed_message"))
+        }
+        .onAppear { triggerICloudAutoEnableAlertIfPending() }
+        .onChange(of: membership.pendingICloudAutoEnableNotice) { _, pending in
+            if pending { triggerICloudAutoEnableAlertIfPending() }
+        }
+        .onChange(of: membership.showWelcomeBonusAlert) { oldValue, newValue in
+            // Welcome bonus dismissed → defer to next runloop so SwiftUI can
+            // tear down its alert before we present the iCloud one. Stacking
+            // two alerts in the same runloop is unreliable.
+            guard oldValue && !newValue else { return }
+            DispatchQueue.main.async {
+                triggerICloudAutoEnableAlertIfPending()
+            }
+        }
+    }
+
+    /// Show the iCloud-auto-enabled alert if there's a pending notice and no
+    /// welcome-bonus alert currently on screen. Called from .onAppear (for
+    /// re-subscription where no welcome bonus fires), pendingICloudAutoEnableNotice
+    /// changes, and welcome-bonus dismissal.
+    private func triggerICloudAutoEnableAlertIfPending() {
+        guard membership.pendingICloudAutoEnableNotice else { return }
+        guard !membership.showWelcomeBonusAlert else { return }
+        showICloudAutoEnableAlert = true
     }
 
     // MARK: - Header
@@ -428,15 +470,25 @@ struct MembershipSubscriptionView: View {
             .opacity(isPurchasing ? 0.7 : 1.0)
             .padding(.horizontal, 18)
 
-            Button {
-                Task {
-                    try? await AppStore.sync()
-                    await membership.refreshEntitlement()
+            HStack(spacing: 18) {
+                Button {
+                    Task {
+                        try? await membership.restorePurchases()
+                    }
+                } label: {
+                    Text(L10n.t("membership_restore_purchases"))
+                        .font(.system(size: 13))
+                        .foregroundColor(FigmaTheme.subtext)
                 }
-            } label: {
-                Text(L10n.t("membership_restore_purchases"))
-                    .font(.system(size: 13))
-                    .foregroundColor(FigmaTheme.subtext)
+                Button {
+                    Task {
+                        await membership.presentOfferCodeRedemption()
+                    }
+                } label: {
+                    Text(L10n.t("membership_redeem_offer_code"))
+                        .font(.system(size: 13))
+                        .foregroundColor(FigmaTheme.subtext)
+                }
             }
 
             Text(L10n.t("membership_auto_renew_note"))

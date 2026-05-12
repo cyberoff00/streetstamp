@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import UIKit
 import MapKit
 import AVFoundation
@@ -75,7 +76,20 @@ enum FriendFeedLogic {
     static func isJourneyEligible(_ journey: FriendSharedJourney) -> Bool {
         let isVisible = journey.visibility == .public || journey.visibility == .friendsOnly
         guard isVisible else { return false }
-        return journey.distance >= minDistanceMeters || !journey.memories.isEmpty
+        return journey.distance >= minDistanceMeters || hasMemoryContent(journey)
+    }
+
+    // Mirrors `JourneyRoute.hasMemoryContent` so the feed-display gate matches
+    // the publish gate (`JourneyVisibilityPolicy.evaluateChange`). If these
+    // drift, journeys can publish successfully yet never appear in the feed.
+    static func hasMemoryContent(_ journey: FriendSharedJourney) -> Bool {
+        if !journey.memories.isEmpty { return true }
+        if let text = journey.overallMemory,
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return true
+        }
+        if !journey.overallMemoryImageURLs.isEmpty { return true }
+        return false
     }
 
     static func feedTimestamp(for journey: FriendSharedJourney) -> Date {
@@ -389,11 +403,8 @@ struct FriendsHubView: View {
                 tabSwitcher
 
                 TabView(selection: $tab) {
-                    activityContent
-                        .tag(FriendsTopTab.activity)
-
-                    allFriendsContent
-                        .tag(FriendsTopTab.allFriends)
+                    activityContent.tag(FriendsTopTab.activity)
+                    allFriendsContent.tag(FriendsTopTab.allFriends)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
             } else {
@@ -547,6 +558,17 @@ struct FriendsHubView: View {
                 await refreshRemoteFriends(showUnreadToast: false)
             }
         }
+        .onChange(of: sessionStore.sessionRefreshVersion) { _, _ in
+            Task { @MainActor in
+                print("⏱ [FriendsHub] session refresh observed loggedIn=\(sessionStore.isLoggedIn)")
+                didPerformInitialFeedRefresh = false
+                lastFeedRefreshTime = .distantPast
+                pendingFeedRefreshProfiles = nil
+                if sessionStore.isLoggedIn {
+                    await performInitialFeedRefreshIfNeeded()
+                }
+            }
+        }
         .onChange(of: publishStore.status) { _, newStatus in
             if case .success = newStatus {
                 Task { await refreshRemoteFriends(force: true) }
@@ -591,7 +613,7 @@ struct FriendsHubView: View {
                     .foregroundColor(FigmaTheme.text)
                     .frame(maxWidth: .infinity)
                     .frame(height: 40)
-                    .background(Color.white)
+                    .background(FigmaTheme.card)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -802,7 +824,7 @@ struct FriendsHubView: View {
                 }
             }
             .padding(4)
-            .background(Color.white)
+            .background(FigmaTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: 21, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 21, style: .continuous)
@@ -1039,7 +1061,6 @@ struct FriendsHubView: View {
             let t0 = CFAbsoluteTimeGetCurrent()
             let previousFriends = socialStore.friends
             let token = sessionStore.currentAccessToken
-
             retryBanner.beginOperation()
 
             // Fetch friends and own profile in parallel — both are needed for the feed.
@@ -1291,9 +1312,13 @@ struct FriendsHubView: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(item.read ? Color(white: 0.97) : Color.white)
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .shadow(color: Color.black.opacity(0.04), radius: 14, x: 0, y: 5)
+            .background(item.read ? FigmaTheme.mutedBackground : FigmaTheme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.gray.opacity(0.08), lineWidth: 1)
+            )
+            .shadow(color: FigmaTheme.softShadow, radius: 8, x: 0, y: 3)
             .onTapGesture {
                 Task {
                     await notificationStore.markSingleRead(id: item.id, token: sessionStore.currentAccessToken)
@@ -1443,8 +1468,7 @@ private struct FeedActivityListView: View {
                             .scrollTransition(.animated(.spring(response: 0.4, dampingFraction: 0.85))) { content, phase in
                                 content
                                     .opacity(phase.isIdentity ? 1 : 0.3)
-                                    .scaleEffect(phase.isIdentity ? 1 : 0.95)
-                                    .offset(y: phase.isIdentity ? 0 : 20)
+                                    .scaleEffect(phase.isIdentity ? 1 : 0.96)
                             }
                         }
                     }
@@ -2091,6 +2115,7 @@ private struct FriendProfileScreen: View {
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var flow: AppFlowCoordinator
     @EnvironmentObject private var blockStore: UserBlockStore
+    @EnvironmentObject private var postcardCenter: PostcardCenter
 
     let friendID: String
 
@@ -2106,6 +2131,7 @@ private struct FriendProfileScreen: View {
     @State private var isDeletingFriend = false
     @State private var showPostcardComposer = false
     @State private var showPhotoBooth = false
+    @State private var photoBoothSnapshot: FriendProfileSnapshot?
     @State private var activeCollectionPage: FriendCollectionPageDestination?
     @State private var showBlockConfirm = false
     @State private var showReportSheet = false
@@ -2162,25 +2188,28 @@ private struct FriendProfileScreen: View {
         ZStack(alignment: .top) {
             FigmaTheme.background.ignoresSafeArea()
 
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 14) {
-                    friendHeroSection(friend: f, sceneState: sceneState, activeCollectionPage: $activeCollectionPage)
+            VStack(spacing: 0) {
+                friendTopControls
 
+                ScrollView(showsIndicators: false) {
                     VStack(spacing: 14) {
-                        if let displayBio = resolvedBioText(for: f) {
-                            Text(displayBio)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(FigmaTheme.text.opacity(0.68))
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 10)
+                        friendHeroSection(friend: f, sceneState: sceneState, activeCollectionPage: $activeCollectionPage)
+
+                        VStack(spacing: 14) {
+                            if let displayBio = resolvedBioText(for: f) {
+                                Text(displayBio)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(FigmaTheme.text.opacity(0.68))
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal, 10)
+                            }
                         }
+                        .frame(maxWidth: 430)
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 32)
                     }
-                    .frame(maxWidth: 430)
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 32)
                 }
             }
-            .ignoresSafeArea(edges: .top)
         }
         .background(SwipeBackEnabler())
         .navigationBarBackButtonHidden(true)
@@ -2190,9 +2219,6 @@ private struct FriendProfileScreen: View {
         }
         .onDisappear {
             flow.popSidebarButtonHidden(token: sidebarHideToken)
-        }
-        .overlay(alignment: .top) {
-            friendTopControls
         }
         .overlay(alignment: .top) {
             if showStompToast {
@@ -2249,8 +2275,8 @@ private struct FriendProfileScreen: View {
         }
         .fullScreenCover(isPresented: $showPhotoBooth) {
             FriendPhotoBoothView(
-                hostName: (friend ?? fallbackFriend).displayName,
-                hostLoadout: (friend ?? fallbackFriend).loadout,
+                hostName: (photoBoothSnapshot ?? friend ?? fallbackFriend).displayName,
+                hostLoadout: (photoBoothSnapshot ?? friend ?? fallbackFriend).loadout,
                 visitorLoadout: visitorLoadout
             )
         }
@@ -2319,96 +2345,105 @@ private struct FriendProfileScreen: View {
     }
 
     private var friendTopControls: some View {
-        GeometryReader { proxy in
-            HStack {
-                AppBackButton()
+        HStack {
+            AppBackButton()
 
-                Spacer()
+            Spacer()
 
-                if isVisitorSeated && !isViewingOwnFriendProfile {
-                    Button {
-                        showPhotoBooth = true
-                    } label: {
-                        Image(systemName: "camera.fill")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(.white)
-                            .frame(width: 38, height: 38)
-                            .background(
-                                Circle()
-                                    .fill(FigmaTheme.primary)
-                                    .shadow(color: FigmaTheme.primary.opacity(0.35), radius: 8, x: 0, y: 4)
-                            )
-                            .clipShape(Circle())
-                            .appMinTapTarget()
-                    }
-                    .buttonStyle(.plain)
-                    .transition(.scale.combined(with: .opacity))
+            if isVisitorSeated && !isViewingOwnFriendProfile {
+                Button {
+                    photoBoothSnapshot = friend ?? fallbackFriend
+                    showPhotoBooth = true
+                } label: {
+                    Image(systemName: "camera.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(width: 38, height: 38)
+                        .background(
+                            Circle()
+                                .fill(FigmaTheme.primary)
+                                .shadow(color: FigmaTheme.primary.opacity(0.35), radius: 8, x: 0, y: 4)
+                        )
+                        .clipShape(Circle())
+                        .appMinTapTarget()
                 }
-
-                if sessionStore.isLoggedIn && (sessionStore.accountUserID ?? "") != friendID {
-                    Menu {
-                        Button {
-                            showReportSheet = true
-                        } label: {
-                            Label(L10n.t("report_user"), systemImage: "exclamationmark.bubble")
-                        }
-                        Button(role: .destructive) {
-                            showBlockConfirm = true
-                        } label: {
-                            Label(L10n.t("block_user"), systemImage: "hand.raised")
-                        }
-                        Divider()
-                        Button(role: .destructive) {
-                            showDeleteFriendConfirm = true
-                        } label: {
-                            Label(L10n.t("friends_delete_friend"), systemImage: "person.crop.circle.badge.xmark")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundColor(FigmaTheme.text)
-                            .appMinTapTarget()
-                    }
-                    .disabled(isDeletingFriend)
-                } else {
-                    Color.clear
-                        .frame(width: 44, height: 44)
-                }
+                .buttonStyle(.plain)
+                .transition(.scale.combined(with: .opacity))
             }
-            .padding(.horizontal, 18)
-            .padding(.top, FriendProfileLayout.topControlsTopPadding)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+            if sessionStore.isLoggedIn && (sessionStore.accountUserID ?? "") != friendID {
+                Menu {
+                    Button {
+                        showReportSheet = true
+                    } label: {
+                        Label(L10n.t("report_user"), systemImage: "exclamationmark.bubble")
+                    }
+                    Button(role: .destructive) {
+                        showBlockConfirm = true
+                    } label: {
+                        Label(L10n.t("block_user"), systemImage: "hand.raised")
+                    }
+                    Divider()
+                    Button(role: .destructive) {
+                        showDeleteFriendConfirm = true
+                    } label: {
+                        Label(L10n.t("friends_delete_friend"), systemImage: "person.crop.circle.badge.xmark")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(FigmaTheme.text)
+                        .appMinTapTarget()
+                }
+                .disabled(isDeletingFriend)
+            } else {
+                Color.clear
+                    .frame(width: 44, height: 44)
+            }
         }
-        .frame(height: 96)
+        .padding(.horizontal, 18)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
     }
 
     private func friendHeroSection(friend: FriendProfileSnapshot, sceneState: ProfileSceneInteractionState, activeCollectionPage: Binding<FriendCollectionPageDestination?>) -> some View {
-        VStack(spacing: 0) {
-            ProfileHeroTopBackdrop {
-                GeometryReader { _ in
-                    VStack(spacing: 0) {
-                        Spacer(minLength: 72)
-
-                        SofaProfileSceneView(
-                            state: sceneState,
-                            hostLoadout: friend.loadout,
-                            visitorLoadout: visitorLoadout,
-                            welcomeText: L10n.t("friends_welcome"),
-                            postcardPromptText: sceneState.postcardPromptText,
-                            onPostcardPromptTap: sceneState.postcardPromptText == nil ? nil : {
-                                showPostcardComposer = true
-                            },
-                            promptBubbleStyle: .chat
-                        )
-                        .frame(maxWidth: 360)
-                        .padding(.horizontal, 30)
-                        .padding(.top, 0)
-                        .padding(.bottom, 16)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        let inventory = RoomInventory(
+            journeyCount: friend.stats.totalJourneys,
+            cityCount: friend.stats.totalUnlockedCities,
+            countryCount: Set(
+                friend.unlockedCityCards.compactMap { card -> String? in
+                    guard let iso = card.countryISO2?.trimmingCharacters(in: .whitespaces),
+                          !iso.isEmpty else { return nil }
+                    return iso.uppercased()
+                }
+            ).count,
+            postcardCount: postcardCenter.receivedItems.filter { $0.fromUserID == friend.id }.count,
+            levelCount: UserLevelProgress.from(completedJourneyCount: friend.stats.totalJourneys).level
+        )
+        return VStack(spacing: 0) {
+            ProfileHeroTopBackdrop(topCornerRadius: 28) {
+                VStack(spacing: 0) {
+                    SofaProfileSceneView(
+                        state: sceneState,
+                        hostLoadout: friend.loadout,
+                        visitorLoadout: visitorLoadout,
+                        welcomeText: L10n.t("friends_welcome"),
+                        postcardPromptText: sceneState.postcardPromptText,
+                        onPostcardPromptTap: sceneState.postcardPromptText == nil ? nil : {
+                            showPostcardComposer = true
+                        },
+                        promptBubbleStyle: .chat,
+                        inventory: inventory
+                    )
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 6)
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
                 }
             }
-            .frame(height: 376)
+            .frame(height: 268)
+            .frame(maxWidth: 430)
+            .padding(.horizontal, 20)
 
             VStack(spacing: 18) {
                 HStack(alignment: .top, spacing: 16) {
@@ -2855,14 +2890,14 @@ private extension View {
 
     func friendAvatarCardStyle() -> some View {
         self
-            .background(Color.white)
+            .background(FigmaTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
             .shadow(color: Color.black.opacity(0.04), radius: 20, x: 0, y: 8)
     }
 
     func friendFeatureCardStyle() -> some View {
         self
-            .background(Color.white)
+            .background(FigmaTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
             .shadow(color: Color.black.opacity(0.04), radius: 20, x: 0, y: 8)
     }
@@ -2905,6 +2940,7 @@ private final class FriendMirrorContext: ObservableObject {
         try? paths.ensureBaseDirectoriesExist()
         self.journeyStore = JourneyStore(paths: paths)
         self.cityCache = CityCache(paths: paths, journeyStore: journeyStore)
+        self.cityCache.isReadOnlyMirror = true
         self.renderCacheStore = CityRenderCacheStore(rootDir: paths.thumbnailsDir)
     }
 
@@ -3249,7 +3285,7 @@ private struct FriendCollectionScreen: View {
             }
         }
         .padding(4)
-        .background(Color.white)
+        .background(FigmaTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 21, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 21, style: .continuous)
@@ -3261,50 +3297,34 @@ private struct FriendCollectionScreen: View {
     }
 
     private func collectionPager(friend: FriendProfileSnapshot) -> some View {
-        ZStack {
-            if page == .cities {
-                CityStampLibraryView(
-                    autoRebuildFromJourneyStore: false,
-                    showHeader: false,
-                    allowCityDetailNavigation: false,
-                    emptyTitleKey: "friend_city_cards_empty_title",
-                    emptySubtitleKey: "friend_city_cards_empty_subtitle"
-                )
-                .environmentObject(mirror.journeyStore)
-                .environmentObject(mirror.cityCache)
-                .environmentObject(mirror.renderCacheStore)
-                .transition(.move(edge: .leading))
-            } else {
-                JourneyMemoryMainView(
-                    hideLeadingControl: true,
-                    showHeader: false,
-                    readOnly: true,
-                    emptyTitleKey: "friend_memories_empty_title",
-                    emptySubtitleKey: "friend_memories_empty_subtitle",
-                    friendLoadout: friend.loadout,
-                    onSelectJourney: { activeJourneyDetail = $0 }
-                )
-                .environmentObject(mirror.journeyStore)
-                .environmentObject(mirror.cityCache)
-                .environmentObject(sessionStore)
-                .transition(.move(edge: .trailing))
-            }
+        TabView(selection: $page) {
+            CityStampLibraryView(
+                autoRebuildFromJourneyStore: false,
+                showHeader: false,
+                allowCityDetailNavigation: false,
+                emptyTitleKey: "friend_city_cards_empty_title",
+                emptySubtitleKey: "friend_city_cards_empty_subtitle"
+            )
+            .environmentObject(mirror.journeyStore)
+            .environmentObject(mirror.cityCache)
+            .environmentObject(mirror.renderCacheStore)
+            .tag(FriendCollectionPage.cities)
+
+            JourneyMemoryMainView(
+                hideLeadingControl: true,
+                showHeader: false,
+                readOnly: true,
+                emptyTitleKey: "friend_memories_empty_title",
+                emptySubtitleKey: "friend_memories_empty_subtitle",
+                friendLoadout: friend.loadout,
+                onSelectJourney: { activeJourneyDetail = $0 }
+            )
+            .environmentObject(mirror.journeyStore)
+            .environmentObject(mirror.cityCache)
+            .environmentObject(sessionStore)
+            .tag(FriendCollectionPage.memories)
         }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 30, coordinateSpace: .local)
-                .onEnded { value in
-                    guard abs(value.translation.width) > abs(value.translation.height) * 1.5 else { return }
-                    if value.translation.width < -30, page == .cities {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                            page = .memories
-                        }
-                    } else if value.translation.width > 30, page == .memories {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                            page = .cities
-                        }
-                    }
-                }
-        )
+        .tabViewStyle(.page(indexDisplayMode: .never))
     }
 }
 

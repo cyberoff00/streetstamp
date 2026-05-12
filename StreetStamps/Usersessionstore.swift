@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import Combine
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -44,21 +45,22 @@ final class UserSessionStore: ObservableObject {
     @Published private(set) var pendingMigrationFromGuestUserID: String?
     @Published private(set) var activeLocalProfileID: String
     @Published private(set) var reauthenticationPromptVersion: Int = 0
+    @Published private(set) var sessionRefreshVersion: Int = 0
     @Published private(set) var requiresProfileSetup: Bool
     @Published var hasEmailPassword: Bool = false {
         didSet { UserDefaults.standard.set(hasEmailPassword, forKey: Self.hasEmailPasswordKey) }
     }
 
-    private static let guestIDKey = "streetstamps.guest_id.v1"
-    private static let activeLocalProfileIDKey = "streetstamps.active_local_profile_id.v1"
-    private static let sessionDataKey = "streetstamps.session.v1"
-    private static let firebaseAccountStateKey = "streetstamps.firebase_account_state.v1"
-    private static let pendingGuestMigrationKey = "streetstamps.pending_guest_migration.v1"
-    private static let legacyGuestBindingsKey = "streetstamps.legacy_guest_bindings.v1"
-    private static let guestAccountBindingsKey = "streetstamps.guest_account_bindings.v1"
-    private static let autoRecoveredGuestSourcesKey = "streetstamps.auto_recovered_guest_sources.v1"
-    private static let hasEmailPasswordKey = "streetstamps.has_email_password.v1"
-    private static let pendingReauthPromptKey = "streetstamps.pending_reauth_prompt.v1"
+    nonisolated private static let guestIDKey = "streetstamps.guest_id.v1"
+    nonisolated private static let activeLocalProfileIDKey = "streetstamps.active_local_profile_id.v1"
+    nonisolated private static let sessionDataKey = "streetstamps.session.v1"
+    nonisolated private static let firebaseAccountStateKey = "streetstamps.firebase_account_state.v1"
+    nonisolated private static let pendingGuestMigrationKey = "streetstamps.pending_guest_migration.v1"
+    nonisolated private static let legacyGuestBindingsKey = "streetstamps.legacy_guest_bindings.v1"
+    nonisolated private static let guestAccountBindingsKey = "streetstamps.guest_account_bindings.v1"
+    nonisolated private static let autoRecoveredGuestSourcesKey = "streetstamps.auto_recovered_guest_sources.v1"
+    nonisolated private static let hasEmailPasswordKey = "streetstamps.has_email_password.v1"
+    nonisolated private static let pendingReauthPromptKey = "streetstamps.pending_reauth_prompt.v1"
 
     init() {
         let guestID = Self.loadOrCreateGuestID()
@@ -303,6 +305,7 @@ final class UserSessionStore: ObservableObject {
         persistFirebaseAccountState()
         clearPendingGuestMigrationMarker()
         clearPendingReauthPrompt()
+        markSessionDidChange()
     }
 
     func applyFirebaseAccountSession(
@@ -338,6 +341,7 @@ final class UserSessionStore: ObservableObject {
             clearPendingGuestMigrationMarker()
         }
         clearPendingReauthPrompt()
+        markSessionDidChange()
     }
 
     func updateCachedFirebaseIDToken(_ token: String?) {
@@ -358,6 +362,7 @@ final class UserSessionStore: ObservableObject {
             guestID: guestID
         )
         persistSession()
+        markSessionDidChange()
     }
 
     func syncFirebaseAccountState(
@@ -404,6 +409,7 @@ final class UserSessionStore: ObservableObject {
         }
         requiresProfileSetup = auth.needsProfileSetup
         persistSession()
+        markSessionDidChange()
         return true
     }
 
@@ -420,6 +426,7 @@ final class UserSessionStore: ObservableObject {
             guestID: guestID
         )
         persistSession()
+        markSessionDidChange()
     }
 
     func logoutToGuest(
@@ -440,6 +447,7 @@ final class UserSessionStore: ObservableObject {
         if requireReauthenticationPrompt {
             reauthenticationPromptVersion &+= 1
         }
+        markSessionDidChange()
     }
 
     func clearPendingGuestMigrationMarker() {
@@ -542,6 +550,10 @@ final class UserSessionStore: ObservableObject {
         print("[DEBUG] switchActiveLocalProfileID: \(activeLocalProfileID) → \(newID)")
         activeLocalProfileID = newID
         UserDefaults.standard.set(newID, forKey: Self.activeLocalProfileIDKey)
+    }
+
+    private func markSessionDidChange() {
+        sessionRefreshVersion &+= 1
     }
 
     private static func appProvider(firebaseProviderID: String) -> String {
@@ -1093,14 +1105,14 @@ final class UserSessionStore: ObservableObject {
         targetUserID: String,
         hasRecoverableData: (String) -> Bool
     ) -> [String] {
-        let fm = FileManager.default
+        let fm = FileManager()
         let uniqueCandidates = Array(Set(candidates)).filter { userID in
             !userID.isEmpty && userID != targetUserID
         }
 
         let discovered = uniqueCandidates.compactMap { userID -> (String, Date)? in
             guard hasRecoverableData(userID) else { return nil }
-            let url = StoragePath(userID: userID).userRoot
+            let url = StoragePath(userID: userID, fm: fm).userRoot
             let lastModified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
             guard fm.fileExists(atPath: url.path) else { return nil }
             return (userID, lastModified)
@@ -1109,22 +1121,5 @@ final class UserSessionStore: ObservableObject {
         return discovered
             .sorted { $0.1 > $1.1 }
             .map(\.0)
-    }
-
-    nonisolated private static func currentDeviceIDWorker() -> String? {
-        #if canImport(UIKit)
-        return UIDevice.current.identifierForVendor?.uuidString.lowercased()
-        #else
-        return nil
-        #endif
-    }
-
-    nonisolated private static func loadOrCreateGuestIDWorker() -> String {
-        if let existing = UserDefaults.standard.string(forKey: guestIDKey), !existing.isEmpty {
-            return existing
-        }
-        let id = UUID().uuidString.lowercased()
-        UserDefaults.standard.set(id, forKey: guestIDKey)
-        return id
     }
 }

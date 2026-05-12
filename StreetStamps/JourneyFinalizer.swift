@@ -90,7 +90,18 @@ enum JourneyFinalizer {
         if !r.correctedCoordinates.isEmpty {
             r.preferredRouteSource = .corrected
         }
-        r.distance = JourneyPostCorrection.correctedDistance(for: r)
+        // PR 5: trust ingest's accumulated totalDistance — it's been validated by
+        // CoreMotion (stationary periods excluded, walking + zero steps dropped).
+        // Recomputing from raw geometry here would re-include those excluded drift
+        // segments and undo PR 5's validation entirely.
+        // The ingest path's physical-speed limit (50 m/s in L3.1) and OneEuro
+        // smoothing already act as the "outlier rejection" that correctedDistance
+        // was previously providing.
+        // r.distance stays as set by MapView.onCoordsUpdated (= tracking.totalDistance).
+
+        // PR 3.2: overwrite correctedCoordinates with DP-simplified geometry for display.
+        // Distance is independent of this — only smooths the rendered polyline.
+        r.correctedCoordinates = JourneyPostCorrection.simplifiedForDisplay(for: r)
         r.isTooShort = shouldTreatAsStationaryDrift(route: r)
 
         func persistAndReturn(_ updated: JourneyRoute, notify: (() -> Void)?) {
@@ -124,9 +135,10 @@ enum JourneyFinalizer {
             let startWgs = r.coordinates.first?.cl,
             let endWgs = r.coordinates.last?.cl
         else {
-            persistAndReturn(r, notify: {
+            let snapshot = r
+            persistAndReturn(snapshot, notify: {
                 Task { @MainActor in
-                    cityCache.onJourneyCompleted(r)
+                    cityCache.onJourneyCompleted(snapshot)
                 }
             })
             return
@@ -136,9 +148,10 @@ enum JourneyFinalizer {
         // cityCache.onJourneyCompleted 只读 startCityKey，不依赖 endCityKey，可以直接触发。
         let existingKey = r.startCityKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !existingKey.isEmpty && existingKey != "Unknown|" && existingKey.contains("|") {
-            persistAndReturn(r, notify: {
+            let snapshot = r
+            persistAndReturn(snapshot, notify: {
                 Task { @MainActor in
-                    cityCache.onJourneyCompleted(r)
+                    cityCache.onJourneyCompleted(snapshot)
                 }
             })
             return
@@ -184,21 +197,22 @@ enum JourneyFinalizer {
                 geocoder.reverseGeocodeLocation(endLoc, preferredLocale: fixedLocale) { endPMs, _ in
                     let endCanon = endPMs?.first.map { CityPlacemarkResolver.resolveCanonical(from: $0) }
 
-                    r = resolveCompletedRouteCityFields(
+                    var updated = resolveCompletedRouteCityFields(
                         route: r,
                         startCanonical: bestStartCanon.map(makeResult),
                         endCanonical: endCanon.map(makeResult)
                     )
 
-                    r.exploreMode = .city
+                    updated.exploreMode = .city
+                    let snapshot = updated
 
                     let notify: () -> Void = {
                         Task { @MainActor in
-                            cityCache.onJourneyCompleted(r)
+                            cityCache.onJourneyCompleted(snapshot)
                         }
                     }
 
-                    persistAndReturn(r, notify: notify)
+                    persistAndReturn(snapshot, notify: notify)
                 }
             }
 

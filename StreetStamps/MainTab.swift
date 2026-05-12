@@ -106,12 +106,6 @@ struct MainTabView: View {
                 ContextualHintBar(
                     icon: "checkmark.circle",
                     message: L10n.t("hint_journey_saved"),
-                    actionTitle: L10n.t("hint_journey_saved_action"),
-                    onAction: {
-                        selectedTab = .cities
-                        onboardingGuide.dismissHint(.journeySavedToMemory)
-                        journeyJustSaved = false
-                    },
                     onDismiss: {
                         onboardingGuide.dismissHint(.journeySavedToMemory)
                         journeyJustSaved = false
@@ -140,7 +134,7 @@ struct MainTabView: View {
                 maybePromptResumeIfNeeded()
             }
         }
-        .onChange(of: selectedTab) { tab in
+        .onChange(of: selectedTab) { _, tab in
             loadedTabs.insert(tab)
             flow.updateCurrentTab(tab)
             if tab == .cities {
@@ -201,7 +195,7 @@ struct MainTabView: View {
         } message: {
             Text(L10n.t("auto_pause_alert_message"))
         }
-        .onChange(of: tracking.pendingAutoEndedNotice) { notice in
+        .onChange(of: tracking.pendingAutoEndedNotice) { _, notice in
             if notice != nil {
                 showAutoEndedAlert = true
             }
@@ -276,7 +270,6 @@ struct MainTabView: View {
         }
         .tint(FigmaTheme.primary)
         .toolbarColorScheme(.light, for: .tabBar)
-        .toolbarBackground(.white, for: .tabBar)
         .toolbarBackground(.visible, for: .tabBar)
         .background(
             TabBarSelectionHapticObserver(currentTab: selectedTab)

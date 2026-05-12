@@ -91,12 +91,12 @@ final class UserScopedProfileStateStoreTests: XCTestCase {
         UserScopedProfileStateStore.saveCurrentLoadout(loadout, for: userID, defaults: defaults)
         UserScopedProfileStateStore.markPendingLoadout(loadout, for: userID, defaults: defaults)
 
+        let savedGlobal = try decodeLoadout(from: defaults, key: UserScopedProfileStateStore.globalAvatarLoadoutKey)
+        XCTAssertEqual(withoutModifiedAt(savedGlobal), loadout.normalizedForCurrentAvatar())
+        XCTAssertNotNil(savedGlobal.modifiedAt, "saveCurrentLoadout must stamp modifiedAt for cross-device sync ordering")
+
         XCTAssertEqual(
-            try decodeLoadout(from: defaults, key: UserScopedProfileStateStore.globalAvatarLoadoutKey),
-            loadout.normalizedForCurrentAvatar()
-        )
-        XCTAssertEqual(
-            try decodeLoadout(from: defaults, key: UserScopedProfileStateStore.avatarLoadoutKey(for: userID)),
+            withoutModifiedAt(try decodeLoadout(from: defaults, key: UserScopedProfileStateStore.avatarLoadoutKey(for: userID))),
             loadout.normalizedForCurrentAvatar()
         )
         XCTAssertEqual(
@@ -183,11 +183,11 @@ final class UserScopedProfileStateStoreTests: XCTestCase {
 
         XCTAssertNil(UserScopedProfileStateStore.pendingLoadout(for: userID, defaults: defaults))
         XCTAssertEqual(
-            try decodeLoadout(from: defaults, key: UserScopedProfileStateStore.avatarLoadoutKey(for: userID)),
+            withoutModifiedAt(try decodeLoadout(from: defaults, key: UserScopedProfileStateStore.avatarLoadoutKey(for: userID))),
             loadout.normalizedForCurrentAvatar()
         )
         XCTAssertEqual(
-            try decodeLoadout(from: defaults, key: UserScopedProfileStateStore.globalAvatarLoadoutKey),
+            withoutModifiedAt(try decodeLoadout(from: defaults, key: UserScopedProfileStateStore.globalAvatarLoadoutKey)),
             loadout.normalizedForCurrentAvatar()
         )
     }
@@ -415,6 +415,14 @@ final class UserScopedProfileStateStoreTests: XCTestCase {
             return .defaultBoy
         }
         return try JSONDecoder().decode(RobotLoadout.self, from: data)
+    }
+
+    /// Strip the modifiedAt timestamp so legacy assertions can compare against
+    /// freshly-stamped values without caring about the exact write time.
+    private func withoutModifiedAt(_ loadout: RobotLoadout) -> RobotLoadout {
+        var copy = loadout
+        copy.modifiedAt = nil
+        return copy
     }
 
     private func decodeEconomy(from defaults: UserDefaults, key: String) throws -> EquipmentEconomy {

@@ -4,11 +4,14 @@ import SwiftUI
 /// Minimal i18n helper.
 ///
 /// Backed by `Localizable.strings` in each language.
+/// All methods are explicitly nonisolated so they can be called from
+/// background tasks (e.g. journey post-processing) without MainActor hops.
+/// Internal cache uses NSLock for thread-safety.
 enum L10n {
     private static let stringsCacheLock = NSLock()
     private static var stringsCache: [String: [String: String]] = [:]
 
-    static func t(_ key: String) -> String {
+    nonisolated static func t(_ key: String) -> String {
         let value = localizedValue(for: key, preferredLanguages: LanguagePreference.shared.effectiveLanguages)
         #if DEBUG
         if value == key {
@@ -18,21 +21,21 @@ enum L10n {
         return value
     }
 
-    static func t(_ key: String, locale: Locale) -> String {
+    nonisolated static func t(_ key: String, locale: Locale) -> String {
         localizedValue(for: key, preferredLanguages: [locale.identifier], currentLocale: locale)
     }
 
-    static func upper(_ key: String, locale: Locale? = nil) -> String {
+    nonisolated static func upper(_ key: String, locale: Locale? = nil) -> String {
         let effectiveLocale = locale ?? LanguagePreference.shared.displayLocale
         return uppercasedValue(t(key, locale: effectiveLocale), locale: effectiveLocale)
     }
 
     /// Convenience for `Text`.
-    static func key(_ key: String) -> LocalizedStringKey {
+    nonisolated static func key(_ key: String) -> LocalizedStringKey {
         LocalizedStringKey(key)
     }
 
-    static func localizedValue(
+    nonisolated static func localizedValue(
         for key: String,
         preferredLanguages: [String] = Locale.preferredLanguages,
         currentLocale: Locale = .current,
@@ -66,7 +69,7 @@ enum L10n {
             .first(where: { !$0.isEmpty && $0 != "Base" })
     }
 
-    private static func localizedString(
+    nonisolated private static func localizedString(
         for key: String,
         preferredLanguages: [String],
         currentLocale: Locale,
@@ -94,11 +97,11 @@ enum L10n {
         return nil
     }
 
-    private static func uppercasedValue(_ value: String, locale: Locale) -> String {
+    nonisolated private static func uppercasedValue(_ value: String, locale: Locale) -> String {
         value.uppercased(with: locale)
     }
 
-    private static func localizationPreferences(
+    nonisolated private static func localizationPreferences(
         preferredLanguages: [String],
         currentLocale: Locale
     ) -> [String] {
@@ -113,7 +116,7 @@ enum L10n {
         return values
     }
 
-    private static func localizationCandidates(forIdentifier identifier: String) -> [String] {
+    nonisolated private static func localizationCandidates(forIdentifier identifier: String) -> [String] {
         let normalized = identifier
             .replacingOccurrences(of: "_", with: "-")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -149,7 +152,7 @@ enum L10n {
         return values
     }
 
-    private static func discoveredLocalizations(in bundle: Bundle) -> [String] {
+    nonisolated private static func discoveredLocalizations(in bundle: Bundle) -> [String] {
         guard let resourcePath = bundle.resourcePath,
               let entries = try? FileManager.default.contentsOfDirectory(atPath: resourcePath) else {
             return []
@@ -159,7 +162,7 @@ enum L10n {
             .map { String($0.dropLast(".lproj".count)) }
     }
 
-    private static func localizedString(
+    nonisolated private static func localizedString(
         for key: String,
         localization: String,
         bundle: Bundle
@@ -182,7 +185,7 @@ enum L10n {
         return value
     }
 
-    private static func stringsDictionary(at path: String) -> [String: String]? {
+    nonisolated private static func stringsDictionary(at path: String) -> [String: String]? {
         stringsCacheLock.lock()
         if let cached = stringsCache[path] {
             stringsCacheLock.unlock()

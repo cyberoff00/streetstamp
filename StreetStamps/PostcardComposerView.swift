@@ -146,20 +146,8 @@ struct PostcardComposerView: View {
                 await MainActor.run { localizedCityNamesByID[key] = fallback }
             }
 
-            let anchor = city.anchor?.cl ?? city.journeyIds.compactMap { id in
-                journeyStore.journeys.first(where: { $0.id == id })?.startCoordinate
-            }.first
-            guard let anchor, anchor.isValid else { continue }
-
             let locale = LanguagePreference.shared.displayLocale
-            if let cached = CityNameTranslationCache.shared.cachedName(cityKey: key, localeID: locale.identifier),
-               !cached.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                let resolved = normalizedPrefetchedCityName(for: city, candidateTitle: cached)
-                await MainActor.run { localizedCityNamesByID[key] = resolved }
-                continue
-            }
-
-            if let title = await CityNameTranslationCache.shared.translate(cityKey: key, anchor: anchor, level: city.identityLevel, locale: locale),
+            if let title = CNCityNameLookup.shared.displayName(for: key, locale: locale),
                !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 let resolved = normalizedPrefetchedCityName(for: city, candidateTitle: title)
                 await MainActor.run { localizedCityNamesByID[key] = resolved }
@@ -178,10 +166,12 @@ struct PostcardComposerView: View {
 
     private var cityRefreshTaskID: String {
         let lang = languagePreference.currentLanguage ?? "sys"
-        let citiesPart = cityCache.cachedCities.map { city in
-            "\(city.id)|\(city.name)|\(city.parentScopeKey ?? "")"
-        }.joined(separator: ";")
-        return "\(lang)|\(citiesPart)"
+        let cityIDs = cityCache.cachedCities
+            .filter { !($0.isTemporary ?? false) }
+            .map(\.id)
+            .sorted()
+            .joined(separator: ";")
+        return "\(lang)|\(cityIDs)"
     }
 
     private var content: some View {
@@ -419,7 +409,7 @@ struct PostcardComposerView: View {
                 .frame(height: 120)
                 .scrollContentBackground(.hidden)
                 .padding(8)
-                .background(Color.white)
+                .background(FigmaTheme.card)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .onChange(of: messageText) { _, newValue in
                     if newValue.count > 80 {
@@ -486,7 +476,7 @@ private extension PostcardComposerView {
 private extension View {
     func postcardFeatureCardStyle() -> some View {
         self
-            .background(Color.white)
+            .background(FigmaTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
             .shadow(color: Color.black.opacity(0.04), radius: 20, x: 0, y: 8)
     }
