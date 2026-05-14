@@ -8,6 +8,7 @@ struct JourneyCompletionOverlay: View {
     let startTime: Date?
     let endTime: Date?
     let coordinates: [CoordinateCodable]
+    let coinsAwarded: Int
 
     // MARK: - Brand colors (same as AppSplashView)
 
@@ -88,7 +89,7 @@ struct JourneyCompletionOverlay: View {
                     .opacity(showSaving ? 1 : 0)
                     .padding(.bottom, 32)
 
-                    // Stats card
+                    // Stats card (distance / duration / coins-if-any)
                     if showStats {
                         statsCard
                             .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -115,6 +116,17 @@ struct JourneyCompletionOverlay: View {
                 .frame(width: 1, height: 32)
 
             statColumn(value: formattedDuration, label: L10n.t("journey_stat_duration"))
+
+            if coinsAwarded > 0 {
+                Rectangle()
+                    .fill(Color.white.opacity(0.2))
+                    .frame(width: 1, height: 32)
+
+                statColumn(
+                    value: String(format: L10n.t("journey_reward_coins_amount_format"), coinsAwarded),
+                    label: L10n.t("journey_reward_coins")
+                )
+            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
@@ -126,7 +138,7 @@ struct JourneyCompletionOverlay: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(Color.white.opacity(0.2), lineWidth: 1)
         )
-        .padding(.horizontal, 50)
+        .padding(.horizontal, coinsAwarded > 0 ? 30 : 50)
     }
 
     private func statColumn(value: String, label: String) -> some View {

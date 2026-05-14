@@ -35,6 +35,8 @@ final class AppFlowCoordinator: ObservableObject {
     @Published private(set) var openModalDestinationSignal: Int = 0
     @Published private(set) var pendingPostcardSidebarIntent: PostcardInboxIntent?
     @Published private(set) var pendingModalDestination: ModalNavDestination?
+    @Published private(set) var pendingJourneyCommentLink: JourneyCommentDeepLink?
+    @Published private(set) var openJourneyCommentSignal: Int = 0
     @Published private(set) var sidebarHiddenTokens: Set<String> = []
     @Published private(set) var requestedTab: NavigationTab?
     @Published private(set) var requestedCollectionPage: Int?
@@ -72,6 +74,15 @@ final class AppFlowCoordinator: ObservableObject {
 
     func consumePendingModalDestination() {
         pendingModalDestination = nil
+    }
+
+    func requestOpenJourneyCommentDeepLink(_ link: JourneyCommentDeepLink) {
+        pendingJourneyCommentLink = link
+        openJourneyCommentSignal += 1
+    }
+
+    func consumePendingJourneyCommentLink() {
+        pendingJourneyCommentLink = nil
     }
 
     func requestSelectTab(_ tab: NavigationTab) {

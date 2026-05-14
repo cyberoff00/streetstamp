@@ -332,19 +332,28 @@ final class MembershipStore: NSObject, ObservableObject {
     private func handleRevocation() {
         applyTier(.free, expiration: nil)
         if welcomeBonusGranted {
-            var economy = EquipmentEconomyStore.load()
-            economy.coins = max(0, economy.coins - MembershipTierConfig.premiumWelcomeBonus)
-            EquipmentEconomyStore.save(economy)
+            // Try to claw back the 1500-coin bonus. CoinService.spend returns
+            // false if the user has already spent below that — we don't push
+            // them below zero (server enforces non-negative anyway).
+            Task { @MainActor in
+                _ = await CoinService.shared.spend(
+                    MembershipTierConfig.premiumWelcomeBonus,
+                    reason: "premium_revocation"
+                )
+            }
         }
         showRefundProcessedAlert = true
     }
 
     /// Award the one-time 1500 coin welcome bonus on first premium subscription.
     private func awardWelcomeBonus() {
-        var economy = EquipmentEconomyStore.load()
-        economy.coins += MembershipTierConfig.premiumWelcomeBonus
-        EquipmentEconomyStore.save(economy)
         markWelcomeBonusGranted()
+        Task { @MainActor in
+            await CoinService.shared.grant(
+                MembershipTierConfig.premiumWelcomeBonus,
+                reason: "premium_welcome_bonus"
+            )
+        }
         showWelcomeBonusAlert = true
     }
 

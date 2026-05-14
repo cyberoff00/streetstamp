@@ -1260,6 +1260,7 @@ struct MapView: View {
     @State private var showFinishNoCityWarning = false
     @State private var showFinishPendingMemoryWarning = false
     @State private var isFinalizingJourney = false
+    @State private var coinsAwardedThisJourney = 0
     @State private var showExitWarning = false
     @State private var showModeSelector = false
     @State private var showMapLayerPicker = false
@@ -1475,7 +1476,8 @@ struct MapView: View {
                         endTime: journeyRoute.endTime,
                         coordinates: journeyRoute.correctedCoordinates.isEmpty
                             ? journeyRoute.coordinates
-                            : journeyRoute.correctedCoordinates
+                            : journeyRoute.correctedCoordinates,
+                        coinsAwarded: coinsAwardedThisJourney
                     )
                     .transition(.opacity)
                 }
@@ -2543,6 +2545,10 @@ struct MapView: View {
         syncTimingFields()
         journeyRoute.endTime = Date()
         hasOngoingJourney = false
+        coinsAwardedThisJourney = JourneyCoinRewardPolicy.checkAndReward(
+            journeyID: journeyRoute.id,
+            distanceMeters: journeyRoute.distance
+        )
         isFinalizingJourney = true
         tracking.stopJourney()
 

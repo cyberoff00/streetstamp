@@ -213,9 +213,11 @@ final class PostcardCenter: ObservableObject {
     }
 
     func refreshFromBackend(token: String?, force: Bool = false) async {
+        print("[BUG-DBG] PostcardCenter.refreshFromBackend ENTER force=\(force) hasToken=\(token?.isEmpty == false)")
         guard let token, !token.isEmpty else { return }
         if !force, let last = lastRefreshSucceededAt,
            Date().timeIntervalSince(last) < Self.refreshDebounceWindow {
+            print("[BUG-DBG] PostcardCenter.refreshFromBackend SKIPPED (debounced)")
             return
         }
         let generationAtStart = sentItemsGeneration
@@ -237,6 +239,7 @@ final class PostcardCenter: ObservableObject {
             }
 
             receivedItems = received.items.sorted(by: { $0.sentAt > $1.sentAt })
+            print("[BUG-DBG] PostcardCenter wrote sent=\(sentItems.count) received=\(receivedItems.count)")
             lastSyncError = nil
             lastRefreshSucceededAt = Date()
             PostcardInboxStore.saveSent(sentItems, userID: activeUserID)

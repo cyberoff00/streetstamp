@@ -40,6 +40,7 @@ fi
 [[ -f "backend-node-v1/migrations/001-create-tables.sql" ]] || fail "missing backend-node-v1/migrations/001-create-tables.sql"
 [[ -f "backend-node-v1/migrations/002-migrate-data.js" ]] || fail "missing backend-node-v1/migrations/002-migrate-data.js"
 [[ -f "backend-node-v1/migrations/003-user-blocks-reports.sql" ]] || fail "missing backend-node-v1/migrations/003-user-blocks-reports.sql"
+[[ -f "backend-node-v1/migrations/004-add-coins.sql" ]] || fail "missing backend-node-v1/migrations/004-add-coins.sql"
 [[ -f "docs/ops/PRODUCTION_WORKFLOW.md" ]] || fail "missing docs/ops/PRODUCTION_WORKFLOW.md"
 [[ -f "docs/ops/SERVER_BOOTSTRAP.md" ]] || fail "missing docs/ops/SERVER_BOOTSTRAP.md"
 [[ -f "scripts/check_auth_mode.sh" ]] || fail "missing scripts/check_auth_mode.sh"
@@ -71,6 +72,7 @@ ssh -o StrictHostKeyChecking=no "$SERVER_HOST" "\
   if [ -f migrations/001-create-tables.sql ]; then cp migrations/001-create-tables.sql '${REMOTE_RELEASE_DIR}/migrations/'; fi; \
   if [ -f migrations/002-migrate-data.js ]; then cp migrations/002-migrate-data.js '${REMOTE_RELEASE_DIR}/migrations/'; fi; \
   if [ -f migrations/003-user-blocks-reports.sql ]; then cp migrations/003-user-blocks-reports.sql '${REMOTE_RELEASE_DIR}/migrations/'; fi; \
+  if [ -f migrations/004-add-coins.sql ]; then cp migrations/004-add-coins.sql '${REMOTE_RELEASE_DIR}/migrations/'; fi; \
   mkdir -p '${REMOTE_RELEASE_DIR}/docs/ops'; \
   if [ -f docs/ops/PRODUCTION_WORKFLOW.md ]; then cp docs/ops/PRODUCTION_WORKFLOW.md '${REMOTE_RELEASE_DIR}/docs/ops/'; fi; \
   if [ -f docs/ops/SERVER_BOOTSTRAP.md ]; then cp docs/ops/SERVER_BOOTSTRAP.md '${REMOTE_RELEASE_DIR}/docs/ops/'; fi; \
@@ -99,6 +101,7 @@ scp -o StrictHostKeyChecking=no \
   backend-node-v1/migrations/001-create-tables.sql \
   backend-node-v1/migrations/002-migrate-data.js \
   backend-node-v1/migrations/003-user-blocks-reports.sql \
+  backend-node-v1/migrations/004-add-coins.sql \
   "$SERVER_HOST:$REMOTE_DIR/migrations/"
 
 ssh -o StrictHostKeyChecking=no "$SERVER_HOST" "mkdir -p '$REMOTE_DIR/docs/ops'"

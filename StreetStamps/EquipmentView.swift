@@ -147,13 +147,26 @@ struct EquipmentView: View {
                 selectedCategoryId = store.catalog.categories.first?.id ?? "hair"
             }
             economy.bootstrapIfNeeded(catalog: store.catalog, loadout: loadout)
+            // Pull authoritative balance from CoinService. For account users this
+            // hits Postgres (or the cached value); for guests this reads from
+            // UserDefaults that EquipmentEconomy already maps to.
+            economy.coins = CoinService.shared.balance
             EquipmentEconomyStore.save(economy)
+            Task { @MainActor in
+                await CoinService.shared.refresh()
+                economy.coins = CoinService.shared.balance
+            }
         }
         .onChange(of: loadout) { _, newValue in
             economy.ensureCurrentLoadoutOwned(loadout: newValue)
         }
         .onChange(of: economy) { _, newValue in
             EquipmentEconomyStore.save(newValue)
+        }
+        .onReceive(CoinService.shared.$balance) { newBalance in
+            if economy.coins != newBalance {
+                economy.coins = newBalance
+            }
         }
         .sheet(isPresented: $showCoinPurchaseDialog) {
             CoinPurchaseSheet(economy: $economy) {
@@ -756,11 +769,21 @@ struct EquipmentView: View {
             return
         }
 
-        economy.coins -= price
-        economy.markOwned(categoryId: category.id, itemId: item.id)
-        applySelection(category: category, item: item)
-        showUnlockCelebration(L10n.t("equipment_unlocked_and_equipped"))
+        let categorySnapshot = category
+        let itemSnapshot = item
         self.pendingPurchase = nil
+
+        Task { @MainActor in
+            let ok = await CoinService.shared.spend(price, reason: "equipment:\(itemSnapshot.id)")
+            guard ok else {
+                showInsufficientCoinsAlert = true
+                return
+            }
+            economy.coins = CoinService.shared.balance
+            economy.markOwned(categoryId: categorySnapshot.id, itemId: itemSnapshot.id)
+            applySelection(category: categorySnapshot, item: itemSnapshot)
+            showUnlockCelebration(L10n.t("equipment_unlocked_and_equipped"))
+        }
     }
 
     private var pendingTryOnPurchaseCost: Int {
@@ -866,16 +889,25 @@ struct EquipmentView: View {
             return
         }
 
-        economy.coins -= cost
-        for item in pendingTryOnPurchase.missingItems {
-            economy.markOwned(categoryId: item.categoryId, itemId: item.itemId)
-        }
-
-        loadout = pendingTryOnPurchase.targetLoadout
-        tryOnLoadout = nil
+        let purchase = pendingTryOnPurchase
         showTryOnPurchaseDialog = false
-        showUnlockCelebration(L10n.t("equipment_purchased_and_applied"))
         self.pendingTryOnPurchase = nil
+
+        Task { @MainActor in
+            let ids = purchase.missingItems.map { "\($0.categoryId):\($0.itemId)" }.joined(separator: ",")
+            let ok = await CoinService.shared.spend(cost, reason: "try_on:\(ids)")
+            guard ok else {
+                showInsufficientCoinsAlert = true
+                return
+            }
+            economy.coins = CoinService.shared.balance
+            for item in purchase.missingItems {
+                economy.markOwned(categoryId: item.categoryId, itemId: item.itemId)
+            }
+            loadout = purchase.targetLoadout
+            tryOnLoadout = nil
+            showUnlockCelebration(L10n.t("equipment_purchased_and_applied"))
+        }
     }
 
     private var hasPendingTryOnChanges: Bool {

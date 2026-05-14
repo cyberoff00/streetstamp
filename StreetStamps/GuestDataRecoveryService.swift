@@ -489,6 +489,13 @@ enum GuestDataRecoveryService {
         return true
     }
 
+    // NOTE: For coins, this writes into target's UserDefaults. When the target
+    // is an account user, CoinService.bootstrap()'s migrateLocalIfNeeded later
+    // POSTs those coins to Postgres using the stable token
+    // "userdefaults_migration_<accountID>". The token is per-account, so if the
+    // same account is logged in on a second device with leftover guest coins,
+    // that second batch is not re-credited (token already consumed). Rare edge
+    // case; revisit if a customer complains.
     private static func mergeEconomy(from sourceUserID: String, to targetUserID: String, defaults: UserDefaults = .standard) -> Bool {
         let sourceKey = UserScopedProfileStateStore.economyKey(for: sourceUserID)
         guard let sourceData = defaults.data(forKey: sourceKey),

@@ -144,6 +144,8 @@
 "journey_complete_title" = "旅程完成！";
 "journey_stat_distance" = "距离";
 "journey_stat_duration" = "时长";
+"journey_reward_coins" = "金币奖励";
+"journey_reward_coins_amount_format" = "+%d";
 "finish_no_city_title" = "无法识别城市";
 "finish_no_city_message" = "当前网络不可用，无法确定旅程所在城市。你可以等待网络恢复，或立即结束（城市信息稍后补全）。";
 "finish_no_city_finish_now" = "立即结束";
@@ -1321,3 +1323,20 @@
 "city_edit_display_name_title" = "重命名城市";
 "city_edit_display_name_placeholder" = "显示名";
 "city_edit_display_name_hint" = "用自定义名字显示这张卡片。城市身份不变。";
+
+"journey_comments_title" = "评论";
+"journey_comments_empty_owner" = "暂无评论";
+"journey_comments_empty_thread" = "打个招呼，开启对话吧";
+"journey_comments_show_older" = "查看更早 %d 条";
+"journey_comments_reply_placeholder" = "回复 %@...";
+"journey_comments_send_failed" = "发送失败，请重试。";
+"comments" = "评论";
+"friend" = "好友";
+
+"coin_rules_title" = "金币规则";
+"coin_rules_earn_title" = "走路赚金币";
+"coin_rules_earn_body_format" = "每完整公里 %d 金币，单次旅程最多 %d 金币。";
+"coin_rules_premium_title" = "Premium 加成";
+"coin_rules_premium_body" = "Premium 会员每次走路获得 5 倍金币。";
+"coin_rules_spend_title" = "购买装备";
+"coin_rules_spend_body" = "用金币在装备商店解锁和试穿装备。";

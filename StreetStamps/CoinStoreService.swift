@@ -96,8 +96,10 @@ final class CoinStoreService: ObservableObject {
     private func handleCoinPackRefund(productID: String) async {
         let coins = coinsForProduct(productID)
         guard coins > 0 else { return }
-        var economy = EquipmentEconomyStore.load()
-        economy.coins = max(0, economy.coins - coins)
-        EquipmentEconomyStore.save(economy)
+        // CoinService.spend refuses to push the balance negative server-side;
+        // if user already burned the coins, refund still proceeds and balance
+        // sits at zero. Matches the "consumable economy doesn't track per-coin
+        // provenance" rule above.
+        _ = await CoinService.shared.spend(coins, reason: "iap_refund:\(productID)")
     }
 }

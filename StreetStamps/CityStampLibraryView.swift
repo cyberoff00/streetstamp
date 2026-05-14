@@ -1208,7 +1208,7 @@ final class CityThumbnailLoader: ObservableObject {
             .joined(separator: "~")
         let boundarySignature = "ignored-for-cache"
         let anchorSignature = "ignored-for-cache"
-        let styleVersion = 9
+        let styleVersion = 10
         let colorVersion = (MapLayerStyle(rawValue: appearanceRaw) ?? .mutedDark).isSatelliteStyle ? 2 : 1
         // Include only the masks for journeys that belong to this city, so
         // edits to one city's polylines don't invalidate every other city's
@@ -1382,9 +1382,17 @@ final class CityThumbnailLoader: ObservableObject {
         let allowFallback = maskedCity.journeys.isEmpty
         await RenderThrottle.shared.acquire()
 
+        // Treat a blank primary the same as a nil primary so route-less cities
+        // (photo-discovered) can still reach the fallback path. Previously the
+        // fallback only ran when primary returned nil, but MKMapSnapshotter and
+        // Mapbox both routinely hand back a non-nil-but-blank image on tile-load
+        // failure — that pinned photo cities to retry forever even though
+        // allowFallback was true.
+        let primary = await Self.makeSnapshot(city: maskedCity, appearanceRaw: appearanceRaw, fetchedBoundary: fetchedBoundary)
+        let usablePrimary = primary.flatMap { Self.isBlankImage($0) ? nil : $0 }
         let candidate: UIImage?
-        if let primary = await Self.makeSnapshot(city: maskedCity, appearanceRaw: appearanceRaw, fetchedBoundary: fetchedBoundary) {
-            candidate = primary
+        if let usablePrimary {
+            candidate = usablePrimary
         } else if allowFallback {
             candidate = await Self.makeFallbackSnapshot(city: maskedCity, appearanceRaw: appearanceRaw)
         } else {
@@ -1884,7 +1892,13 @@ final class CityThumbnailLoader: ObservableObject {
                     cont.resume(returning: nil)
                     return
                 }
-                let img = UIGraphicsImageRenderer(size: snapshotSize).image { renderer in
+                // Match the snapshotter's own scale (2) so satellite raster tiles
+                // aren't bilinearly upsampled to the device's display scale (3 on
+                // iPhone). Vector map types repaint cleanly at any scale, but
+                // satellite imagery is raster — upscaling makes it visibly soft.
+                let format = UIGraphicsImageRendererFormat()
+                format.scale = 2
+                let img = UIGraphicsImageRenderer(size: snapshotSize, format: format).image { renderer in
                     snapshot.image.draw(at: .zero)
                     CityDeepRenderEngine.drawStyledSegments(styledSegments, snapshot: snapshot, context: renderer.cgContext, appearanceRaw: appearanceRaw)
                 }

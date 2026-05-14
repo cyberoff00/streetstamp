@@ -38,6 +38,7 @@ struct CoinPurchaseSheet: View {
     @ObservedObject private var membership = MembershipStore.shared
     @State private var isPurchasing = false
     @State private var showMembershipGate = false
+    @State private var showRulesSheet = false
 
     var body: some View {
         NavigationStack {
@@ -67,6 +68,9 @@ struct CoinPurchaseSheet: View {
             MembershipGateView(feature: .coinBoost)
                 .environmentObject(MembershipStore.shared)
         }
+        .sheet(isPresented: $showRulesSheet) {
+            CoinRulesSheet()
+        }
         .task {
             await store.loadProducts()
         }
@@ -95,8 +99,20 @@ struct CoinPurchaseSheet: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Color.clear
-                .frame(width: 44, height: 44)
+            Button {
+                showRulesSheet = true
+            } label: {
+                Image(systemName: "questionmark")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(FigmaTheme.text.opacity(0.85))
+                    .frame(width: 32, height: 32)
+                    .background(Color.black.opacity(0.05))
+                    .clipShape(Circle())
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(L10n.t("coin_rules_title")))
 
             Spacer()
 
@@ -139,14 +155,9 @@ struct CoinPurchaseSheet: View {
                     .font(.system(size: 26, weight: .semibold))
                     .foregroundColor(.orange)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(L10n.t("coin_sheet_premium_title"))
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(FigmaTheme.text)
-                    Text(L10n.t("coin_sheet_premium_subtitle"))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(FigmaTheme.subtext)
-                }
+                Text(L10n.t("coin_sheet_premium_title"))
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(FigmaTheme.text)
 
                 Spacer()
 
@@ -253,8 +264,8 @@ struct CoinPurchaseSheet: View {
     private func purchaseProduct(_ product: Product, coins: Int) async {
         isPurchasing = true
         if let earnedCoins = await store.purchase(product) {
-            economy.coins += earnedCoins
-            EquipmentEconomyStore.save(economy)
+            await CoinService.shared.grant(earnedCoins, reason: "iap:\(product.id)")
+            economy.coins = CoinService.shared.balance
             onDismiss()
         }
         isPurchasing = false
@@ -264,5 +275,76 @@ struct CoinPurchaseSheet: View {
         // Rough USD estimate: 500 coins = $0.49
         let usd = Double(pkg.coins) / 500.0 * 0.49
         return String(format: "$%.2f", usd)
+    }
+}
+
+// MARK: - Rules sheet
+
+private struct CoinRulesSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(L10n.t("coin_rules_title"))
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(FigmaTheme.text)
+                Spacer()
+                AppCloseButton(style: .circleSubtle) { dismiss() }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 8)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    ruleRow(
+                        icon: "figure.walk",
+                        title: L10n.t("coin_rules_earn_title"),
+                        body: String(
+                            format: L10n.t("coin_rules_earn_body_format"),
+                            JourneyCoinRewardPolicy.coinsPerKm,
+                            JourneyCoinRewardPolicy.maxCoinsPerJourney
+                        )
+                    )
+                    ruleRow(
+                        icon: "star.circle.fill",
+                        title: L10n.t("coin_rules_premium_title"),
+                        body: L10n.t("coin_rules_premium_body")
+                    )
+                    ruleRow(
+                        icon: "bag.fill",
+                        title: L10n.t("coin_rules_spend_title"),
+                        body: L10n.t("coin_rules_spend_body")
+                    )
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+            }
+        }
+        .background(FigmaTheme.background.ignoresSafeArea())
+        .presentationDetents([.medium])
+    }
+
+    @ViewBuilder
+    private func ruleRow(icon: String, title: String, body: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(FigmaTheme.primary)
+                .frame(width: 28, height: 28)
+                .background(FigmaTheme.primary.opacity(0.12))
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(FigmaTheme.text)
+                Text(body)
+                    .font(.system(size: 13))
+                    .foregroundColor(FigmaTheme.subtext)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 }

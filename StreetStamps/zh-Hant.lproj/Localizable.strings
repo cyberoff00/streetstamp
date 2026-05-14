@@ -218,6 +218,8 @@
 "journey_complete_title" = "旅程完成！";
 "journey_stat_distance" = "距離";
 "journey_stat_duration" = "時長";
+"journey_reward_coins" = "金幣獎勵";
+"journey_reward_coins_amount_format" = "+%d";
 "finish_confirm_message" = "如果你是不小心点到結束，可以選擇繼續旅程。";
 "finish_confirm_title" = "結束旅程？";
 "finish_no_city_title" = "無法識別城市";
@@ -1285,3 +1287,20 @@
 "city_edit_display_name_title" = "重新命名城市";
 "city_edit_display_name_placeholder" = "顯示名";
 "city_edit_display_name_hint" = "用自訂名字顯示這張卡片。城市身分不變。";
+
+"journey_comments_title" = "評論";
+"journey_comments_empty_owner" = "暫無評論";
+"journey_comments_empty_thread" = "打個招呼，開啟對話吧";
+"journey_comments_show_older" = "查看更早 %d 則";
+"journey_comments_reply_placeholder" = "回覆 %@...";
+"journey_comments_send_failed" = "發送失敗，請重試。";
+"comments" = "評論";
+"friend" = "好友";
+
+"coin_rules_title" = "金幣規則";
+"coin_rules_earn_title" = "走路賺金幣";
+"coin_rules_earn_body_format" = "每完整公里 %d 金幣，單次旅程最多 %d 金幣。";
+"coin_rules_premium_title" = "Premium 加成";
+"coin_rules_premium_body" = "Premium 會員每次走路獲得 5 倍金幣。";
+"coin_rules_spend_title" = "購買裝備";
+"coin_rules_spend_body" = "用金幣在裝備商店解鎖和試穿裝備。";

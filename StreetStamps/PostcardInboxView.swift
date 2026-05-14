@@ -139,7 +139,10 @@ struct PostcardInboxView: View {
                 )
             }
         }
+        .onAppear { print("[BUG-DBG] Inbox onAppear box=\(selectedBox.rawValue)") }
+        .onDisappear { print("[BUG-DBG] Inbox onDisappear") }
         .task {
+            print("[BUG-DBG] Inbox .task fired")
             await refreshInbox()
             if focusMessageID != nil {
                 selectedBox = .received
@@ -147,10 +150,12 @@ struct PostcardInboxView: View {
             autoFocusReceivedIfNeeded()
         }
         .task(id: scenePhase) {
+            print("[BUG-DBG] Inbox scenePhase=\(scenePhase)")
             guard scenePhase == .active else { return }
             await refreshInbox()
         }
         .onChange(of: publishStore.status) { _, newStatus in
+            print("[BUG-DBG] Inbox publishStore.status changed -> \(newStatus)")
             if case .success = newStatus {
                 Task { await refreshInbox(force: true) }
             }
@@ -158,7 +163,8 @@ struct PostcardInboxView: View {
         .refreshable {
             await refreshInbox(force: true)
         }
-        .onReceive(postcardCenter.$receivedItems) { _ in
+        .onReceive(postcardCenter.$receivedItems) { items in
+            print("[BUG-DBG] Inbox received receivedItems count=\(items.count)")
             autoFocusReceivedIfNeeded()
         }
     }
@@ -586,6 +592,12 @@ private struct PostcardCardRow: View {
                     .transition(.scale(scale: 0.6).combined(with: .opacity))
             }
         }
+        .onAppear {
+            print("[BUG-DBG] Row onAppear msg=\(messageID ?? "nil") tokenLen=\(token?.count ?? -1)")
+        }
+        .onDisappear {
+            print("[BUG-DBG] Row onDisappear msg=\(messageID ?? "nil") showCommentInput=\(showCommentInput)")
+        }
         .sheet(isPresented: $showFullImage) {
             if let photoURL {
                 FullImageViewer(imageURL: photoURL)
@@ -594,6 +606,8 @@ private struct PostcardCardRow: View {
         .sheet(isPresented: $showCommentInput) {
             if let messageID, let token {
                 CommentInputSheet(messageID: messageID, token: token)
+            } else {
+                let _ = print("[BUG-DBG] Sheet content closure hit ELSE — messageID=\(messageID ?? "nil") tokenLen=\(token?.count ?? -1)")
             }
         }
     }
@@ -723,6 +737,9 @@ private struct CommentInputSheet: View {
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(3...5)
                     .padding()
+                    .onChange(of: commentText) { old, new in
+                        print("[BUG-DBG] CommentSheet text \(old.count)->\(new.count) chars")
+                    }
 
                 Text("\(commentText.count)/50")
                     .font(.system(size: 12))
@@ -736,6 +753,8 @@ private struct CommentInputSheet: View {
 
                 Spacer()
             }
+            .onAppear { print("[BUG-DBG] CommentSheet onAppear msg=\(messageID) text.count=\(commentText.count)") }
+            .onDisappear { print("[BUG-DBG] CommentSheet onDisappear text.count=\(commentText.count)") }
             .navigationTitle(L10n.t("postcard_add_comment"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

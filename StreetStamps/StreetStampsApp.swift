@@ -82,6 +82,7 @@ struct StreetStampsApp: App {
     @StateObject private var lifelogRenderCache: LifelogRenderCacheCoordinator
     @StateObject private var socialStore: SocialGraphStore
     @StateObject private var postcardCenter: PostcardCenter
+    @StateObject private var journeyCommentStore: JourneyCommentStore
     @StateObject private var flow = AppFlowCoordinator.shared
     @StateObject private var deepLinkStore = AppDeepLinkStore()
     @StateObject private var onboardingGuide = OnboardingGuideStore()
@@ -97,6 +98,7 @@ struct StreetStampsApp: App {
     @State private var trackTileDirty: Bool = false
     @State private var profileSwitchTask: Task<Void, Never>?
     @State private var pendingUpdatePrompt: PendingUpdatePrompt?
+    @State private var pendingCommentDeepLink: JourneyCommentDeepLink?
 
     @ViewBuilder
     private var firstProfileSetupScreen: some View {
@@ -358,6 +360,10 @@ struct StreetStampsApp: App {
         _lifelogRenderCache = StateObject(wrappedValue: LifelogRenderCacheCoordinator())
         _socialStore = StateObject(wrappedValue: SocialGraphStore(userID: session.activeLocalProfileID))
         _postcardCenter = StateObject(wrappedValue: PostcardCenter(userID: session.activeLocalProfileID))
+        _journeyCommentStore = StateObject(wrappedValue: JourneyCommentStore(
+            userID: session.activeLocalProfileID,
+            backend: RESTJourneyCommentBackend.shared
+        ))
 
         configureGlobalTabBarAppearance()
     }
@@ -393,6 +399,7 @@ struct StreetStampsApp: App {
             .environmentObject(lifelogRenderCache)
             .environmentObject(socialStore)
             .environmentObject(postcardCenter)
+            .environmentObject(journeyCommentStore)
             .environmentObject(flow)
             .environmentObject(deepLinkStore)
             .environmentObject(onboardingGuide)
@@ -464,6 +471,38 @@ struct StreetStampsApp: App {
                 firstProfileSetupScreen
                     .environmentObject(sessionStore)
             }
+            .onChange(of: flow.openJourneyCommentSignal) { _, _ in
+                guard let link = flow.pendingJourneyCommentLink else { return }
+                pendingCommentDeepLink = link
+                flow.consumePendingJourneyCommentLink()
+            }
+            .fullScreenCover(item: $pendingCommentDeepLink) { link in
+                NavigationStack {
+                    journeyCommentDeepLinkView(for: link)
+                }
+                .environmentObject(sessionStore)
+                .environmentObject(journeyStore)
+                .environmentObject(cityCache)
+                .environmentObject(cityRenderCache)
+                .environmentObject(locationHub)
+                .environmentObject(flow)
+                .environmentObject(socialStore)
+                .environmentObject(journeyCommentStore)
+                .environmentObject(publishStore)
+                .environmentObject(onboardingGuide)
+            }
+    }
+
+    @ViewBuilder
+    private func journeyCommentDeepLinkView(for link: JourneyCommentDeepLink) -> some View {
+        if link.ownerID == sessionStore.currentUserID {
+            OwnerCommentDeepLinkContent(link: link)
+        } else {
+            FriendCommentDeepLinkContent(
+                link: link,
+                initialSnapshot: socialStore.friends.first(where: { $0.id == link.ownerID })
+            )
+        }
     }
 
     private var appContentWithStartupTasks: some View {
@@ -482,9 +521,19 @@ struct StreetStampsApp: App {
                 await MembershipStore.shared.refreshEntitlement()
             }
             .task {
+                // Populate per-journey unread badges so bubbles in
+                // JourneyRouteDetailView show the dot without first opening
+                // the sheet. Cheap (single endpoint, returns only buckets).
+                await journeyCommentStore.refreshUnreadSummary(
+                    token: sessionStore.currentAccessToken
+                )
+            }
+            .task {
                 BackendAPIClient.shared.bindSessionStore(sessionStore)
+                CoinService.shared.bindSessionStore(sessionStore)
                 let startupUserID = sessionStore.activeLocalProfileID
                 await sessionStore.bootstrapFileSystemAsync()
+                await CoinService.shared.bootstrap()
 
                 // Phase 1: All independent loads in parallel.
                 // bootstrapFS must finish first (ensures dirs exist), then
@@ -638,6 +687,7 @@ struct StreetStampsApp: App {
                     lifelogStore.rebind(paths: paths)
                     cityRenderCache.rebind(rootDir: paths.thumbnailsDir)
                     renderMaskStore.rebind(paths: paths)
+                    journeyCommentStore.switchUser(uid)
 
                     // Load journey, lifelog, city cache, and track tiles in parallel.
                     // All four do heavy disk I/O — running them concurrently avoids
@@ -725,6 +775,7 @@ struct StreetStampsApp: App {
                         try? await MembershipStore.shared.restorePurchases()
                     }
                     await MembershipStore.shared.refreshEntitlement()
+                    await CoinService.shared.bootstrap()
                 }
             }
             .onChange(of: sessionStore.reauthenticationPromptVersion) { _, version in
@@ -852,6 +903,21 @@ struct StreetStampsApp: App {
             .onReceive(NotificationCenter.default.publisher(for: .lifelogCountryAttributionDidChange)) { notification in
                 let countryISO2 = notification.userInfo?["countryISO2"] as? String
                 lifelogRenderCache.noteCountryAttributionRefresh(countryISO2: countryISO2)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .journeyCommentReceivedPush)) { notification in
+                let journeyID = notification.userInfo?["journeyID"] as? String
+                Task {
+                    let token = sessionStore.currentAccessToken
+                    // Refresh global summary so the bubble badge updates across
+                    // every journey detail screen, not just the one in front.
+                    await journeyCommentStore.refreshUnreadSummary(token: token)
+                    // If the affected journey is currently being shown, also
+                    // refresh its thread list so any open sheet picks up the
+                    // new message without a manual pull.
+                    if let journeyID, !journeyID.isEmpty {
+                        await journeyCommentStore.loadThreads(journeyID: journeyID, token: token)
+                    }
+                }
             }
             .onReceive(MembershipStore.shared.$pendingICloudAutoEnableNotice) { pending in
                 guard pending else { return }

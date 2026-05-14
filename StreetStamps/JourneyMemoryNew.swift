@@ -1134,12 +1134,20 @@ struct JourneyMemoryDetailView: View {
     let countryName: String
     let readOnly: Bool
     let friendLoadout: RobotLoadout?
+    /// When this view is opened from an APNs deep link, the comment sheet
+    /// should auto-present after the navigation transition settles.
+    let autoPresentCommentSheet: Bool
+    /// Owner of the journey. For own journeys this equals `currentUserID`;
+    /// for friend (read-only) journeys the caller passes the friend's user ID.
+    let journeyOwnerID: String?
 
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var cityCache: CityCache
     @EnvironmentObject private var flow: AppFlowCoordinator
     @EnvironmentObject private var publishStore: JourneyPublishStore
+    @EnvironmentObject private var commentStore: JourneyCommentStore
+    @EnvironmentObject private var socialStore: SocialGraphStore
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
 
@@ -1197,6 +1205,7 @@ struct JourneyMemoryDetailView: View {
     @ObservedObject private var membership = MembershipStore.shared
     @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
     @State private var showMemoryHint = false
+    @State private var showCommentSheet = false
 
     init(
         journey: JourneyRoute,
@@ -1204,7 +1213,9 @@ struct JourneyMemoryDetailView: View {
         cityName: String,
         countryName: String,
         readOnly: Bool = false,
-        friendLoadout: RobotLoadout? = nil
+        friendLoadout: RobotLoadout? = nil,
+        autoPresentCommentSheet: Bool = false,
+        journeyOwnerID: String? = nil
     ) {
         self.journey = journey
         self.memories = memories
@@ -1212,6 +1223,8 @@ struct JourneyMemoryDetailView: View {
         self.countryName = countryName
         self.readOnly = readOnly
         self.friendLoadout = friendLoadout
+        self.autoPresentCommentSheet = autoPresentCommentSheet
+        self.journeyOwnerID = journeyOwnerID
     }
 
     private enum ActivePhotoTarget: Equatable {
@@ -1268,6 +1281,31 @@ struct JourneyMemoryDetailView: View {
 
     private var journeyActivityTag: String {
         (journey.activityTag ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var resolvedOwnerID: String {
+        if let explicit = journeyOwnerID, !explicit.isEmpty { return explicit }
+        return sessionStore.currentUserID
+    }
+
+    private var commentSheetMode: JourneyCommentSheet.Mode {
+        if readOnly {
+            let ownerID = resolvedOwnerID
+            let ownerName = socialStore.friends.first(where: { $0.id == ownerID })?.displayName
+            return .viewer(ownerID: ownerID, ownerDisplayName: ownerName)
+        } else {
+            return .owner
+        }
+    }
+
+    /// Hide the owner-side bubble when nobody has commented on the journey yet,
+    /// so the navBar stays clean. We use the union of unread badge data
+    /// (populated at startup by `refreshUnreadSummary`) and per-journey thread
+    /// data (populated by `loadThreads` when this view appears) so the bubble
+    /// surfaces as soon as either source confirms a thread exists.
+    private var ownerShouldShowCommentBubble: Bool {
+        if commentStore.unreadCount(forJourney: journey.id) > 0 { return true }
+        return !commentStore.threads(forJourney: journey.id).isEmpty
     }
 
     private var journeyMetaSubtitle: String {
@@ -1340,6 +1378,29 @@ struct JourneyMemoryDetailView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
+        .sheet(isPresented: $showCommentSheet) {
+            JourneyCommentSheet(
+                journeyID: journey.id,
+                mode: commentSheetMode,
+                viewerID: sessionStore.currentUserID
+            )
+            .environmentObject(commentStore)
+            .environmentObject(sessionStore)
+        }
+        .task(id: journey.id) {
+            await commentStore.loadThreads(
+                journeyID: journey.id,
+                token: sessionStore.currentAccessToken
+            )
+        }
+        .onAppear {
+            if autoPresentCommentSheet {
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                    showCommentSheet = true
+                }
+            }
+        }
         .overlay(alignment: .bottom) {
             if showMemoryHint {
                 ContextualHintBar(
@@ -1565,6 +1626,14 @@ struct JourneyMemoryDetailView: View {
             Spacer()
             if !readOnly {
                 HStack(spacing: 6) {
+                    if !isEditing && ownerShouldShowCommentBubble {
+                        JourneyCommentBubbleButton(
+                            unreadCount: commentStore.unreadCount(forJourney: journey.id),
+                            tone: .owner
+                        ) {
+                            showCommentSheet = true
+                        }
+                    }
                     if isEditing {
                         Button {
                             cancelEditing()
@@ -1635,6 +1704,16 @@ struct JourneyMemoryDetailView: View {
                                 .appMinTapTarget()
                         }
                         .buttonStyle(.plain)
+                    }
+                }
+                .padding(.trailing, 16)
+            } else {
+                HStack(spacing: 6) {
+                    JourneyCommentBubbleButton(
+                        unreadCount: commentStore.unreadCount(forJourney: journey.id),
+                        tone: .viewer
+                    ) {
+                        showCommentSheet = true
                     }
                 }
                 .padding(.trailing, 16)

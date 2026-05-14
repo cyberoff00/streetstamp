@@ -1041,12 +1041,150 @@ async function insertReport(pool, report) {
   );
 }
 
+// ============================================================
+// Journey Comments
+// ============================================================
+
+function journeyCommentRowToObj(row) {
+  return {
+    id: row.id,
+    journeyID: row.journey_id,
+    ownerID: row.owner_id,
+    senderID: row.sender_id,
+    recipientID: row.recipient_id,
+    threadKey: row.thread_key,
+    content: row.content,
+    clientDraftID: row.client_draft_id,
+    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+    readAt: row.read_at ? (row.read_at instanceof Date ? row.read_at.toISOString() : String(row.read_at)) : null,
+    deletedAt: row.deleted_at ? (row.deleted_at instanceof Date ? row.deleted_at.toISOString() : String(row.deleted_at)) : null,
+  };
+}
+
+async function findJourneyCommentByDraft(pool, senderID, clientDraftID) {
+  if (!clientDraftID) return null;
+  const { rows } = await pool.query(
+    "SELECT * FROM journey_comments WHERE sender_id = $1 AND client_draft_id = $2 LIMIT 1",
+    [senderID, clientDraftID]
+  );
+  return rows[0] ? journeyCommentRowToObj(rows[0]) : null;
+}
+
+async function insertJourneyComment(pool, c) {
+  await pool.query(
+    `INSERT INTO journey_comments (
+       id, journey_id, owner_id, sender_id, recipient_id,
+       thread_key, content, client_draft_id, created_at
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+     ON CONFLICT (id) DO NOTHING`,
+    [
+      c.id, c.journeyID, c.ownerID, c.senderID, c.recipientID,
+      c.threadKey, c.content, c.clientDraftID || null, c.createdAt,
+    ]
+  );
+}
+
+async function getThreadMessages(pool, threadKey, before, limit) {
+  const params = [threadKey];
+  let sql = "SELECT * FROM journey_comments WHERE thread_key = $1 AND deleted_at IS NULL";
+  if (before) {
+    params.push(before);
+    sql += ` AND created_at < $${params.length}`;
+  }
+  params.push(limit);
+  sql += ` ORDER BY created_at DESC LIMIT $${params.length}`;
+  const { rows } = await pool.query(sql, params);
+  // Return ascending so the client can append without re-sorting.
+  return rows.map(journeyCommentRowToObj).reverse();
+}
+
+async function getOwnerThreadSummaries(pool, journeyID, viewerID) {
+  // All threads where viewer is either side. The owner is always one of the
+  // two participants by construction; for the owner case viewerID == ownerID.
+  const { rows } = await pool.query(
+    `WITH thread_messages AS (
+       SELECT * FROM journey_comments
+       WHERE journey_id = $1
+         AND deleted_at IS NULL
+         AND (sender_id = $2 OR recipient_id = $2)
+     ),
+     last_per_thread AS (
+       SELECT DISTINCT ON (thread_key) *
+       FROM thread_messages
+       ORDER BY thread_key, created_at DESC
+     ),
+     unread_per_thread AS (
+       SELECT thread_key, COUNT(*)::int AS unread_count
+       FROM thread_messages
+       WHERE recipient_id = $2 AND read_at IS NULL
+       GROUP BY thread_key
+     )
+     SELECT lpt.*, COALESCE(upt.unread_count, 0) AS unread_count
+     FROM last_per_thread lpt
+     LEFT JOIN unread_per_thread upt USING (thread_key)
+     ORDER BY (COALESCE(upt.unread_count, 0) > 0) DESC, lpt.created_at DESC`,
+    [journeyID, viewerID]
+  );
+  return rows.map((row) => ({
+    threadKey: row.thread_key,
+    journeyID: row.journey_id,
+    ownerID: row.owner_id,
+    // The "other" participant from the viewer's perspective is whichever
+    // side of the last message wasn't the viewer.
+    otherUserID: row.sender_id === viewerID ? row.recipient_id : row.sender_id,
+    unreadCount: row.unread_count,
+    lastMessage: journeyCommentRowToObj(row),
+  }));
+}
+
+async function markThreadRead(pool, threadKey, recipientID) {
+  const { rowCount } = await pool.query(
+    `UPDATE journey_comments
+       SET read_at = NOW()
+     WHERE thread_key = $1
+       AND recipient_id = $2
+       AND read_at IS NULL
+       AND deleted_at IS NULL`,
+    [threadKey, recipientID]
+  );
+  return rowCount;
+}
+
+async function softDeleteJourneyComment(pool, id, senderID) {
+  const { rowCount } = await pool.query(
+    `UPDATE journey_comments
+       SET deleted_at = NOW()
+     WHERE id = $1
+       AND sender_id = $2
+       AND deleted_at IS NULL`,
+    [id, senderID]
+  );
+  return rowCount;
+}
+
+async function getJourneyCommentUnreadSummary(pool, recipientID) {
+  const { rows } = await pool.query(
+    `SELECT journey_id, COUNT(*)::int AS unread_count
+       FROM journey_comments
+      WHERE recipient_id = $1
+        AND read_at IS NULL
+        AND deleted_at IS NULL
+      GROUP BY journey_id`,
+    [recipientID]
+  );
+  const summary = {};
+  for (const r of rows) summary[r.journey_id] = r.unread_count;
+  return summary;
+}
+
 async function ensureSchema(pool) {
   const fs = require("fs");
   const path = require("path");
   const migrationFiles = [
     "001-create-tables.sql",
     "003-user-blocks-reports.sql",
+    "004-add-coins.sql",
+    "005-journey-comments.sql",
   ];
   for (const file of migrationFiles) {
     const schemaPath = path.join(__dirname, "migrations", file);
@@ -1151,6 +1289,15 @@ module.exports = {
   getPostcardsForUser,
   insertPostcard,
   findPostcardByDraft,
+
+  // Journey Comments
+  findJourneyCommentByDraft,
+  insertJourneyComment,
+  getThreadMessages,
+  getOwnerThreadSummaries,
+  markThreadRead,
+  softDeleteJourneyComment,
+  getJourneyCommentUnreadSummary,
 
   // Postcard Reactions
   getPostcardReaction,

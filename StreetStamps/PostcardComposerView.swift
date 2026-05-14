@@ -218,11 +218,13 @@ struct PostcardComposerView: View {
             }
         }
         .onAppear {
+            print("[BUG-DBG] Composer onAppear msg.count=\(messageText.count) photoSet=\(!localImagePath.isEmpty)")
             socialStore.ensureLoaded()
             guard PostcardSidebarVisibilityScope.composer.hidesGlobalSidebarButton else { return }
             flow.pushSidebarButtonHidden(token: sidebarHideToken)
         }
         .onDisappear {
+            print("[BUG-DBG] Composer onDisappear msg.count=\(messageText.count) photoSet=\(!localImagePath.isEmpty)")
             guard PostcardSidebarVisibilityScope.composer.hidesGlobalSidebarButton else { return }
             flow.popSidebarButtonHidden(token: sidebarHideToken)
         }
@@ -243,12 +245,14 @@ struct PostcardComposerView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .task {
+            print("[BUG-DBG] Composer .task fired")
             if selectedCityID.isEmpty, let first = cityOptions.first {
                 selectedCityID = first.id
                 selectedCityName = first.name
             }
         }
         .task(id: cityRefreshTaskID) {
+            print("[BUG-DBG] Composer .task(cityRefreshTaskID) fired id=\(cityRefreshTaskID) msg.count=\(messageText.count)")
             await refreshLocalizedCityNames()
             guard let first = cityOptions.first else {
                 selectedCityID = ""

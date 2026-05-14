@@ -1312,6 +1312,69 @@ final class BackendAPIClient {
         _ = try await request(path: "/v1/push-token", method: "PUT", token: token, jsonBody: body)
     }
 
+    // MARK: - Journey Comments
+
+    func fetchJourneyCommentUnreadSummary(token: String) async throws -> BackendJourneyCommentUnreadSummaryResponse {
+        let (data, _) = try await request(path: "/v1/comments/unread-summary", method: "GET", token: token)
+        return try decoder.decode(BackendJourneyCommentUnreadSummaryResponse.self, from: data)
+    }
+
+    func fetchJourneyCommentThreads(token: String, journeyID: String) async throws -> BackendJourneyCommentThreadsResponse {
+        let path = "/v1/journeys/\(journeyID)/comment-threads"
+        let (data, _) = try await request(path: path, method: "GET", token: token)
+        return try decoder.decode(BackendJourneyCommentThreadsResponse.self, from: data)
+    }
+
+    func fetchJourneyCommentMessages(
+        token: String,
+        journeyID: String,
+        otherUserID: String,
+        before: Date? = nil,
+        limit: Int = 30
+    ) async throws -> BackendJourneyCommentMessagesResponse {
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "with", value: otherUserID),
+            URLQueryItem(name: "limit", value: String(limit)),
+        ]
+        if let before {
+            queryItems.append(URLQueryItem(name: "before", value: Self.iso8601String(before)))
+        }
+        let path = "/v1/journeys/\(journeyID)/comments"
+        let (data, _) = try await request(path: path, method: "GET", token: token, queryItems: queryItems)
+        return try decoder.decode(BackendJourneyCommentMessagesResponse.self, from: data)
+    }
+
+    func sendJourneyComment(
+        token: String,
+        journeyID: String,
+        body: BackendSendJourneyCommentRequest
+    ) async throws -> BackendSendJourneyCommentResponse {
+        let payload = try encoder.encode(body)
+        let path = "/v1/journeys/\(journeyID)/comments"
+        let (data, _) = try await request(path: path, method: "POST", token: token, jsonBody: payload)
+        return try decoder.decode(BackendSendJourneyCommentResponse.self, from: data)
+    }
+
+    func markJourneyCommentThreadRead(
+        token: String,
+        journeyID: String,
+        otherUserID: String
+    ) async throws {
+        let body = try encoder.encode(BackendJourneyCommentMarkReadRequest(withUserID: otherUserID))
+        let path = "/v1/journeys/\(journeyID)/comments/read"
+        _ = try await request(path: path, method: "POST", token: token, jsonBody: body)
+    }
+
+    func deleteJourneyComment(token: String, id: String) async throws {
+        _ = try await request(path: "/v1/comments/\(id)", method: "DELETE", token: token)
+    }
+
+    private static func iso8601String(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+    }
+
     // MARK: - Account Deletion
 
     func deleteAccount(token: String) async throws {
@@ -1344,6 +1407,82 @@ final class BackendAPIClient {
         if let contentID { dict["contentID"] = contentID }
         let body = try encoder.encode(dict)
         _ = try await request(path: "/v1/reports", method: "POST", token: token, jsonBody: body)
+    }
+
+    // MARK: - Coins
+
+    func fetchCoinBalance(token: String) async throws -> Int {
+        let (data, _) = try await request(path: "/v1/coins/balance", method: "GET", token: token)
+        return try decoder.decode(CoinBalanceResponse.self, from: data).balance
+    }
+
+    /// Returns the new balance after grant.
+    func grantCoins(amount: Int, reason: String, token: String) async throws -> Int {
+        let payload: [String: AnyEncodable] = [
+            "amount": AnyEncodable(amount),
+            "reason": AnyEncodable(reason),
+        ]
+        let body = try encoder.encode(payload)
+        let (data, _) = try await request(path: "/v1/coins/grant", method: "POST", token: token, jsonBody: body)
+        return try decoder.decode(CoinBalanceResponse.self, from: data).balance
+    }
+
+    struct SpendResult {
+        let ok: Bool
+        let balance: Int
+    }
+
+    /// Returns ok=false when balance was insufficient. Server always returns 200
+    /// for this endpoint; the `ok` field signals success/failure so the client
+    /// can read the current balance regardless of outcome.
+    func spendCoins(amount: Int, reason: String, token: String) async throws -> SpendResult {
+        let payload: [String: AnyEncodable] = [
+            "amount": AnyEncodable(amount),
+            "reason": AnyEncodable(reason),
+        ]
+        let body = try encoder.encode(payload)
+        let (data, _) = try await request(path: "/v1/coins/spend", method: "POST", token: token, jsonBody: body)
+        let resp = try decoder.decode(CoinSpendResponse.self, from: data)
+        return SpendResult(ok: resp.ok, balance: resp.balance)
+    }
+
+    /// Idempotent merge from external source (guest upgrade, device transfer, userdefaults migration).
+    /// Returns the new balance. Replaying the same merge_token is a server-side no-op.
+    func mergeCoins(amount: Int, source: String, mergeToken: String, accessToken: String) async throws -> Int {
+        let payload: [String: AnyEncodable] = [
+            "amount": AnyEncodable(amount),
+            "source": AnyEncodable(source),
+            "merge_token": AnyEncodable(mergeToken)
+        ]
+        let body = try encoder.encode(payload)
+        let (data, _) = try await request(path: "/v1/coins/merge", method: "POST", token: accessToken, jsonBody: body)
+        return try decoder.decode(CoinBalanceResponse.self, from: data).balance
+    }
+}
+
+private struct CoinBalanceResponse: Codable {
+    let balance: Int
+}
+
+private struct CoinSpendResponse: Codable {
+    let ok: Bool
+    let balance: Int
+}
+
+/// Wraps a heterogeneous JSON value so we can encode mixed-type dictionaries
+/// without spreading per-payload Codable structs through the client.
+private struct AnyEncodable: Encodable {
+    let value: Encodable
+    init(_ value: Encodable) { self.value = value }
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch value {
+        case let v as Int: try container.encode(v)
+        case let v as String: try container.encode(v)
+        case let v as Bool: try container.encode(v)
+        case let v as Double: try container.encode(v)
+        default: try value.encode(to: encoder)
+        }
     }
 }
 

@@ -190,6 +190,7 @@ final class AppNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
+        JourneyCommentNotificationBridge.handleIncomingPayload(notification.request.content.userInfo)
         completionHandler([.banner, .sound, .list])
     }
 
@@ -198,6 +199,15 @@ final class AppNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         if response.actionIdentifier == "LONG_STATIONARY_CONTINUE" {
             await MainActor.run {
                 TrackingService.shared.userDidConfirmContinueTracking()
+            }
+            return
+        }
+
+        let pushUserInfo = response.notification.request.content.userInfo
+        JourneyCommentNotificationBridge.handleIncomingPayload(pushUserInfo)
+        if let link = JourneyCommentNotificationBridge.deepLink(from: pushUserInfo) {
+            await MainActor.run {
+                AppFlowCoordinator.shared.requestOpenJourneyCommentDeepLink(link)
             }
             return
         }

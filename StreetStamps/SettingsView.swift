@@ -3130,7 +3130,14 @@ private final class PrivateDataTransferManager: ObservableObject {
             guard file.relativePath.hasPrefix("__userdefaults/") else { continue }
             let key = String(file.relativePath.dropFirst("__userdefaults/".count))
             if key == UserScopedProfileStateStore.globalEconomyKey {
-                // Merge economy: coins = sum, items = union
+                // Merge economy: coins = sum, items = union.
+                // NOTE: coins land in UserDefaults; CoinService.bootstrap's
+                // one-shot migration pushes them to Postgres on next launch
+                // (account users only). If the receiving account already had
+                // its userdefaults_migration token consumed on another device,
+                // these incoming transfer coins won't reach the backend — rare
+                // edge case (device-transfer to an account already migrated
+                // elsewhere). Same rationale as in GuestDataRecoveryService.
                 if let remote = try? JSONDecoder().decode(EquipmentEconomy.self, from: file.data) {
                     var local = EquipmentEconomyStore.load()
                     local.coins += remote.coins

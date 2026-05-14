@@ -379,8 +379,11 @@ actor CloudKitSyncService {
             local = .empty
         }
 
+        // Coins moved to Postgres as the source of truth for account users.
+        // We deliberately ignore the remote CloudKit coin value here so iCloud
+        // sync cannot overwrite or compete with the backend balance. Only
+        // owned-item ownership continues to round-trip through CloudKit.
         var merged = local
-        merged.coins = max(local.coins, remote.coins)
         for (category, items) in remote.ownedItemsByCategory {
             let existing = Set(merged.ownedItemsByCategory[category] ?? [])
             let union = existing.union(items)

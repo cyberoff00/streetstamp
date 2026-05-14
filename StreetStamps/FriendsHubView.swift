@@ -2923,7 +2923,7 @@ private struct FriendChevronBackButtonModifier: ViewModifier {
 }
 
 @MainActor
-private final class FriendMirrorContext: ObservableObject {
+final class FriendMirrorContext: ObservableObject {
     let friendID: String
     let paths: StoragePath
     let journeyStore: JourneyStore

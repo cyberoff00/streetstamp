@@ -70,6 +70,213 @@ const WRITE_FREEZE_ENABLED = String(process.env.WRITE_FREEZE_ENABLED || "").trim
 const SOCIAL_DISABLED_REGIONS = (process.env.SOCIAL_DISABLED_REGIONS ?? "CN").trim().toUpperCase().split(",").map(s => s.trim()).filter(Boolean);
 const LEGACY_EMAIL_REVERIFY_EMAIL = normalizeEmail(process.env.LEGACY_EMAIL_REVERIFY_EMAIL || "yinterestingy@163.com");
 
+// Coin economy. App-driven grant/spend trust the client for amount but cap
+// per-call to limit abuse. ADMIN_API_TOKEN gates the customer-service admin
+// endpoint used to credit users who paid out-of-band (e.g. Xianyu).
+const COIN_MAX_PER_CALL = Number(process.env.COIN_MAX_PER_CALL || 100000);
+const ADMIN_API_TOKEN = (process.env.ADMIN_API_TOKEN || "").trim();
+
+// RevenueCat V1 secret key for granting promotional entitlements (membership).
+// Used only by the unified admin endpoint; never exposed to iOS.
+const REVENUECAT_V1_KEY = (process.env.REVENUECAT_V1_KEY || "").trim();
+const REVENUECAT_PREMIUM_ENTITLEMENT_ID = (process.env.REVENUECAT_PREMIUM_ENTITLEMENT_ID || "premium").trim();
+
+const ADMIN_PAGE_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Worldo 管理</title>
+<style>
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+  background: #f6f7f9; color: #1d1d1f; min-height: 100vh; padding: 24px 20px 60px;
+}
+.wrap { max-width: 520px; margin: 0 auto; }
+h1 { font-size: 24px; margin: 0 0 24px; font-weight: 700; }
+.field { margin-bottom: 16px; }
+.field label { display: block; font-size: 13px; color: #6b6b70; margin-bottom: 6px; font-weight: 500; }
+.field input, .field select {
+  width: 100%; padding: 14px; font-size: 16px;
+  border: 1px solid #e0e0e2; border-radius: 12px;
+  background: white; color: #1d1d1f; -webkit-appearance: none; appearance: none;
+}
+.field input:focus, .field select:focus { outline: none; border-color: #007aff; }
+button.primary {
+  width: 100%; padding: 16px; font-size: 17px; font-weight: 600;
+  background: #007aff; color: white; border: none; border-radius: 14px;
+  cursor: pointer; transition: opacity 0.15s;
+}
+button.primary:active { opacity: 0.75; }
+button.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+.result {
+  margin-top: 16px; padding: 14px 16px; border-radius: 12px;
+  font-size: 15px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+}
+.result.ok { background: #e6f7ed; color: #0d7e3e; }
+.result.err { background: #fdeaea; color: #c0392b; }
+.logout { display: block; margin-top: 32px; text-align: center; color: #8e8e93; font-size: 14px; text-decoration: none; }
+.tabs { display: flex; gap: 4px; margin-bottom: 24px; padding: 4px; background: #e8e8eb; border-radius: 12px; }
+.tabs button {
+  flex: 1; padding: 12px; border: none; background: transparent; border-radius: 8px;
+  font-size: 15px; font-weight: 500; color: #6b6b70; cursor: pointer;
+}
+.tabs button.active { background: white; color: #1d1d1f; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="login" style="display:none">
+    <h1>Worldo 管理</h1>
+    <div class="field">
+      <label>Admin Token</label>
+      <input type="password" id="tokenInput" autocomplete="off" autocapitalize="off" autocorrect="off">
+    </div>
+    <button class="primary" onclick="saveToken()">登录</button>
+    <div class="result err" id="loginErr" style="display:none"></div>
+  </div>
+
+  <div id="main" style="display:none">
+    <h1>发放</h1>
+    <div class="tabs">
+      <button id="tabCoins" class="active" onclick="setType('coins')">金币</button>
+      <button id="tabMembership" onclick="setType('membership')">会员</button>
+    </div>
+    <div class="field">
+      <label>用户邮箱</label>
+      <input type="email" id="email" autocapitalize="off" autocorrect="off" inputmode="email">
+    </div>
+    <div class="field" id="amountField">
+      <label>金币数量</label>
+      <input type="number" id="amount" inputmode="numeric" min="1" max="100000">
+    </div>
+    <div class="field" id="durationField" style="display:none">
+      <label>会员时长</label>
+      <select id="duration">
+        <option value="weekly">1 周</option>
+        <option value="two_week">2 周</option>
+        <option value="monthly" selected>1 个月</option>
+        <option value="two_month">2 个月</option>
+        <option value="three_month">3 个月</option>
+        <option value="six_month">6 个月</option>
+        <option value="yearly">1 年</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>备注（仅用于审计）</label>
+      <input type="text" id="note" placeholder="闲鱼代充">
+    </div>
+    <button class="primary" id="submitBtn" onclick="submit()">提交</button>
+    <div id="result"></div>
+    <a class="logout" href="#" onclick="logout(); return false;">退出登录</a>
+  </div>
+</div>
+
+<script>
+const TOKEN_KEY = "worldo_admin_token";
+let currentType = "coins";
+
+function start() {
+  if (localStorage.getItem(TOKEN_KEY)) {
+    document.getElementById("main").style.display = "block";
+  } else {
+    document.getElementById("login").style.display = "block";
+  }
+}
+
+function saveToken() {
+  const v = document.getElementById("tokenInput").value.trim();
+  const errEl = document.getElementById("loginErr");
+  if (!v) { errEl.textContent = "Token 不能为空"; errEl.style.display = "block"; return; }
+  localStorage.setItem(TOKEN_KEY, v);
+  document.getElementById("login").style.display = "none";
+  document.getElementById("main").style.display = "block";
+}
+
+function logout() {
+  localStorage.removeItem(TOKEN_KEY);
+  document.getElementById("main").style.display = "none";
+  document.getElementById("login").style.display = "block";
+  document.getElementById("tokenInput").value = "";
+  document.getElementById("loginErr").style.display = "none";
+  showResult("", "");
+}
+
+function setType(t) {
+  currentType = t;
+  document.getElementById("tabCoins").classList.toggle("active", t === "coins");
+  document.getElementById("tabMembership").classList.toggle("active", t === "membership");
+  document.getElementById("amountField").style.display = t === "coins" ? "block" : "none";
+  document.getElementById("durationField").style.display = t === "membership" ? "block" : "none";
+}
+
+function showResult(cls, msg) {
+  const r = document.getElementById("result");
+  if (!msg) { r.className = ""; r.textContent = ""; return; }
+  r.className = "result " + cls;
+  r.textContent = msg;
+}
+
+async function submit() {
+  const email = document.getElementById("email").value.trim();
+  const note = document.getElementById("note").value.trim();
+  const token = localStorage.getItem(TOKEN_KEY);
+  const btn = document.getElementById("submitBtn");
+
+  if (!email) { showResult("err", "请填邮箱"); return; }
+
+  const body = { email, type: currentType, note };
+  if (currentType === "coins") {
+    const amount = parseInt(document.getElementById("amount").value, 10);
+    if (!amount || amount <= 0) { showResult("err", "金币数量必须 > 0"); return; }
+    body.amount = amount;
+  } else {
+    body.duration = document.getElementById("duration").value;
+  }
+
+  btn.disabled = true;
+  btn.textContent = "提交中...";
+  showResult("", "");
+
+  try {
+    const resp = await fetch("/v1/admin/grant", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Admin-Token": token },
+      body: JSON.stringify(body)
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      if (resp.status === 401) { logout(); showResult("err", "Token 无效，请重新登录"); return; }
+      showResult("err", (data.message || ("HTTP " + resp.status)) + (data.detail ? "\\n" + data.detail : ""));
+    } else {
+      let msg;
+      if (currentType === "coins") {
+        msg = "✓ 已发放 " + body.amount + " 金币\\n邮箱: " + email + "\\n新余额: " + data.balance;
+      } else {
+        const map = { weekly: "1 周", two_week: "2 周", monthly: "1 个月", two_month: "2 个月", three_month: "3 个月", six_month: "6 个月", yearly: "1 年" };
+        msg = "✓ 会员已激活\\n邮箱: " + email + "\\n时长: " + (map[body.duration] || body.duration);
+      }
+      showResult("ok", msg);
+      document.getElementById("email").value = "";
+      document.getElementById("amount").value = "";
+      document.getElementById("note").value = "";
+    }
+  } catch (err) {
+    showResult("err", "网络错误: " + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "提交";
+  }
+}
+
+start();
+</script>
+</body>
+</html>`;
+
 const visibilityPrivate = "private";
 const visibilityFriendsOnly = "friendsOnly";
 const visibilityPublic = "public";
@@ -2466,6 +2673,267 @@ async function main() {
     });
   });
 
+  // ============================================================
+  // Coins — account-user balance lives in users.coins.
+  // Guests use iOS UserDefaults and never hit these endpoints.
+  // ============================================================
+
+  function normalizeCoinAmount(raw) {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) return null;
+    if (n > COIN_MAX_PER_CALL) return null;
+    return n;
+  }
+
+  async function logCoinTransaction(client, { userID, delta, balanceAfter, source, reason, mergeToken }) {
+    await client.query(
+      `INSERT INTO coin_transactions (user_id, delta, balance_after, source, reason, merge_token, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [userID, delta, balanceAfter, source, String(reason || "").slice(0, 200), mergeToken || null, nowUnix()]
+    );
+  }
+
+  app.get("/v1/coins/balance", async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      if (!pgPool) return res.status(503).json({ message: "coins require relational backend" });
+      const { rows } = await pgPool.query("SELECT coins FROM users WHERE id=$1", [uid]);
+      if (!rows.length) return res.status(404).json({ message: "user not found" });
+      return res.status(200).json({ balance: rows[0].coins });
+    } catch (err) {
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.post("/v1/coins/grant", writeRateLimiter, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      if (!pgPool) return res.status(503).json({ message: "coins require relational backend" });
+      const amount = normalizeCoinAmount(req.body?.amount);
+      if (amount === null) return res.status(400).json({ message: "invalid amount" });
+      const reason = String(req.body?.reason || "").slice(0, 200);
+
+      let balance = 0;
+      await persistPGTx(async (client) => {
+        const { rows } = await client.query(
+          "UPDATE users SET coins = coins + $1 WHERE id=$2 RETURNING coins",
+          [amount, uid]
+        );
+        if (!rows.length) throw new Error("user_not_found");
+        balance = rows[0].coins;
+        await logCoinTransaction(client, { userID: uid, delta: amount, balanceAfter: balance, source: "grant", reason });
+      });
+
+      return res.status(200).json({ balance });
+    } catch (err) {
+      if (err && err.message === "user_not_found") return res.status(404).json({ message: "user not found" });
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.post("/v1/coins/spend", writeRateLimiter, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      if (!pgPool) return res.status(503).json({ message: "coins require relational backend" });
+      const amount = normalizeCoinAmount(req.body?.amount);
+      if (amount === null) return res.status(400).json({ message: "invalid amount" });
+      const reason = String(req.body?.reason || "").slice(0, 200);
+
+      let balance = null;
+      let ok = false;
+      await persistPGTx(async (client) => {
+        // Atomic: only deduct if sufficient balance. WHERE clause guards underflow.
+        const { rows } = await client.query(
+          "UPDATE users SET coins = coins - $1 WHERE id=$2 AND coins >= $1 RETURNING coins",
+          [amount, uid]
+        );
+        if (rows.length) {
+          balance = rows[0].coins;
+          ok = true;
+          await logCoinTransaction(client, { userID: uid, delta: -amount, balanceAfter: balance, source: "spend", reason });
+        } else {
+          // Either user missing or insufficient balance. Read current balance for response.
+          const cur = await client.query("SELECT coins FROM users WHERE id=$1", [uid]);
+          if (!cur.rows.length) throw new Error("user_not_found");
+          balance = cur.rows[0].coins;
+          ok = false;
+        }
+      });
+
+      // 200 always for ok-or-not; client checks `ok` field. This avoids 409
+      // body-shape mismatch where validateResponse would throw before client
+      // can read the balance.
+      return res.status(200).json({ ok, balance });
+    } catch (err) {
+      if (err && err.message === "user_not_found") return res.status(404).json({ message: "user not found" });
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.post("/v1/coins/merge", writeRateLimiter, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      if (!pgPool) return res.status(503).json({ message: "coins require relational backend" });
+      const amount = normalizeCoinAmount(req.body?.amount);
+      if (amount === null) return res.status(400).json({ message: "invalid amount" });
+      const token = String(req.body?.merge_token || "").trim().slice(0, 200);
+      const source = String(req.body?.source || "").trim().slice(0, 50);
+      const ALLOWED_SOURCES = ["guest_upgrade", "device_transfer", "userdefaults_migration"];
+      if (!token) return res.status(400).json({ message: "missing merge_token" });
+      if (!ALLOWED_SOURCES.includes(source)) return res.status(400).json({ message: "invalid source" });
+
+      let balance = 0;
+      let applied = false;
+      await persistPGTx(async (client) => {
+        // Insert token first; ON CONFLICT no-op signals "already applied"
+        const ins = await client.query(
+          `INSERT INTO coin_merge_tokens (token, user_id, amount, source, applied_at)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (token) DO NOTHING
+           RETURNING token`,
+          [token, uid, amount, source, nowUnix()]
+        );
+        if (ins.rows.length) {
+          // First time for this token — credit the user.
+          const upd = await client.query(
+            "UPDATE users SET coins = coins + $1 WHERE id=$2 RETURNING coins",
+            [amount, uid]
+          );
+          if (!upd.rows.length) throw new Error("user_not_found");
+          balance = upd.rows[0].coins;
+          applied = true;
+          await logCoinTransaction(client, { userID: uid, delta: amount, balanceAfter: balance, source: "merge", reason: source, mergeToken: token });
+        } else {
+          // Token already consumed — return current balance, no change.
+          const cur = await client.query("SELECT coins FROM users WHERE id=$1", [uid]);
+          if (!cur.rows.length) throw new Error("user_not_found");
+          balance = cur.rows[0].coins;
+          applied = false;
+        }
+      });
+
+      return res.status(200).json({ balance, applied });
+    } catch (err) {
+      if (err && err.message === "user_not_found") return res.status(404).json({ message: "user not found" });
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  // Admin: credit a user's coins by ID, used by customer-service flow.
+  // Auth: X-Admin-Token header must match ADMIN_API_TOKEN env (not the user JWT).
+  app.post("/v1/admin/coins/grant", async (req, res) => {
+    if (!ADMIN_API_TOKEN) return res.status(503).json({ message: "admin api not configured" });
+    const provided = String(req.headers["x-admin-token"] || "").trim();
+    if (provided !== ADMIN_API_TOKEN) return res.status(401).json({ message: "unauthorized" });
+    if (!pgPool) return res.status(503).json({ message: "coins require relational backend" });
+
+    try {
+      const userID = String(req.body?.user_id || "").trim();
+      const amount = normalizeCoinAmount(req.body?.amount);
+      const note = String(req.body?.note || "").slice(0, 200);
+      if (!userID) return res.status(400).json({ message: "missing user_id" });
+      if (amount === null) return res.status(400).json({ message: "invalid amount" });
+
+      let balance = 0;
+      await persistPGTx(async (client) => {
+        const { rows } = await client.query(
+          "UPDATE users SET coins = coins + $1 WHERE id=$2 RETURNING coins",
+          [amount, userID]
+        );
+        if (!rows.length) throw new Error("user_not_found");
+        balance = rows[0].coins;
+        await logCoinTransaction(client, { userID, delta: amount, balanceAfter: balance, source: "admin_grant", reason: note });
+      });
+
+      return res.status(200).json({ balance, user_id: userID });
+    } catch (err) {
+      if (err && err.message === "user_not_found") return res.status(404).json({ message: "user not found" });
+      return res.status(500).json({ message: "internal error" });
+    }
+  });
+
+  // Unified admin grant: looks up user by email, then routes by `type`.
+  // Used by the /admin web page so a single form handles both products.
+  app.post("/v1/admin/grant", async (req, res) => {
+    if (!ADMIN_API_TOKEN) return res.status(503).json({ message: "admin api not configured" });
+    const provided = String(req.headers["x-admin-token"] || "").trim();
+    if (provided !== ADMIN_API_TOKEN) return res.status(401).json({ message: "unauthorized" });
+    if (!pgPool) return res.status(503).json({ message: "needs relational backend" });
+
+    try {
+      const email = String(req.body?.email || "").trim().toLowerCase();
+      const type = String(req.body?.type || "").trim();
+      const note = String(req.body?.note || "").slice(0, 200);
+      if (!email) return res.status(400).json({ message: "missing email" });
+
+      const userRows = await pgPool.query(
+        "SELECT id FROM users WHERE email ILIKE $1 LIMIT 1",
+        [email]
+      );
+      if (!userRows.rows.length) return res.status(404).json({ message: "user not found", email });
+      const userId = userRows.rows[0].id;
+
+      if (type === "coins") {
+        const amount = normalizeCoinAmount(req.body?.amount);
+        if (amount === null) return res.status(400).json({ message: "invalid amount" });
+
+        let balance = 0;
+        await persistPGTx(async (client) => {
+          const { rows } = await client.query(
+            "UPDATE users SET coins = coins + $1 WHERE id=$2 RETURNING coins",
+            [amount, userId]
+          );
+          balance = rows[0].coins;
+          await logCoinTransaction(client, {
+            userID: userId, delta: amount, balanceAfter: balance,
+            source: "admin_grant", reason: note
+          });
+        });
+        return res.status(200).json({ type: "coins", user_id: userId, email, balance });
+      }
+
+      if (type === "membership") {
+        if (!REVENUECAT_V1_KEY) return res.status(503).json({ message: "revenuecat not configured" });
+        const duration = String(req.body?.duration || "").trim();
+        const ALLOWED_DURATIONS = [
+          "daily", "three_day", "weekly", "two_week",
+          "monthly", "two_month", "three_month", "six_month",
+          "yearly", "lifetime"
+        ];
+        if (!ALLOWED_DURATIONS.includes(duration)) {
+          return res.status(400).json({ message: "invalid duration" });
+        }
+
+        const url = `https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(userId)}/entitlements/${encodeURIComponent(REVENUECAT_PREMIUM_ENTITLEMENT_ID)}/promotional`;
+        const rcResp = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${REVENUECAT_V1_KEY}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ duration })
+        });
+        if (!rcResp.ok) {
+          const detail = await rcResp.text().catch(() => "");
+          return res.status(502).json({ message: "revenuecat grant failed", status: rcResp.status, detail });
+        }
+        return res.status(200).json({ type: "membership", user_id: userId, email, duration });
+      }
+
+      return res.status(400).json({ message: "invalid type, expected 'coins' or 'membership'" });
+    } catch (err) {
+      console.error("[admin/grant]", err);
+      return res.status(500).json({ message: "internal error", detail: String(err && err.message || err) });
+    }
+  });
+
+  // Internal admin web page. Mounted at /admin. Embedded HTML so we don't add
+  // static-asset plumbing for one page. Page is non-indexed and stays inline
+  // until it actually needs splitting up.
+  app.get("/admin", (_req, res) => {
+    res.type("html").send(ADMIN_PAGE_HTML);
+  });
+
   app.post("/v1/auth/register", authRateLimiter, async (req, res) => {
     try {
       const email = String(req.body?.email || "").trim().toLowerCase();
@@ -4126,6 +4594,210 @@ async function main() {
       return res.status(200).json({
         reaction: reactionObj
       });
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  // ── Journey Comments ────────────────────────────────────────
+  // 1-on-1 threads anchored to a journey. Threads must be viewer-initiated;
+  // the owner can only reply once a friend has posted. Storage requires PG.
+
+  function makeJourneyCommentThreadKey(journeyID, a, b) {
+    const sorted = [String(a || ""), String(b || "")].sort();
+    return `${journeyID}:${sorted[0]}:${sorted[1]}`;
+  }
+
+  app.post("/v1/journeys/:journeyID/comments", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = await getUser(uid);
+      if (!me) return res.status(404).json({ message: "user not found" });
+      if (!pgPool) return res.status(501).json({ message: "journey comments require PG" });
+
+      const journeyID = String(req.params.journeyID || "").trim();
+      const ownerID = String(req.body?.ownerID || "").trim();
+      const recipientID = String(req.body?.recipientID || "").trim();
+      const content = String(req.body?.content || "").trim();
+      const clientDraftID = String(req.body?.clientDraftID || "").trim();
+
+      if (!journeyID || !ownerID || !recipientID || !content || !clientDraftID) {
+        return res.status(400).json({ message: "journeyID, ownerID, recipientID, content, clientDraftID required" });
+      }
+      if (content.length > 300) {
+        return res.status(400).json({ code: "content_too_long", message: "content must be <= 300 chars" });
+      }
+      // The requester must be one of the two participants.
+      if (uid !== ownerID && uid !== recipientID) {
+        return res.status(403).json({ message: "forbidden" });
+      }
+      if (uid === recipientID) {
+        return res.status(400).json({ message: "cannot send to yourself" });
+      }
+
+      const otherID = uid === ownerID ? recipientID : ownerID;
+      if (await isBlockedEitherDirectionSafe(uid, otherID)) {
+        return res.status(403).json({ message: "blocked" });
+      }
+      if (!(await checkAreFriends(uid, otherID))) {
+        return res.status(403).json({ message: "friends only" });
+      }
+
+      // Idempotent: client may retry with the same draft ID.
+      const existing = await DB.findJourneyCommentByDraft(pgPool, uid, clientDraftID);
+      if (existing) {
+        return res.status(200).json({ comment: existing, idempotent: true });
+      }
+
+      const threadKey = makeJourneyCommentThreadKey(journeyID, ownerID, otherID);
+
+      // Owner cannot initiate: a thread must already contain at least one
+      // message before the owner is allowed to reply into it.
+      if (uid === ownerID) {
+        const priorMessages = await DB.getThreadMessages(pgPool, threadKey, null, 1);
+        if (priorMessages.length === 0) {
+          return res.status(403).json({
+            code: "owner_cannot_initiate",
+            message: "thread must be started by a friend",
+          });
+        }
+      }
+
+      const nowISO = new Date().toISOString();
+      const canonical = {
+        id: `jc_${randHex(12)}`,
+        journeyID,
+        ownerID,
+        senderID: uid,
+        recipientID: otherID,
+        threadKey,
+        content,
+        clientDraftID,
+        createdAt: nowISO,
+      };
+
+      await DB.insertJourneyComment(pgPool, canonical);
+
+      fireRemotePush(otherID, {
+        title: "Worldo",
+        body: `${me.displayName} commented on your journey`,
+        data: {
+          type: "journey_comment",
+          journeyID,
+          senderID: uid,
+          ownerID,
+        },
+      });
+
+      return res.status(200).json({
+        comment: {
+          ...canonical,
+          readAt: null,
+          deletedAt: null,
+        },
+      });
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.get("/v1/journeys/:journeyID/comments", async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = await getUser(uid);
+      if (!me) return res.status(404).json({ message: "user not found" });
+      if (!pgPool) return res.status(501).json({ message: "journey comments require PG" });
+
+      const journeyID = String(req.params.journeyID || "").trim();
+      const otherUserID = String(req.query?.with || "").trim();
+      if (!journeyID || !otherUserID) {
+        return res.status(400).json({ message: "journeyID and with required" });
+      }
+      const beforeRaw = String(req.query?.before || "").trim();
+      const before = beforeRaw ? new Date(beforeRaw) : null;
+      const limit = Math.min(100, Math.max(1, parseInt(String(req.query?.limit || "30"), 10) || 30));
+
+      if (await isBlockedEitherDirectionSafe(uid, otherUserID)) {
+        return res.status(403).json({ message: "blocked" });
+      }
+
+      const threadKey = makeJourneyCommentThreadKey(journeyID, uid, otherUserID);
+      const messages = await DB.getThreadMessages(pgPool, threadKey, before, limit);
+      return res.status(200).json({ messages });
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.get("/v1/journeys/:journeyID/comment-threads", async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = await getUser(uid);
+      if (!me) return res.status(404).json({ message: "user not found" });
+      if (!pgPool) return res.status(501).json({ message: "journey comments require PG" });
+
+      const journeyID = String(req.params.journeyID || "").trim();
+      if (!journeyID) return res.status(400).json({ message: "journeyID required" });
+
+      const threads = await DB.getOwnerThreadSummaries(pgPool, journeyID, uid);
+      return res.status(200).json({ threads });
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.post("/v1/journeys/:journeyID/comments/read", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = await getUser(uid);
+      if (!me) return res.status(404).json({ message: "user not found" });
+      if (!pgPool) return res.status(501).json({ message: "journey comments require PG" });
+
+      const journeyID = String(req.params.journeyID || "").trim();
+      const otherUserID = String(req.body?.withUserID || "").trim();
+      if (!journeyID || !otherUserID) {
+        return res.status(400).json({ message: "journeyID and withUserID required" });
+      }
+      const threadKey = makeJourneyCommentThreadKey(journeyID, uid, otherUserID);
+      const marked = await DB.markThreadRead(pgPool, threadKey, uid);
+      return res.status(200).json({ marked });
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.delete("/v1/comments/:id", writeRateLimiter, rejectWhenWriteFrozen, async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = await getUser(uid);
+      if (!me) return res.status(404).json({ message: "user not found" });
+      if (!pgPool) return res.status(501).json({ message: "journey comments require PG" });
+
+      const id = String(req.params.id || "").trim();
+      if (!id) return res.status(400).json({ message: "id required" });
+      const rowCount = await DB.softDeleteJourneyComment(pgPool, id, uid);
+      if (rowCount === 0) return res.status(404).json({ message: "comment not found or not yours" });
+      return res.status(200).json({ ok: true });
+    } catch (err) {
+      if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
+      return res.status(401).json({ message: "unauthorized" });
+    }
+  });
+
+  app.get("/v1/comments/unread-summary", async (req, res) => {
+    try {
+      const uid = parseBearer(req);
+      const me = await getUser(uid);
+      if (!me) return res.status(404).json({ message: "user not found" });
+      if (!pgPool) return res.status(501).json({ message: "journey comments require PG" });
+
+      const summary = await DB.getJourneyCommentUnreadSummary(pgPool, uid);
+      return res.status(200).json({ summary });
     } catch (err) {
       if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
       return res.status(401).json({ message: "unauthorized" });

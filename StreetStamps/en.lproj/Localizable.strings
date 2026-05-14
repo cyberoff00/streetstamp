@@ -147,6 +147,8 @@
 "journey_complete_title" = "Journey Complete!";
 "journey_stat_distance" = "Distance";
 "journey_stat_duration" = "Duration";
+"journey_reward_coins" = "Coins earned";
+"journey_reward_coins_amount_format" = "+%d";
 "finish_no_city_title" = "Unable to identify city";
 "finish_no_city_message" = "Network is unavailable and the city for this journey could not be determined. You can wait for network to recover, or finish now without city info.";
 "finish_no_city_finish_now" = "Finish Now";
@@ -1327,3 +1329,20 @@
 "city_edit_display_name_title" = "Rename City";
 "city_edit_display_name_placeholder" = "Display name";
 "city_edit_display_name_hint" = "Show this card with a custom name. The city's identity is not changed.";
+
+"journey_comments_title" = "Comments";
+"journey_comments_empty_owner" = "No comments yet";
+"journey_comments_empty_thread" = "Say hi to start the conversation";
+"journey_comments_show_older" = "Show %d earlier";
+"journey_comments_reply_placeholder" = "Reply to %@...";
+"journey_comments_send_failed" = "Send failed. Try again.";
+"comments" = "Comments";
+"friend" = "Friend";
+
+"coin_rules_title" = "How coins work";
+"coin_rules_earn_title" = "Earn by walking";
+"coin_rules_earn_body_format" = "Every full kilometer earns %d coins, up to %d coins per journey.";
+"coin_rules_premium_title" = "Premium boost";
+"coin_rules_premium_body" = "Premium members earn 5× the coins on every walk.";
+"coin_rules_spend_title" = "Spend on gear";
+"coin_rules_spend_body" = "Use coins to unlock and try on equipment in the shop.";
