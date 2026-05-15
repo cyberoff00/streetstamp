@@ -308,11 +308,6 @@ private struct CoinRulesSheet: View {
                         )
                     )
                     ruleRow(
-                        icon: "star.circle.fill",
-                        title: L10n.t("coin_rules_premium_title"),
-                        body: L10n.t("coin_rules_premium_body")
-                    )
-                    ruleRow(
                         icon: "bag.fill",
                         title: L10n.t("coin_rules_spend_title"),
                         body: L10n.t("coin_rules_spend_body")
