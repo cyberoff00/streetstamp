@@ -1336,6 +1336,8 @@
 "journey_comments_show_older" = "Show %d earlier";
 "journey_comments_reply_placeholder" = "Reply to %@...";
 "journey_comments_send_failed" = "Send failed. Try again.";
+"journey_comments_you" = "you";
+"journey_comments_add_placeholder" = "Add a comment…";
 "comments" = "Comments";
 "friend" = "Friend";
 

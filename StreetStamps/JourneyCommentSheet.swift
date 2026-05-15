@@ -2,13 +2,12 @@ import SwiftUI
 
 /// Sheet that presents the comment threads for a journey. Two layouts:
 ///
-/// - **Viewer mode** (`mode == .viewer`): a single block containing the
-///   conversation between the active user and the journey owner. If no
-///   thread exists yet, the input box lets the viewer post the first
-///   message, which creates the thread.
-/// - **Owner mode** (`mode == .owner`): a stack of blocks, one per friend
-///   who has started a thread on this journey. Each block is self-contained
-///   with its own inline reply input.
+/// - **Viewer mode** (`mode == .viewer`): a single thread between the viewer
+///   and the journey owner. Messages scroll; the composer is pinned to the
+///   bottom of the sheet so the empty state can breathe in the middle.
+/// - **Owner mode** (`mode == .owner`): one section per friend who has
+///   started a thread. Each section keeps its own inline composer so replies
+///   target the right friend.
 struct JourneyCommentSheet: View {
     enum Mode {
         case viewer(ownerID: String, ownerDisplayName: String?)
@@ -33,6 +32,8 @@ struct JourneyCommentSheet: View {
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button(L10n.t("done")) { dismiss() }
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(WorldoPalette.inkSecondary)
                     }
                 }
         }
@@ -50,21 +51,13 @@ struct JourneyCommentSheet: View {
     private var content: some View {
         switch mode {
         case .viewer(let ownerID, let ownerName):
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    JourneyCommentThreadBlockView(
-                        journeyID: journeyID,
-                        ownerID: ownerID,
-                        otherUserID: ownerID,
-                        otherDisplayName: ownerName,
-                        viewerID: viewerID,
-                        showHeader: false
-                    )
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                }
-            }
-            .background(FigmaTheme.background.ignoresSafeArea())
+            JourneyCommentViewerLayout(
+                journeyID: journeyID,
+                ownerID: ownerID,
+                otherUserID: ownerID,
+                otherDisplayName: ownerName,
+                viewerID: viewerID
+            )
         case .owner:
             ownerContent
         }
@@ -74,34 +67,28 @@ struct JourneyCommentSheet: View {
     private var ownerContent: some View {
         let threads = store.threads(forJourney: journeyID)
         if threads.isEmpty {
-            VStack(spacing: 12) {
-                Spacer()
-                Image(systemName: "bubble.left")
-                    .font(.system(size: 40, weight: .light))
-                    .foregroundColor(.secondary)
-                Text(L10n.t("journey_comments_empty_owner"))
-                    .font(.system(size: 14))
-                    .foregroundColor(.secondary)
-                Spacer()
-            }
-            .frame(maxWidth: .infinity)
-            .background(FigmaTheme.background.ignoresSafeArea())
+            JourneyCommentEmptyState(message: L10n.t("journey_comments_empty_owner"))
+                .background(FigmaTheme.background.ignoresSafeArea())
         } else {
             ScrollView {
-                LazyVStack(spacing: 16) {
-                    ForEach(threads) { thread in
-                        JourneyCommentThreadBlockView(
-                            journeyID: journeyID,
-                            ownerID: thread.ownerID,
-                            otherUserID: thread.otherUserID,
-                            otherDisplayName: thread.otherDisplayName,
-                            viewerID: viewerID,
-                            showHeader: true
-                        )
+                LazyVStack(spacing: 20) {
+                    ForEach(Array(threads.enumerated()), id: \.element.id) { idx, thread in
+                        VStack(spacing: 14) {
+                            if idx > 0 {
+                                Divider().background(WorldoPalette.hairline.opacity(0.5))
+                            }
+                            JourneyCommentThreadBlockView(
+                                journeyID: journeyID,
+                                ownerID: thread.ownerID,
+                                otherUserID: thread.otherUserID,
+                                otherDisplayName: thread.otherDisplayName,
+                                viewerID: viewerID
+                            )
+                        }
                         .padding(.horizontal, 16)
                     }
                 }
-                .padding(.vertical, 16)
+                .padding(.vertical, 12)
             }
             .background(FigmaTheme.background.ignoresSafeArea())
         }
@@ -119,31 +106,125 @@ struct JourneyCommentSheet: View {
     }
 }
 
-// MARK: - Thread block
+// MARK: - Viewer-mode layout
 
-/// A single self-contained conversation block: header (optional) + messages +
-/// inline reply input. Used in both viewer single-block and owner multi-block
-/// layouts. Each block manages its own input `@State` so multi-block typing
-/// doesn't share text across friends.
+/// Full-sheet layout for a single thread: messages fill the available space
+/// (centered empty state when nothing yet), composer pinned at the bottom.
+private struct JourneyCommentViewerLayout: View {
+    let journeyID: String
+    let ownerID: String
+    let otherUserID: String
+    let otherDisplayName: String?
+    let viewerID: String
+
+    @EnvironmentObject private var store: JourneyCommentStore
+
+    private var threadKey: String {
+        JourneyCommentThreadKey.make(journeyID: journeyID, userA: viewerID, userB: otherUserID)
+    }
+
+    private var hasMessages: Bool {
+        !store.messages(forThread: threadKey).isEmpty
+    }
+
+    var body: some View {
+        Group {
+            if hasMessages {
+                ScrollView {
+                    JourneyCommentMessagesList(
+                        journeyID: journeyID,
+                        ownerID: ownerID,
+                        otherUserID: otherUserID,
+                        otherDisplayName: otherDisplayName,
+                        viewerID: viewerID
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                }
+            } else {
+                JourneyCommentEmptyState(message: L10n.t("journey_comments_empty_thread"))
+            }
+        }
+        .background(FigmaTheme.background.ignoresSafeArea())
+        .safeAreaInset(edge: .bottom) {
+            JourneyCommentComposer(
+                journeyID: journeyID,
+                ownerID: ownerID,
+                otherUserID: otherUserID,
+                otherDisplayName: otherDisplayName,
+                viewerID: viewerID,
+                showFriendNameInPlaceholder: false
+            )
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 12)
+            .background(
+                FigmaTheme.background
+                    .overlay(
+                        Divider().opacity(0.4),
+                        alignment: .top
+                    )
+            )
+        }
+    }
+}
+
+// MARK: - Owner-mode thread block
+
+/// One friend's thread inside the owner sheet. Header (friend name) +
+/// inline messages + inline composer.
 struct JourneyCommentThreadBlockView: View {
     let journeyID: String
     let ownerID: String
     let otherUserID: String
     let otherDisplayName: String?
     let viewerID: String
-    /// Whether to render the friend header strip. Owner multi-block layout
-    /// shows it; viewer single-block hides it (the sheet title already says
-    /// "Comments" and there's only one thread).
-    let showHeader: Bool
+
+    private var displayName: String {
+        if let name = otherDisplayName, !name.isEmpty { return name }
+        return L10n.t("friend")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(displayName.uppercased())
+                .font(.system(size: 11, weight: .semibold))
+                .tracking(0.8)
+                .foregroundColor(WorldoPalette.inkSecondary)
+
+            JourneyCommentMessagesList(
+                journeyID: journeyID,
+                ownerID: ownerID,
+                otherUserID: otherUserID,
+                otherDisplayName: otherDisplayName,
+                viewerID: viewerID
+            )
+
+            JourneyCommentComposer(
+                journeyID: journeyID,
+                ownerID: ownerID,
+                otherUserID: otherUserID,
+                otherDisplayName: otherDisplayName,
+                viewerID: viewerID,
+                showFriendNameInPlaceholder: true
+            )
+            .padding(.top, 2)
+        }
+    }
+}
+
+// MARK: - Messages list (shared by viewer & owner)
+
+private struct JourneyCommentMessagesList: View {
+    let journeyID: String
+    let ownerID: String
+    let otherUserID: String
+    let otherDisplayName: String?
+    let viewerID: String
 
     @EnvironmentObject private var store: JourneyCommentStore
     @EnvironmentObject private var sessionStore: UserSessionStore
-
-    @State private var draftText: String = ""
-    @State private var isSending = false
-    @State private var sendError: String?
     @State private var isExpanded = false
-    @FocusState private var inputFocused: Bool
 
     private var threadKey: String {
         JourneyCommentThreadKey.make(journeyID: journeyID, userA: viewerID, userB: otherUserID)
@@ -165,30 +246,28 @@ struct JourneyCommentThreadBlockView: View {
         max(0, allMessages.count - visibleMessages.count)
     }
 
-    private var displayName: String {
-        if let name = otherDisplayName, !name.isEmpty { return name }
-        return L10n.t("friend")
-    }
-
     var body: some View {
-        VStack(spacing: 0) {
-            if showHeader {
-                header
-                Divider().opacity(0.3)
+        VStack(alignment: .leading, spacing: 14) {
+            if hiddenCount > 0 {
+                Button {
+                    withAnimation { isExpanded = true }
+                } label: {
+                    Text(String(format: L10n.t("journey_comments_show_older"), hiddenCount))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(WorldoPalette.inkSecondary)
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 44)
             }
-            messagesArea
-            replyInput
+            ForEach(visibleMessages) { msg in
+                JourneyCommentRow(
+                    message: msg,
+                    isOwnMessage: msg.senderID == viewerID,
+                    otherDisplayName: otherDisplayName
+                )
+            }
         }
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(FigmaTheme.border, lineWidth: 0.5)
-        )
         .task(id: threadKey) {
-            // Load this thread's messages if we don't have them yet. The
-            // owner sheet pre-loaded the thread summary, but per-thread
-            // messages are loaded lazily as blocks appear.
             if allMessages.isEmpty {
                 let token = sessionStore.currentAccessToken
                 await store.loadMessages(
@@ -204,113 +283,89 @@ struct JourneyCommentThreadBlockView: View {
             }
         }
     }
+}
 
-    private var header: some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(Color.gray.opacity(0.2))
-                .frame(width: 28, height: 28)
-                .overlay(
-                    Text(initial(of: displayName))
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.black)
-                )
-            Text(displayName)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(.black)
-            Spacer()
+// MARK: - Composer (shared)
+
+private struct JourneyCommentComposer: View {
+    let journeyID: String
+    let ownerID: String
+    let otherUserID: String
+    let otherDisplayName: String?
+    let viewerID: String
+    /// Owner mode wants "Reply to <friend>…"; viewer mode prefers a neutral
+    /// "Add a comment…" since there is only one thread on screen.
+    let showFriendNameInPlaceholder: Bool
+
+    @EnvironmentObject private var store: JourneyCommentStore
+    @EnvironmentObject private var sessionStore: UserSessionStore
+
+    @State private var draftText: String = ""
+    @State private var isSending = false
+    @State private var sendError: String?
+    @FocusState private var inputFocused: Bool
+
+    private var placeholder: String {
+        if showFriendNameInPlaceholder {
+            let name = (otherDisplayName?.isEmpty == false) ? otherDisplayName! : L10n.t("friend")
+            return String(format: L10n.t("journey_comments_reply_placeholder"), name)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-    }
-
-    @ViewBuilder
-    private var messagesArea: some View {
-        if allMessages.isEmpty {
-            HStack {
-                Spacer()
-                Text(L10n.t("journey_comments_empty_thread"))
-                    .font(.system(size: 13))
-                    .foregroundColor(.secondary)
-                Spacer()
-            }
-            .padding(.vertical, 18)
-        } else {
-            VStack(spacing: 8) {
-                if hiddenCount > 0 {
-                    Button {
-                        withAnimation { isExpanded = true }
-                    } label: {
-                        Text(String(format: L10n.t("journey_comments_show_older"), hiddenCount))
-                            .font(.system(size: 12))
-                            .foregroundColor(.blue)
-                    }
-                    .buttonStyle(.plain)
-                }
-                ForEach(visibleMessages) { msg in
-                    JourneyCommentMessageBubble(
-                        message: msg,
-                        isOwnMessage: msg.senderID == viewerID
-                    )
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 12)
-        }
-    }
-
-    private var replyInput: some View {
-        VStack(spacing: 4) {
-            HStack(alignment: .bottom, spacing: 8) {
-                TextField(
-                    String(format: L10n.t("journey_comments_reply_placeholder"), displayName),
-                    text: $draftText,
-                    axis: .vertical
-                )
-                .lineLimit(1...4)
-                .focused($inputFocused)
-                .font(.system(size: 14))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(FigmaTheme.background)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .onChange(of: draftText) { _, newValue in
-                    // Hard cap at the limit while typing to avoid silent
-                    // truncation on send.
-                    if newValue.count > JourneyCommentLimits.maxContentLength {
-                        draftText = String(newValue.prefix(JourneyCommentLimits.maxContentLength))
-                    }
-                    if !newValue.isEmpty { sendError = nil }
-                }
-
-                Button {
-                    Task { await send() }
-                } label: {
-                    Image(systemName: "paperplane.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(canSend ? .white : .gray)
-                        .frame(width: 34, height: 34)
-                        .background(Circle().fill(canSend ? Color.black : Color.gray.opacity(0.2)))
-                }
-                .buttonStyle(.plain)
-                .disabled(!canSend || isSending)
-            }
-
-            if let sendError {
-                HStack {
-                    Text(sendError)
-                        .font(.system(size: 11))
-                        .foregroundColor(.red)
-                    Spacer()
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        return L10n.t("journey_comments_add_placeholder")
     }
 
     private var canSend: Bool {
         !draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .center, spacing: 10) {
+                TextField(placeholder, text: $draftText, axis: .vertical)
+                    .lineLimit(1...4)
+                    .focused($inputFocused)
+                    .font(.system(size: 14))
+                    .foregroundColor(WorldoPalette.inkPrimary)
+                    .onChange(of: draftText) { _, newValue in
+                        if newValue.count > JourneyCommentLimits.maxContentLength {
+                            draftText = String(newValue.prefix(JourneyCommentLimits.maxContentLength))
+                        }
+                        if !newValue.isEmpty { sendError = nil }
+                    }
+
+                if canSend {
+                    Button {
+                        Task { await send() }
+                    } label: {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 28, height: 28)
+                            .background(Circle().fill(WorldoPalette.signal))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isSending)
+                    .transition(.scale.combined(with: .opacity))
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 999, style: .continuous)
+                    .fill(FigmaTheme.card)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 999, style: .continuous)
+                    .stroke(FigmaTheme.border, lineWidth: 0.5)
+            )
+            .animation(.easeOut(duration: 0.15), value: canSend)
+
+            if let sendError {
+                Text(sendError)
+                    .font(.system(size: 11))
+                    .foregroundColor(WorldoPalette.terracotta)
+                    .padding(.leading, 14)
+            }
+        }
     }
 
     private func send() async {
@@ -319,8 +374,8 @@ struct JourneyCommentThreadBlockView: View {
         isSending = true
         defer { isSending = false }
         do {
-            // Recipient depends on who's sending: viewer sends to owner;
-            // owner replies to the friend (the other user in this thread).
+            // Viewer sends to owner; owner replies to the other party in this
+            // thread.
             let recipientID = (viewerID == ownerID) ? otherUserID : ownerID
             _ = try await store.send(
                 journeyID: journeyID,
@@ -335,33 +390,87 @@ struct JourneyCommentThreadBlockView: View {
             sendError = L10n.t("journey_comments_send_failed")
         }
     }
+}
 
-    private func initial(of name: String) -> String {
-        guard let first = name.first else { return "?" }
-        return String(first).uppercased()
+// MARK: - Empty state
+
+private struct JourneyCommentEmptyState: View {
+    let message: String
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Spacer()
+            Image(systemName: "bubble.left.and.bubble.right")
+                .font(.system(size: 36, weight: .light))
+                .foregroundColor(WorldoPalette.inkSecondary.opacity(0.6))
+            Text(message)
+                .font(.system(size: 13))
+                .foregroundColor(WorldoPalette.inkSecondary)
+                .multilineTextAlignment(.center)
+            Spacer()
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
-// MARK: - Message bubble
+// MARK: - Comment row (Instagram-style)
 
-struct JourneyCommentMessageBubble: View {
+struct JourneyCommentRow: View {
     let message: JourneyComment
     let isOwnMessage: Bool
+    let otherDisplayName: String?
+
+    private var senderName: String {
+        if isOwnMessage { return L10n.t("journey_comments_you") }
+        if let name = otherDisplayName, !name.isEmpty { return name }
+        return L10n.t("friend")
+    }
+
+    private var avatarInitial: String {
+        guard let first = senderName.first else { return "?" }
+        return String(first).uppercased()
+    }
+
+    private var timeLabel: String {
+        Self.timeFormatter.localizedString(for: message.createdAt, relativeTo: Date())
+    }
+
+    private static let timeFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .abbreviated
+        return f
+    }()
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 0) {
-            if isOwnMessage { Spacer(minLength: 40) }
-            Text(message.content)
-                .font(.system(size: 14))
-                .foregroundColor(isOwnMessage ? .white : .black)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(isOwnMessage ? Color.black : Color.gray.opacity(0.12))
+        HStack(alignment: .top, spacing: 10) {
+            Circle()
+                .fill(WorldoPalette.signal.opacity(0.18))
+                .frame(width: 34, height: 34)
+                .overlay(
+                    Text(avatarInitial)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(WorldoPalette.inkPrimary)
                 )
-                .frame(maxWidth: 260, alignment: isOwnMessage ? .trailing : .leading)
-            if !isOwnMessage { Spacer(minLength: 40) }
+
+            VStack(alignment: .leading, spacing: 2) {
+                // Name + body share one wrapping Text so the body flows
+                // naturally after the name, IG-style.
+                (Text(senderName)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(WorldoPalette.inkPrimary)
+                 + Text("  ")
+                 + Text(message.content)
+                    .font(.system(size: 13))
+                    .foregroundColor(WorldoPalette.inkPrimary))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(timeLabel)
+                    .font(.system(size: 11))
+                    .foregroundColor(WorldoPalette.inkSecondary)
+            }
+
+            Spacer(minLength: 0)
         }
     }
 }

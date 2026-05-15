@@ -1330,6 +1330,8 @@
 "journey_comments_show_older" = "查看更早 %d 条";
 "journey_comments_reply_placeholder" = "回复 %@...";
 "journey_comments_send_failed" = "发送失败，请重试。";
+"journey_comments_you" = "你";
+"journey_comments_add_placeholder" = "写评论…";
 "comments" = "评论";
 "friend" = "好友";
 
