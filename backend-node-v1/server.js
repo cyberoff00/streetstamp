@@ -4655,7 +4655,12 @@ async function main() {
         return res.status(200).json({ comment: existing, idempotent: true });
       }
 
-      const threadKey = makeJourneyCommentThreadKey(journeyID, ownerID, otherID);
+      // Thread key always identifies the (owner, friend) pair. `otherID`
+      // above is "the other party from uid's perspective" which equals
+      // ownerID when the friend is sending — using it here would collapse
+      // the key to (owner, owner) and never match what iOS queries.
+      const friendID = uid === ownerID ? recipientID : uid;
+      const threadKey = makeJourneyCommentThreadKey(journeyID, ownerID, friendID);
 
       // Owner cannot initiate: a thread must already contain at least one
       // message before the owner is allowed to reply into it.
