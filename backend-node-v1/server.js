@@ -4684,9 +4684,26 @@ async function main() {
 
       await DB.insertJourneyComment(pgPool, canonical);
 
+      // Persist an in-app notification so the recipient sees the comment in
+      // /v1/notifications even when APNs push fails or the app is offline.
+      // Matches the pattern used by postcard send.
+      const notifMessage = `${me.displayName} commented on your journey`;
+      await DB.insertNotification(pgPool, {
+        id: `n_${randHex(12)}`,
+        userID: otherID,
+        type: "journey_comment",
+        fromUserID: uid,
+        fromDisplayName: me.displayName,
+        journeyID,
+        journeyTitle: null,
+        message: notifMessage,
+        read: false,
+        createdAt: nowISO,
+      });
+
       fireRemotePush(otherID, {
         title: "Worldo",
-        body: `${me.displayName} commented on your journey`,
+        body: notifMessage,
         data: {
           type: "journey_comment",
           journeyID,
