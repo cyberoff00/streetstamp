@@ -1285,7 +1285,13 @@ struct JourneyMemoryDetailView: View {
 
     private var resolvedOwnerID: String {
         if let explicit = journeyOwnerID, !explicit.isEmpty { return explicit }
-        return sessionStore.currentUserID
+        // Comments are keyed by backend account ID, not local profile.
+        return sessionStore.accountUserID ?? ""
+    }
+
+    private var canUseComments: Bool {
+        if let id = sessionStore.accountUserID, !id.isEmpty { return true }
+        return false
     }
 
     private var commentSheetMode: JourneyCommentSheet.Mode {
@@ -1382,7 +1388,7 @@ struct JourneyMemoryDetailView: View {
             JourneyCommentSheet(
                 journeyID: journey.id,
                 mode: commentSheetMode,
-                viewerID: sessionStore.currentUserID
+                viewerID: sessionStore.accountUserID ?? ""
             )
             .environmentObject(commentStore)
             .environmentObject(sessionStore)
@@ -1626,7 +1632,7 @@ struct JourneyMemoryDetailView: View {
             Spacer()
             if !readOnly {
                 HStack(spacing: 6) {
-                    if !isEditing && ownerShouldShowCommentBubble {
+                    if !isEditing && ownerShouldShowCommentBubble && canUseComments {
                         JourneyCommentBubbleButton(
                             unreadCount: commentStore.unreadCount(forJourney: journey.id),
                             tone: .owner
@@ -1707,7 +1713,7 @@ struct JourneyMemoryDetailView: View {
                     }
                 }
                 .padding(.trailing, 16)
-            } else {
+            } else if canUseComments {
                 HStack(spacing: 6) {
                     JourneyCommentBubbleButton(
                         unreadCount: commentStore.unreadCount(forJourney: journey.id),

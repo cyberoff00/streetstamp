@@ -39,10 +39,11 @@ final class JourneyCommentStore: ObservableObject {
         self.backend = backend
     }
 
-    /// Called when `activeLocalProfileID` changes. Resets all in-memory state.
-    /// Local cache (added in step 4) will reload from `StoragePath(userID: uid)`.
+    /// Called when the signed-in account changes. Resets all in-memory state.
+    /// Empty `userID` represents sign-out / guest mode — state is cleared and
+    /// the store stays inert until a real account ID arrives.
     func switchUser(_ userID: String) {
-        guard !userID.isEmpty, userID != activeUserID else { return }
+        guard userID != activeUserID else { return }
         activeUserID = userID
         threadsByJourney.removeAll()
         messagesByThread.removeAll()

@@ -360,8 +360,11 @@ struct StreetStampsApp: App {
         _lifelogRenderCache = StateObject(wrappedValue: LifelogRenderCacheCoordinator())
         _socialStore = StateObject(wrappedValue: SocialGraphStore(userID: session.activeLocalProfileID))
         _postcardCenter = StateObject(wrappedValue: PostcardCenter(userID: session.activeLocalProfileID))
+        // Comments are cloud-only and keyed by backend account ID, not the
+        // local profile scope. Initialize with the account ID so thread keys
+        // match what the backend computes from the JWT uid.
         _journeyCommentStore = StateObject(wrappedValue: JourneyCommentStore(
-            userID: session.activeLocalProfileID,
+            userID: session.accountUserID ?? "",
             backend: RESTJourneyCommentBackend.shared
         ))
 
@@ -687,7 +690,7 @@ struct StreetStampsApp: App {
                     lifelogStore.rebind(paths: paths)
                     cityRenderCache.rebind(rootDir: paths.thumbnailsDir)
                     renderMaskStore.rebind(paths: paths)
-                    journeyCommentStore.switchUser(uid)
+                    journeyCommentStore.switchUser(sessionStore.accountUserID ?? "")
 
                     // Load journey, lifelog, city cache, and track tiles in parallel.
                     // All four do heavy disk I/O — running them concurrently avoids
@@ -777,6 +780,13 @@ struct StreetStampsApp: App {
                     await MembershipStore.shared.refreshEntitlement()
                     await CoinService.shared.bootstrap()
                 }
+            }
+            .onChange(of: sessionStore.accountUserID ?? "") { _, accountID in
+                // Sign-in/out can change the account ID without changing
+                // activeLocalProfileID, so the profile-switch rebind above
+                // doesn't always cover it. Comments are cloud-only and keyed
+                // by account ID; rebind here too.
+                journeyCommentStore.switchUser(accountID)
             }
             .onChange(of: sessionStore.reauthenticationPromptVersion) { _, version in
                 guard version > 0 else { return }

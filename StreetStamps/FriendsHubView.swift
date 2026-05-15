@@ -3227,7 +3227,8 @@ private struct FriendCollectionScreen: View {
                 cityName: destination.cityName,
                 countryName: destination.countryName,
                 readOnly: destination.readOnly,
-                friendLoadout: destination.friendLoadout
+                friendLoadout: destination.friendLoadout,
+                journeyOwnerID: friendID
             )
             .environmentObject(mirror.journeyStore)
             .environmentObject(mirror.cityCache)
@@ -3434,7 +3435,8 @@ private struct FriendPublicMemoriesScreen: View {
                     cityName: destination.cityName,
                     countryName: destination.countryName,
                     readOnly: destination.readOnly,
-                    friendLoadout: destination.friendLoadout
+                    friendLoadout: destination.friendLoadout,
+                    journeyOwnerID: friendID
                 )
                 .environmentObject(mirror.journeyStore)
                 .environmentObject(mirror.cityCache)
@@ -3506,7 +3508,8 @@ private struct FriendJourneyDetailScreen: View {
                 cityName: resolvedCityName(for: mirroredJourney),
                 countryName: resolvedCountryName(for: mirroredJourney),
                 readOnly: true,
-                friendLoadout: friend.loadout
+                friendLoadout: friend.loadout,
+                journeyOwnerID: friend.id
             )
             .environmentObject(mirror.journeyStore)
             .environmentObject(mirror.cityCache)

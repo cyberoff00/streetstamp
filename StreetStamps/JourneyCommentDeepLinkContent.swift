@@ -20,7 +20,7 @@ struct OwnerCommentDeepLinkContent: View {
                 readOnly: false,
                 friendLoadout: nil,
                 autoPresentCommentSheet: true,
-                journeyOwnerID: sessionStore.currentUserID
+                journeyOwnerID: sessionStore.accountUserID ?? ""
             )
         } else {
             JourneyCommentDeepLinkUnavailableView()
