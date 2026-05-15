@@ -36,6 +36,9 @@ struct JourneyCommentSheet: View {
                     }
                 }
         }
+        // Start compact; user can drag up when the thread gets long.
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
         .task {
             guard !hasLoadedInitial else { return }
             hasLoadedInitial = true
