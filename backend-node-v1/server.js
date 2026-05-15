@@ -4628,12 +4628,17 @@ async function main() {
       if (content.length > 300) {
         return res.status(400).json({ code: "content_too_long", message: "content must be <= 300 chars" });
       }
-      // The requester must be one of the two participants.
-      if (uid !== ownerID && uid !== recipientID) {
-        return res.status(403).json({ message: "forbidden" });
-      }
-      if (uid === recipientID) {
-        return res.status(400).json({ message: "cannot send to yourself" });
+      // The thread is between the journey owner and one friend. When the
+      // owner sends, `recipientID` is the friend. When a friend sends, the
+      // friend is the requester (uid) and `recipientID` must be the owner.
+      if (uid === ownerID) {
+        if (recipientID === ownerID) {
+          return res.status(400).json({ message: "cannot send to yourself" });
+        }
+      } else {
+        if (recipientID !== ownerID) {
+          return res.status(400).json({ message: "non-owner can only reply to journey owner" });
+        }
       }
 
       const otherID = uid === ownerID ? recipientID : ownerID;
