@@ -3712,7 +3712,9 @@ async function main() {
       };
       await pushNotificationAndPersist(target.id, notif, {
         title: "Worldo",
-        body: `${me.displayName} 向你发送了好友申请`
+        body: `${me.displayName} 向你发送了好友申请`,
+        "loc-key": "notification_friend_request_format",
+        "loc-args": [me.displayName],
       });
 
       return res.status(200).json({
@@ -3795,7 +3797,9 @@ async function main() {
       }
       fireRemotePush(fromUser.id, {
         title: "Worldo",
-        body: `${me.displayName} 通过了你的好友申请`
+        body: `${me.displayName} 通过了你的好友申请`,
+        "loc-key": "notification_friend_request_accepted_format",
+        "loc-args": [me.displayName],
       });
 
       return res.status(200).json({
@@ -4185,7 +4189,9 @@ async function main() {
         };
         await pushNotificationAndPersist(ownerUserID, notif, {
           title: "Worldo",
-          body: `${viewer.displayName} 赞了你的旅程`
+          body: `${viewer.displayName} 赞了你的旅程`,
+          "loc-key": "notification_journey_like_short_format",
+          "loc-args": [viewer.displayName],
         });
       }
 
@@ -4385,7 +4391,9 @@ async function main() {
       }
       fireRemotePush(target.id, {
         title: "Worldo",
-        body: `${me.displayName} 给你寄了一张明信片`
+        body: `${me.displayName} 给你寄了一张明信片`,
+        "loc-key": "notification_postcard_received_format",
+        "loc-args": [me.displayName],
       });
       const saveDurationMs = elapsedMs(saveStartedAt);
 
@@ -4586,9 +4594,17 @@ async function main() {
       await persistPG(async () => {
         await DB.upsertPostcardReaction(pgPool, reactionObj);
       });
+      const reactionLocKey = reactionEmoji
+        ? "notification_postcard_reaction_emoji_format"
+        : "notification_postcard_reaction_format";
+      const reactionLocArgs = reactionEmoji
+        ? [me.displayName, reactionEmoji]
+        : [me.displayName];
       await pushNotificationAndPersist(sender.id, notif, {
         title: "Worldo",
-        body: notifBody
+        body: notifBody,
+        "loc-key": reactionLocKey,
+        "loc-args": reactionLocArgs,
       });
 
       return res.status(200).json({
@@ -4706,15 +4722,19 @@ async function main() {
         createdAt: nowISO,
       });
 
+      // Body uses loc-key/loc-args so the recipient's device renders it in
+      // its own UI language via the app bundle's Localizable.strings.
+      // Fallback `body` is honored only by very old iOS that ignores loc-key.
       fireRemotePush(otherID, {
         title: "Worldo",
         body: notifMessage,
-        data: {
-          type: "journey_comment",
-          journeyID,
-          senderID: uid,
-          ownerID,
-        },
+        "loc-key": "notification_journey_comment_format",
+        "loc-args": [me.displayName],
+      }, {
+        type: "journey_comment",
+        journeyID,
+        senderID: uid,
+        ownerID,
       });
 
       return res.status(200).json({
@@ -4955,7 +4975,9 @@ async function main() {
       };
       await pushNotificationAndPersist(targetID, notification, {
         title: "Worldo",
-        body: `${viewer.displayName}在你的沙发上坐了一坐`
+        body: `${viewer.displayName}在你的沙发上坐了一坐`,
+        "loc-key": "notification_profile_stomp_format",
+        "loc-args": [viewer.displayName],
       });
       return res.status(200).json({ ok: true, message: `已踩一踩 ${target.displayName} 的主页` });
     } catch (err) {

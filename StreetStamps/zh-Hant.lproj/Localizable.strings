@@ -480,6 +480,11 @@
 "notification_friend_request_accepted_format" = "%@ 通过了你的好友申请";
 "notification_friend_request_fallback" = "你收到一条好友申请";
 "notification_friend_request_format" = "%@ 向你發送了好友申请";
+"notification_journey_comment_format" = "%@ 評論了你的旅程";
+"notification_journey_like_short_format" = "%@ 赞了你的旅程";
+"notification_postcard_received_format" = "%@ 给你寄了一张明信片";
+"notification_postcard_reaction_format" = "%@ 回覆了你的明信片";
+"notification_postcard_reaction_emoji_format" = "%1$@ 回應了你的明信片 %2$@";
 "notification_journey_like_format" = "%@ 赞了你的旅程「%@」";
 "notification_profile_stomp_format" = "%@在你的沙发上坐了一坐";
 "ok" = "好";
@@ -791,6 +796,7 @@
 "share_to_fallback" = "终点";
 "social_notice_friend_request" = "好友申请";
 "social_notice_friend_update" = "好友動態";
+"social_notice_journey_comment" = "收到評論";
 "social_notice_like" = "收到点赞";
 "social_notice_stomp" = "有人到访";
 "splash_tagline" = "绘制你的世界記憶";

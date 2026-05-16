@@ -46,6 +46,16 @@ enum SocialNotificationPresentation {
         case "postcard_reaction":
             return item.message
 
+        case "journey_comment":
+            guard let displayName = normalized(item.fromDisplayName) else {
+                return item.message
+            }
+            return String(
+                format: L10n.t("notification_journey_comment_format", locale: locale),
+                locale: locale,
+                displayName
+            )
+
         default:
             return item.message
         }
@@ -70,6 +80,8 @@ enum SocialNotificationPresentation {
             return "social_notice_friend_request"
         case "friend_request_accepted":
             return "social_notice_friend_update"
+        case "journey_comment":
+            return "social_notice_journey_comment"
         default:
             return "social_notice_stomp"
         }

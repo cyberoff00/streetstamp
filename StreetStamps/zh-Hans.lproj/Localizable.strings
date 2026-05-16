@@ -646,6 +646,7 @@
 "social_notice_friend_request" = "好友申请";
 "social_notice_friend_update" = "好友动态";
 "social_notice_stomp" = "有人到访";
+"social_notice_journey_comment" = "收到评论";
 
 "tab_home" = "开始";
 "tab_friends" = "好友";
@@ -919,6 +920,11 @@
 "notification_friend_request_format" = "%@ 向你发送了好友申请";
 "notification_friend_request_accepted_format" = "%@ 通过了你的好友申请";
 "notification_friend_request_fallback" = "你收到一条好友申请";
+"notification_journey_comment_format" = "%@ 评论了你的旅程";
+"notification_journey_like_short_format" = "%@ 赞了你的旅程";
+"notification_postcard_received_format" = "%@ 给你寄了一张明信片";
+"notification_postcard_reaction_format" = "%@ 回复了你的明信片";
+"notification_postcard_reaction_emoji_format" = "%1$@ 回应了你的明信片 %2$@";
 "friend_profile_cta_idle" = "坐一坐";
 "friend_profile_cta_loading" = "坐下中...";
 "friend_profile_cta_done" = "已坐下";

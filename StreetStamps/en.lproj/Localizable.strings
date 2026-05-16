@@ -657,6 +657,7 @@
 "social_notice_friend_request" = "Friend Request";
 "social_notice_friend_update" = "Friend Update";
 "social_notice_stomp" = "Visitor";
+"social_notice_journey_comment" = "Comment";
 
 "tab_home" = "Start";
 "tab_friends" = "Friends";
@@ -936,6 +937,11 @@
 "notification_friend_request_format" = "%@ sent you a friend request";
 "notification_friend_request_accepted_format" = "%@ accepted your friend request";
 "notification_friend_request_fallback" = "You received a friend request";
+"notification_journey_comment_format" = "%@ commented on your journey";
+"notification_journey_like_short_format" = "%@ liked your journey";
+"notification_postcard_received_format" = "%@ sent you a postcard";
+"notification_postcard_reaction_format" = "%@ replied to your postcard";
+"notification_postcard_reaction_emoji_format" = "%1$@ reacted %2$@ to your postcard";
 "friend_profile_cta_idle" = "Take a seat";
 "friend_profile_cta_loading" = "Sitting down...";
 "friend_profile_cta_done" = "Seated";
