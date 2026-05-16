@@ -1392,6 +1392,7 @@ struct JourneyMemoryDetailView: View {
             )
             .environmentObject(commentStore)
             .environmentObject(sessionStore)
+            .environmentObject(socialStore)
         }
         .task(id: journey.id) {
             await commentStore.loadThreads(
@@ -1703,6 +1704,22 @@ struct JourneyMemoryDetailView: View {
                             } label: {
                                 Label(L10n.t("delete_journey_confirm_title"), systemImage: "trash.fill")
                             }
+
+                            #if DEBUG
+                            Divider()
+                            Button {
+                                let friendID = socialStore.friends.first?.id ?? "debug-friend"
+                                let friendName = socialStore.friends.first?.displayName ?? "小米"
+                                commentStore.debugSeedFakeThread(
+                                    journeyID: journey.id,
+                                    friendID: friendID,
+                                    friendName: friendName
+                                )
+                                showCommentSheet = true
+                            } label: {
+                                Label("[Debug] Seed comments", systemImage: "ladybug")
+                            }
+                            #endif
                         } label: {
                             Image(systemName: "ellipsis")
                                 .font(.system(size: 18, weight: .medium))

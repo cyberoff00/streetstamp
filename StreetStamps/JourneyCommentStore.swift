@@ -210,6 +210,42 @@ final class JourneyCommentStore: ObservableObject {
         }
     }
 
+#if DEBUG
+    /// Dev-only: injects a fake thread + mixed-direction messages directly into
+    /// local state so the comment UI can be exercised without a second account
+    /// or backend round-trips. `activeUserID` is treated as the owner side.
+    func debugSeedFakeThread(journeyID: String, friendID: String, friendName: String) {
+        let ownerID = activeUserID
+        let threadKey = JourneyCommentThreadKey.make(journeyID: journeyID, userA: ownerID, userB: friendID)
+        let base = Date().addingTimeInterval(-600)
+        let msgs: [JourneyComment] = [
+            JourneyComment(id: UUID().uuidString, journeyID: journeyID, ownerID: ownerID,
+                           senderID: friendID, recipientID: ownerID, threadKey: threadKey,
+                           content: "在哪拍的?", createdAt: base, readAt: nil, deletedAt: nil),
+            JourneyComment(id: UUID().uuidString, journeyID: journeyID, ownerID: ownerID,
+                           senderID: ownerID, recipientID: friendID, threadKey: threadKey,
+                           content: "外滩 18 号外面那条小路", createdAt: base.addingTimeInterval(60),
+                           readAt: Date(), deletedAt: nil),
+            JourneyComment(id: UUID().uuidString, journeyID: journeyID, ownerID: ownerID,
+                           senderID: friendID, recipientID: ownerID, threadKey: threadKey,
+                           content: "哦哦看到了,周末一起去!", createdAt: base.addingTimeInterval(180),
+                           readAt: nil, deletedAt: nil),
+            JourneyComment(id: UUID().uuidString, journeyID: journeyID, ownerID: ownerID,
+                           senderID: ownerID, recipientID: friendID, threadKey: threadKey,
+                           content: "好啊 顺便吃顿饭", createdAt: base.addingTimeInterval(240),
+                           readAt: Date(), deletedAt: nil),
+        ]
+        messagesByThread[threadKey] = msgs
+        let thread = JourneyCommentThread(
+            threadKey: threadKey, journeyID: journeyID, ownerID: ownerID,
+            otherUserID: friendID, otherDisplayName: friendName, otherAvatarURL: nil,
+            lastMessage: msgs.last, unreadCount: 1
+        )
+        threadsByJourney[journeyID] = [thread]
+        updateUnread(forJourney: journeyID, to: 1)
+    }
+#endif
+
     func deleteComment(_ comment: JourneyComment, token: String?) async {
         guard comment.senderID == activeUserID else { return }
         let threadKey = comment.threadKey

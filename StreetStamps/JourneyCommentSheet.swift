@@ -20,6 +20,7 @@ struct JourneyCommentSheet: View {
 
     @EnvironmentObject private var store: JourneyCommentStore
     @EnvironmentObject private var sessionStore: UserSessionStore
+    @EnvironmentObject private var socialStore: SocialGraphStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var hasLoadedInitial = false
@@ -69,6 +70,16 @@ struct JourneyCommentSheet: View {
         if threads.isEmpty {
             JourneyCommentEmptyState(message: L10n.t("journey_comments_empty_owner"))
                 .background(FigmaTheme.background.ignoresSafeArea())
+        } else if threads.count == 1, let thread = threads.first {
+            // Common case — single friend's thread. Render like viewer mode so
+            // the composer stays pinned at the bottom of the sheet.
+            JourneyCommentViewerLayout(
+                journeyID: journeyID,
+                ownerID: thread.ownerID,
+                otherUserID: thread.otherUserID,
+                otherDisplayName: resolvedFriendName(for: thread),
+                viewerID: viewerID
+            )
         } else {
             ScrollView {
                 LazyVStack(spacing: 20) {
@@ -81,7 +92,7 @@ struct JourneyCommentSheet: View {
                                 journeyID: journeyID,
                                 ownerID: thread.ownerID,
                                 otherUserID: thread.otherUserID,
-                                otherDisplayName: thread.otherDisplayName,
+                                otherDisplayName: resolvedFriendName(for: thread),
                                 viewerID: viewerID
                             )
                         }
@@ -92,6 +103,11 @@ struct JourneyCommentSheet: View {
             }
             .background(FigmaTheme.background.ignoresSafeArea())
         }
+    }
+
+    private func resolvedFriendName(for thread: JourneyCommentThread) -> String? {
+        if let name = thread.otherDisplayName, !name.isEmpty { return name }
+        return socialStore.friends.first(where: { $0.id == thread.otherUserID })?.displayName
     }
 
     private func loadInitial() async {
@@ -118,28 +134,61 @@ private struct JourneyCommentViewerLayout: View {
     let viewerID: String
 
     @EnvironmentObject private var store: JourneyCommentStore
+    @EnvironmentObject private var socialStore: SocialGraphStore
 
     private var threadKey: String {
         JourneyCommentThreadKey.make(journeyID: journeyID, userA: viewerID, userB: otherUserID)
     }
 
-    private var hasMessages: Bool {
-        !store.messages(forThread: threadKey).isEmpty
+    private var messages: [JourneyComment] {
+        store.messages(forThread: threadKey)
     }
+
+    private var hasMessages: Bool { !messages.isEmpty }
+
+    private var resolvedOtherName: String {
+        if let name = otherDisplayName, !name.isEmpty { return name }
+        if let name = socialStore.friends.first(where: { $0.id == otherUserID })?.displayName,
+           !name.isEmpty { return name }
+        return L10n.t("friend")
+    }
+
+    private let bottomAnchorID = "__journey_comments_bottom__"
 
     var body: some View {
         Group {
             if hasMessages {
-                ScrollView {
-                    JourneyCommentMessagesList(
-                        journeyID: journeyID,
-                        ownerID: ownerID,
-                        otherUserID: otherUserID,
-                        otherDisplayName: otherDisplayName,
-                        viewerID: viewerID
-                    )
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text(resolvedOtherName.uppercased())
+                                .font(.system(size: 11, weight: .semibold))
+                                .tracking(0.8)
+                                .foregroundColor(WorldoPalette.inkSecondary)
+
+                            JourneyCommentMessagesList(
+                                journeyID: journeyID,
+                                ownerID: ownerID,
+                                otherUserID: otherUserID,
+                                otherDisplayName: otherDisplayName,
+                                viewerID: viewerID
+                            )
+
+                            Color.clear.frame(height: 1).id(bottomAnchorID)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                    }
+                    .onAppear {
+                        DispatchQueue.main.async {
+                            proxy.scrollTo(bottomAnchorID, anchor: .bottom)
+                        }
+                    }
+                    .onChange(of: messages.count) { _, _ in
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            proxy.scrollTo(bottomAnchorID, anchor: .bottom)
+                        }
+                    }
                 }
             } else {
                 JourneyCommentEmptyState(message: L10n.t("journey_comments_empty_thread"))
@@ -224,7 +273,6 @@ private struct JourneyCommentMessagesList: View {
 
     @EnvironmentObject private var store: JourneyCommentStore
     @EnvironmentObject private var sessionStore: UserSessionStore
-    @State private var isExpanded = false
 
     private var threadKey: String {
         JourneyCommentThreadKey.make(journeyID: journeyID, userA: viewerID, userB: otherUserID)
@@ -234,36 +282,14 @@ private struct JourneyCommentMessagesList: View {
         store.messages(forThread: threadKey)
     }
 
-    private var visibleMessages: [JourneyComment] {
-        let recent = 3
-        if isExpanded || allMessages.count <= recent {
-            return allMessages
-        }
-        return Array(allMessages.suffix(recent))
-    }
-
-    private var hiddenCount: Int {
-        max(0, allMessages.count - visibleMessages.count)
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if hiddenCount > 0 {
-                Button {
-                    withAnimation { isExpanded = true }
-                } label: {
-                    Text(String(format: L10n.t("journey_comments_show_older"), hiddenCount))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(WorldoPalette.inkSecondary)
-                }
-                .buttonStyle(.plain)
-                .padding(.leading, 44)
-            }
-            ForEach(visibleMessages) { msg in
+            ForEach(allMessages) { msg in
                 JourneyCommentRow(
                     message: msg,
                     isOwnMessage: msg.senderID == viewerID,
-                    otherDisplayName: otherDisplayName
+                    otherDisplayName: otherDisplayName,
+                    otherUserID: otherUserID
                 )
             }
         }
@@ -420,16 +446,34 @@ struct JourneyCommentRow: View {
     let message: JourneyComment
     let isOwnMessage: Bool
     let otherDisplayName: String?
+    /// The other party's user ID for this thread — used as a fallback lookup
+    /// when `message.senderID` isn't in the local friends list (e.g. the
+    /// signed-in viewer's own ID).
+    let otherUserID: String
+
+    @EnvironmentObject private var socialStore: SocialGraphStore
+    @AppStorage("streetstamps.profile.displayName") private var ownDisplayName: String = "EXPLORER"
+    @State private var ownLoadout: RobotLoadout = AvatarLoadoutStore.load()
+
+    private var friendProfile: FriendProfileSnapshot? {
+        socialStore.friends.first(where: { $0.id == message.senderID })
+            ?? socialStore.friends.first(where: { $0.id == otherUserID })
+    }
 
     private var senderName: String {
-        if isOwnMessage { return L10n.t("journey_comments_you") }
+        if isOwnMessage {
+            let trimmed = ownDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? L10n.t("journey_comments_you") : trimmed
+        }
+        if let name = friendProfile?.displayName, !name.isEmpty { return name }
         if let name = otherDisplayName, !name.isEmpty { return name }
         return L10n.t("friend")
     }
 
-    private var avatarInitial: String {
-        guard let first = senderName.first else { return "?" }
-        return String(first).uppercased()
+    private var senderLoadout: RobotLoadout {
+        if isOwnMessage { return ownLoadout.normalizedForCurrentAvatar() }
+        if let loadout = friendProfile?.loadout { return loadout.normalizedForCurrentAvatar() }
+        return RobotLoadout.defaultBoy
     }
 
     private var timeLabel: String {
@@ -444,14 +488,15 @@ struct JourneyCommentRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Circle()
-                .fill(WorldoPalette.signal.opacity(0.18))
+            RobotRendererView(size: 34, face: .front, loadout: senderLoadout)
                 .frame(width: 34, height: 34)
-                .overlay(
-                    Text(avatarInitial)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(WorldoPalette.inkPrimary)
+                .clipShape(Circle())
+                .background(
+                    Circle().fill(WorldoPalette.signal.opacity(0.12))
                 )
+                .onReceive(NotificationCenter.default.publisher(for: .avatarLoadoutDidChange)) { _ in
+                    if isOwnMessage { ownLoadout = AvatarLoadoutStore.load() }
+                }
 
             VStack(alignment: .leading, spacing: 2) {
                 // Name + body share one wrapping Text so the body flows
