@@ -4708,7 +4708,7 @@ async function main() {
       // Persist an in-app notification so the recipient sees the comment in
       // /v1/notifications even when APNs push fails or the app is offline.
       // Matches the pattern used by postcard send.
-      const notifMessage = `${me.displayName} commented on your journey`;
+      const notifMessage = `${me.displayName} 评论了你的旅程`;
       await DB.insertNotification(pgPool, {
         id: `n_${randHex(12)}`,
         userID: otherID,
