@@ -21,18 +21,13 @@ enum JourneyVisibility: String, Codable, CaseIterable, Identifiable {
 }
 
 enum JourneyVisibilityPolicy {
-    static let minFriendsVisibilityDistanceMeters: Double = 2_000
-
     enum DenialReason: Equatable {
         case loginRequired
-        case journeyNotEligible
 
         var localizationKey: String {
             switch self {
             case .loginRequired:
                 return "journey_visibility_login_required"
-            case .journeyNotEligible:
-                return "journey_visibility_requires_distance_or_memory"
             }
         }
     }
@@ -48,19 +43,24 @@ enum JourneyVisibilityPolicy {
         }
     }
 
+    /// `journeyDistance` and `hasMemory` are intentionally retained on the
+    /// signature even though the policy no longer reads them, so existing
+    /// call sites (SharingCard, JourneyMemoryNew) don't need to be touched.
+    /// Quota enforcement (free-tier public-journey cap) now lives at the
+    /// call site via `PublicJourneyQuota`, not here, because it needs the
+    /// JourneyStore and membership tier — concerns this pure policy avoids.
     static func evaluateChange(
         current: JourneyVisibility,
         target: JourneyVisibility,
         isLoggedIn: Bool,
-        journeyDistance: Double,
-        hasMemory: Bool
+        journeyDistance: Double = 0,
+        hasMemory: Bool = false
     ) -> Decision {
+        _ = journeyDistance
+        _ = hasMemory
         guard current != target else { return .allowed }
         guard target == .friendsOnly else { return .allowed }
         guard isLoggedIn else { return .denied(.loginRequired) }
-        guard journeyDistance >= minFriendsVisibilityDistanceMeters || hasMemory else {
-            return .denied(.journeyNotEligible)
-        }
         return .allowed
     }
 
@@ -73,9 +73,7 @@ enum JourneyVisibilityPolicy {
         return evaluateChange(
             current: current,
             target: target,
-            isLoggedIn: isLoggedIn,
-            journeyDistance: minFriendsVisibilityDistanceMeters,
-            hasMemory: true
+            isLoggedIn: isLoggedIn
         ).isAllowed
     }
 }

@@ -117,7 +117,6 @@ final class LocalizationCoverageTests: XCTestCase {
             "journey_change_visibility",
             "journey_current_visibility_format",
             "journey_visibility_login_required",
-            "journey_visibility_requires_distance_or_memory",
             "journey_confirm_change",
             "journey_likes_title",
             "journey_change_permission",

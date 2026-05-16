@@ -933,6 +933,10 @@
 "membership_gate_map_desc" = "升級 Premium 解鎖更多地圖外觀樣式。";
 "membership_benefit_photos" = "每段旅程最多 12 張照片";
 "membership_benefit_friends" = "無限好友";
+"membership_benefit_public_journeys" = "無限公開旅程";
+"public_quota_gate_title" = "開通會員，公開更多旅程";
+"public_quota_gate_subhead" = "同時享有";
+"public_quota_gate_note" = "Worldo 由一位獨立女性開發者打造。我們希望做一款純粹、長久的產品，持續帶來有趣的新功能，永久無廣告，也認真守護你的資料隱私。你的支持對我們格外重要。";
 "membership_benefit_globe" = "完整全球視圖體驗";
 "membership_benefit_icloud" = "iCloud 同步與還原";
 "membership_benefit_gpx" = "GPX 匯入";
@@ -956,6 +960,7 @@
 "journey_photo_limit_toast" = "為了留下最精彩瞬間，每次行程最多 %d 張照片";
 "membership_info_postcard" = "每個城市：可向每位好友發 1 張(免費)/2 張(Premium)明信片，最多 3 位(免費)/10 位(Premium)好友。該城市每多一段旅程，每位好友 +1 張，可發好友數也增加。";
 "membership_compare_friends" = "好友";
+"membership_compare_public_journeys" = "公開旅程";
 "membership_compare_unlimited" = "無限";
 "membership_compare_globe" = "全球視圖";
 "membership_compare_icloud" = "iCloud 同步";

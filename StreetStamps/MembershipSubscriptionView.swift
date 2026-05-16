@@ -250,7 +250,7 @@ struct MembershipSubscriptionView: View {
 
             if socialEnabled {
                 comparisonRow(
-                    feature: L10n.t("membership_compare_friends"),
+                    feature: L10n.t("membership_compare_public_journeys"),
                     freeValue: "5",
                     premiumValue: L10n.t("membership_compare_unlimited")
                 )
@@ -553,7 +553,7 @@ struct MembershipSubscriptionView: View {
         var rows: [BenefitRow] = []
         if socialEnabled {
             rows.append(BenefitRow(icon: "camera.fill",         key: "membership_benefit_photos"))
-            rows.append(BenefitRow(icon: "person.2.fill",       key: "membership_benefit_friends"))
+            rows.append(BenefitRow(icon: "person.2.fill",       key: "membership_benefit_public_journeys"))
             rows.append(BenefitRow(icon: "envelope.fill",       key: "membership_benefit_postcard"))
         }
         rows.append(BenefitRow(icon: "globe",                   key: "membership_benefit_globe"))

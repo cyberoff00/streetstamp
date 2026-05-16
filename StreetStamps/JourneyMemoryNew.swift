@@ -2918,13 +2918,27 @@ struct JourneyMemoryDetailView: View {
         let decision = JourneyVisibilityPolicy.evaluateChange(
             current: effective,
             target: target,
-            isLoggedIn: sessionStore.isLoggedIn,
-            journeyDistance: journey.distance,
-            hasMemory: journey.hasMemoryContent
+            isLoggedIn: sessionStore.isLoggedIn
         )
         guard decision.isAllowed else {
             activeJourneySheet = nil
             showVisibilityDeniedMessage(reason: decision.reason)
+            return
+        }
+        // Free-tier public-journey quota. Only enforced when promoting to
+        // .friendsOnly for the *first time* on this journey — if sharedAt is
+        // already set the slot was consumed previously, so the user can
+        // toggle visibility on previously-published journeys without re-hitting
+        // the gate.
+        if target == .friendsOnly,
+           !membership.isPremium,
+           journey.sharedAt == nil,
+           PublicJourneyQuota.isOverFreeLimit(
+               journeys: store.journeys,
+               tier: membership.tier
+           ) {
+            activeJourneySheet = nil
+            showMembershipGate = .publicJourneyQuota
             return
         }
         var updated = journey

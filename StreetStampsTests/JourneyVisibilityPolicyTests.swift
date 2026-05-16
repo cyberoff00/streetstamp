@@ -6,52 +6,43 @@ final class JourneyVisibilityPolicyTests: XCTestCase {
         let decision = JourneyVisibilityPolicy.evaluateChange(
             current: .private,
             target: .friendsOnly,
-            isLoggedIn: false,
-            journeyDistance: 5_000,
-            hasMemory: false
+            isLoggedIn: false
         )
 
         XCTAssertFalse(decision.isAllowed)
         XCTAssertEqual(decision.reason, .loginRequired)
     }
 
-    func test_logged_in_user_needs_distance_or_memory_for_friends_visibility() {
+    func test_logged_in_user_can_publish_short_journey_without_memory() {
+        // Distance/memory gate was removed: any logged-in user can promote a
+        // journey to friends-only regardless of length or content. Quota is
+        // enforced at the call site via PublicJourneyQuota, not here.
         let decision = JourneyVisibilityPolicy.evaluateChange(
             current: .private,
             target: .friendsOnly,
-            isLoggedIn: true,
-            journeyDistance: 1_999,
-            hasMemory: false
-        )
-
-        XCTAssertFalse(decision.isAllowed)
-        XCTAssertEqual(decision.reason, .journeyNotEligible)
-    }
-
-    func test_logged_in_user_can_change_visibility_when_journey_is_long_enough() {
-        let decision = JourneyVisibilityPolicy.evaluateChange(
-            current: .private,
-            target: .friendsOnly,
-            isLoggedIn: true,
-            journeyDistance: 2_000,
-            hasMemory: false
+            isLoggedIn: true
         )
 
         XCTAssertTrue(decision.isAllowed)
         XCTAssertNil(decision.reason)
     }
 
-    func test_logged_in_user_can_change_visibility_when_journey_has_memory() {
+    func test_no_op_visibility_change_is_always_allowed() {
         let decision = JourneyVisibilityPolicy.evaluateChange(
             current: .private,
-            target: .friendsOnly,
-            isLoggedIn: true,
-            journeyDistance: 100,
-            hasMemory: true
+            target: .private,
+            isLoggedIn: false
         )
-
         XCTAssertTrue(decision.isAllowed)
-        XCTAssertNil(decision.reason)
+    }
+
+    func test_returning_to_private_does_not_require_login() {
+        let decision = JourneyVisibilityPolicy.evaluateChange(
+            current: .friendsOnly,
+            target: .private,
+            isLoggedIn: false
+        )
+        XCTAssertTrue(decision.isAllowed)
     }
 
     func test_overall_memory_text_counts_as_memory_content() {

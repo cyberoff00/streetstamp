@@ -23,6 +23,10 @@ enum MembershipGatedFeature: Identifiable {
     case gpxExport
     case mapAppearance
     case photoCityDiscovery
+    /// Free-tier user has used up their public-journey allotment and is
+    /// trying to publish another. Gets a softer hero + a "thank you" note
+    /// below the subscribe button.
+    case publicJourneyQuota
 
     var id: String {
         switch self {
@@ -36,6 +40,7 @@ enum MembershipGatedFeature: Identifiable {
         case .gpxExport:        return "gpxExport"
         case .mapAppearance:    return "mapAppearance"
         case .photoCityDiscovery: return "photoCityDiscovery"
+        case .publicJourneyQuota: return "publicJourneyQuota"
         }
     }
 }
@@ -79,6 +84,10 @@ struct MembershipGateView: View {
                         .padding(.top, 24)
                     subscribeButton
                         .padding(.top, 20)
+                    if feature == .publicJourneyQuota {
+                        publicQuotaNote
+                            .padding(.top, 18)
+                    }
                     footer
                         .padding(.top, 16)
                 }
@@ -105,7 +114,16 @@ struct MembershipGateView: View {
 
     // MARK: - Hero
 
+    @ViewBuilder
     private var heroSection: some View {
+        if feature == .publicJourneyQuota {
+            publicQuotaHero
+        } else {
+            defaultHero
+        }
+    }
+
+    private var defaultHero: some View {
         VStack(spacing: 16) {
             ZStack {
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -131,6 +149,39 @@ struct MembershipGateView: View {
         }
     }
 
+    /// Softer hero shown when the gate is triggered by hitting the free
+    /// public-journey cap. Larger title, no crown — the goal is to read like
+    /// an offer, not a paywall pop-up.
+    private var publicQuotaHero: some View {
+        VStack(spacing: 10) {
+            Spacer().frame(height: 8)
+            Text(L10n.t("public_quota_gate_title"))
+                .font(.system(size: 28, weight: .black, design: .rounded))
+                .foregroundColor(FigmaTheme.text)
+                .multilineTextAlignment(.center)
+                .lineSpacing(2)
+                .padding(.top, 8)
+
+            Text(L10n.t("public_quota_gate_subhead"))
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(FigmaTheme.subtext)
+                .multilineTextAlignment(.center)
+                .padding(.top, 4)
+        }
+    }
+
+    /// Short note shown below the subscribe button when this gate was
+    /// triggered by the public-journey quota. Reads as a personal note from
+    /// the developer, not as marketing copy.
+    private var publicQuotaNote: some View {
+        Text(L10n.t("public_quota_gate_note"))
+            .font(.system(size: 12))
+            .foregroundColor(FigmaTheme.subtext)
+            .multilineTextAlignment(.center)
+            .lineSpacing(4)
+            .padding(.horizontal, 6)
+    }
+
     // MARK: - Benefits Grid (2 columns)
 
     private var benefitsGrid: some View {
@@ -141,7 +192,7 @@ struct MembershipGateView: View {
         items.append(("globe.americas.fill", "membership_benefit_globe"))
         if socialEnabled {
             items.append(("photo.on.rectangle.angled", "membership_benefit_photos"))
-            items.append(("person.2.fill", "membership_benefit_friends"))
+            items.append(("person.2.fill", "membership_benefit_public_journeys"))
             items.append(("envelope.fill", "membership_benefit_postcard"))
         }
         items.append(("icloud.fill", "membership_benefit_icloud"))

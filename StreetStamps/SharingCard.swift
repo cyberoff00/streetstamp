@@ -71,6 +71,7 @@ struct PopSharingCard: View {
     @State private var activePhotoFlow: PhotoInputMode? = nil
     @State private var showVisibilityRestrictionAlert = false
     @State private var visibilityRestrictionMessage = ""
+    @State private var pendingGatedFeature: MembershipGatedFeature? = nil
     private var canRenderCard: Bool { journey.coordinates.count >= 1 && !journey.isTooShort }
     private let activityPresetKeys: [String] = [
         "activity_tag_commute", "activity_tag_running", "activity_tag_travel", "activity_tag_walking",
@@ -200,6 +201,9 @@ struct PopSharingCard: View {
                 Button(L10n.t("done"), role: .cancel) {}
             } message: {
                 Text(visibilityRestrictionMessage)
+            }
+            .sheet(item: $pendingGatedFeature) { feature in
+                MembershipGateView(feature: feature)
             }
         }
     }
@@ -657,6 +661,21 @@ struct PopSharingCard: View {
                     showVisibilityRestriction(reason: decision.reason)
                     return
                 }
+                // Free-tier public-journey quota: block the switch to
+                // .friendsOnly if the user has already used their allotment.
+                // We do NOT mutate selectedVisibility here — keeping it at the
+                // previous value means dismissing the gate by swiping down
+                // leaves the SharingCard exactly as the user left it.
+                if target == .friendsOnly,
+                   !membership.isPremium,
+                   journey.sharedAt == nil,
+                   PublicJourneyQuota.isOverFreeLimit(
+                       journeys: store.journeys,
+                       tier: membership.tier
+                   ) {
+                    pendingGatedFeature = .publicJourneyQuota
+                    return
+                }
                 selectedVisibility = target
                 onboardingGuide.dismissHint(.visibilityToggle)
             }
@@ -664,19 +683,10 @@ struct PopSharingCard: View {
     }
 
     private func visibilityDecision(for target: JourneyVisibility) -> JourneyVisibilityPolicy.Decision {
-        // Use the in-editor draft so adding an overall memory here unlocks the
-        // friends toggle immediately, before the user saves.
-        let draftHasOverallMemory =
-            !overallMemory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || !overallMemoryImagePaths.isEmpty
-            || !journey.overallMemoryRemoteImageURLs.isEmpty
-        let hasMemory = !journey.memories.isEmpty || draftHasOverallMemory
-        return JourneyVisibilityPolicy.evaluateChange(
+        JourneyVisibilityPolicy.evaluateChange(
             current: selectedVisibility,
             target: target,
-            isLoggedIn: sessionStore.isLoggedIn,
-            journeyDistance: journey.distance,
-            hasMemory: hasMemory
+            isLoggedIn: sessionStore.isLoggedIn
         )
     }
 

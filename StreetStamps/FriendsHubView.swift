@@ -71,17 +71,18 @@ enum FriendFeedKind {
 }
 
 enum FriendFeedLogic {
-    static let minDistanceMeters: Double = 2_000
-
+    /// Feed eligibility now only checks visibility — the previous distance /
+    /// memory gate was removed when the publish-side gate was dropped, since
+    /// the two must stay in sync (otherwise journeys can publish successfully
+    /// yet never appear in the feed). Quota enforcement (free-tier cap on
+    /// public journeys) lives on the publish side via `PublicJourneyQuota`.
     static func isJourneyEligible(_ journey: FriendSharedJourney) -> Bool {
-        let isVisible = journey.visibility == .public || journey.visibility == .friendsOnly
-        guard isVisible else { return false }
-        return journey.distance >= minDistanceMeters || hasMemoryContent(journey)
+        journey.visibility == .public || journey.visibility == .friendsOnly
     }
 
-    // Mirrors `JourneyRoute.hasMemoryContent` so the feed-display gate matches
-    // the publish gate (`JourneyVisibilityPolicy.evaluateChange`). If these
-    // drift, journeys can publish successfully yet never appear in the feed.
+    /// Retained because UI code outside of eligibility still asks "does this
+    /// friend journey carry any user-authored memory content" — e.g. to
+    /// decide whether to render a memory chip on a feed card.
     static func hasMemoryContent(_ journey: FriendSharedJourney) -> Bool {
         if !journey.memories.isEmpty { return true }
         if let text = journey.overallMemory,

@@ -44,6 +44,18 @@ enum MembershipTierConfig {
 
     static func maxFriends(for tier: MembershipTier) -> Int {
         switch tier {
+        case .free:    return Int.max
+        case .premium: return Int.max
+        }
+    }
+
+    // MARK: Public Journey Quota
+
+    /// Free users may publish (set visibility to .friendsOnly) at most this
+    /// many journeys from the new-version cutoff onward. Pre-cutoff public
+    /// journeys are grandfathered and do not count.
+    static func maxPublicJourneys(for tier: MembershipTier) -> Int {
+        switch tier {
         case .free:    return 5
         case .premium: return Int.max
         }
@@ -220,6 +232,7 @@ final class MembershipStore: NSObject, ObservableObject {
     var maxJourneyPhotos: Int { MembershipTierConfig.maxJourneyPhotos(for: tier) }
     var maxPhotosPerMemory: Int { MembershipTierConfig.maxPhotosPerMemory(for: tier) }
     var maxFriends: Int { MembershipTierConfig.maxFriends(for: tier) }
+    var maxPublicJourneys: Int { MembershipTierConfig.maxPublicJourneys(for: tier) }
     var globeViewEnabled: Bool { MembershipTierConfig.globeViewEnabled(for: tier) }
     var canRepublishEditedJourney: Bool { MembershipTierConfig.canRepublishEditedJourney(for: tier) }
     var postcardPerCityBase: Int { MembershipTierConfig.postcardPerCityBase(for: tier) }

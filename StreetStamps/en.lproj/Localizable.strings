@@ -1081,6 +1081,10 @@
 "membership_gate_map_desc" = "Unlock additional map appearance styles with Premium.";
 "membership_benefit_photos" = "Up to 12 photos per journey";
 "membership_benefit_friends" = "Unlimited friends";
+"membership_benefit_public_journeys" = "Unlimited public journeys";
+"public_quota_gate_title" = "Subscribe to share more journeys";
+"public_quota_gate_subhead" = "You'll also get";
+"public_quota_gate_note" = "Worldo is built by an independent woman developer. We want to make something pure and lasting — adding new features over time, ad-free forever, and treating your data with real care. Your support means a great deal to us.";
 "membership_benefit_globe" = "Full global view experience";
 "membership_benefit_icloud" = "iCloud sync & restore";
 "membership_benefit_gpx" = "GPX import";
@@ -1111,6 +1115,7 @@
 "journey_photo_limit_toast" = "To capture the best moments, each journey allows up to %d photos";
 "membership_info_postcard" = "Per city: Free plan can send 1 postcard per friend (max 3 friends). Premium is unlimited.";
 "membership_compare_friends" = "Friends";
+"membership_compare_public_journeys" = "Public journeys";
 "membership_compare_unlimited" = "Unlimited";
 "membership_compare_globe" = "Global view";
 "membership_compare_icloud" = "iCloud sync";
