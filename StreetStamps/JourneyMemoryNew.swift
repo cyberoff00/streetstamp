@@ -1708,12 +1708,23 @@ struct JourneyMemoryDetailView: View {
                             #if DEBUG
                             Divider()
                             Button {
-                                let friendID = socialStore.friends.first?.id ?? "debug-friend"
-                                let friendName = socialStore.friends.first?.displayName ?? "小米"
-                                commentStore.debugSeedFakeThread(
+                                let real = socialStore.friends.prefix(3).map {
+                                    (id: $0.id, name: $0.displayName)
+                                }
+                                let synthetic: [(id: String, name: String)] = [
+                                    ("debug-friend-1", "小米"),
+                                    ("debug-friend-2", "阿斯"),
+                                    ("debug-friend-3", "Kira"),
+                                ]
+                                var seeded: [(id: String, name: String)] = Array(real)
+                                for s in synthetic where seeded.count < 3 {
+                                    if !seeded.contains(where: { $0.id == s.id }) {
+                                        seeded.append(s)
+                                    }
+                                }
+                                commentStore.debugSeedFakeThreads(
                                     journeyID: journey.id,
-                                    friendID: friendID,
-                                    friendName: friendName
+                                    friends: seeded
                                 )
                                 showCommentSheet = true
                             } label: {

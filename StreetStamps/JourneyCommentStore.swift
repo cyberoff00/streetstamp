@@ -33,6 +33,9 @@ final class JourneyCommentStore: ObservableObject {
     private let backend: JourneyCommentBackend
     private var loadingThreadsJourneys: Set<String> = []
     private var loadingMessagesThreads: Set<String> = []
+#if DEBUG
+    private var debugSeededJourneys: Set<String> = []
+#endif
 
     init(userID: String, backend: JourneyCommentBackend = MockJourneyCommentBackend.shared) {
         self.activeUserID = userID
@@ -80,6 +83,9 @@ final class JourneyCommentStore: ObservableObject {
     }
 
     func loadThreads(journeyID: String, token: String?) async {
+#if DEBUG
+        if debugSeededJourneys.contains(journeyID) { return }
+#endif
         guard !loadingThreadsJourneys.contains(journeyID) else { return }
         loadingThreadsJourneys.insert(journeyID)
         defer { loadingThreadsJourneys.remove(journeyID) }
@@ -105,6 +111,9 @@ final class JourneyCommentStore: ObservableObject {
         before: Date? = nil,
         limit: Int = 30
     ) async {
+#if DEBUG
+        if debugSeededJourneys.contains(journeyID) { return }
+#endif
         let threadKey = JourneyCommentThreadKey.make(
             journeyID: journeyID,
             userA: activeUserID,
@@ -211,38 +220,89 @@ final class JourneyCommentStore: ObservableObject {
     }
 
 #if DEBUG
-    /// Dev-only: injects a fake thread + mixed-direction messages directly into
-    /// local state so the comment UI can be exercised without a second account
-    /// or backend round-trips. `activeUserID` is treated as the owner side.
-    func debugSeedFakeThread(journeyID: String, friendID: String, friendName: String) {
+    /// Dev-only: injects fake thread(s) + mixed-direction messages directly
+    /// into local state so the comment UI can be exercised without a second
+    /// account or backend round-trips. `activeUserID` is treated as the
+    /// owner side. Once a journey is seeded, this store skips backend reads
+    /// for that journey so the fake data survives sheet reopens.
+    func debugSeedFakeThreads(journeyID: String, friends: [(id: String, name: String)]) {
+        guard !friends.isEmpty else { return }
         let ownerID = activeUserID
-        let threadKey = JourneyCommentThreadKey.make(journeyID: journeyID, userA: ownerID, userB: friendID)
-        let base = Date().addingTimeInterval(-600)
-        let msgs: [JourneyComment] = [
-            JourneyComment(id: UUID().uuidString, journeyID: journeyID, ownerID: ownerID,
-                           senderID: friendID, recipientID: ownerID, threadKey: threadKey,
-                           content: "在哪拍的?", createdAt: base, readAt: nil, deletedAt: nil),
-            JourneyComment(id: UUID().uuidString, journeyID: journeyID, ownerID: ownerID,
-                           senderID: ownerID, recipientID: friendID, threadKey: threadKey,
-                           content: "外滩 18 号外面那条小路", createdAt: base.addingTimeInterval(60),
-                           readAt: Date(), deletedAt: nil),
-            JourneyComment(id: UUID().uuidString, journeyID: journeyID, ownerID: ownerID,
-                           senderID: friendID, recipientID: ownerID, threadKey: threadKey,
-                           content: "哦哦看到了,周末一起去!", createdAt: base.addingTimeInterval(180),
-                           readAt: nil, deletedAt: nil),
-            JourneyComment(id: UUID().uuidString, journeyID: journeyID, ownerID: ownerID,
-                           senderID: ownerID, recipientID: friendID, threadKey: threadKey,
-                           content: "好啊 顺便吃顿饭", createdAt: base.addingTimeInterval(240),
-                           readAt: Date(), deletedAt: nil),
+
+        // Per-friend conversation templates so each block looks distinct.
+        // `fromFriend == true` means the friend sent it; `unread` only
+        // applies to friend-sent messages.
+        struct Line { let fromFriend: Bool; let content: String; let unread: Bool }
+        let templates: [[Line]] = [
+            [
+                Line(fromFriend: true,  content: "在哪拍的?",          unread: false),
+                Line(fromFriend: false, content: "外滩 18 号外面那条小路", unread: false),
+                Line(fromFriend: true,  content: "哦哦看到了,周末一起去!", unread: true),
+                Line(fromFriend: false, content: "好啊 顺便吃顿饭",      unread: false),
+            ],
+            [
+                Line(fromFriend: true,  content: "这条路线可以发我吗?",   unread: false),
+                Line(fromFriend: false, content: "刚刚分享了 看一下",     unread: false),
+                Line(fromFriend: true,  content: "收到 谢谢!",          unread: true),
+            ],
+            [
+                Line(fromFriend: true,  content: "天气真好",            unread: false),
+                Line(fromFriend: false, content: "对啊 适合走路",        unread: false),
+                Line(fromFriend: true,  content: "下次约我",            unread: false),
+                Line(fromFriend: false, content: "没问题",              unread: false),
+                Line(fromFriend: true,  content: "下周?",               unread: true),
+            ],
         ]
-        messagesByThread[threadKey] = msgs
-        let thread = JourneyCommentThread(
-            threadKey: threadKey, journeyID: journeyID, ownerID: ownerID,
-            otherUserID: friendID, otherDisplayName: friendName, otherAvatarURL: nil,
-            lastMessage: msgs.last, unreadCount: 1
-        )
-        threadsByJourney[journeyID] = [thread]
-        updateUnread(forJourney: journeyID, to: 1)
+
+        var threads: [JourneyCommentThread] = []
+        var totalUnread = 0
+        let baseTime = Date().addingTimeInterval(-1800)
+
+        for (index, friend) in friends.enumerated() {
+            let template = templates[index % templates.count]
+            let threadKey = JourneyCommentThreadKey.make(
+                journeyID: journeyID, userA: ownerID, userB: friend.id
+            )
+            let threadBase = baseTime.addingTimeInterval(Double(index) * 120)
+            var msgs: [JourneyComment] = []
+            var threadUnread = 0
+            for (i, line) in template.enumerated() {
+                let sender = line.fromFriend ? friend.id : ownerID
+                let recipient = line.fromFriend ? ownerID : friend.id
+                // Outgoing (owner→friend): pretend the friend has read it.
+                // Incoming (friend→owner): readAt nil iff `unread`.
+                let readAt: Date? = line.fromFriend ? (line.unread ? nil : Date()) : Date()
+                msgs.append(JourneyComment(
+                    id: UUID().uuidString,
+                    journeyID: journeyID,
+                    ownerID: ownerID,
+                    senderID: sender,
+                    recipientID: recipient,
+                    threadKey: threadKey,
+                    content: line.content,
+                    createdAt: threadBase.addingTimeInterval(Double(i) * 30),
+                    readAt: readAt,
+                    deletedAt: nil
+                ))
+                if line.fromFriend && line.unread { threadUnread += 1 }
+            }
+            messagesByThread[threadKey] = msgs
+            threads.append(JourneyCommentThread(
+                threadKey: threadKey,
+                journeyID: journeyID,
+                ownerID: ownerID,
+                otherUserID: friend.id,
+                otherDisplayName: friend.name,
+                otherAvatarURL: nil,
+                lastMessage: msgs.last,
+                unreadCount: threadUnread
+            ))
+            totalUnread += threadUnread
+        }
+
+        threadsByJourney[journeyID] = threads
+        updateUnread(forJourney: journeyID, to: totalUnread)
+        debugSeededJourneys.insert(journeyID)
     }
 #endif
 
