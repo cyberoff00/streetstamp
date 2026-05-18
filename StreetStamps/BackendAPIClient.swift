@@ -156,11 +156,17 @@ struct BackendNotificationItem: Codable, Identifiable {
     var cityName: String?
     var photoURL: String?
     var messageText: String?
+    /// Owner of the journey referenced by this notification. Populated for
+    /// `journey_comment` so the inbox tap can deep-link into the correct
+    /// viewer/owner mode of the comment sheet. Nil for other types and for
+    /// historical journey_comment rows written before this field existed.
+    var ownerID: String?
 }
 
 enum SocialNotificationPolicy {
     static let supportedTypes: Set<String> = [
         "journey_like",
+        "journey_comment",
         "profile_stomp",
         "postcard_received",
         "friend_request",

@@ -1337,6 +1337,26 @@ struct FriendsHubView: View {
                               !jid.isEmpty {
                         showSocialNotificationsSheet = false
                         activeRoute = .myJourney(jid)
+                    } else if item.type == "journey_comment",
+                              let jid = item.journeyID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                              !jid.isEmpty {
+                        // Owner side and friend side both go through the
+                        // shared comment deep-link router. `ownerID` comes
+                        // from the backend (notifications.owner_id). For
+                        // historical rows where it's nil, fall back to the
+                        // current user — covers the common owner-receives
+                        // case and is wrong (but harmless: the unavailable
+                        // view shows) only for very old friend-receives rows.
+                        let ownerID = (item.ownerID?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+                            ?? sessionStore.currentUserID
+                        let senderID = item.fromUserID?.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let link = JourneyCommentDeepLink(
+                            journeyID: jid,
+                            ownerID: ownerID,
+                            senderID: (senderID?.isEmpty == false) ? senderID : nil
+                        )
+                        showSocialNotificationsSheet = false
+                        AppFlowCoordinator.shared.requestOpenJourneyCommentDeepLink(link)
                     } else if let fromUserID = item.fromUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
                               !fromUserID.isEmpty {
                         showSocialNotificationsSheet = false

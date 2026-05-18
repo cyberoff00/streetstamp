@@ -4720,6 +4720,7 @@ async function main() {
         message: notifMessage,
         read: false,
         createdAt: nowISO,
+        ownerID,
       });
 
       // Body uses loc-key/loc-args so the recipient's device renders it in

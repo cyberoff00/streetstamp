@@ -69,10 +69,7 @@ ssh -o StrictHostKeyChecking=no "$SERVER_HOST" "\
   if [ -f check_auth_mode.sh ]; then cp check_auth_mode.sh '${REMOTE_RELEASE_DIR}/'; fi; \
   if [ -f readonly_prod_check.sh ]; then cp readonly_prod_check.sh '${REMOTE_RELEASE_DIR}/'; fi; \
   mkdir -p '${REMOTE_RELEASE_DIR}/migrations'; \
-  if [ -f migrations/001-create-tables.sql ]; then cp migrations/001-create-tables.sql '${REMOTE_RELEASE_DIR}/migrations/'; fi; \
-  if [ -f migrations/002-migrate-data.js ]; then cp migrations/002-migrate-data.js '${REMOTE_RELEASE_DIR}/migrations/'; fi; \
-  if [ -f migrations/003-user-blocks-reports.sql ]; then cp migrations/003-user-blocks-reports.sql '${REMOTE_RELEASE_DIR}/migrations/'; fi; \
-  if [ -f migrations/004-add-coins.sql ]; then cp migrations/004-add-coins.sql '${REMOTE_RELEASE_DIR}/migrations/'; fi; \
+  if [ -d migrations ]; then cp -r migrations/. '${REMOTE_RELEASE_DIR}/migrations/'; fi; \
   mkdir -p '${REMOTE_RELEASE_DIR}/docs/ops'; \
   if [ -f docs/ops/PRODUCTION_WORKFLOW.md ]; then cp docs/ops/PRODUCTION_WORKFLOW.md '${REMOTE_RELEASE_DIR}/docs/ops/'; fi; \
   if [ -f docs/ops/SERVER_BOOTSTRAP.md ]; then cp docs/ops/SERVER_BOOTSTRAP.md '${REMOTE_RELEASE_DIR}/docs/ops/'; fi; \
@@ -97,11 +94,10 @@ scp -o StrictHostKeyChecking=no \
 
 ssh -o StrictHostKeyChecking=no "$SERVER_HOST" "mkdir -p '$REMOTE_DIR/migrations'"
 
+# Upload every migration file rather than maintaining a hardcoded list — new
+# migrations were being silently dropped because they weren't added here.
 scp -o StrictHostKeyChecking=no \
-  backend-node-v1/migrations/001-create-tables.sql \
-  backend-node-v1/migrations/002-migrate-data.js \
-  backend-node-v1/migrations/003-user-blocks-reports.sql \
-  backend-node-v1/migrations/004-add-coins.sql \
+  backend-node-v1/migrations/* \
   "$SERVER_HOST:$REMOTE_DIR/migrations/"
 
 ssh -o StrictHostKeyChecking=no "$SERVER_HOST" "mkdir -p '$REMOTE_DIR/docs/ops'"

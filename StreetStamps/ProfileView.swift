@@ -618,6 +618,19 @@ struct ProfileView: View {
                           let jid = item.journeyID?.trimmingCharacters(in: .whitespacesAndNewlines),
                           !jid.isEmpty {
                     notifSheetJourneyPush = NotifJourneyPush(id: jid)
+                } else if item.type == "journey_comment",
+                          let jid = item.journeyID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                          !jid.isEmpty {
+                    let ownerID = (item.ownerID?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+                        ?? sessionStore.currentUserID
+                    let senderID = item.fromUserID?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let link = JourneyCommentDeepLink(
+                        journeyID: jid,
+                        ownerID: ownerID,
+                        senderID: (senderID?.isEmpty == false) ? senderID : nil
+                    )
+                    showNotificationsSheet = false
+                    AppFlowCoordinator.shared.requestOpenJourneyCommentDeepLink(link)
                 }
             }
         }

@@ -688,13 +688,14 @@ async function getNotifications(pool, uid, limit = 400) {
 async function insertNotification(pool, n) {
   await pool.query(
     `INSERT INTO notifications (id, user_id, type, from_user_id, from_display_name,
-      journey_id, journey_title, message, read, created_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      journey_id, journey_title, message, read, created_at, owner_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
     [
       n.id, n.userID, n.type, n.fromUserID || null,
       n.fromDisplayName || null, n.journeyID || null,
       n.journeyTitle || null, n.message,
       n.read ?? false, n.createdAt,
+      n.ownerID || null,
     ]
   );
   // Enforce cap
@@ -732,6 +733,7 @@ function notificationRowToObj(row) {
     message: row.message,
     read: row.read,
     createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+    ownerID: row.owner_id || null,
   };
 }
 
@@ -1185,6 +1187,7 @@ async function ensureSchema(pool) {
     "003-user-blocks-reports.sql",
     "004-add-coins.sql",
     "005-journey-comments.sql",
+    "006-notif-owner-id.sql",
   ];
   for (const file of migrationFiles) {
     const schemaPath = path.join(__dirname, "migrations", file);
