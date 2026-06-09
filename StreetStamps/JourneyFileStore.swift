@@ -280,20 +280,50 @@ final class JourneysFileStore: @unchecked Sendable {
         return latest
     }
 
-    /// Find journey files on disk that are not in the index (orphans from crash between file write and index update).
+    /// Find journey files on disk that are not in the index (orphans from a crash
+    /// between file write and index update).
+    ///
+    /// Recovers BOTH:
+    ///   - finalized journeys, which have a full `<id>.json`; and
+    ///   - **ongoing** (or interrupted-finalize) journeys, which have only
+    ///     `<id>.meta.json` + `<id>.delta.jsonl` and no full file yet.
+    /// The second case is the important one: an all-day journey lives for hours
+    /// as meta+delta only, so if its id is lost from `index.json` (corruption, or
+    /// a crash before the index write landed) it would otherwise be unrecoverable
+    /// even though its coordinates are sitting on disk. `loadJourney` rebuilds it
+    /// from the meta seed + delta replay.
+    ///
+    /// We key ongoing recovery off `.meta.json` (not `.delta.jsonl`): without a
+    /// meta/full seed `loadJourney` throws, and meta is always written alongside
+    /// delta — so surfacing a delta-only id would just create a phantom index
+    /// entry that never loads.
     func scanOrphanedIDs(knownIDs: Set<String>) -> [String] {
         guard let files = try? fm.contentsOfDirectory(at: baseURL, includingPropertiesForKeys: nil) else { return [] }
         var orphans: [String] = []
+        var seen = Set<String>()
+
         for file in files {
             let name = file.lastPathComponent
-            guard name.hasSuffix(".json"),
-                  !name.contains(".meta."),
-                  !name.contains(".done."),
-                  !name.hasSuffix(".tmp.json") else { continue }
-            let id = String(name.dropLast(5)) // strip ".json"
-            if !knownIDs.contains(id) {
-                orphans.append(id)
+
+            let id: String
+            if name.hasSuffix(".meta.json") {
+                // Ongoing / interrupted-finalize journey (meta + delta, no full file).
+                id = String(name.dropLast(".meta.json".count))
+            } else if name == "index.json" {
+                // The index itself lives in this directory — never a journey id.
+                continue
+            } else if name.hasSuffix(".json"),
+                      !name.contains(".done."),
+                      !name.hasSuffix(".tmp") {
+                // Finalized full snapshot.
+                id = String(name.dropLast(".json".count))
+            } else {
+                continue
             }
+
+            guard !id.isEmpty, !knownIDs.contains(id), !seen.contains(id) else { continue }
+            seen.insert(id)
+            orphans.append(id)
         }
         return orphans
     }

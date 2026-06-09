@@ -464,40 +464,33 @@ final class JourneyStore: ObservableObject {
         importance[0] = .greatestFiniteMagnitude
         importance[n - 1] = .greatestFiniteMagnitude
 
-        func assignImportance(_ start: Int, _ end: Int) {
-            guard end - start > 1 else { return }
-
-            let ax = coords[start].lon, ay = coords[start].lat
-            let bx = coords[end].lon, by = coords[end].lat
-            let midLat = (ay + by) / 2.0
-            let lonScale = cos(midLat * .pi / 180.0)
-            let dx = (bx - ax) * lonScale
-            let dy = by - ay
-            let lenSq = dx * dx + dy * dy
-
-            var maxDist = 0.0
-            var maxIdx = start + 1
-            for i in (start + 1)..<end {
+        // Count policy: subdivide fully (onSplit always true) so every interior
+        // point receives a significance value, then keep the N most significant
+        // below. The cos-scaled relative metric is ranking-only — it does not
+        // need to be in meters. Runs through the shared iterative traversal so
+        // a long delta slice cannot overflow the stack.
+        PolylineSimplifier.traverse(
+            count: n,
+            distance: { i, a, b in
+                let ax = coords[a].lon, ay = coords[a].lat
+                let bx = coords[b].lon, by = coords[b].lat
+                let midLat = (ay + by) / 2.0
+                let lonScale = cos(midLat * .pi / 180.0)
+                let dx = (bx - ax) * lonScale
+                let dy = by - ay
+                let lenSq = dx * dx + dy * dy
                 let px = (coords[i].lon - ax) * lonScale
                 let py = coords[i].lat - ay
-                let dist: Double
                 if lenSq < 1e-20 {
-                    dist = sqrt(px * px + py * py)
-                } else {
-                    dist = abs(px * dy - py * dx) / sqrt(lenSq)
+                    return sqrt(px * px + py * py)
                 }
-                if dist > maxDist {
-                    maxDist = dist
-                    maxIdx = i
-                }
+                return abs(px * dy - py * dx) / sqrt(lenSq)
+            },
+            onSplit: { idx, dist in
+                importance[idx] = dist
+                return true
             }
-
-            importance[maxIdx] = maxDist
-            assignImportance(start, maxIdx)
-            assignImportance(maxIdx, end)
-        }
-
-        assignImportance(0, n - 1)
+        )
 
         // Keep the `maxPoints` most important points, preserving original order.
         var indexed = (0..<n).map { ($0, importance[$0]) }

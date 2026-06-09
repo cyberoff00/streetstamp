@@ -17,6 +17,9 @@ struct JourneyCommentSheet: View {
     let journeyID: String
     let mode: Mode
     let viewerID: String
+    /// Owner multi-thread only: scroll the block of the friend who fired a
+    /// comment deep link into view. nil for normal opens / viewer mode.
+    var focusSenderID: String? = nil
 
     @EnvironmentObject private var store: JourneyCommentStore
     @EnvironmentObject private var sessionStore: UserSessionStore
@@ -68,8 +71,24 @@ struct JourneyCommentSheet: View {
     private var ownerContent: some View {
         let threads = store.threads(forJourney: journeyID)
         if threads.isEmpty {
-            JourneyCommentEmptyState(message: L10n.t("journey_comments_empty_owner"))
-                .background(FigmaTheme.background.ignoresSafeArea())
+            Group {
+                switch store.threadsLoadPhase(forJourney: journeyID) {
+                case .idle, .loading:
+                    JourneyCommentLoadingState()
+                case .failed:
+                    JourneyCommentErrorState {
+                        Task {
+                            await store.loadThreads(
+                                journeyID: journeyID,
+                                token: sessionStore.currentAccessToken
+                            )
+                        }
+                    }
+                case .loaded:
+                    JourneyCommentEmptyState(message: L10n.t("journey_comments_empty_owner"))
+                }
+            }
+            .background(FigmaTheme.background.ignoresSafeArea())
         } else if threads.count == 1, let thread = threads.first {
             // Common case — single friend's thread. Render like viewer mode so
             // the composer stays pinned at the bottom of the sheet.
@@ -81,33 +100,50 @@ struct JourneyCommentSheet: View {
                 viewerID: viewerID
             )
         } else {
-            ScrollView {
-                LazyVStack(spacing: 20) {
-                    ForEach(Array(threads.enumerated()), id: \.element.id) { idx, thread in
-                        VStack(spacing: 14) {
-                            if idx > 0 {
-                                Divider().background(WorldoPalette.hairline.opacity(0.5))
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 20) {
+                        ForEach(Array(threads.enumerated()), id: \.element.id) { idx, thread in
+                            VStack(spacing: 14) {
+                                if idx > 0 {
+                                    Divider().background(WorldoPalette.hairline.opacity(0.5))
+                                }
+                                JourneyCommentThreadBlockView(
+                                    journeyID: journeyID,
+                                    ownerID: thread.ownerID,
+                                    otherUserID: thread.otherUserID,
+                                    otherDisplayName: resolvedFriendName(for: thread),
+                                    viewerID: viewerID
+                                )
                             }
-                            JourneyCommentThreadBlockView(
-                                journeyID: journeyID,
-                                ownerID: thread.ownerID,
-                                otherUserID: thread.otherUserID,
-                                otherDisplayName: resolvedFriendName(for: thread),
-                                viewerID: viewerID
-                            )
+                            .padding(.horizontal, 16)
+                            // Anchor each block by the friend's user ID so a
+                            // deep link can scroll to the right conversation.
+                            .id(thread.otherUserID)
                         }
-                        .padding(.horizontal, 16)
                     }
+                    .padding(.vertical, 12)
                 }
-                .padding(.vertical, 12)
+                .background(FigmaTheme.background.ignoresSafeArea())
+                .onAppear { scrollToFocusedThread(using: proxy, threads: threads) }
             }
-            .background(FigmaTheme.background.ignoresSafeArea())
         }
     }
 
     private func resolvedFriendName(for thread: JourneyCommentThread) -> String? {
         if let name = thread.otherDisplayName, !name.isEmpty { return name }
         return socialStore.friends.first(where: { $0.id == thread.otherUserID })?.displayName
+    }
+
+    private func scrollToFocusedThread(using proxy: ScrollViewProxy, threads: [JourneyCommentThread]) {
+        guard let target = focusSenderID,
+              threads.contains(where: { $0.otherUserID == target }) else { return }
+        // Let the lazy stack lay out before scrolling.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            withAnimation(.easeOut(duration: 0.25)) {
+                proxy.scrollTo(target, anchor: .top)
+            }
+        }
     }
 
     private func loadInitial() async {
@@ -134,6 +170,7 @@ private struct JourneyCommentViewerLayout: View {
     let viewerID: String
 
     @EnvironmentObject private var store: JourneyCommentStore
+    @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var socialStore: SocialGraphStore
 
     private var threadKey: String {
@@ -184,17 +221,41 @@ private struct JourneyCommentViewerLayout: View {
                             proxy.scrollTo(bottomAnchorID, anchor: .bottom)
                         }
                     }
-                    .onChange(of: messages.count) { _, _ in
+                    // Scroll to the newest message only when the *last* message
+                    // changes (a new arrival or an optimistic send). Watching the
+                    // raw count would also fire when older messages are paged in
+                    // at the top, yanking the user back to the bottom.
+                    .onChange(of: messages.last?.id) { _, _ in
                         withAnimation(.easeOut(duration: 0.2)) {
                             proxy.scrollTo(bottomAnchorID, anchor: .bottom)
                         }
                     }
                 }
             } else {
-                JourneyCommentEmptyState(message: L10n.t("journey_comments_empty_thread"))
+                // No messages cached: distinguish "still loading" / "failed" /
+                // "genuinely empty" so a network failure doesn't masquerade as
+                // an empty thread.
+                switch store.messageLoadPhase(forThread: threadKey) {
+                case .idle, .loading:
+                    JourneyCommentLoadingState()
+                case .failed:
+                    JourneyCommentErrorState { Task { await loadAndMarkRead() } }
+                case .loaded:
+                    JourneyCommentEmptyState(message: L10n.t("journey_comments_empty_thread"))
+                }
             }
         }
         .background(FigmaTheme.background.ignoresSafeArea())
+        // Load the thread's messages whether or not any are cached yet. The
+        // empty-state branch above does NOT contain `JourneyCommentMessagesList`,
+        // so its load `.task` never mounts — owner-mode single-thread (the most
+        // common case) would otherwise stay blank forever. Attaching the load
+        // here covers both branches. Idempotent: the store guards in-flight
+        // fetches, and the inner list's task skips when messages already exist.
+        .task(id: threadKey) {
+            guard messages.isEmpty else { return }
+            await loadAndMarkRead()
+        }
         .safeAreaInset(edge: .bottom) {
             JourneyCommentComposer(
                 journeyID: journeyID,
@@ -215,6 +276,12 @@ private struct JourneyCommentViewerLayout: View {
                     )
             )
         }
+    }
+
+    private func loadAndMarkRead() async {
+        let token = sessionStore.currentAccessToken
+        await store.loadMessages(journeyID: journeyID, otherUserID: otherUserID, token: token)
+        await store.markRead(journeyID: journeyID, otherUserID: otherUserID, token: token)
     }
 }
 
@@ -284,30 +351,75 @@ private struct JourneyCommentMessagesList: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            ForEach(allMessages) { msg in
-                JourneyCommentRow(
-                    message: msg,
-                    isOwnMessage: msg.senderID == viewerID,
-                    otherDisplayName: otherDisplayName,
-                    otherUserID: otherUserID
-                )
-            }
-        }
-        .task(id: threadKey) {
             if allMessages.isEmpty {
-                let token = sessionStore.currentAccessToken
-                await store.loadMessages(
-                    journeyID: journeyID,
-                    otherUserID: otherUserID,
-                    token: token
-                )
-                await store.markRead(
-                    journeyID: journeyID,
-                    otherUserID: otherUserID,
-                    token: token
-                )
+                switch store.messageLoadPhase(forThread: threadKey) {
+                case .idle, .loading:
+                    JourneyCommentInlineLoading()
+                case .failed:
+                    JourneyCommentInlineError { Task { await loadAndMarkRead() } }
+                case .loaded:
+                    // A thread with no messages shouldn't normally surface in
+                    // the owner list; render nothing and let the composer show.
+                    EmptyView()
+                }
+            } else {
+                if store.hasMoreOlder(forThread: threadKey) {
+                    Button {
+                        Task { await loadOlder() }
+                    } label: {
+                        Group {
+                            if store.isLoadingOlder(forThread: threadKey) {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Text(L10n.t("journey_comments_load_older"))
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(WorldoPalette.signal)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                    }
+                    .buttonStyle(.plain)
+                }
+                ForEach(allMessages) { msg in
+                    JourneyCommentRow(
+                        message: msg,
+                        isOwnMessage: msg.senderID == viewerID,
+                        otherDisplayName: otherDisplayName,
+                        otherUserID: otherUserID,
+                        onRetry: msg.sendState == .failed ? { Task { await retry(msg) } } : nil
+                    )
+                }
             }
         }
+        // Always refresh on appear — NOT just when empty. A cached thread would
+        // otherwise never pick up comments that arrived since the last open
+        // (the push handler refreshes only the thread/unread summaries, never
+        // `messagesByThread`), and markRead would never re-run — leaving the
+        // newest message hidden and the unread badge stuck red. `loadMessages`
+        // dedupes in-flight fetches and replaces with the latest page; markRead
+        // is cheap and idempotent.
+        .task(id: threadKey) {
+            await loadAndMarkRead()
+        }
+    }
+
+    private func loadAndMarkRead() async {
+        let token = sessionStore.currentAccessToken
+        await store.loadMessages(journeyID: journeyID, otherUserID: otherUserID, token: token)
+        await store.markRead(journeyID: journeyID, otherUserID: otherUserID, token: token)
+    }
+
+    private func loadOlder() async {
+        await store.loadOlderMessages(
+            journeyID: journeyID,
+            otherUserID: otherUserID,
+            token: sessionStore.currentAccessToken
+        )
+    }
+
+    private func retry(_ message: JourneyComment) async {
+        await store.retrySend(message, token: sessionStore.currentAccessToken)
     }
 }
 
@@ -327,8 +439,6 @@ private struct JourneyCommentComposer: View {
     @EnvironmentObject private var sessionStore: UserSessionStore
 
     @State private var draftText: String = ""
-    @State private var isSending = false
-    @State private var sendError: String?
     @FocusState private var inputFocused: Bool
 
     private var placeholder: String {
@@ -355,7 +465,6 @@ private struct JourneyCommentComposer: View {
                         if newValue.count > JourneyCommentLimits.maxContentLength {
                             draftText = String(newValue.prefix(JourneyCommentLimits.maxContentLength))
                         }
-                        if !newValue.isEmpty { sendError = nil }
                     }
 
                 if canSend {
@@ -369,7 +478,6 @@ private struct JourneyCommentComposer: View {
                             .background(Circle().fill(WorldoPalette.signal))
                     }
                     .buttonStyle(.plain)
-                    .disabled(isSending)
                     .transition(.scale.combined(with: .opacity))
                 }
             }
@@ -384,37 +492,27 @@ private struct JourneyCommentComposer: View {
                     .stroke(FigmaTheme.border, lineWidth: 0.5)
             )
             .animation(.easeOut(duration: 0.15), value: canSend)
-
-            if let sendError {
-                Text(sendError)
-                    .font(.system(size: 11))
-                    .foregroundColor(WorldoPalette.terracotta)
-                    .padding(.leading, 14)
-            }
         }
     }
 
     private func send() async {
         let text = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isSending else { return }
-        isSending = true
-        defer { isSending = false }
-        do {
-            // Viewer sends to owner; owner replies to the other party in this
-            // thread.
-            let recipientID = (viewerID == ownerID) ? otherUserID : ownerID
-            _ = try await store.send(
-                journeyID: journeyID,
-                ownerID: ownerID,
-                recipientID: recipientID,
-                content: text,
-                token: sessionStore.currentAccessToken
-            )
-            draftText = ""
-            inputFocused = false
-        } catch {
-            sendError = L10n.t("journey_comments_send_failed")
-        }
+        guard !text.isEmpty else { return }
+        // Optimistic: clear the field right away. `store.send` inserts the
+        // bubble synchronously in a `.sending` state before the network call,
+        // and the bubble itself surfaces the retry affordance on failure — so
+        // the composer no longer waits on, or reports, the round-trip.
+        draftText = ""
+        inputFocused = false
+        // Viewer sends to owner; owner replies to the other party in this thread.
+        let recipientID = (viewerID == ownerID) ? otherUserID : ownerID
+        _ = try? await store.send(
+            journeyID: journeyID,
+            ownerID: ownerID,
+            recipientID: recipientID,
+            content: text,
+            token: sessionStore.currentAccessToken
+        )
     }
 }
 
@@ -440,6 +538,82 @@ private struct JourneyCommentEmptyState: View {
     }
 }
 
+// MARK: - Loading / error states
+
+/// Full-size centered spinner, sized to match `JourneyCommentEmptyState` so the
+/// sheet doesn't jump when the load resolves into a list or empty state.
+private struct JourneyCommentLoadingState: View {
+    var body: some View {
+        VStack {
+            Spacer()
+            ProgressView()
+            Spacer()
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Full-size error state with a retry affordance. Shown when an initial load
+/// fails, so a network error is never mistaken for "no comments".
+private struct JourneyCommentErrorState: View {
+    let retry: () -> Void
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Spacer()
+            Image(systemName: "exclamationmark.bubble")
+                .font(.system(size: 36, weight: .light))
+                .foregroundColor(WorldoPalette.inkSecondary.opacity(0.6))
+            Text(L10n.t("journey_comments_load_failed"))
+                .font(.system(size: 13))
+                .foregroundColor(WorldoPalette.inkSecondary)
+                .multilineTextAlignment(.center)
+            Button(action: retry) {
+                Text(L10n.t("retry"))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(WorldoPalette.signal)
+            }
+            .buttonStyle(.plain)
+            Spacer()
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Compact spinner for an owner thread block (inline, left-aligned).
+private struct JourneyCommentInlineLoading: View {
+    var body: some View {
+        HStack {
+            ProgressView()
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+/// Compact error + retry for an owner thread block.
+private struct JourneyCommentInlineError: View {
+    let retry: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(L10n.t("journey_comments_load_failed"))
+                .font(.system(size: 12))
+                .foregroundColor(WorldoPalette.inkSecondary)
+            Button(action: retry) {
+                Text(L10n.t("retry"))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(WorldoPalette.signal)
+            }
+            .buttonStyle(.plain)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
 // MARK: - Comment row (Instagram-style)
 
 struct JourneyCommentRow: View {
@@ -450,6 +624,8 @@ struct JourneyCommentRow: View {
     /// when `message.senderID` isn't in the local friends list (e.g. the
     /// signed-in viewer's own ID).
     let otherUserID: String
+    /// Set only for a `.failed` optimistic message; taps re-send it.
+    var onRetry: (() -> Void)? = nil
 
     @EnvironmentObject private var socialStore: SocialGraphStore
     @AppStorage("streetstamps.profile.displayName") private var ownDisplayName: String = "EXPLORER"
@@ -509,13 +685,36 @@ struct JourneyCommentRow: View {
                     .font(.system(size: 13))
                     .foregroundColor(WorldoPalette.inkPrimary))
                     .fixedSize(horizontal: false, vertical: true)
+                    .opacity(message.sendState == .sending ? 0.55 : 1.0)
 
-                Text(timeLabel)
-                    .font(.system(size: 11))
-                    .foregroundColor(WorldoPalette.inkSecondary)
+                statusLine
             }
 
             Spacer(minLength: 0)
+        }
+    }
+
+    @ViewBuilder
+    private var statusLine: some View {
+        switch message.sendState {
+        case .sending:
+            Text(L10n.t("journey_comments_sending"))
+                .font(.system(size: 11))
+                .foregroundColor(WorldoPalette.inkSecondary)
+        case .failed:
+            Button { onRetry?() } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.circle")
+                    Text(L10n.t("journey_comments_send_failed_retry"))
+                }
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(WorldoPalette.terracotta)
+            }
+            .buttonStyle(.plain)
+        case .sent:
+            Text(timeLabel)
+                .font(.system(size: 11))
+                .foregroundColor(WorldoPalette.inkSecondary)
         }
     }
 }

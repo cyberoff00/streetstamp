@@ -480,8 +480,19 @@ struct StreetStampsApp: App {
                 flow.consumePendingJourneyCommentLink()
             }
             .fullScreenCover(item: $pendingCommentDeepLink) { link in
-                NavigationStack {
-                    journeyCommentDeepLinkView(for: link)
+                // Host the detail as a PUSHED navigation destination, not as the
+                // NavigationStack's root. A `.sheet` presented from the root view
+                // of a NavigationStack that is itself the content of a
+                // `fullScreenCover` silently fails to present (the comment sheet
+                // never appeared and the comment button looked dead). The same
+                // view works fine when it is a pushed destination — which is how
+                // the normal in-app path (CollectionTabView) presents it. Mirrors
+                // the proven `ModalNavigationWrapper` pattern in MainTabView.
+                JourneyCommentDeepLinkCover(
+                    link: link,
+                    onDismiss: { pendingCommentDeepLink = nil }
+                ) { routedLink in
+                    journeyCommentDeepLinkView(for: routedLink)
                 }
                 .environmentObject(sessionStore)
                 .environmentObject(journeyStore)
@@ -498,13 +509,56 @@ struct StreetStampsApp: App {
 
     @ViewBuilder
     private func journeyCommentDeepLinkView(for link: JourneyCommentDeepLink) -> some View {
-        if link.ownerID == sessionStore.currentUserID {
+        // Comments are keyed by backend account ID, not the local profile scope.
+        // `link.ownerID` is the account ID from the push payload, so it must be
+        // compared against `accountUserID` (not `currentUserID`, which resolves
+        // to `activeLocalProfileID` = `local_<guestID>` and never matches an
+        // account ID — that mismatch routed every own-journey comment tap into
+        // the friend branch and onto the "content unavailable" screen).
+        if link.ownerID == sessionStore.accountUserID {
             OwnerCommentDeepLinkContent(link: link)
         } else {
             FriendCommentDeepLinkContent(
                 link: link,
                 initialSnapshot: socialStore.friends.first(where: { $0.id == link.ownerID })
             )
+        }
+    }
+
+    /// Hosts the journey-comment deep-link detail as a PUSHED navigation
+    /// destination (not the NavigationStack root) so the detail's `.sheet`s —
+    /// most importantly the comment sheet — present reliably. Initializing
+    /// `path` with the link renders the detail on the first frame; popping back
+    /// to root (the detail's back button / swipe) auto-dismisses the enclosing
+    /// `fullScreenCover`. Mirrors `MainTabView.ModalNavigationWrapper`.
+    private struct JourneyCommentDeepLinkCover<Content: View>: View {
+        let link: JourneyCommentDeepLink
+        let onDismiss: () -> Void
+        @ViewBuilder let content: (JourneyCommentDeepLink) -> Content
+        @State private var path: [JourneyCommentDeepLink]
+
+        init(
+            link: JourneyCommentDeepLink,
+            onDismiss: @escaping () -> Void,
+            @ViewBuilder content: @escaping (JourneyCommentDeepLink) -> Content
+        ) {
+            self.link = link
+            self.onDismiss = onDismiss
+            self.content = content
+            _path = State(initialValue: [link])
+        }
+
+        var body: some View {
+            NavigationStack(path: $path) {
+                Color.clear
+                    .navigationBarHidden(true)
+                    .navigationDestination(for: JourneyCommentDeepLink.self) { routedLink in
+                        content(routedLink)
+                    }
+            }
+            .onChange(of: path) { _, newPath in
+                if newPath.isEmpty { onDismiss() }
+            }
         }
     }
 

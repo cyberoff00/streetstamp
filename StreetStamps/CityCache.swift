@@ -570,8 +570,12 @@ final class CityRenderCacheStore: ObservableObject {
         return UIImage(contentsOfFile: path)
     }
 
-    func save(_ image: UIImage, forKey key: String) {
-        guard let data = image.jpegData(compressionQuality: 0.82) else { return }
+    func save(_ image: UIImage, forKey key: String, highQuality: Bool = false) {
+        // Raster (satellite/hybrid) thumbnails are photographic and JPEG 0.82 visibly
+        // softens them; encode those near-lossless. Vector styles are flat colours that
+        // JPEG handles cleanly, so they stay at 0.82 to keep disk use down.
+        let quality: CGFloat = highQuality ? 0.95 : 0.82
+        guard let data = image.jpegData(compressionQuality: quality) else { return }
         let url = rootDir.appendingPathComponent(relativePath(forKey: key), isDirectory: false)
         try? fm.createDirectory(at: rootDir, withIntermediateDirectories: true, attributes: nil)
         try? data.write(to: url, options: [.atomic])
@@ -857,6 +861,16 @@ final class CityCache: ObservableObject {
         let photoOnly = decoded.filter { !existingKeys.contains($0.id) }
         guard !photoOnly.isEmpty else { return }
         cachedCities.append(contentsOf: photoOnly)
+    }
+
+    /// Cheap "has the user ever run a photo scan" check, safe to read from a
+    /// SwiftUI `body`/computed property. Unlike `loadPreviousPhotoScanResult()`
+    /// this does NOT decode the full result or trigger the destructive
+    /// version-mismatch cleanup — that cleanup must only run from an explicit
+    /// scan action, never during view evaluation. A stale-version file reports
+    /// `true` here and self-heals on the next scan.
+    var hasPhotoScanResultOnDisk: Bool {
+        fm.fileExists(atPath: paths.photoScanResultURL.path)
     }
 
     func loadPreviousPhotoScanResult() -> PhotoScanResult? {
@@ -1290,11 +1304,19 @@ final class CityCache: ObservableObject {
     }
 
     private func saveMembershipIndexToDisk() {
-        do {
-            let data = try JSONEncoder().encode(membershipIndex)
-            try data.write(to: membershipIndexURL, options: [.atomic])
-        } catch {
-            print("❌ city membership index save failed:", error)
+        // Snapshot the value-type index and encode+write off-main (like saveToDisk).
+        // This runs on every journey mutation; the index grows with cities×journeys,
+        // so a synchronous encode here would block the main thread at each
+        // completion. diskQueue is serial, so writes stay ordered.
+        let snapshot = membershipIndex
+        let url = membershipIndexURL
+        diskQueue.async {
+            do {
+                let data = try JSONEncoder().encode(snapshot)
+                try data.write(to: url, options: [.atomic])
+            } catch {
+                print("❌ city membership index save failed:", error)
+            }
         }
     }
 

@@ -78,31 +78,77 @@ enum JourneyFinalizer {
     ) {
         _ = source
 
-        var r = route
-        r.memories = r.memories.map {
-            JourneyMemoryLocationResolver.finalize(
-                memory: $0,
-                lastKnownLocation: lastKnownLocation,
-                recordedLocations: recordedLocations
+        // Memory location resolution + spike correction + Douglas-Peucker
+        // simplification all scale with point count. On an all-day route of tens
+        // of thousands of points this can block the main thread for seconds —
+        // long enough for the iOS watchdog to terminate the app mid-finalize and
+        // lose the just-completed journey. Compute it off the main actor first,
+        // then hop back for the store mutations and completion callback.
+        Task { @MainActor in
+            let resolved = await resolveHeavyGeometry(
+                route: route,
+                recordedLocations: recordedLocations,
+                lastKnownLocation: lastKnownLocation
+            )
+            finalizeResolvedRoute(
+                resolved,
+                journeyStore: journeyStore,
+                cityCache: cityCache,
+                lifelogStore: lifelogStore,
+                completion: completion
             )
         }
-        r.correctedCoordinates = JourneyPostCorrection.correctedCoordinates(for: r)
-        if !r.correctedCoordinates.isEmpty {
-            r.preferredRouteSource = .corrected
-        }
-        // PR 5: trust ingest's accumulated totalDistance — it's been validated by
-        // CoreMotion (stationary periods excluded, walking + zero steps dropped).
-        // Recomputing from raw geometry here would re-include those excluded drift
-        // segments and undo PR 5's validation entirely.
-        // The ingest path's physical-speed limit (50 m/s in L3.1) and OneEuro
-        // smoothing already act as the "outlier rejection" that correctedDistance
-        // was previously providing.
-        // r.distance stays as set by MapView.onCoordsUpdated (= tracking.totalDistance).
+    }
 
-        // PR 3.2: overwrite correctedCoordinates with DP-simplified geometry for display.
-        // Distance is independent of this — only smooths the rendered polyline.
-        r.correctedCoordinates = JourneyPostCorrection.simplifiedForDisplay(for: r)
-        r.isTooShort = shouldTreatAsStationaryDrift(route: r)
+    /// Run the point-count-scaling geometry work (memory resolution, spike
+    /// correction, DP simplification) on a background task so it never blocks the
+    /// main thread during finalize. Returns the fully-resolved route.
+    private static func resolveHeavyGeometry(
+        route: JourneyRoute,
+        recordedLocations: [CLLocation],
+        lastKnownLocation: CLLocation?
+    ) async -> JourneyRoute {
+        await Task.detached(priority: .userInitiated) {
+            var r = route
+            r.memories = r.memories.map {
+                JourneyMemoryLocationResolver.finalize(
+                    memory: $0,
+                    lastKnownLocation: lastKnownLocation,
+                    recordedLocations: recordedLocations
+                )
+            }
+            r.correctedCoordinates = JourneyPostCorrection.correctedCoordinates(for: r)
+            if !r.correctedCoordinates.isEmpty {
+                r.preferredRouteSource = .corrected
+            }
+            // PR 5: trust ingest's accumulated totalDistance — it's been validated by
+            // CoreMotion (stationary periods excluded, walking + zero steps dropped).
+            // Recomputing from raw geometry here would re-include those excluded drift
+            // segments and undo PR 5's validation entirely.
+            // The ingest path's physical-speed limit (50 m/s in L3.1) and OneEuro
+            // smoothing already act as the "outlier rejection" that correctedDistance
+            // was previously providing.
+            // r.distance stays as set by MapView.onCoordsUpdated (= tracking.totalDistance).
+
+            // PR 3.2: overwrite correctedCoordinates with DP-simplified geometry for display.
+            // Distance is independent of this — only smooths the rendered polyline.
+            r.correctedCoordinates = JourneyPostCorrection.simplifiedForDisplay(for: r)
+            r.isTooShort = shouldTreatAsStationaryDrift(route: r)
+            return r
+        }.value
+    }
+
+    /// Main-actor tail of finalize: city-key resolution (best-effort geocode),
+    /// persistence, and completion. Assumes `resolved` already went through
+    /// `resolveHeavyGeometry`.
+    private static func finalizeResolvedRoute(
+        _ resolved: JourneyRoute,
+        journeyStore: JourneyStore,
+        cityCache: CityCache,
+        lifelogStore: LifelogStore,
+        completion: @escaping (JourneyRoute) -> Void
+    ) {
+        var r = resolved
 
         func persistAndReturn(_ updated: JourneyRoute, notify: (() -> Void)?) {
             Task { @MainActor in

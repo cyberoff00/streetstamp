@@ -11,3 +11,6 @@ build/tmp-home/
 build/postcard-status-build.*/
 build/postcard-status-test.*/
 .worktrees/
+
+# Local Xcode derived data used for test builds
+.dd_test/

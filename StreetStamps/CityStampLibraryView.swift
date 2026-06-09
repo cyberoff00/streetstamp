@@ -459,7 +459,8 @@ struct CityStampLibraryView: View {
     // MARK: - Photo discovery
 
     private var hasEverScannedPhotos: Bool {
-        cache.loadPreviousPhotoScanResult() != nil
+        // Cheap existence check — never decode the full scan result from `body`.
+        cache.hasPhotoScanResultOnDisk
     }
 
     private var photoDiscoveryIntroCard: some View {
@@ -731,7 +732,7 @@ struct PhotoDiscoveryScanButton: View {
 // =======================================================
 
 /// Limits concurrent MKMapSnapshotter / Mapbox snapshot requests to avoid
-/// tile-server rate-limiting that returns blank images.
+/// tile-server rate-limiting (which can make renders fail outright).
 private actor RenderThrottle {
     static let shared = RenderThrottle(limit: 4)
 
@@ -1208,7 +1209,15 @@ final class CityThumbnailLoader: ObservableObject {
             .joined(separator: "~")
         let boundarySignature = "ignored-for-cache"
         let anchorSignature = "ignored-for-cache"
-        let styleVersion = 10
+        // v11: dropped the isBlankImage pixel heuristic (no more false-rejected
+        // uniform maps → no infinite-retry cards) + satellite thumbnails render at
+        // scale 3 (sharper raster).
+        // v12: invalidate blank thumbnails poisoned on cold start. v11 trusted Mapbox's
+        // .success unconditionally, so a Mapbox "success-but-unrendered" frame got cached
+        // as a permanent blank. ensurePersistentCache now rejects fully-uniform frames for
+        // route-bearing cities before caching; bump to force a re-render of any blank
+        // already saved to disk under v11.
+        let styleVersion = 12
         let colorVersion = (MapLayerStyle(rawValue: appearanceRaw) ?? .mutedDark).isSatelliteStyle ? 2 : 1
         // Include only the masks for journeys that belong to this city, so
         // edits to one city's polylines don't invalidate every other city's
@@ -1368,44 +1377,76 @@ final class CityThumbnailLoader: ObservableObject {
             maskedCity = city
         }
 
-        // Both MKMapSnapshotter and Mapbox Snapshotter can hand back a valid UIImage
-        // whose tiles are blank — MapKit when the tile server rate-limits, Mapbox when
-        // its success callback fires after style load but before base tiles arrive
-        // (route-less photo-discovered cities surface this most often). We reject
-        // blanks here and rely on the outer scheduleRetry's exponential backoff to
-        // eventually succeed without hammering the tile server inside a single call.
-        // Route-less fallback is only legitimate when there's nothing to draw.
-        // Accepting it for a city with journeys would cache a thumbnail without
-        // routes under the current style key (e.g. after a style switch where the
-        // primary Mapbox snapshot transiently fails) and the user would see
-        // wrong content until the next styleVersion bump. Let primary retry instead.
-        let allowFallback = maskedCity.journeys.isEmpty
+        let hasRoutes = !maskedCity.journeys.isEmpty
         await RenderThrottle.shared.acquire()
 
-        // Treat a blank primary the same as a nil primary so route-less cities
-        // (photo-discovered) can still reach the fallback path. Previously the
-        // fallback only ran when primary returned nil, but MKMapSnapshotter and
-        // Mapbox both routinely hand back a non-nil-but-blank image on tile-load
-        // failure — that pinned photo cities to retry forever even though
-        // allowFallback was true.
+        // ROOT-CAUSE FIX (recurring "card won't load / retry does nothing"):
+        // A non-nil result here means the renderer SUCCEEDED — MKMapSnapshotter only
+        // calls back a snapshot once its tiles have loaded, and Mapbox
+        // Snapshotter.start() completes only after the requested tiles render. The
+        // real "the whole thumbnail loaded no map at all" failure surfaces as nil
+        // (tile/style error, invalid region, or our own timeout), which we treat as
+        // failure below and let scheduleRetry handle.
+        //
+        // We deliberately do NOT pixel-inspect the result to second-guess success.
+        // The previous isBlankImage heuristic sampled 9 pixels and rejected "uniform"
+        // frames, but a flat frame is fundamentally ambiguous: it looks identical for
+        // "tiles never loaded" and for a perfectly valid map over open sea / desert /
+        // a sparse dark area. That ambiguity made it false-reject real renders whose
+        // thin route missed the sampled points (and even route-less ocean/desert
+        // cities), returning nil → renderFailed → infinite deterministic retry where
+        // even manual "tap to retry" just restarted the same failure. Pixels can't
+        // tell blank-failure from uniform-terrain, so trust the renderer's own
+        // success/failure signal instead — with ONE narrow exception applied after the
+        // render below: a route-bearing city whose frame is 100% one flat colour. That is
+        // unambiguous (a drawn route would paint pixels), and it specifically catches
+        // Mapbox returning .success with an unrendered cold-start frame. See the
+        // isFullyUniformFrame guard before caching.
         let primary = await Self.makeSnapshot(city: maskedCity, appearanceRaw: appearanceRaw, fetchedBoundary: fetchedBoundary)
-        let usablePrimary = primary.flatMap { Self.isBlankImage($0) ? nil : $0 }
         let candidate: UIImage?
-        if let usablePrimary {
-            candidate = usablePrimary
-        } else if allowFallback {
+        if primary != nil {
+            candidate = primary
+        } else if !hasRoutes {
+            // Route-less (photo-discovered) city: primary failed, so try a plain wider
+            // map tile centered on the city before giving up.
             candidate = await Self.makeFallbackSnapshot(city: maskedCity, appearanceRaw: appearanceRaw)
         } else {
             candidate = nil
         }
-        let img: UIImage? = (candidate.flatMap { Self.isBlankImage($0) ? nil : $0 })
+        let img: UIImage? = candidate
 
         await RenderThrottle.shared.release()
 
         guard let img else { return }
 
+        // A route-bearing city whose rendered frame is a single flat colour means the
+        // renderer reported success but the tiles/route never rasterised — observed with
+        // Mapbox Snapshotter on cold start, which can return .success with an unrendered
+        // frame (see makeMapboxSnapshot). Caching it would persist a blank thumbnail on
+        // disk forever (renderedKey gets set → never retried). Do NOT cache it: returning
+        // here leaves the cache empty so renderOnDemand/scheduleRetry re-render on a now-warm
+        // GPU instead. This is deliberately NOT the old isBlankImage 9-point heuristic: it
+        // only fires for route-bearing cities (so valid uniform-terrain maps over open
+        // sea/desert without routes are never touched) AND requires the WHOLE frame to be a
+        // single colour, which for a city that has routes is unambiguous render failure.
+        if hasRoutes, Self.isFullyUniformFrame(img) {
+            await MainActor.run {
+                CityThumbnailDebugLogger.shared.log(
+                    .renderMiss,
+                    cityID: city.id,
+                    "ensurePersistentCache city=\(city.id) action=rejected_blank_frame key=\(key)"
+                )
+            }
+            print("[CityThumbnail] ▶ rejected uniform/blank frame city=\(city.id) (treated as render failure → retry)")
+            return
+        }
+
         CityImageMemoryCache.shared.set(img, forKey: key)
-        renderCacheStore.save(img, forKey: key)
+        // Satellite/hybrid are photographic: JPEG 0.82 softens them visibly. Persist raster
+        // styles near-lossless; vector styles stay at the default quality (flat colours
+        // survive JPEG fine and it keeps disk use down).
+        let isRasterStyle = (MapLayerStyle(rawValue: appearanceRaw) ?? .mutedDark).isSatelliteStyle
+        renderCacheStore.save(img, forKey: key, highQuality: isRasterStyle)
         await MainActor.run {
             CityThumbnailDebugLogger.shared.log(
                 .renderComplete,
@@ -1422,6 +1463,11 @@ final class CityThumbnailLoader: ObservableObject {
     /// from indefinite background retries — they only waste battery. Once the cap
     /// is hit, the placeholder surfaces "tap to retry" and waits for the user.
     private var renderRetryCount = 0
+    /// First retry is fast: failures right after a style switch / many cards loading
+    /// at once are usually transient tile-server contention that clears in ~1–2s, so
+    /// waiting the full backoff feels like the card is stuck. Retry quickly once, then
+    /// fall back to exponential backoff for genuinely persistent failures.
+    private static let firstRetryDelaySec: Double = 1.2
     private static let initialRetryDelaySec: Double = 5
     private static let maxRetryDelaySec: Double = 600
     private static let maxAutoRetries = 5
@@ -1479,11 +1525,18 @@ final class CityThumbnailLoader: ObservableObject {
 
     private func scheduleRetry(city: City, appearanceRaw: String, key: String, renderCacheStore: CityRenderCacheStore, renderMaskByJourney: [String: Set<Int>] = [:]) {
         renderTask?.cancel()
-        // Exponential backoff capped at maxRetryDelaySec: 5s, 10s, 20s, 40s, 80s,
-        // 160s, 320s, 600s, 600s... — gives the tile server room between bursts.
+        // First retry is fast (~1.2s) to recover quickly from transient contention
+        // after a style switch / many-card burst. Subsequent retries use exponential
+        // backoff capped at maxRetryDelaySec: 5s, 10s, 20s, 40s, 80s... — giving the
+        // tile server room between bursts for genuinely persistent failures.
         let attempt = max(1, renderRetryCount)
-        let raw = Self.initialRetryDelaySec * pow(2.0, Double(attempt - 1))
-        let delaySec = min(raw, Self.maxRetryDelaySec)
+        let delaySec: Double
+        if attempt == 1 {
+            delaySec = Self.firstRetryDelaySec
+        } else {
+            let raw = Self.initialRetryDelaySec * pow(2.0, Double(attempt - 2))
+            delaySec = min(raw, Self.maxRetryDelaySec)
+        }
         let delayNs = UInt64(delaySec * 1_000_000_000)
         renderTask = Task(priority: .utility) { [city, appearanceRaw, key, renderMaskByJourney] in
             try? await Task.sleep(nanoseconds: delayNs)
@@ -1509,6 +1562,41 @@ final class CityThumbnailLoader: ObservableObject {
                 }
             }
         }
+    }
+
+    /// True only when EVERY pixel of the frame is essentially one flat colour — i.e. the
+    /// renderer handed back a single fill with nothing drawn on it. Used solely to detect a
+    /// Mapbox "success-but-unrendered" cold-start frame BEFORE caching, and only consulted
+    /// for route-bearing cities (where a full-opacity route line would otherwise paint
+    /// contrasting pixels, so a uniform frame can only mean the render failed). Scans the
+    /// whole frame downsampled to 24×16 rather than the old 9 fixed points, so a valid map
+    /// whose thin route happens to miss a few sample points is never false-rejected.
+    nonisolated private static func isFullyUniformFrame(_ image: UIImage) -> Bool {
+        guard let cg = image.cgImage else { return false }
+        let w = 24, h = 16
+        let bytesPerRow = w * 4
+        var data = [UInt8](repeating: 0, count: bytesPerRow * h)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: &data, width: w, height: h, bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow, space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return false }
+        ctx.interpolationQuality = .low
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+
+        let r0 = Int(data[0]), g0 = Int(data[1]), b0 = Int(data[2])
+        let tolerance = 6
+        var i = 0
+        while i < data.count {
+            if abs(Int(data[i]) - r0) > tolerance
+                || abs(Int(data[i + 1]) - g0) > tolerance
+                || abs(Int(data[i + 2]) - b0) > tolerance {
+                return false
+            }
+            i += 4
+        }
+        return true
     }
 
     nonisolated private static func journeySignature(_ journey: JourneyRoute) -> String {
@@ -1578,42 +1666,6 @@ final class CityThumbnailLoader: ObservableObject {
 
         var seen = Set<String>()
         return keys.filter { seen.insert($0).inserted }
-    }
-
-    /// Detect blank/unloaded map snapshots by sampling a few pixels.
-    /// A real map tile always has variation (roads, labels, terrain shading).
-    /// Blank tiles are a single solid color across the entire image.
-    nonisolated private static func isBlankImage(_ image: UIImage) -> Bool {
-        guard let cgImage = image.cgImage else { return true }
-        let w = cgImage.width, h = cgImage.height
-        guard w > 0, h > 0 else { return true }
-
-        // Sample 9 pixels spread across the image.
-        guard let data = cgImage.dataProvider?.data,
-              let ptr = CFDataGetBytePtr(data) else { return true }
-        let bpp = cgImage.bitsPerPixel / 8
-        guard bpp >= 3 else { return false }
-        let bpr = cgImage.bytesPerRow
-
-        func pixel(x: Int, y: Int) -> (UInt8, UInt8, UInt8) {
-            let offset = y * bpr + x * bpp
-            return (ptr[offset], ptr[offset + 1], ptr[offset + 2])
-        }
-
-        let ref = pixel(x: 0, y: 0)
-        let samples = [
-            (w / 4, h / 4), (w / 2, h / 4), (3 * w / 4, h / 4),
-            (w / 4, h / 2), (w / 2, h / 2), (3 * w / 4, h / 2),
-            (w / 4, 3 * h / 4), (w / 2, 3 * h / 4),
-        ]
-        for (x, y) in samples {
-            let p = pixel(x: min(x, w - 1), y: min(y, h - 1))
-            let dr = abs(Int(p.0) - Int(ref.0))
-            let dg = abs(Int(p.1) - Int(ref.1))
-            let db = abs(Int(p.2) - Int(ref.2))
-            if dr + dg + db > 12 { return false }
-        }
-        return true
     }
 
     nonisolated private static func mapType(for appearanceRaw: String) -> MKMapType {
@@ -1852,10 +1904,20 @@ final class CityThumbnailLoader: ObservableObject {
             dedupGranularity: .coarse
         )
 
+        // Satellite/hybrid are RASTER. MKMapSnapshotter chooses which zoom tiles to
+        // fetch from size × scale (in pixels): a higher scale → higher-zoom, sharper
+        // imagery. A previous fix hardcoded scale = 2 to "avoid upsampling raster to
+        // the device's 3x scale", but that starved the raster of detail and the
+        // thumbnails stayed soft. Request scale 3 for raster so the snapshot itself
+        // carries crisp imagery; vector styles repaint cleanly at any scale, so keep
+        // them at 2 to save thumbnail memory.
+        let isRaster = (MapLayerStyle(rawValue: appearanceRaw) ?? .mutedDark).isSatelliteStyle
+        let renderScale: CGFloat = isRaster ? 3 : 2
+
         let options = MKMapSnapshotter.Options()
         options.region = region
         options.size = CGSize(width: 480, height: 320)
-        options.scale = 2
+        options.scale = renderScale
         options.mapType = mapType(for: appearanceRaw)
         options.traitCollection = UITraitCollection(traitsFrom: [
             UITraitCollection(userInterfaceStyle: interfaceStyle(for: appearanceRaw)),
@@ -1892,12 +1954,13 @@ final class CityThumbnailLoader: ObservableObject {
                     cont.resume(returning: nil)
                     return
                 }
-                // Match the snapshotter's own scale (2) so satellite raster tiles
-                // aren't bilinearly upsampled to the device's display scale (3 on
-                // iPhone). Vector map types repaint cleanly at any scale, but
-                // satellite imagery is raster — upscaling makes it visibly soft.
+                // Redraw at the same scale the snapshot was rendered at (renderScale)
+                // so the crisp raster tiles fetched above are preserved 1:1 — drawing
+                // a 3x snapshot into a 2x context would throw away the detail we just
+                // paid for. The route overlay is vector (CoreGraphics) and stays sharp
+                // at any scale.
                 let format = UIGraphicsImageRendererFormat()
-                format.scale = 2
+                format.scale = renderScale
                 let img = UIGraphicsImageRenderer(size: snapshotSize, format: format).image { renderer in
                     snapshot.image.draw(at: .zero)
                     CityDeepRenderEngine.drawStyledSegments(styledSegments, snapshot: snapshot, context: renderer.cgContext, appearanceRaw: appearanceRaw)
@@ -2037,9 +2100,10 @@ final class CityThumbnailLoader: ObservableObject {
                     // Mapbox Snapshotter doesn't continuously render — it only renders
                     // once when start() is called. .mapIdle on Snapshotter therefore
                     // doesn't reliably fire (no render loop to go idle from), so we
-                    // can't gate start() on it. Trust start()'s own internal tile-wait
-                    // logic; if it returns a blank early frame anyway, the outer
-                    // isBlankImage check + scheduleRetry will give it another shot.
+                    // can't gate start() on it. start() itself waits for the style and
+                    // the tiles required by the current camera before its completion
+                    // fires, so a .success result is a fully-rendered frame; a real
+                    // failure comes back as .failure (→ nil → retry).
                     // Defensive timeout: if start() never calls back (rare SDK edge
                     // case), the throttle slot would be held forever. 15s is well
                     // above any normal render time and guarantees the slot returns.

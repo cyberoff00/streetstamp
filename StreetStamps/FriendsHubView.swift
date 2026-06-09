@@ -206,6 +206,7 @@ struct FriendsHubView: View {
     @EnvironmentObject private var notificationStore: SocialNotificationStore
     @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
     @EnvironmentObject private var blockStore: UserBlockStore
+    @EnvironmentObject private var commentStore: JourneyCommentStore
     @ObservedObject private var languagePreference = LanguagePreference.shared
     // NOTE: journeyStore, cityCache, flow removed from here to prevent
     // spurious body recomputation. Those stores update frequently but are
@@ -533,6 +534,12 @@ struct FriendsHubView: View {
             let t0 = CFAbsoluteTimeGetCurrent()
             print("⏱ [FriendsHub] .task START")
             await performInitialFeedRefreshIfNeeded()
+            // Populate the per-journey unread-comment dots when the feed first
+            // appears. The app-launch refresh often runs before the access token
+            // is ready (returns empty); without this, dots only showed after the
+            // user opened a journey detail (which fetched that journey's threads)
+            // and came back.
+            await commentStore.refreshUnreadSummary(token: sessionStore.currentAccessToken)
             print("⏱ [FriendsHub] .task feed done: \(Int((CFAbsoluteTimeGetCurrent()-t0)*1000))ms")
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 300 * 1_000_000_000)
@@ -549,6 +556,9 @@ struct FriendsHubView: View {
                 } else {
                     await performInitialFeedRefreshIfNeeded()
                 }
+                // Refresh unread dots on every foreground return so comments
+                // that arrived while away surface without opening each journey.
+                await commentStore.refreshUnreadSummary(token: sessionStore.currentAccessToken)
             }
         }
         .onChange(of: sessionStore.currentAccessToken) { _, _ in
@@ -557,6 +567,9 @@ struct FriendsHubView: View {
                 async let b: Void = refreshFriendRequests()
                 _ = await (a, b)
                 await refreshRemoteFriends(showUnreadToast: false)
+                // A token arriving after the feed mounted (cold-launch race) is
+                // exactly when the launch-time unread refresh came back empty.
+                await commentStore.refreshUnreadSummary(token: sessionStore.currentAccessToken)
             }
         }
         .onChange(of: sessionStore.sessionRefreshVersion) { _, _ in
@@ -687,7 +700,7 @@ struct FriendsHubView: View {
         }
         .scrollPosition(id: $friendsListScrollPosition)
         .refreshable {
-            async let a: Void = refreshRemoteFriends(force: true)
+            async let a: Void = refreshRemoteFriends(force: true, showRetryBanner: true)
             async let b: Void = refreshFriendRequests()
             _ = await (a, b)
         }
@@ -1050,7 +1063,7 @@ struct FriendsHubView: View {
         private static let refreshCooldownSeconds: TimeInterval = 60
 
         @MainActor
-        private func refreshRemoteFriends(showUnreadToast: Bool = true, force: Bool = false) async {
+        private func refreshRemoteFriends(showUnreadToast: Bool = true, force: Bool = false, showRetryBanner: Bool = false) async {
             guard !loadingRemote else { return }
             if !force, Date().timeIntervalSince(lastFeedRefreshTime) < Self.refreshCooldownSeconds {
                 print("⏱ [FriendsHub] refreshRemoteFriends skipped (cooldown)")
@@ -1062,7 +1075,12 @@ struct FriendsHubView: View {
             let t0 = CFAbsoluteTimeGetCurrent()
             let previousFriends = socialStore.friends
             let token = sessionStore.currentAccessToken
-            retryBanner.beginOperation()
+            // Only surface the "fetching updates" banner for user-initiated
+            // refreshes (pull-to-refresh) or when there is no cached content yet.
+            // A silent background freshen over already-displayed cached content
+            // should not show an alarming banner just because the network is slow.
+            let bannerEnabled = showRetryBanner || socialStore.friends.isEmpty
+            if bannerEnabled { retryBanner.beginOperation() }
 
             // Fetch friends and own profile in parallel — both are needed for the feed.
             async let friendsTask = socialStore.fetchFriendSnapshotsFromBackend(accessToken: token)
@@ -1174,13 +1192,22 @@ struct FriendsHubView: View {
             requestActionLoadingIDs.insert(requestID)
             defer { requestActionLoadingIDs.remove(requestID) }
 
+            // Optimistically drop the request row so the tap feels instant instead of
+            // waiting on the accept POST plus a full friends re-fetch before anything
+            // moves. On failure we re-sync from the server (the authoritative source)
+            // to bring the row back.
+            incomingFriendRequests.removeAll { $0.id == requestID }
+
             do {
                 let resp = try await BackendAPIClient.shared.acceptFriendRequest(token: token, requestID: requestID)
+                // Confirm immediately; the friends list re-fetch runs without blocking
+                // the toast.
+                showFeedToast(resp.message ?? L10n.t("friends_request_accepted"))
                 async let a: Void = refreshRemoteFriends(force: true)
                 async let b: Void = refreshFriendRequests()
                 _ = await (a, b)
-                showFeedToast(resp.message ?? L10n.t("friends_request_accepted"))
             } catch {
+                await refreshFriendRequests()
                 showFeedToast(String(format: L10n.t("friends_accept_failed_format"), error.localizedDescription))
             }
         }
@@ -1197,11 +1224,16 @@ struct FriendsHubView: View {
             requestActionLoadingIDs.insert(requestID)
             defer { requestActionLoadingIDs.remove(requestID) }
 
+            // Optimistically drop the row for instant feedback; on failure re-sync from
+            // the server to restore it.
+            incomingFriendRequests.removeAll { $0.id == requestID }
+
             do {
                 let resp = try await BackendAPIClient.shared.rejectFriendRequest(token: token, requestID: requestID)
-                await refreshFriendRequests()
                 showFeedToast(resp.message ?? L10n.t("friends_request_rejected"))
+                await refreshFriendRequests()
             } catch {
+                await refreshFriendRequests()
                 showFeedToast(String(format: L10n.t("friends_reject_failed_format"), error.localizedDescription))
             }
         }
@@ -1321,47 +1353,51 @@ struct FriendsHubView: View {
             )
             .shadow(color: FigmaTheme.softShadow, radius: 8, x: 0, y: 3)
             .onTapGesture {
-                Task {
-                    await notificationStore.markSingleRead(id: item.id, token: sessionStore.currentAccessToken)
-                    if item.type == "postcard_received" || item.type == "postcard_reaction" {
-                        showSocialNotificationsSheet = false
-                        let box = item.type == "postcard_received" ? "received" : "sent"
-                        postcardInboxIntent = PostcardInboxIntent(box: box, messageID: item.postcardMessageID)
-                        showPostcardInboxSheet = true
-                    } else if item.type == "friend_request" {
-                        showSocialNotificationsSheet = false
-                        tab = .allFriends
-                        Task { await refreshFriendRequests() }
-                    } else if item.type == "journey_like",
-                              let jid = item.journeyID?.trimmingCharacters(in: .whitespacesAndNewlines),
-                              !jid.isEmpty {
-                        showSocialNotificationsSheet = false
-                        activeRoute = .myJourney(jid)
-                    } else if item.type == "journey_comment",
-                              let jid = item.journeyID?.trimmingCharacters(in: .whitespacesAndNewlines),
-                              !jid.isEmpty {
-                        // Owner side and friend side both go through the
-                        // shared comment deep-link router. `ownerID` comes
-                        // from the backend (notifications.owner_id). For
-                        // historical rows where it's nil, fall back to the
-                        // current user — covers the common owner-receives
-                        // case and is wrong (but harmless: the unavailable
-                        // view shows) only for very old friend-receives rows.
-                        let ownerID = (item.ownerID?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
-                            ?? sessionStore.currentUserID
-                        let senderID = item.fromUserID?.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let link = JourneyCommentDeepLink(
-                            journeyID: jid,
-                            ownerID: ownerID,
-                            senderID: (senderID?.isEmpty == false) ? senderID : nil
-                        )
-                        showSocialNotificationsSheet = false
-                        AppFlowCoordinator.shared.requestOpenJourneyCommentDeepLink(link)
-                    } else if let fromUserID = item.fromUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
-                              !fromUserID.isEmpty {
-                        showSocialNotificationsSheet = false
-                        activeRoute = .profile(fromUserID)
-                    }
+                // Fire-and-forget read marking: markRead's optimistic local update
+                // greys the row instantly, so navigation must not wait on the backend
+                // round-trip. Awaiting it here delayed the jump until the network POST
+                // returned (looked like the tap did nothing but grey out, needing
+                // repeated taps on a slow connection).
+                Task { await notificationStore.markSingleRead(id: item.id, token: sessionStore.currentAccessToken) }
+
+                if item.type == "postcard_received" || item.type == "postcard_reaction" {
+                    showSocialNotificationsSheet = false
+                    let box = item.type == "postcard_received" ? "received" : "sent"
+                    postcardInboxIntent = PostcardInboxIntent(box: box, messageID: item.postcardMessageID)
+                    showPostcardInboxSheet = true
+                } else if item.type == "friend_request" {
+                    showSocialNotificationsSheet = false
+                    tab = .allFriends
+                    Task { await refreshFriendRequests() }
+                } else if item.type == "journey_like",
+                          let jid = item.journeyID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                          !jid.isEmpty {
+                    showSocialNotificationsSheet = false
+                    activeRoute = .myJourney(jid)
+                } else if item.type == "journey_comment",
+                          let jid = item.journeyID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                          !jid.isEmpty {
+                    // Owner side and friend side both go through the
+                    // shared comment deep-link router. `ownerID` comes
+                    // from the backend (notifications.owner_id). For
+                    // historical rows where it's nil, fall back to the
+                    // current user — covers the common owner-receives
+                    // case and is wrong (but harmless: the unavailable
+                    // view shows) only for very old friend-receives rows.
+                    let ownerID = (item.ownerID?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+                        ?? sessionStore.currentUserID
+                    let senderID = item.fromUserID?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let link = JourneyCommentDeepLink(
+                        journeyID: jid,
+                        ownerID: ownerID,
+                        senderID: (senderID?.isEmpty == false) ? senderID : nil
+                    )
+                    showSocialNotificationsSheet = false
+                    AppFlowCoordinator.shared.requestOpenJourneyCommentDeepLink(link)
+                } else if let fromUserID = item.fromUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                          !fromUserID.isEmpty {
+                    showSocialNotificationsSheet = false
+                    activeRoute = .profile(fromUserID)
                 }
             }
         }
@@ -1397,6 +1433,14 @@ struct FriendsHubView: View {
 // only re-evaluates this lightweight list, not the entire parent with all
 // its sheets, overlays, and modifiers.
 
+/// Identifies which journey's comment thread the feed should present, plus the
+/// sheet mode (owner for my own journeys, viewer for a friend's).
+private struct FeedCommentSheetTarget: Identifiable {
+    let journeyID: String
+    let mode: JourneyCommentSheet.Mode
+    var id: String { journeyID }
+}
+
 private struct FeedActivityListView: View {
     let feedEvents: [FriendFeedEvent]
     let feedProfileByID: [String: FriendProfileSnapshot]
@@ -1409,9 +1453,12 @@ private struct FeedActivityListView: View {
     let onRefresh: () async -> Void
 
     @EnvironmentObject private var sessionStore: UserSessionStore
+    @EnvironmentObject private var commentStore: JourneyCommentStore
+    @EnvironmentObject private var socialStore: SocialGraphStore
 
     @State private var feedLikeStats: [String: (likes: Int, likedByMe: Bool)] = [:]
     @State private var feedLikeLoadingKeys: Set<String> = []
+    @State private var commentSheetTarget: FeedCommentSheetTarget?
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -1436,6 +1483,22 @@ private struct FeedActivityListView: View {
                                     eventFriendID: event.friendID,
                                     hasJourney: event.journeyID != nil
                                 ),
+                                unreadCommentCount: commentStore.unreadCount(
+                                    forJourney: event.journeyID ?? ""
+                                ),
+                                onOpenComments: {
+                                    guard let journeyID = event.journeyID else { return }
+                                    // Own journey → owner sheet (replies to friends);
+                                    // friend's journey → viewer sheet (the one thread
+                                    // between me and the owner).
+                                    let mode: JourneyCommentSheet.Mode = (event.friendID == currentUserID)
+                                        ? .owner
+                                        : .viewer(ownerID: event.friendID, ownerDisplayName: friend.displayName)
+                                    commentSheetTarget = FeedCommentSheetTarget(
+                                        journeyID: journeyID,
+                                        mode: mode
+                                    )
+                                },
                                 onLikeTap: {
                                     guard let journeyID = event.journeyID else { return }
                                     switch FriendsFeedLikePresentation.actionMode(
@@ -1514,11 +1577,24 @@ private struct FeedActivityListView: View {
         .scrollPosition(id: $feedScrollPosition)
         .refreshable {
             await onRefresh()
+            // Keep the feed's unread-comment dots in sync with a manual refresh,
+            // not just app launch / incoming push.
+            await commentStore.refreshUnreadSummary(token: sessionStore.currentAccessToken)
         }
         .task(id: feedLikeSignature) {
             try? await Task.sleep(nanoseconds: 50_000_000)
             guard !Task.isCancelled else { return }
             await loadFeedLikeStatsIfNeeded()
+        }
+        .sheet(item: $commentSheetTarget) { target in
+            JourneyCommentSheet(
+                journeyID: target.journeyID,
+                mode: target.mode,
+                viewerID: sessionStore.accountUserID ?? ""
+            )
+            .environmentObject(commentStore)
+            .environmentObject(sessionStore)
+            .environmentObject(socialStore)
         }
     }
 
@@ -1668,6 +1744,8 @@ private struct FriendActivityCard: View {
     let likedByMe: Bool
     let likeLoading: Bool
     let likeActionMode: FriendsFeedLikeActionMode?
+    let unreadCommentCount: Int
+    let onOpenComments: () -> Void
     let onLikeTap: () -> Void
     let onOpenProfile: () -> Void
     let onOpenEvent: () -> Void
@@ -1759,6 +1837,32 @@ private struct FriendActivityCard: View {
                 }
 
                 Spacer()
+
+                // Unread comment / reply indicator. Surfaces whenever there are
+                // unread messages on this journey — friends commenting on my own
+                // journey, or a friend replying to my comment on theirs.
+                if event.journeyID != nil && unreadCommentCount > 0 {
+                    Button {
+                        Haptics.light()
+                        onOpenComments()
+                    } label: {
+                        Image(systemName: "bubble.left")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(FigmaTheme.subtext)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(Color.black.opacity(0.05))
+                            .clipShape(Capsule())
+                            .overlay(alignment: .topTrailing) {
+                                Circle()
+                                    .fill(Color.red)
+                                    .frame(width: 8, height: 8)
+                                    .offset(x: 1, y: -1)
+                            }
+                            .appFullSurfaceTapTarget(.capsule)
+                    }
+                    .buttonStyle(.plain)
+                }
 
                 if let likeActionMode {
                     Button {
@@ -3022,10 +3126,13 @@ final class FriendMirrorContext: ObservableObject {
             guard !Task.isCancelled, let self else { return }
             await MainActor.run {
                 self.journeyStore.rebind(paths: targetPaths)
-                self.cityCache.rebind(paths: targetPaths)
                 self.renderCacheStore.rebind(rootDir: targetPaths.thumbnailsDir)
                 self.journeyStore.load()
             }
+            // cityCache.rebind() decodes the full city cache + membership index
+            // synchronously; use the async variant so the decode stays off the
+            // main thread (mirrors the profile-switch path in StreetStampsApp).
+            await self.cityCache.rebindAsync(paths: targetPaths)
             try? await Task.sleep(nanoseconds: 500_000_000)
         }
         applyTask = task

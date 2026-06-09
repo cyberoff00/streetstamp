@@ -154,7 +154,12 @@ actor ReverseGeocodeService {
             }
         }
 
-        if let result {
+        // Only cache results that actually resolved to a real city. A degenerate
+        // result (missing admin/locality on an early imprecise fix → "Unknown|XX"
+        // or localized "未知|XX") must NOT poison the cell cache, or every later
+        // request for this ~1.1km cell would keep returning the placeholder even
+        // once a better fix is available.
+        if let result, !Self.isDegenerateCityKey(result.cityKey) {
             canonicalCacheByCell[cell] = result
         }
 
@@ -257,6 +262,19 @@ actor ReverseGeocodeService {
     }
 
     // MARK: - Internals
+
+    /// A cityKey whose city component is missing or a placeholder ("Unknown" /
+    /// localized "未知" / empty). Such results are never worth caching.
+    nonisolated static func isDegenerateCityKey(_ rawKey: String) -> Bool {
+        let key = rawKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if key.isEmpty { return true }
+        let cityPart = (key.split(separator: "|", omittingEmptySubsequences: false).first.map(String.init) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if cityPart.isEmpty { return true }
+        if cityPart.caseInsensitiveCompare("Unknown") == .orderedSame { return true }
+        if cityPart == L10n.t("unknown") { return true }
+        return false
+    }
 
     private func cellKey(for location: CLLocation) -> String {
         // NOTE: Avoid depending on a project-wide `Double.rounded(to:)` helper.

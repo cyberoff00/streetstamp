@@ -1140,6 +1140,10 @@ struct JourneyMemoryDetailView: View {
     /// Owner of the journey. For own journeys this equals `currentUserID`;
     /// for friend (read-only) journeys the caller passes the friend's user ID.
     let journeyOwnerID: String?
+    /// When opened from a comment deep link, the account ID of the friend whose
+    /// comment fired the push. Lets the owner multi-thread sheet scroll that
+    /// friend's block into view. nil for normal (non-deep-link) opens.
+    let focusCommentSenderID: String?
 
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var sessionStore: UserSessionStore
@@ -1206,6 +1210,8 @@ struct JourneyMemoryDetailView: View {
     @EnvironmentObject private var onboardingGuide: OnboardingGuideStore
     @State private var showMemoryHint = false
     @State private var showCommentSheet = false
+    /// Deep-link auto-present runs at most once (see `autoPresentCommentSheetIfNeeded`).
+    @State private var didTriggerAutoComment = false
 
     init(
         journey: JourneyRoute,
@@ -1215,7 +1221,8 @@ struct JourneyMemoryDetailView: View {
         readOnly: Bool = false,
         friendLoadout: RobotLoadout? = nil,
         autoPresentCommentSheet: Bool = false,
-        journeyOwnerID: String? = nil
+        journeyOwnerID: String? = nil,
+        focusCommentSenderID: String? = nil
     ) {
         self.journey = journey
         self.memories = memories
@@ -1225,6 +1232,7 @@ struct JourneyMemoryDetailView: View {
         self.friendLoadout = friendLoadout
         self.autoPresentCommentSheet = autoPresentCommentSheet
         self.journeyOwnerID = journeyOwnerID
+        self.focusCommentSenderID = focusCommentSenderID
     }
 
     private enum ActivePhotoTarget: Equatable {
@@ -1292,6 +1300,24 @@ struct JourneyMemoryDetailView: View {
     private var canUseComments: Bool {
         if let id = sessionStore.accountUserID, !id.isEmpty { return true }
         return false
+    }
+
+    /// Auto-present the comment sheet for an APNs deep link.
+    ///
+    /// This view is hosted inside a `fullScreenCover` on the deep-link path.
+    /// Wait out the cover's present animation before showing the sheet —
+    /// presenting mid-animation makes SwiftUI silently drop it (the same hazard
+    /// `MainTabView` guards against with a post-animation delay). Single, clean
+    /// attempt — no rapid toggling, which can itself confuse the presentation
+    /// system and swallow a concurrent manual tap.
+    private func autoPresentCommentSheetIfNeeded() {
+        guard autoPresentCommentSheet, !didTriggerAutoComment else { return }
+        didTriggerAutoComment = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            guard !Task.isCancelled, !showCommentSheet else { return }
+            showCommentSheet = true
+        }
     }
 
     private var commentSheetMode: JourneyCommentSheet.Mode {
@@ -1388,26 +1414,36 @@ struct JourneyMemoryDetailView: View {
             JourneyCommentSheet(
                 journeyID: journey.id,
                 mode: commentSheetMode,
-                viewerID: sessionStore.accountUserID ?? ""
+                viewerID: sessionStore.accountUserID ?? "",
+                focusSenderID: focusCommentSenderID
             )
             .environmentObject(commentStore)
             .environmentObject(sessionStore)
             .environmentObject(socialStore)
         }
         .task(id: journey.id) {
+            let token = sessionStore.currentAccessToken
             await commentStore.loadThreads(
                 journeyID: journey.id,
-                token: sessionStore.currentAccessToken
+                token: token
             )
-        }
-        .onAppear {
-            if autoPresentCommentSheet {
-                Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 250_000_000)
-                    showCommentSheet = true
+            // Viewer mode: warm the single owner↔viewer thread's messages while
+            // the user reads the journey, so tapping the comment bubble opens
+            // instantly instead of showing a full-screen spinner during a cold
+            // network fetch. Idempotent — the store dedupes in-flight fetches and
+            // the sheet's own load skips when messages are already cached.
+            if readOnly, canUseComments {
+                let ownerID = resolvedOwnerID
+                if !ownerID.isEmpty {
+                    await commentStore.loadMessages(
+                        journeyID: journey.id,
+                        otherUserID: ownerID,
+                        token: token
+                    )
                 }
             }
         }
+        .onAppear { autoPresentCommentSheetIfNeeded() }
         .overlay(alignment: .bottom) {
             if showMemoryHint {
                 ContextualHintBar(
@@ -1444,6 +1480,18 @@ struct JourneyMemoryDetailView: View {
             if let cached = await RouteThumbnailCache.shared.get(journey.id) {
                 routeThumbnail = cached
             } else {
+                // Cache miss only. The Mapbox thumbnail path runs the
+                // Snapshotter's style-load + layer setup on the main thread
+                // (it needs Metal — see makeMapboxJourneyThumbnail). Kicking it
+                // off while the presenting transition (deep-link fullScreenCover
+                // or nav push) is still animating steals main-thread frames and
+                // visibly hitches the slide. The placeholder is already on
+                // screen, so letting the transition settle first only means the
+                // map fills in a beat later — smoothly. Mirrors the same
+                // "defer heavy work past the present animation" guard in
+                // MainTabView's resume prompt.
+                try? await Task.sleep(nanoseconds: 450_000_000)
+                guard !Task.isCancelled else { return }
                 await generateRouteThumbnail()
             }
         }

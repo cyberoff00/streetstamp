@@ -17,7 +17,32 @@ struct JourneyComment: Identifiable, Codable, Equatable, Hashable, Sendable {
     var readAt: Date?
     var deletedAt: Date?
 
+    /// Client-only optimistic-send lifecycle. NEVER crosses the wire — excluded
+    /// from `CodingKeys`, so anything decoded from the backend (or encoded) is
+    /// always `.sent`. Only locally-inserted optimistic messages carry
+    /// `.sending` / `.failed`.
+    var sendState: CommentSendState = .sent
+    /// Client draft id of the optimistic insert, used to reconcile the local
+    /// bubble with the server-confirmed comment. nil once confirmed / for
+    /// fetched messages.
+    var clientDraftID: String? = nil
+
     var isDeleted: Bool { deletedAt != nil }
+
+    enum CodingKeys: String, CodingKey {
+        case id, journeyID, ownerID, senderID, recipientID, threadKey, content
+        case createdAt, readAt, deletedAt
+    }
+}
+
+/// Optimistic-send state for a locally-composed comment.
+enum CommentSendState: Sendable, Equatable, Hashable {
+    /// Confirmed by the backend, or freshly fetched. The only state on the wire.
+    case sent
+    /// Optimistically inserted, network round-trip in flight.
+    case sending
+    /// Send failed; the bubble offers a retry affordance.
+    case failed
 }
 
 /// Summary of a single thread shown on the owner's multi-block screen, or

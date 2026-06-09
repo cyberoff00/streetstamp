@@ -66,6 +66,15 @@ enum JourneyPostCorrection {
         let cleaned = correctedCoordinates(from: coords, config: config)
         guard cleaned.count >= 2 else { return route.coordinates }
 
+        // Sport mode is already OneEuro-smoothed during recording and its display
+        // ε is only 2m, so Douglas-Peucker would drop almost nothing while paying
+        // for a full simplification pass. Skip it: the cleaned (dedup + spike-
+        // removed) geometry is the display geometry. Daily mode has no OneEuro,
+        // so it still needs the jitter-flattening DP pass below.
+        if route.trackingMode == .sport {
+            return cleaned.map { CoordinateCodable(lat: $0.latitude, lon: $0.longitude) }
+        }
+
         let avgAcc = averageAccuracy(of: route.coordinates)
         let epsilon = epsilonForAvgAccuracy(avgAcc, mode: route.trackingMode)
 
@@ -101,33 +110,25 @@ enum JourneyPostCorrection {
         var keep = Array(repeating: false, count: coords.count)
         keep[0] = true
         keep[coords.count - 1] = true
-        dpRecurse(coords, start: 0, end: coords.count - 1, epsilon: epsilon, keep: &keep)
-        return zip(coords, keep).compactMap { $1 ? $0 : nil }
-    }
 
-    private static func dpRecurse(
-        _ coords: [CLLocationCoordinate2D],
-        start: Int,
-        end: Int,
-        epsilon: Double,
-        keep: inout [Bool]
-    ) {
-        guard end - start >= 2 else { return }
-
-        var maxDist: Double = 0
-        var maxIdx = start
-        for i in (start + 1)..<end {
-            let d = perpendicularDistance(point: coords[i], lineStart: coords[start], lineEnd: coords[end])
-            if d > maxDist {
-                maxDist = d
-                maxIdx = i
+        // Tolerance policy: keep a split point when its perpendicular distance
+        // (in meters) exceeds ε, and stop subdividing once a segment's peak falls
+        // under ε. This is the classic threshold Douglas-Peucker. The shared
+        // iterative traversal keeps the work list on the heap so a long route
+        // can't overflow the stack.
+        PolylineSimplifier.traverse(
+            count: coords.count,
+            distance: { i, a, b in
+                perpendicularDistance(point: coords[i], lineStart: coords[a], lineEnd: coords[b])
+            },
+            onSplit: { idx, dist in
+                guard dist > epsilon else { return false }
+                keep[idx] = true
+                return true
             }
-        }
+        )
 
-        guard maxDist > epsilon else { return }
-        keep[maxIdx] = true
-        dpRecurse(coords, start: start, end: maxIdx, epsilon: epsilon, keep: &keep)
-        dpRecurse(coords, start: maxIdx, end: end, epsilon: epsilon, keep: &keep)
+        return zip(coords, keep).compactMap { $1 ? $0 : nil }
     }
 
     /// Perpendicular distance from point to line segment, in meters.

@@ -242,8 +242,10 @@
 "empty_memory" = "（空回忆）";
 "accessibility_you" = "你";
 "accessibility_avatar" = "头像";
-"sport_mode_desc" = "GPS 高精度追踪，适合跑步、徒步、骑行等活动。";
-"daily_mode_desc" = "日常探索的平衡模式，更省电，同时仍会记录你的旅程。";
+"sport_mode_desc" = "GPS 高精度追踪，适合跑步、徒步、骑行等 2 小时左右运动。";
+"daily_mode_desc" = "精度与续航平衡，适合徒步、日常出行等 4-6 小时活动。";
+"tracking_preset_saving_title" = "省电模式";
+"tracking_preset_saving_desc" = "降低 GPS 精度以最大化续航，适合整日旅程。";
 "hint_precise" = "● 高精度";
 "hint_battery" = "○ 省电";
 "hint_precision" = "○ 精度";
@@ -1328,7 +1330,7 @@
 "city_empty_action_import" = "从相册导入历史城市";
 "memory_empty_action_start" = "开始一次旅程";
 "postcard_no_city_hint" = "开启旅程解锁城市，才能获得对应城市的明信片发送机会";
-"network_unstable_retrying" = "网络不稳，正在重试";
+"network_unstable_retrying" = "获取网络更新中";
 "reset" = "重置";
 "city_edit_display_name" = "修改显示名";
 "city_edit_display_name_title" = "重命名城市";
@@ -1341,6 +1343,10 @@
 "journey_comments_show_older" = "查看更早 %d 条";
 "journey_comments_reply_placeholder" = "回复 %@...";
 "journey_comments_send_failed" = "发送失败，请重试。";
+"journey_comments_sending" = "发送中…";
+"journey_comments_send_failed_retry" = "未发送 · 点击重试";
+"journey_comments_load_older" = "加载更早的评论";
+"journey_comments_load_failed" = "评论加载失败";
 "journey_comments_you" = "你";
 "journey_comments_add_placeholder" = "写评论…";
 "comments" = "评论";

@@ -20,7 +20,8 @@ struct OwnerCommentDeepLinkContent: View {
                 readOnly: false,
                 friendLoadout: nil,
                 autoPresentCommentSheet: true,
-                journeyOwnerID: sessionStore.accountUserID ?? ""
+                journeyOwnerID: sessionStore.accountUserID ?? "",
+                focusCommentSenderID: link.senderID
             )
         } else {
             JourneyCommentDeepLinkUnavailableView()
@@ -44,11 +45,27 @@ struct FriendCommentDeepLinkContent: View {
     init(link: JourneyCommentDeepLink, initialSnapshot: FriendProfileSnapshot?) {
         self.link = link
         self.initialSnapshot = initialSnapshot
-        let ctx = FriendMirrorContext(friendID: link.ownerID)
-        if let snapshot = initialSnapshot {
+        // Build the mirror lazily inside the StateObject autoclosure so the
+        // heavy work — FriendMirrorContext's directory I/O plus the synchronous
+        // full-history `applySync` — runs exactly ONCE, when SwiftUI first
+        // creates the StateObject. Constructing `ctx` eagerly here re-ran that
+        // work on every SwiftUI re-init of this view, hitching the main thread
+        // each time the deep link opened. The async `mirror.apply` in the body
+        // still re-syncs from disk afterwards.
+        _mirror = StateObject(
+            wrappedValue: Self.makeMirror(friendID: link.ownerID, snapshot: initialSnapshot)
+        )
+    }
+
+    private static func makeMirror(
+        friendID: String,
+        snapshot: FriendProfileSnapshot?
+    ) -> FriendMirrorContext {
+        let ctx = FriendMirrorContext(friendID: friendID)
+        if let snapshot {
             ctx.applySync(snapshot: snapshot)
         }
-        _mirror = StateObject(wrappedValue: ctx)
+        return ctx
     }
 
     var body: some View {
@@ -83,7 +100,8 @@ struct FriendCommentDeepLinkContent: View {
                 readOnly: true,
                 friendLoadout: friend.loadout,
                 autoPresentCommentSheet: true,
-                journeyOwnerID: link.ownerID
+                journeyOwnerID: link.ownerID,
+                focusCommentSenderID: link.senderID
             )
             // Override the parent app's journey/city stores so the detail
             // view reads the friend's mirrored data, not the active user's.

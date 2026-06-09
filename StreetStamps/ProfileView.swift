@@ -604,34 +604,39 @@ struct ProfileView: View {
         .shadow(color: FigmaTheme.softShadow, radius: 8, x: 0, y: 3)
         .onTapGesture {
             guard featureFlags.socialEnabled else { return }
-            Task {
-                await notificationStore.markSingleRead(id: item.id, token: sessionStore.currentAccessToken)
-                if item.type == "postcard_received" || item.type == "postcard_reaction" {
-                    let box = item.type == "postcard_received" ? "received" : "sent"
-                    postcardInboxIntent = PostcardInboxIntent(box: box, messageID: item.postcardMessageID)
-                    showNotificationsSheet = false
-                    showPostcardInboxFromNotification = true
-                } else if item.type == "friend_request" {
-                    showNotificationsSheet = false
-                    AppFlowCoordinator.shared.requestSelectTab(.friends)
-                } else if item.type == "journey_like",
-                          let jid = item.journeyID?.trimmingCharacters(in: .whitespacesAndNewlines),
-                          !jid.isEmpty {
-                    notifSheetJourneyPush = NotifJourneyPush(id: jid)
-                } else if item.type == "journey_comment",
-                          let jid = item.journeyID?.trimmingCharacters(in: .whitespacesAndNewlines),
-                          !jid.isEmpty {
-                    let ownerID = (item.ownerID?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
-                        ?? sessionStore.currentUserID
-                    let senderID = item.fromUserID?.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let link = JourneyCommentDeepLink(
-                        journeyID: jid,
-                        ownerID: ownerID,
-                        senderID: (senderID?.isEmpty == false) ? senderID : nil
-                    )
-                    showNotificationsSheet = false
-                    AppFlowCoordinator.shared.requestOpenJourneyCommentDeepLink(link)
-                }
+            // Mark-as-read is fire-and-forget: the optimistic local update inside
+            // markRead already greys the row instantly, so navigation must NOT wait
+            // for the backend round-trip. Awaiting it here serialized the deep-link
+            // open behind a network POST, which is why a tap appeared to do nothing
+            // (just grey out) until the request returned — and why repeated taps were
+            // needed on a slow connection.
+            Task { await notificationStore.markSingleRead(id: item.id, token: sessionStore.currentAccessToken) }
+
+            if item.type == "postcard_received" || item.type == "postcard_reaction" {
+                let box = item.type == "postcard_received" ? "received" : "sent"
+                postcardInboxIntent = PostcardInboxIntent(box: box, messageID: item.postcardMessageID)
+                showNotificationsSheet = false
+                showPostcardInboxFromNotification = true
+            } else if item.type == "friend_request" {
+                showNotificationsSheet = false
+                AppFlowCoordinator.shared.requestSelectTab(.friends)
+            } else if item.type == "journey_like",
+                      let jid = item.journeyID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !jid.isEmpty {
+                notifSheetJourneyPush = NotifJourneyPush(id: jid)
+            } else if item.type == "journey_comment",
+                      let jid = item.journeyID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !jid.isEmpty {
+                let ownerID = (item.ownerID?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+                    ?? sessionStore.currentUserID
+                let senderID = item.fromUserID?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let link = JourneyCommentDeepLink(
+                    journeyID: jid,
+                    ownerID: ownerID,
+                    senderID: (senderID?.isEmpty == false) ? senderID : nil
+                )
+                showNotificationsSheet = false
+                AppFlowCoordinator.shared.requestOpenJourneyCommentDeepLink(link)
             }
         }
     }

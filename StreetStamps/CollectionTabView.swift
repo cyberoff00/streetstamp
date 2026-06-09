@@ -100,7 +100,7 @@ struct CollectionTabView: View {
                     availableActivityTags: availableActivityTags,
                     allJourneys: allMemoryJourneys
                 )
-            } else if cityCache.loadPreviousPhotoScanResult() == nil {
+            } else if !cityCache.hasPhotoScanResultOnDisk {
                 PhotoDiscoveryScanButton(cityCache: cityCache)
             } else {
                 Color.clear.frame(width: 42, height: 42)

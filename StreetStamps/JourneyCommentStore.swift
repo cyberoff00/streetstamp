@@ -24,6 +24,24 @@ final class JourneyCommentStore: ObservableObject {
     /// Aggregate unread across all journeys, for any global badge needs.
     @Published private(set) var totalUnreadCount: Int = 0
 
+    /// Initial-load phase per thread, so the UI can tell "still loading" and
+    /// "load failed" apart from "genuinely no messages" (all three otherwise
+    /// render as an empty message list).
+    @Published private(set) var messageLoadPhaseByThread: [String: ThreadLoadPhase] = [:]
+
+    /// Initial-load phase for a journey's owner-side thread list, same purpose.
+    @Published private(set) var threadsLoadPhaseByJourney: [String: ThreadLoadPhase] = [:]
+
+    /// Whether an older page may still exist for a thread, so the UI can show a
+    /// "load earlier" affordance. Set after every message fetch from whether the
+    /// page came back full.
+    @Published private(set) var hasMoreOlderByThread: [String: Bool] = [:]
+
+    /// Whether an older-page fetch is currently in flight, for the load-earlier
+    /// spinner. Distinct from the initial-load phase, which pagination never
+    /// touches.
+    @Published private(set) var loadingOlderByThread: [String: Bool] = [:]
+
     /// Last error from a refresh / send / read call, for inline display.
     @Published private(set) var lastError: String?
 
@@ -52,6 +70,10 @@ final class JourneyCommentStore: ObservableObject {
         messagesByThread.removeAll()
         unreadCountByJourney.removeAll()
         totalUnreadCount = 0
+        messageLoadPhaseByThread.removeAll()
+        threadsLoadPhaseByJourney.removeAll()
+        hasMoreOlderByThread.removeAll()
+        loadingOlderByThread.removeAll()
         lastError = nil
     }
 
@@ -67,6 +89,22 @@ final class JourneyCommentStore: ObservableObject {
 
     func messages(forThread threadKey: String) -> [JourneyComment] {
         messagesByThread[threadKey] ?? []
+    }
+
+    func messageLoadPhase(forThread threadKey: String) -> ThreadLoadPhase {
+        messageLoadPhaseByThread[threadKey] ?? .idle
+    }
+
+    func hasMoreOlder(forThread threadKey: String) -> Bool {
+        hasMoreOlderByThread[threadKey] ?? false
+    }
+
+    func isLoadingOlder(forThread threadKey: String) -> Bool {
+        loadingOlderByThread[threadKey] ?? false
+    }
+
+    func threadsLoadPhase(forJourney journeyID: String) -> ThreadLoadPhase {
+        threadsLoadPhaseByJourney[journeyID] ?? .idle
     }
 
     // MARK: - Loading
@@ -89,6 +127,9 @@ final class JourneyCommentStore: ObservableObject {
         guard !loadingThreadsJourneys.contains(journeyID) else { return }
         loadingThreadsJourneys.insert(journeyID)
         defer { loadingThreadsJourneys.remove(journeyID) }
+        if (threadsByJourney[journeyID] ?? []).isEmpty {
+            threadsLoadPhaseByJourney[journeyID] = .loading
+        }
         do {
             let threads = try await backend.fetchThreads(
                 journeyID: journeyID,
@@ -98,8 +139,12 @@ final class JourneyCommentStore: ObservableObject {
             threadsByJourney[journeyID] = threads
             let count = threads.reduce(0) { $0 + $1.unreadCount }
             updateUnread(forJourney: journeyID, to: count)
+            threadsLoadPhaseByJourney[journeyID] = .loaded
             lastError = nil
         } catch {
+            if (threadsByJourney[journeyID] ?? []).isEmpty {
+                threadsLoadPhaseByJourney[journeyID] = .failed
+            }
             lastError = error.localizedDescription
         }
     }
@@ -122,6 +167,11 @@ final class JourneyCommentStore: ObservableObject {
         guard !loadingMessagesThreads.contains(threadKey) else { return }
         loadingMessagesThreads.insert(threadKey)
         defer { loadingMessagesThreads.remove(threadKey) }
+        // Phase tracking only applies to the initial page (before == nil);
+        // pagination keeps the list visible and shouldn't toggle the phase.
+        if before == nil {
+            messageLoadPhaseByThread[threadKey] = .loading
+        }
         do {
             let page = try await backend.fetchMessages(
                 journeyID: journeyID,
@@ -132,7 +182,19 @@ final class JourneyCommentStore: ObservableObject {
                 token: token
             )
             if before == nil {
-                messagesByThread[threadKey] = page
+                // Full refresh of the most-recent page. Preserve any optimistic
+                // messages still in flight / failed so a concurrent reload (the
+                // sheet refreshes on every appear) can't drop a pending bubble.
+                let pending = (messagesByThread[threadKey] ?? []).filter { $0.sendState != .sent }
+                if pending.isEmpty {
+                    messagesByThread[threadKey] = page
+                } else {
+                    let pageIDs = Set(page.map(\.id))
+                    var merged = page
+                    merged.append(contentsOf: pending.filter { !pageIDs.contains($0.id) })
+                    merged.sort { $0.createdAt < $1.createdAt }
+                    messagesByThread[threadKey] = merged
+                }
             } else {
                 let existing = messagesByThread[threadKey] ?? []
                 // Page returns older messages; merge by id keeping ascending order.
@@ -142,10 +204,46 @@ final class JourneyCommentStore: ObservableObject {
                 merged.sort { $0.createdAt < $1.createdAt }
                 messagesByThread[threadKey] = merged
             }
+            // A full page back means there may be still-older messages to page to.
+            hasMoreOlderByThread[threadKey] = page.count >= limit
+            if before == nil {
+                messageLoadPhaseByThread[threadKey] = .loaded
+            }
             lastError = nil
         } catch {
+            if before == nil {
+                messageLoadPhaseByThread[threadKey] = .failed
+            }
             lastError = error.localizedDescription
         }
+    }
+
+    /// Pages one batch of older messages into a thread, using the oldest
+    /// confirmed message's timestamp as the cursor. No-op when there's nothing
+    /// older or a fetch is already running. Drives the "load earlier" UI.
+    func loadOlderMessages(journeyID: String, otherUserID: String, token: String?, limit: Int = 30) async {
+        let threadKey = JourneyCommentThreadKey.make(
+            journeyID: journeyID,
+            userA: activeUserID,
+            userB: otherUserID
+        )
+        guard hasMoreOlderByThread[threadKey] == true else { return }
+        guard !loadingMessagesThreads.contains(threadKey) else { return }
+        // Cursor off the oldest *confirmed* message; optimistic pending bubbles
+        // carry a "now" timestamp and would otherwise skip the whole history.
+        guard let oldest = (messagesByThread[threadKey] ?? [])
+            .filter({ $0.sendState == .sent })
+            .map(\.createdAt)
+            .min() else { return }
+        loadingOlderByThread[threadKey] = true
+        defer { loadingOlderByThread[threadKey] = false }
+        await loadMessages(
+            journeyID: journeyID,
+            otherUserID: otherUserID,
+            token: token,
+            before: oldest,
+            limit: limit
+        )
     }
 
     // MARK: - Writes
@@ -166,6 +264,29 @@ final class JourneyCommentStore: ObservableObject {
         }
         let clipped = String(trimmed.prefix(JourneyCommentLimits.maxContentLength))
         let draftID = UUID().uuidString
+        let threadKey = JourneyCommentThreadKey.make(
+            journeyID: journeyID,
+            userA: activeUserID,
+            userB: recipientID
+        )
+        // Optimistic insert: the bubble appears immediately in a `.sending`
+        // state, before the network round-trip. On success it's reconciled with
+        // the server comment; on failure it flips to `.failed` with a retry.
+        let optimistic = JourneyComment(
+            id: draftID,
+            journeyID: journeyID,
+            ownerID: ownerID,
+            senderID: activeUserID,
+            recipientID: recipientID,
+            threadKey: threadKey,
+            content: clipped,
+            createdAt: Date(),
+            readAt: nil,
+            deletedAt: nil,
+            sendState: .sending,
+            clientDraftID: draftID
+        )
+        upsertMessage(optimistic, inThread: threadKey)
         do {
             let comment = try await backend.send(
                 journeyID: journeyID,
@@ -176,13 +297,28 @@ final class JourneyCommentStore: ObservableObject {
                 clientDraftID: draftID,
                 token: token
             )
-            appendLocally(comment)
+            reconcileSent(draftID: draftID, inThread: threadKey, with: comment)
             lastError = nil
             return comment
         } catch {
+            markOptimisticFailed(draftID: draftID, inThread: threadKey)
             lastError = error.localizedDescription
             throw error
         }
+    }
+
+    /// Re-sends a previously-failed optimistic message. Removes the failed
+    /// bubble and runs a fresh optimistic send so it re-appears in `.sending`.
+    func retrySend(_ failed: JourneyComment, token: String?) async {
+        guard failed.sendState == .failed else { return }
+        removeMessage(id: failed.id, inThread: failed.threadKey)
+        _ = try? await send(
+            journeyID: failed.journeyID,
+            ownerID: failed.ownerID,
+            recipientID: failed.recipientID,
+            content: failed.content,
+            token: token
+        )
     }
 
     /// Marks all incoming messages in the (journeyID, otherUserID) thread as
@@ -322,17 +458,51 @@ final class JourneyCommentStore: ObservableObject {
 
     // MARK: - Helpers
 
-    private func appendLocally(_ comment: JourneyComment) {
-        var msgs = messagesByThread[comment.threadKey] ?? []
-        if !msgs.contains(where: { $0.id == comment.id }) {
-            msgs.append(comment)
-            msgs.sort { $0.createdAt < $1.createdAt }
-            messagesByThread[comment.threadKey] = msgs
+    /// Inserts or replaces a message by id, keeping the list ascending by time.
+    private func upsertMessage(_ msg: JourneyComment, inThread threadKey: String) {
+        var msgs = messagesByThread[threadKey] ?? []
+        if let idx = msgs.firstIndex(where: { $0.id == msg.id }) {
+            msgs[idx] = msg
+        } else {
+            msgs.append(msg)
         }
+        msgs.sort { $0.createdAt < $1.createdAt }
+        messagesByThread[threadKey] = msgs
         // The new message's thread may not be in threadsByJourney yet (e.g.
         // owner replies before threads list has been refreshed). The thread
-        // summary list will refresh on next loadThreads call; UI typically
-        // doesn't need the summary updated synchronously.
+        // summary list refreshes on next loadThreads call; UI typically doesn't
+        // need the summary updated synchronously.
+    }
+
+    /// Swaps a confirmed server comment in for its optimistic placeholder.
+    private func reconcileSent(draftID: String, inThread threadKey: String, with comment: JourneyComment) {
+        var msgs = messagesByThread[threadKey] ?? []
+        // A concurrent reload may already have merged the server comment in;
+        // drop that duplicate before swapping the placeholder.
+        msgs.removeAll { $0.id == comment.id && ($0.clientDraftID ?? $0.id) != draftID }
+        var confirmed = comment
+        confirmed.sendState = .sent
+        confirmed.clientDraftID = nil
+        if let idx = msgs.firstIndex(where: { ($0.clientDraftID ?? $0.id) == draftID }) {
+            msgs[idx] = confirmed
+        } else if !msgs.contains(where: { $0.id == confirmed.id }) {
+            msgs.append(confirmed)
+        }
+        msgs.sort { $0.createdAt < $1.createdAt }
+        messagesByThread[threadKey] = msgs
+    }
+
+    private func markOptimisticFailed(draftID: String, inThread threadKey: String) {
+        guard var msgs = messagesByThread[threadKey] else { return }
+        guard let idx = msgs.firstIndex(where: { ($0.clientDraftID ?? $0.id) == draftID }) else { return }
+        msgs[idx].sendState = .failed
+        messagesByThread[threadKey] = msgs
+    }
+
+    private func removeMessage(id: String, inThread threadKey: String) {
+        guard var msgs = messagesByThread[threadKey] else { return }
+        msgs.removeAll { $0.id == id }
+        messagesByThread[threadKey] = msgs
     }
 
     private func updateUnread(forJourney journeyID: String, to count: Int) {
@@ -360,6 +530,16 @@ final class JourneyCommentStore: ObservableObject {
         }
         updateUnread(forJourney: journeyID, to: count)
     }
+}
+
+/// Initial-load lifecycle for a thread list or message list. `.idle` means no
+/// load has been attempted yet; treat it like `.loading` in the UI so the first
+/// frame doesn't flash an empty state before the fetch starts.
+enum ThreadLoadPhase: Equatable {
+    case idle
+    case loading
+    case loaded
+    case failed
 }
 
 enum JourneyCommentStoreError: LocalizedError {

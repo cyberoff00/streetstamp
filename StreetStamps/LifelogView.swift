@@ -912,36 +912,49 @@ struct LifelogView: View {
 
 
     private var dayModeCalendar: some View {
-        let days = recentSevenDays
-        return VStack(spacing: 8) {
-            HStack(spacing: 8) {
-                ForEach(days, id: \.self) { day in
-                    Button {
-                        handleDayTap(day)
-                    } label: {
-                        VStack(spacing: 4) {
-                            Text(shortWeekday(day))
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundColor(FigmaTheme.text.opacity(0.44))
+        let days = dayStripDays
+        let todayKey = Calendar.current.startOfDay(for: Date())
+        return ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 8) {
+                    ForEach(days, id: \.self) { day in
+                        Button {
+                            handleDayTap(day)
+                        } label: {
                             ZStack {
-                                Circle()
-                                    .fill(dayCellBackground(day: day, forMonthMode: false))
-                                    .frame(width: 40, height: 40)
-                                if let mood = lifelogStore.mood(for: day) {
-                                    moodSymbolView(for: mood, imageSize: 26, fontSize: 20)
-                                } else {
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .fill(dayCellBackground(day: day, forMonthMode: true))
+                                    .frame(height: 40)
+                                VStack(spacing: 1) {
                                     Text("\(Calendar.current.component(.day, from: day))")
-                                        .font(.system(size: 16, weight: .bold))
+                                        .font(.system(size: 12, weight: .semibold))
                                         .foregroundColor(isSelectedDay(day) ? .white : .black)
+                                    if let mood = lifelogStore.mood(for: day) {
+                                        moodSymbolView(for: mood, imageSize: 22, fontSize: 18)
+                                    }
                                 }
                             }
+                            .frame(width: 44)
                         }
-                        .frame(maxWidth: .infinity)
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 4)
+            }
+            .onAppear {
+                DispatchQueue.main.async {
+                    proxy.scrollTo(todayKey, anchor: .trailing)
+                }
+            }
+            .onChange(of: calendarDisplayMode) { _, newMode in
+                if newMode == .day {
+                    DispatchQueue.main.async {
+                        withAnimation { proxy.scrollTo(todayKey, anchor: .trailing) }
+                    }
                 }
             }
         }
+        .frame(height: 48)
     }
 
     private var monthModeCalendar: some View {
@@ -1204,11 +1217,19 @@ struct LifelogView: View {
         return f.string(from: day)
     }
 
-    private var recentSevenDays: [Date] {
+    /// Continuous day range for the horizontally scrollable day strip: a fixed
+    /// recent window ending today, ascending so today sits at the trailing edge.
+    ///
+    /// Deliberately NOT derived from `lifelogStore.availableDays`: a single corrupt
+    /// or epoch (1970) day key there would blow the range back decades and push
+    /// `today` out of the array (breaking auto-scroll-to-today). Deep history is
+    /// reachable via month mode instead.
+    private static let dayStripWindow = 90
+    private var dayStripDays: [Date] {
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
-        return (0..<7).compactMap { offset in
-            cal.date(byAdding: .day, value: offset - 6, to: today)
+        return (0...Self.dayStripWindow).reversed().compactMap { offset in
+            cal.date(byAdding: .day, value: -offset, to: today)
         }
     }
 
@@ -1216,13 +1237,6 @@ struct LifelogView: View {
         let symbols = Calendar.current.shortWeekdaySymbols
         let first = Calendar.current.firstWeekday - 1
         return Array(symbols[first...] + symbols[..<first]).map { String($0.prefix(3)) }
-    }
-
-    private func shortWeekday(_ day: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "EEE"
-        return f.string(from: day)
     }
 
     private func monthStart(for day: Date) -> Date {

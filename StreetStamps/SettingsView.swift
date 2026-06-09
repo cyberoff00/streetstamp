@@ -353,7 +353,6 @@ struct SettingsView: View {
     @AppStorage(AppSettings.voiceBroadcastIntervalKMKey) private var voiceBroadcastIntervalKM = 1
     @AppStorage(AppSettings.longStationaryReminderEnabledKey) private var longStationaryReminderEnabled = true
     @AppStorage(AppSettings.liveActivityEnabledKey) private var liveActivityEnabled = true
-    @AppStorage(AppSettings.dailyTrackingPrecisionKey) private var dailyTrackingPrecisionRaw = DailyTrackingPrecision.defaultPrecision.rawValue
     @AppStorage(AppSettings.iCloudSyncEnabledKey) private var iCloudSyncEnabled = false
 
     @State private var systemNotificationEnabled = true
@@ -382,7 +381,6 @@ struct SettingsView: View {
     @State private var showDeleteAccountConfirmation = false
     @State private var isDeletingAccount = false
     @State private var showLinkEmailSheet = false
-    @State private var showBackgroundModeInfo = false
     @State private var showVoiceBroadcastInfo = false
     @State private var showLiveActivityInfo = false
     @State private var showStillnessReminderInfo = false
@@ -453,11 +451,6 @@ struct SettingsView: View {
         return "\(L10n.t("settings_icloud_sync_desc"))\n\(statusLine)"
     }
 
-    private var dailyTrackingPrecision: DailyTrackingPrecision {
-        get { DailyTrackingPrecision(rawValue: dailyTrackingPrecisionRaw) ?? .defaultPrecision }
-        nonmutating set { dailyTrackingPrecisionRaw = newValue.rawValue }
-    }
-
     private var accountCardPresentation: SettingsAccountCardPresentation {
         SettingsAccountPresentation.card(
             isLoggedIn: sessionStore.isLoggedIn,
@@ -516,11 +509,6 @@ struct SettingsView: View {
             Button(L10n.t("ok"), role: .cancel) {}
         } message: {
             Text(accountMessage)
-        }
-        .alert(L10n.t("settings_daily_precision_title"), isPresented: $showBackgroundModeInfo) {
-            Button(L10n.t("got_it"), role: .cancel) {}
-        } message: {
-            Text(L10n.t("settings_daily_precision_desc"))
         }
         .alert(L10n.t("settings_logout_confirm_title"), isPresented: $showLogoutConfirmation) {
             Button(L10n.t("cancel"), role: .cancel) {}
@@ -941,37 +929,6 @@ struct SettingsView: View {
                     )
                 }
                 .buttonStyle(.plain)
-
-                HStack(alignment: .center, spacing: 10) {
-                    Image(systemName: "leaf")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundColor(FigmaTheme.primary)
-                        .frame(width: 20)
-
-                    Text(L10n.t("settings_daily_precision_title"))
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(FigmaTheme.text)
-
-                    Spacer(minLength: 8)
-
-                    Button {
-                        showBackgroundModeInfo = true
-                    } label: {
-                        Image(systemName: "questionmark.circle")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(FigmaTheme.subtext)
-                            .padding(.horizontal, 6)
-                    }
-                    .buttonStyle(.plain)
-
-                    figmaToggle(isOn: Binding(
-                        get: { dailyTrackingPrecision == .lowPrecision },
-                        set: { dailyTrackingPrecision = $0 ? .lowPrecision : .highPrecision }
-                    ))
-                }
-                .padding(.horizontal, 20)
-                .frame(minHeight: 68)
-                .figmaSurfaceCard(radius: 34)
             }
         }
     }

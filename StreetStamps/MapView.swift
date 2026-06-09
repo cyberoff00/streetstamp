@@ -1263,6 +1263,7 @@ struct MapView: View {
     @State private var coinsAwardedThisJourney = 0
     @State private var showExitWarning = false
     @State private var showModeSelector = false
+    @AppStorage(AppSettings.dailyTrackingPrecisionKey) private var dailyTrackingPrecisionRaw = DailyTrackingPrecision.defaultPrecision.rawValue
     @State private var showMapLayerPicker = false
     @State private var exitToastMessage: String = ""
 
@@ -2179,7 +2180,7 @@ struct MapView: View {
         // Journey snapshots may have been created under a different language; we refresh
         // the display title using the locale-aware cache/key without mutating the cityKey.
         let key = (journeyRoute.startCityKey ?? journeyRoute.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
-        if !key.isEmpty && key != "Unknown|" {
+        if !Self.isUnresolvedCityKey(key) {
             _ = JourneyCityNamePresentation.parentRegionKey(
                 for: journeyRoute,
                 cachedCitiesByKey: cachedCitiesByKey
@@ -2278,13 +2279,23 @@ struct MapView: View {
         }
     }
 
+    /// A city key counts as "unresolved" when its city component is missing or a
+    /// placeholder. The geocoder can produce a degenerate key like `"Unknown|"`,
+    /// `"Unknown|CN"`, or the *localized* `"未知|CN"` when the chosen level's field
+    /// is absent on an early low-accuracy fix (e.g. `.admin` level with no
+    /// `administrativeArea`). Treating those as "resolved" would freeze the route's
+    /// city to a placeholder and stop all retries, so we must detect them here.
+    private static func isUnresolvedCityKey(_ rawKey: String) -> Bool {
+        ReverseGeocodeService.isDegenerateCityKey(rawKey)
+    }
+
     private func reverseGeocodeAndSetRouteCity(_ coordinate: CLLocationCoordinate2D) {
         guard CLLocationCoordinate2DIsValid(coordinate) else { return }
-        // ✅ Freeze to start city: do not override once we have a non-unknown city key.
+        // ✅ Freeze to start city: do not override once we have a real (resolved) city key.
         if journeyRoute.endTime != nil { return }
         if isResolvingStartCity { return }
         let existingKey = (journeyRoute.startCityKey ?? journeyRoute.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
-        if !existingKey.isEmpty && existingKey != "Unknown|" { return }
+        if !Self.isUnresolvedCityKey(existingKey) { return }
         isResolvingStartCity = true
 
         let loc = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
@@ -2297,6 +2308,10 @@ struct MapView: View {
             }
             if let canon = await ReverseGeocodeService.shared.canonical(for: loc) {
                 let resolvedKey = canon.cityKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                // The geocoder may return a placeholder city (missing admin/locality on
+                // an early imprecise fix). Do NOT persist it — leave the route unresolved
+                // so the next location update retries with a better placemark.
+                if Self.isUnresolvedCityKey(resolvedKey) { return }
                 let resolvedCanonicalName = CityPlacemarkResolver.stableCityName(
                     from: resolvedKey,
                     fallback: canon.cityName
@@ -2309,7 +2324,7 @@ struct MapView: View {
                     // ✅ Record start city key once; keep cityKey aligned to start city.
                     let canonKey = resolvedKey
                     let existingStart = (journeyRoute.startCityKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                    if existingStart.isEmpty || existingStart == "Unknown|" {
+                    if Self.isUnresolvedCityKey(existingStart) {
                         journeyRoute.startCityKey = canonKey
                     }
                     journeyRoute.cityKey = journeyRoute.startCityKey ?? canonKey
@@ -2344,7 +2359,7 @@ struct MapView: View {
     private func shouldResolveStartCity() -> Bool {
         guard journeyRoute.endTime == nil else { return false }
         let key = (journeyRoute.startCityKey ?? journeyRoute.cityKey).trimmingCharacters(in: .whitespacesAndNewlines)
-        return key.isEmpty || key == "Unknown|"
+        return Self.isUnresolvedCityKey(key)
     }
 
     @State private var didAutoFitOnEnter = false
@@ -2488,7 +2503,7 @@ struct MapView: View {
     private var hasPendingCityKey: Bool {
         let key = (journeyRoute.startCityKey ?? journeyRoute.cityKey)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return key.isEmpty || key == "Unknown|"
+        return Self.isUnresolvedCityKey(key)
     }
 
     private func handleFinishTapped() {
@@ -2666,9 +2681,12 @@ struct MapView: View {
                 }
 
             MapTrackingModeSelector(
-                selectedMode: journeyRoute.trackingMode,
-                onSelect: { mode in
-                    applyTrackingMode(mode)
+                selectedPreset: JourneyTrackingPreset.resolve(
+                    mode: journeyRoute.trackingMode,
+                    precision: DailyTrackingPrecision(rawValue: dailyTrackingPrecisionRaw) ?? .defaultPrecision
+                ),
+                onSelect: { preset in
+                    applyTrackingPreset(preset)
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.78)) { showModeSelector = false }
                 },
                 onClose: {
@@ -2681,8 +2699,21 @@ struct MapView: View {
         }
     }
 
-    private func applyTrackingMode(_ mode: TrackingMode) {
-        guard journeyRoute.trackingMode != mode else { return }
+    private func applyTrackingPreset(_ preset: JourneyTrackingPreset) {
+        // Precision is a global, daily-only modifier (sport ignores it).
+        // Only daily/dailySaving write it, so picking Sport keeps the user's
+        // saved battery preference for the next daily journey.
+        // Writing this @AppStorage triggers StreetStampsApp's onChange, which
+        // re-applies the background mode live if a daily journey is active.
+        if let precision = preset.precisionToWrite {
+            dailyTrackingPrecisionRaw = precision.rawValue
+        }
+
+        let mode = preset.trackingMode
+        guard journeyRoute.trackingMode != mode else {
+            if journeyRoute.endTime == nil { persistSnapshot(.coordsTick) }
+            return
+        }
         journeyRoute.trackingMode = mode
         tracking.setTrackingMode(mode)
         if journeyRoute.endTime == nil {
@@ -3160,8 +3191,8 @@ struct MemoryDetailPage: View {
 }
 
 private struct MapTrackingModeSelector: View {
-    let selectedMode: TrackingMode
-    let onSelect: (TrackingMode) -> Void
+    let selectedPreset: JourneyTrackingPreset
+    let onSelect: (JourneyTrackingPreset) -> Void
     let onClose: () -> Void
 
     var body: some View {
@@ -3187,17 +3218,13 @@ private struct MapTrackingModeSelector: View {
             .background(FigmaTheme.primary)
 
             VStack(spacing: 14) {
-                MapModeOptionCard(
-                    mode: .sport,
-                    isSelected: selectedMode == .sport,
-                    onSelect: { onSelect(.sport) }
-                )
-
-                MapModeOptionCard(
-                    mode: .daily,
-                    isSelected: selectedMode == .daily,
-                    onSelect: { onSelect(.daily) }
-                )
+                ForEach(JourneyTrackingPreset.allCases) { preset in
+                    MapModeOptionCard(
+                        preset: preset,
+                        isSelected: selectedPreset == preset,
+                        onSelect: { onSelect(preset) }
+                    )
+                }
             }
             .padding(18)
             .background(Color.white)
@@ -3212,7 +3239,7 @@ private struct MapTrackingModeSelector: View {
 }
 
 private struct MapModeOptionCard: View {
-    let mode: TrackingMode
+    let preset: JourneyTrackingPreset
     let isSelected: Bool
     let onSelect: () -> Void
 
@@ -3224,41 +3251,22 @@ private struct MapModeOptionCard: View {
                         .fill(isSelected ? FigmaTheme.primary.opacity(0.15) : Color.black.opacity(0.05))
                         .frame(width: 48, height: 48)
 
-                    Image(systemName: mode == .sport ? "bolt.fill" : "figure.walk")
+                    Image(systemName: preset.icon)
                         .font(.system(size: 20, weight: .semibold))
                         .foregroundColor(isSelected ? FigmaTheme.primary : .black.opacity(0.5))
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(mode == .sport ? L10n.key("lockscreen_sport_mode") : L10n.key("lockscreen_daily_mode"))
+                    Text(L10n.key(preset.titleKey))
                         .font(.system(size: 15, weight: .bold))
                         .tracking(0.8)
                         .foregroundColor(FigmaTheme.text)
 
-                    Text(mode == .sport ? L10n.key("sport_mode_desc") : L10n.key("daily_mode_desc"))
+                    Text(L10n.key(preset.descKey))
                         .font(.system(size: 12))
                         .foregroundColor(FigmaTheme.text.opacity(0.55))
                         .lineLimit(3)
                         .multilineTextAlignment(.leading)
-
-                    HStack(spacing: 12) {
-                        if mode == .sport {
-                            Text(L10n.key("hint_precise"))
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(FigmaTheme.primary)
-                            Text(L10n.key("hint_battery"))
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(FigmaTheme.text.opacity(0.35))
-                        } else {
-                            Text(L10n.key("hint_precision"))
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(FigmaTheme.text.opacity(0.35))
-                            Text(L10n.key("hint_efficient"))
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(FigmaTheme.primary)
-                        }
-                    }
-                    .padding(.top, 2)
                 }
 
                 Spacer()

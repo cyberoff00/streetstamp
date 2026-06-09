@@ -176,6 +176,8 @@ final class LifelogStore: ObservableObject {
     private let trackTileRevisionDebounce: TimeInterval
     private var pendingDayIndexBuild: DispatchWorkItem?
     private var dayIndexBuildGeneration: Int = 0
+    private var pendingDistanceRecompute: DispatchWorkItem?
+    private var distanceRecomputeGeneration: Int = 0
     private var pendingBindHub: LocationHub?
     private var passiveMotionState: PassiveMotionState = .moving
     private var passiveMotionAnchor: CLLocation?
@@ -233,6 +235,9 @@ final class LifelogStore: ObservableObject {
         pendingTrackTileRevisionBump = nil
         pendingDayIndexBuild?.cancel()
         pendingDayIndexBuild = nil
+        pendingDistanceRecompute?.cancel()
+        pendingDistanceRecompute = nil
+        distanceRecomputeGeneration &+= 1
         bag.removeAll()
         pendingBindHub = nil
         resetPassiveMotionState()
@@ -357,6 +362,53 @@ final class LifelogStore: ObservableObject {
             }
         }
         pendingDayIndexBuild = work
+        DispatchQueue.global(qos: .utility).async(execute: work)
+    }
+
+    /// Recompute total distance off the main thread. Per-day sums are independent,
+    /// so cross-day ordering does not matter. In-memory shards are snapshotted on
+    /// main (cheap COW), disk-only shards are read on the background queue. A
+    /// generation token discards the result if the store mutated meanwhile, so a
+    /// stale recompute can never overwrite a newer distance value.
+    private func scheduleBackgroundDistanceRecompute() {
+        pendingDistanceRecompute?.cancel()
+        distanceRecomputeGeneration &+= 1
+        let generation = distanceRecomputeGeneration
+
+        let availableKeys = shardIndex.cachedAvailableDayKeys
+        let todayKey = todayShard.dayKey
+        let todayPoints = todayShard.points
+        let inMemory = loadedShards.mapValues { $0.points }
+        let daysDir = paths.lifelogDaysDir
+
+        let work = DispatchWorkItem {
+            var total = 0.0
+            for dayKey in availableKeys {
+                let points: [LifelogTrackPoint]
+                if dayKey == todayKey {
+                    points = todayPoints
+                } else if let cached = inMemory[dayKey] {
+                    points = cached
+                } else {
+                    points = Self.loadShardFromDisk(dir: daysDir, dayKey: dayKey).points
+                }
+                total += Self.computeTotalDistanceMeters(coords: points.map(\.coord))
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                guard generation == self.distanceRecomputeGeneration else { return }
+                self.cachedDistanceMeters = total
+                self.shardIndex.cachedDistanceMeters = total
+                // The synchronous persistSnapshotNow() in mergeCloudRestore wrote a
+                // stale distance to the index file; re-persist the index (only) so
+                // the corrected value survives an app restart.
+                let indexSnapshot = self.shardIndex
+                self.fileIOQueue.async {
+                    Self.writeIndexToDisk(indexSnapshot, dir: daysDir)
+                }
+            }
+        }
+        pendingDistanceRecompute = work
         DispatchQueue.global(qos: .utility).async(execute: work)
     }
 
@@ -1316,10 +1368,10 @@ final class LifelogStore: ObservableObject {
 
         // Recompute distance — sum per-day to avoid connecting last point of one day
         // to first point of the next day across the dictionary's random ordering.
-        cachedDistanceMeters = snapshotPointsByDay().values.reduce(0.0) { sum, pts in
-            sum + Self.computeTotalDistanceMeters(coords: pts.map(\.coord))
-        }
-        shardIndex.cachedDistanceMeters = cachedDistanceMeters
+        // For a multi-year user this scans 1000+ day shards (synchronous disk reads
+        // for any not in memory), so it runs off-main with a generation guard
+        // instead of blocking the main thread for seconds during restore.
+        scheduleBackgroundDistanceRecompute()
 
         // Update last point
         if let last = todayShard.points.last {
