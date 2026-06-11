@@ -43,12 +43,16 @@ enum JourneyCoinRewardPolicy {
         rewarded.insert(journeyID)
         UserDefaults.standard.set(Array(rewarded), forKey: rewardedJourneysKey)
 
-        // Fire and forget the actual credit. UI got `amount` already; if the
-        // backend call fails the user keeps the marker (no double-credit on
-        // future finalize) but loses the coins. Acceptable tradeoff at this
-        // scale; recoverable via audit log if a customer complains.
+        // Fire and forget the actual credit. UI got `amount` already. The
+        // journey ID doubles as the server-side dedupe token, so on failure
+        // CoinService queues the grant and replays it later without any
+        // double-credit risk.
         Task { @MainActor in
-            await CoinService.shared.grant(amount, reason: "journey_reward:\(journeyID)")
+            await CoinService.shared.grant(
+                amount,
+                reason: "journey_reward:\(journeyID)",
+                dedupeToken: "journey_reward:\(journeyID)"
+            )
         }
 
         return amount

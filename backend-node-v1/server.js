@@ -2712,19 +2712,42 @@ async function main() {
       const amount = normalizeCoinAmount(req.body?.amount);
       if (amount === null) return res.status(400).json({ message: "invalid amount" });
       const reason = String(req.body?.reason || "").slice(0, 200);
+      // Optional idempotency: clients that may retry (IAP coin packs, journey
+      // rewards) send a stable dedupe_token. Replaying the same token returns
+      // the current balance without crediting again, so a lost response +
+      // retry cannot double-credit. Reuses the coin_merge_tokens table with
+      // source='grant'. Tokenless calls keep the legacy non-idempotent path.
+      const dedupeToken = String(req.body?.dedupe_token || "").trim().slice(0, 200);
 
       let balance = 0;
+      let applied = true;
       await persistPGTx(async (client) => {
+        if (dedupeToken) {
+          const ins = await client.query(
+            `INSERT INTO coin_merge_tokens (token, user_id, amount, source, applied_at)
+             VALUES ($1, $2, $3, 'grant', $4)
+             ON CONFLICT (token) DO NOTHING
+             RETURNING token`,
+            [dedupeToken, uid, amount, nowUnix()]
+          );
+          if (!ins.rows.length) {
+            const cur = await client.query("SELECT coins FROM users WHERE id=$1", [uid]);
+            if (!cur.rows.length) throw new Error("user_not_found");
+            balance = cur.rows[0].coins;
+            applied = false;
+            return;
+          }
+        }
         const { rows } = await client.query(
           "UPDATE users SET coins = coins + $1 WHERE id=$2 RETURNING coins",
           [amount, uid]
         );
         if (!rows.length) throw new Error("user_not_found");
         balance = rows[0].coins;
-        await logCoinTransaction(client, { userID: uid, delta: amount, balanceAfter: balance, source: "grant", reason });
+        await logCoinTransaction(client, { userID: uid, delta: amount, balanceAfter: balance, source: "grant", reason, mergeToken: dedupeToken || null });
       });
 
-      return res.status(200).json({ balance });
+      return res.status(200).json({ balance, applied });
     } catch (err) {
       if (err && err.message === "user_not_found") return res.status(404).json({ message: "user not found" });
       return res.status(401).json({ message: "unauthorized" });

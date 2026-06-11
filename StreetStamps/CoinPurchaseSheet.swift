@@ -263,8 +263,16 @@ struct CoinPurchaseSheet: View {
 
     private func purchaseProduct(_ product: Product, coins: Int) async {
         isPurchasing = true
-        if let earnedCoins = await store.purchase(product) {
-            await CoinService.shared.grant(earnedCoins, reason: "iap:\(product.id)")
+        if let outcome = await store.purchase(product) {
+            // The dedupe token makes the grant idempotent server-side; if the
+            // request fails after payment, CoinService queues it and replays
+            // on the next launch/refresh, so paid coins can't be lost.
+            let txID = outcome.transactionID ?? UUID().uuidString
+            await CoinService.shared.grant(
+                outcome.coins,
+                reason: "iap:\(product.id)",
+                dedupeToken: "iap:\(product.id):\(txID)"
+            )
             economy.coins = CoinService.shared.balance
             onDismiss()
         }

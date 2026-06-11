@@ -1423,11 +1423,17 @@ final class BackendAPIClient {
     }
 
     /// Returns the new balance after grant.
-    func grantCoins(amount: Int, reason: String, token: String) async throws -> Int {
-        let payload: [String: AnyEncodable] = [
+    /// `dedupeToken`: optional idempotency key. The server credits a given
+    /// token at most once, so retries after a lost response cannot
+    /// double-credit. Pass a stable ID (StoreKit transaction, journey ID).
+    func grantCoins(amount: Int, reason: String, token: String, dedupeToken: String? = nil) async throws -> Int {
+        var payload: [String: AnyEncodable] = [
             "amount": AnyEncodable(amount),
             "reason": AnyEncodable(reason),
         ]
+        if let dedupeToken, !dedupeToken.isEmpty {
+            payload["dedupe_token"] = AnyEncodable(dedupeToken)
+        }
         let body = try encoder.encode(payload)
         let (data, _) = try await request(path: "/v1/coins/grant", method: "POST", token: token, jsonBody: body)
         return try decoder.decode(CoinBalanceResponse.self, from: data).balance

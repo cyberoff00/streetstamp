@@ -59,6 +59,7 @@ final class CoinService: ObservableObject {
     func bootstrap() async {
         if isAccountUser, let accountID = sessionStore?.accountUserID {
             await migrateLocalIfNeeded(accountID: accountID)
+            await retryPendingGrants()
             await refreshFromBackend()
         } else {
             balance = EquipmentEconomyStore.load().coins
@@ -70,9 +71,35 @@ final class CoinService: ObservableObject {
     /// that displays coins after returning from background).
     func refresh() async {
         if isAccountUser {
+            await retryPendingGrants()
             await refreshFromBackend()
         } else {
             balance = EquipmentEconomyStore.load().coins
+        }
+    }
+
+    /// Replays grants that failed after the user paid (IAP) or earned them
+    /// (journey reward). Safe to call repeatedly: every queued grant carries a
+    /// dedupe token the server credits at most once. Entries stay queued until
+    /// a request succeeds; one network failure aborts the pass (next
+    /// bootstrap/refresh retries).
+    private func retryPendingGrants() async {
+        guard isAccountUser,
+              let accountID = sessionStore?.accountUserID, !accountID.isEmpty,
+              let token = accessToken else { return }
+        for entry in PendingCoinGrantQueue.entries(forAccount: accountID) {
+            do {
+                let newBalance = try await BackendAPIClient.shared.grantCoins(
+                    amount: entry.amount,
+                    reason: entry.reason,
+                    token: token,
+                    dedupeToken: entry.dedupeToken
+                )
+                balance = newBalance
+                PendingCoinGrantQueue.remove(dedupeToken: entry.dedupeToken)
+            } catch {
+                break
+            }
         }
     }
 
@@ -81,16 +108,28 @@ final class CoinService: ObservableObject {
     /// `coin_transactions` audit table (account path only) or ignored locally.
     /// Returns true on success.
     @discardableResult
-    func grant(_ amount: Int, reason: String) async -> Bool {
+    func grant(_ amount: Int, reason: String, dedupeToken: String? = nil) async -> Bool {
         guard amount > 0 else { return true }
         if isAccountUser, let token = accessToken {
             do {
                 let newBalance = try await BackendAPIClient.shared.grantCoins(
-                    amount: amount, reason: reason, token: token
+                    amount: amount, reason: reason, token: token, dedupeToken: dedupeToken
                 )
                 balance = newBalance
                 return true
             } catch {
+                // Only queue grants that carry an idempotency token: retrying
+                // a tokenless grant after a lost-response failure could
+                // double-credit (the server may have already applied it).
+                if let dedupeToken, !dedupeToken.isEmpty,
+                   let accountID = sessionStore?.accountUserID, !accountID.isEmpty {
+                    PendingCoinGrantQueue.enqueue(PendingCoinGrant(
+                        amount: amount,
+                        reason: reason,
+                        dedupeToken: dedupeToken,
+                        accountUserID: accountID
+                    ))
+                }
                 return false
             }
         }

@@ -57,12 +57,22 @@ final class CoinStoreService: ObservableObject {
 
     // MARK: - Purchase
 
-    func purchase(_ product: Product) async -> Int? {
+    struct PurchaseOutcome {
+        let coins: Int
+        /// StoreKit transaction ID — the natural dedupe key for the coin
+        /// grant, so a retry after a lost response can't double-credit.
+        let transactionID: String?
+    }
+
+    func purchase(_ product: Product) async -> PurchaseOutcome? {
         do {
             let storeProduct = StoreProduct(sk2Product: product)
             let result = try await Purchases.shared.purchase(product: storeProduct)
             if result.userCancelled { return nil }
-            return coinsForProduct(product.id)
+            return PurchaseOutcome(
+                coins: coinsForProduct(product.id),
+                transactionID: result.transaction?.transactionIdentifier
+            )
         } catch {
             errorMessage = error.localizedDescription
             return nil
