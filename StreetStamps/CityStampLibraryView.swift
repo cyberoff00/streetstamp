@@ -1600,10 +1600,42 @@ final class CityThumbnailLoader: ObservableObject {
     }
 
     nonisolated private static func journeySignature(_ journey: JourneyRoute) -> String {
-        let coords = journey.allCLThumbnailCoords
+        // Runs per visible card per render (via `loadKey` as a `.task(id:)`),
+        // so it must not materialize `allCLThumbnailCoords` — that map+filter
+        // allocates an array over every coordinate. Sample in place instead.
+        // The output string must stay byte-identical to the old implementation
+        // or every cached thumbnail on disk is invalidated.
+        let src = journey.thumbnailCoordinates.isEmpty ? journey.coordinates : journey.thumbnailCoordinates
+        var validCount = 0
+        for c in src where c.cl.isValid { validCount += 1 }
         let distanceRounded = Int(journey.distance.rounded())
         let endedAt = Int(journey.endTime?.timeIntervalSince1970 ?? 0)
-        return "\(journey.id):\(endedAt):\(distanceRounded):\(coords.count):\(coordinateSignature(coords))"
+        let coordSig = sampledCoordinateSignature(src: src, validCount: validCount)
+        return "\(journey.id):\(endedAt):\(distanceRounded):\(validCount):\(coordSig)"
+    }
+
+    /// Produces the same output as `coordinateSignature` applied to the
+    /// valid-filtered coordinates, without allocating the filtered array.
+    nonisolated private static func sampledCoordinateSignature(src: [CoordinateCodable], validCount: Int) -> String {
+        guard validCount > 0 else { return "empty" }
+        let wantedIndices: Set<Int> = [0, validCount / 2, validCount - 1]
+        var samples: [Int: String] = [:]
+        var validIndex = 0
+        for c in src {
+            let cl = c.cl
+            guard cl.isValid else { continue }
+            if wantedIndices.contains(validIndex) {
+                let lat = Int((cl.latitude * 10_000).rounded())
+                let lon = Int((cl.longitude * 10_000).rounded())
+                samples[validIndex] = "\(lat)_\(lon)"
+                if samples.count == wantedIndices.count { break }
+            }
+            validIndex += 1
+        }
+        let first = samples[0] ?? "empty"
+        let middle = samples[validCount / 2] ?? first
+        let last = samples[validCount - 1] ?? first
+        return "\(first)-\(middle)-\(last)"
     }
 
     nonisolated private static func polygonSignature(_ coords: [CLLocationCoordinate2D]) -> String {

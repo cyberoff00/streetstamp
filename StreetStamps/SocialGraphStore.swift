@@ -309,8 +309,15 @@ extension FriendSharedJourney {
 
 @MainActor
 final class SocialGraphStore: ObservableObject {
-    @Published private(set) var friends: [FriendProfileSnapshot] = []
+    @Published private(set) var friends: [FriendProfileSnapshot] = [] {
+        didSet { friendsRevision &+= 1 }
+    }
     @Published private(set) var cachedMyProfile: BackendProfileDTO?
+
+    /// Cheap change token for `friends`. Deep-hashing the snapshot array walks
+    /// every shared journey's routeCoordinates (O(total coords)), which is far
+    /// too expensive to evaluate on the main thread per SwiftUI render.
+    private(set) var friendsRevision: UInt64 = 0
 
     private var activeUserID: String
     private var hasLoadedFromDisk = false

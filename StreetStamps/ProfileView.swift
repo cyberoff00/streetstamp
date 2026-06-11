@@ -43,6 +43,7 @@ struct ProfileView: View {
     @State private var profileNavTarget: ProfileNavTarget?
     @State private var showNotificationsSheet = false
     @State private var showPostcardInboxFromNotification = false
+    @State private var pendingPostcardInboxIntent: PostcardInboxIntent?
     @State private var notifSheetJourneyPush: NotifJourneyPush? = nil
     @State private var postcardInboxIntent = PostcardInboxIntent(box: "received", messageID: nil)
     @State private var lastSyncedLoadout: RobotLoadout?
@@ -135,7 +136,16 @@ struct ProfileView: View {
         .sheet(isPresented: $showNameEditor) {
             profileNameEditorSheet
         }
-        .sheet(isPresented: $showNotificationsSheet) {
+        .sheet(isPresented: $showNotificationsSheet, onDismiss: {
+            // Present the postcard inbox only after the notifications sheet has
+            // fully dismissed: doing both in one transaction drops the second
+            // sheet (tap appears dead, needs a second tap).
+            if let intent = pendingPostcardInboxIntent {
+                pendingPostcardInboxIntent = nil
+                postcardInboxIntent = intent
+                showPostcardInboxFromNotification = true
+            }
+        }) {
             if featureFlags.socialEnabled {
                 socialNotificationsSheet
             }
@@ -614,9 +624,8 @@ struct ProfileView: View {
 
             if item.type == "postcard_received" || item.type == "postcard_reaction" {
                 let box = item.type == "postcard_received" ? "received" : "sent"
-                postcardInboxIntent = PostcardInboxIntent(box: box, messageID: item.postcardMessageID)
+                pendingPostcardInboxIntent = PostcardInboxIntent(box: box, messageID: item.postcardMessageID)
                 showNotificationsSheet = false
-                showPostcardInboxFromNotification = true
             } else if item.type == "friend_request" {
                 showNotificationsSheet = false
                 AppFlowCoordinator.shared.requestSelectTab(.friends)

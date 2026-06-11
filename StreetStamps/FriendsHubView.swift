@@ -229,6 +229,13 @@ struct FriendsHubView: View {
     @State private var feedJourneyLikersErrorMessage: String?
     @State private var activeFeedLikesSheet: FeedLikesSheetContext?
     @State private var showSocialNotificationsSheet = false
+    /// Route to push after the notifications sheet finishes dismissing.
+    /// Setting `activeRoute` in the same transaction as the sheet dismissal
+    /// makes SwiftUI drop the navigation push (tap appears to do nothing).
+    @State private var pendingNotificationsRoute: FriendsRoute?
+    /// Same race for sheet-over-sheet: presenting the postcard inbox in the
+    /// same transaction that dismisses the notifications sheet gets dropped.
+    @State private var pendingPostcardInboxIntent: PostcardInboxIntent?
     @State private var incomingFriendRequests: [BackendFriendRequestDTO] = []
     @State private var outgoingFriendRequests: [BackendFriendRequestDTO] = []
     @State private var requestActionLoadingIDs: Set<String> = []
@@ -286,10 +293,27 @@ struct FriendsHubView: View {
     }
 
     private var cachedMyProfileVersion: Int {
+        // Same per-render constraint as feedSourceVersion: never deep-hash
+        // journeys here — routeCoordinates makes that O(total coords).
         var h = Hasher()
         h.combine(socialStore.cachedMyProfile?.id)
-        h.combine(socialStore.cachedMyProfile?.journeys.hashValue)
-        h.combine(socialStore.cachedMyProfile?.unlockedCityCards.hashValue)
+        if let profile = socialStore.cachedMyProfile {
+            h.combine(profile.journeys.count)
+            for j in profile.journeys {
+                h.combine(j.id)
+                h.combine(j.sharedAt)
+                h.combine(j.title)
+                h.combine(j.overallMemory)
+                h.combine(j.endTime)
+                h.combine(j.visibility)
+                h.combine(j.routeCoordinates.count)
+                h.combine(j.memories.count)
+            }
+            h.combine(profile.unlockedCityCards.count)
+            for card in profile.unlockedCityCards {
+                h.combine(card.id)
+            }
+        }
         return h.finalize()
     }
 
@@ -330,12 +354,30 @@ struct FriendsHubView: View {
     }
 
     private var feedSourceVersion: Int {
+        // Evaluated on every body render via .onChange(of: feedSourceVersion),
+        // so it must stay cheap. Deep-hashing friends/journeys walks every
+        // routeCoordinates array (O(total coords)) and froze this screen.
         var h = Hasher()
         h.combine(languagePreference.effectiveLocaleIdentifier)
-        h.combine(socialStore.friends.hashValue)
+        h.combine(socialStore.friendsRevision)
         h.combine(myRemoteProfile?.id)
-        h.combine(myRemoteProfile?.journeys.hashValue)
-        h.combine(myRemoteProfile?.unlockedCityCards.hashValue)
+        if let me = myRemoteProfile {
+            h.combine(me.journeys.count)
+            for j in me.journeys {
+                h.combine(j.id)
+                h.combine(j.sharedAt)
+                h.combine(j.title)
+                h.combine(j.overallMemory)
+                h.combine(j.endTime)
+                h.combine(j.visibility)
+                h.combine(j.routeCoordinates.count)
+                h.combine(j.memories.count)
+            }
+            h.combine(me.unlockedCityCards.count)
+            for card in me.unlockedCityCards {
+                h.combine(card.id)
+            }
+        }
         return h.finalize()
     }
 
@@ -462,7 +504,16 @@ struct FriendsHubView: View {
             .environmentObject(socialStore)
             .environmentObject(sessionStore)
         }
-        .sheet(isPresented: $showSocialNotificationsSheet) {
+        .sheet(isPresented: $showSocialNotificationsSheet, onDismiss: {
+            if let route = pendingNotificationsRoute {
+                pendingNotificationsRoute = nil
+                activeRoute = route
+            } else if let intent = pendingPostcardInboxIntent {
+                pendingPostcardInboxIntent = nil
+                postcardInboxIntent = intent
+                showPostcardInboxSheet = true
+            }
+        }) {
             socialNotificationsSheet
         }
         .sheet(isPresented: $showPostcardInboxSheet) {
@@ -1361,10 +1412,9 @@ struct FriendsHubView: View {
                 Task { await notificationStore.markSingleRead(id: item.id, token: sessionStore.currentAccessToken) }
 
                 if item.type == "postcard_received" || item.type == "postcard_reaction" {
-                    showSocialNotificationsSheet = false
                     let box = item.type == "postcard_received" ? "received" : "sent"
-                    postcardInboxIntent = PostcardInboxIntent(box: box, messageID: item.postcardMessageID)
-                    showPostcardInboxSheet = true
+                    pendingPostcardInboxIntent = PostcardInboxIntent(box: box, messageID: item.postcardMessageID)
+                    showSocialNotificationsSheet = false
                 } else if item.type == "friend_request" {
                     showSocialNotificationsSheet = false
                     tab = .allFriends
@@ -1372,8 +1422,8 @@ struct FriendsHubView: View {
                 } else if item.type == "journey_like",
                           let jid = item.journeyID?.trimmingCharacters(in: .whitespacesAndNewlines),
                           !jid.isEmpty {
+                    pendingNotificationsRoute = .myJourney(jid)
                     showSocialNotificationsSheet = false
-                    activeRoute = .myJourney(jid)
                 } else if item.type == "journey_comment",
                           let jid = item.journeyID?.trimmingCharacters(in: .whitespacesAndNewlines),
                           !jid.isEmpty {
@@ -1396,8 +1446,8 @@ struct FriendsHubView: View {
                     AppFlowCoordinator.shared.requestOpenJourneyCommentDeepLink(link)
                 } else if let fromUserID = item.fromUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
                           !fromUserID.isEmpty {
+                    pendingNotificationsRoute = .profile(fromUserID)
                     showSocialNotificationsSheet = false
-                    activeRoute = .profile(fromUserID)
                 }
             }
         }

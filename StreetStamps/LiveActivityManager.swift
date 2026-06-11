@@ -39,6 +39,14 @@ final class LiveActivityManager: ObservableObject {
     private var cachedDistance: Double = 0
     private var cachedMemoriesCount: Int = 0
     private var cachedIsPaused: Bool = false
+    // Throttle distance-only pushes: callers fire updateActivity on every
+    // accepted GPS point (~1/s in sport mode), but each Activity.update() is
+    // an IPC + widget re-render and ActivityKit drops over-budget updates.
+    // State changes (pause/memories) still push immediately.
+    private var lastActivityPushAt: Date = .distantPast
+    private var lastPushedIsPaused: Bool?
+    private var lastPushedMemoriesCount: Int?
+    private static let minDistancePushInterval: TimeInterval = 5
     private var accumulatedPausedDuration: TimeInterval = 0
     private var currentPauseStartedAt: Date?
     
@@ -196,7 +204,17 @@ final class LiveActivityManager: ObservableObject {
         cachedDistance = distanceMeters
         cachedIsPaused = isPaused
         cachedMemoriesCount = memoriesCount
-        
+
+        let stateChanged = isPaused != lastPushedIsPaused || memoriesCount != lastPushedMemoriesCount
+        let now = Date()
+        if !stateChanged && now.timeIntervalSince(lastActivityPushAt) < Self.minDistancePushInterval {
+            // Values are cached; the 30s timer or the next eligible point pushes them.
+            return
+        }
+        lastActivityPushAt = now
+        lastPushedIsPaused = isPaused
+        lastPushedMemoriesCount = memoriesCount
+
         let updatedState = TrackingActivityAttributes.ContentState(
             distanceMeters: distanceMeters,
             elapsedSeconds: elapsedSeconds,
@@ -243,6 +261,9 @@ final class LiveActivityManager: ObservableObject {
         trackingStartTime = nil
         accumulatedPausedDuration = 0
         currentPauseStartedAt = nil
+        lastActivityPushAt = .distantPast
+        lastPushedIsPaused = nil
+        lastPushedMemoriesCount = nil
 
         let finalState = TrackingActivityAttributes.ContentState(
             distanceMeters: 0,
