@@ -516,7 +516,14 @@ struct FriendsHubView: View {
         }) {
             socialNotificationsSheet
         }
-        .sheet(isPresented: $showPostcardInboxSheet) {
+        .sheet(isPresented: $showPostcardInboxSheet, onDismiss: {
+            // A push tap that arrived while this sheet was up parked its
+            // route here (see handleFriendsHubPushRoute).
+            if let route = pendingNotificationsRoute {
+                pendingNotificationsRoute = nil
+                activeRoute = route
+            }
+        }) {
             let initialBox: PostcardInboxView.Box = postcardInboxIntent.box == "sent" ? .sent : .received
             NavigationStack {
                 PostcardInboxView(
@@ -653,6 +660,17 @@ struct FriendsHubView: View {
             postcardInboxIntent = intent
             showPostcardInboxSheet = true
             deepLinkStore.consumePendingPostcardInbox()
+        }
+        // Social push taps (like / stomp / friend request). `onReceive` of a
+        // @Published value replays the current value on subscription, so a
+        // route parked before this view mounted is still consumed. Subscribes
+        // via the singleton on purpose: an @EnvironmentObject here would
+        // re-subscribe this view to every coordinator change (see NOTE on
+        // the property list above).
+        .onReceive(AppFlowCoordinator.shared.$pendingFriendsHubRoute) { route in
+            guard let route else { return }
+            AppFlowCoordinator.shared.consumePendingFriendsHubRoute()
+            handleFriendsHubPushRoute(route)
         }
         .onReceive(NotificationCenter.default.publisher(for: .postcardSentGoToInbox)) { _ in
             postcardInboxIntent = PostcardInboxIntent(box: "sent", messageID: nil)
@@ -1207,6 +1225,35 @@ struct FriendsHubView: View {
             }
         }
 
+        /// Routes a social push tap to the same destination the matching
+        /// in-app inbox row navigates to. Any presented sheet must be
+        /// dismissed first: setting `activeRoute` while a sheet is up
+        /// silently fails (see `pendingNotificationsRoute`), so when the
+        /// notifications sheet is open the route goes through that same
+        /// dismiss-then-navigate mechanism.
+        private func handleFriendsHubPushRoute(_ route: FriendsHubPushRoute) {
+            let friendsRoute: FriendsRoute?
+            switch route {
+            case .myJourney(let journeyID):
+                friendsRoute = .myJourney(journeyID)
+            case .friendProfile(let friendID):
+                friendsRoute = .profile(friendID)
+            case .friendRequests:
+                friendsRoute = nil
+                tab = .allFriends
+                Task { await refreshFriendRequests() }
+            }
+            if showPostcardInboxSheet || showSocialNotificationsSheet {
+                // Park the route and apply it from the sheet's onDismiss:
+                // pushing while a sheet is dismissing drops the navigation.
+                if let friendsRoute { pendingNotificationsRoute = friendsRoute }
+                showPostcardInboxSheet = false
+                showSocialNotificationsSheet = false
+            } else if let friendsRoute {
+                activeRoute = friendsRoute
+            }
+        }
+
         @MainActor
         private func refreshFriendRequests() async {
             guard BackendConfig.isEnabled,
@@ -1317,6 +1364,9 @@ struct FriendsHubView: View {
                             .padding(.horizontal, 16)
                             .padding(.top, 12)
                             .padding(.bottom, 28)
+                        }
+                        .refreshable {
+                            await notificationStore.refresh(token: sessionStore.currentAccessToken)
                         }
                     }
                 }

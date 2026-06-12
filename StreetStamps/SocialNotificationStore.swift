@@ -8,7 +8,9 @@ final class SocialNotificationStore: ObservableObject {
     @Published private(set) var unreadCount: Int = 0
     @Published private(set) var isLoading = false
 
-    private static let cutoffInterval: TimeInterval = 3 * 24 * 60 * 60
+    // Must match the backend badge window (countUnreadNotifications, 30 days)
+    // or the APNs badge number and the in-app unread count drift apart.
+    private static let cutoffInterval: TimeInterval = 30 * 24 * 60 * 60
     private var lastPromptNotificationID: String?
     private var pollingTask: Task<Void, Never>?
 

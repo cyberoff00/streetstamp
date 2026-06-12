@@ -37,6 +37,16 @@ final class PostcardNotificationBridge {
         return URL(string: raw)
     }
 
+    /// A remote APNs push already showed a banner for this inbox notification,
+    /// so the local fallback in `surfaceUnreadPostcardNotifications` must not
+    /// fire a second banner for the same postcard.
+    func markRemoteDelivered(notifID: String) {
+        var delivered = deliveredIDs()
+        guard !delivered.contains(notifID) else { return }
+        delivered.insert(notifID)
+        saveDeliveredIDs(delivered)
+    }
+
     private func scheduleLocalNotification(for item: BackendNotificationItem) {
         let deepLink = buildDeepLink(for: item)
         let title = (item.fromDisplayName?.isEmpty == false)
@@ -183,6 +193,25 @@ final class AppNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         }
     }
 
+    /// Call BEFORE dropping the session on user-initiated logout, while the
+    /// access token is still valid. Unbinds this device from the account
+    /// server-side so it stops receiving the previous account's pushes after
+    /// an account switch. Best-effort: a failure only means the server cleans
+    /// the token up later via APNs BadDeviceToken feedback.
+    static func unregisterPushTokenFromServer(accessToken: String?) {
+        let defaults = UserDefaults.standard
+        guard let hex = defaults.string(forKey: pendingTokenKey), !hex.isEmpty else { return }
+        guard BackendConfig.isEnabled, let accessToken, !accessToken.isEmpty else { return }
+
+        Task {
+            do {
+                try await BackendAPIClient.shared.unregisterPushToken(token: accessToken, pushToken: hex)
+            } catch {
+                print("[APNs] token unregister failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
     // MARK: - UNUserNotificationCenterDelegate
 
     func userNotificationCenter(
@@ -190,7 +219,13 @@ final class AppNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        JourneyCommentNotificationBridge.handleIncomingPayload(notification.request.content.userInfo)
+        let userInfo = notification.request.content.userInfo
+        JourneyCommentNotificationBridge.handleIncomingPayload(userInfo)
+        if let notifID = SocialPushDeepLink.remotePostcardNotifID(from: userInfo) {
+            Task { @MainActor in
+                PostcardNotificationBridge.shared.markRemoteDelivered(notifID: notifID)
+            }
+        }
         completionHandler([.banner, .sound, .list])
     }
 
@@ -208,6 +243,28 @@ final class AppNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         if let link = JourneyCommentNotificationBridge.deepLink(from: pushUserInfo) {
             await MainActor.run {
                 AppFlowCoordinator.shared.requestOpenJourneyCommentDeepLink(link)
+            }
+            return
+        }
+
+        if let socialLink = SocialPushDeepLink.parse(from: pushUserInfo) {
+            await MainActor.run {
+                if let notifID = SocialPushDeepLink.remotePostcardNotifID(from: pushUserInfo) {
+                    PostcardNotificationBridge.shared.markRemoteDelivered(notifID: notifID)
+                }
+                guard FeatureFlagStore.shared.socialEnabled else { return }
+                switch socialLink {
+                case .postcardInbox(let box, let messageID):
+                    AppFlowCoordinator.shared.requestOpenPostcardSidebar(
+                        PostcardInboxIntent(box: box, messageID: messageID)
+                    )
+                case .myJourney(let journeyID):
+                    AppFlowCoordinator.shared.requestOpenFriendsHubRoute(.myJourney(journeyID: journeyID))
+                case .friendProfile(let friendID):
+                    AppFlowCoordinator.shared.requestOpenFriendsHubRoute(.friendProfile(friendID: friendID))
+                case .friendRequests:
+                    AppFlowCoordinator.shared.requestOpenFriendsHubRoute(.friendRequests)
+                }
             }
             return
         }

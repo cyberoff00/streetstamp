@@ -524,6 +524,9 @@ struct ProfileView: View {
                         .padding(.top, 12)
                         .padding(.bottom, 28)
                     }
+                    .refreshable {
+                        await notificationStore.refresh(token: sessionStore.currentAccessToken)
+                    }
                 }
             }
             .background(FigmaTheme.background.ignoresSafeArea())

@@ -1318,6 +1318,11 @@ final class BackendAPIClient {
         _ = try await request(path: "/v1/push-token", method: "PUT", token: token, jsonBody: body)
     }
 
+    func unregisterPushToken(token: String, pushToken: String) async throws {
+        let body = try encoder.encode(["token": pushToken])
+        _ = try await request(path: "/v1/push-token", method: "DELETE", token: token, jsonBody: body)
+    }
+
     // MARK: - Journey Comments
 
     func fetchJourneyCommentUnreadSummary(token: String) async throws -> BackendJourneyCommentUnreadSummaryResponse {

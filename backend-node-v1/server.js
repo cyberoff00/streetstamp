@@ -1852,9 +1852,15 @@ async function insertNotificationDirect(ownerID, notification) {
   }
 }
 
-async function pushNotificationAndPersist(ownerID, notification, pushAlert, pushData) {
+async function pushNotificationAndPersist(ownerID, notification, pushAlert, pushData, pushOptions) {
   await insertNotificationDirect(ownerID, notification);
-  fireRemotePush(ownerID, pushAlert, pushData);
+  fireRemotePush(ownerID, pushAlert, pushData, pushOptions);
+}
+
+// apns-collapse-id must be ≤ 64 bytes; later pushes with the same ID replace
+// earlier ones on the device instead of stacking.
+function pushCollapseID(prefix, key) {
+  return `${prefix}_${String(key || "")}`.slice(0, 64);
 }
 
 async function postcardReactionPayloadForViewerAsync(viewerID, item, box) {
@@ -2348,8 +2354,9 @@ function reconcilePostcardsForUser(user, uid) {
  * @param {string} ownerID - target user ID
  * @param {{ title: string, body: string }} alert
  * @param {object} [data] - optional custom data payload
+ * @param {object} [options] - APNs options (e.g. { collapseId })
  */
-function fireRemotePush(ownerID, alert, data) {
+function fireRemotePush(ownerID, alert, data, options) {
   if (!APNs.isConfigured() || !pgPool) return;
   // Run async in background — never block the HTTP response
   (async () => {
@@ -2361,7 +2368,7 @@ function fireRemotePush(ownerID, alert, data) {
       const badge = await DB.countUnreadNotifications(pgPool, ownerID);
       await APNs.sendToUser(tokens, alert, data, async (invalidToken) => {
         await DB.deletePushToken(pgPool, ownerID, invalidToken);
-      }, badge);
+      }, badge, options);
     } catch (err) {
       console.error(`[APNs] fireRemotePush error for ${ownerID}:`, err.message);
     }
@@ -3738,6 +3745,9 @@ async function main() {
         body: `${me.displayName} 向你发送了好友申请`,
         "loc-key": "notification_friend_request_format",
         "loc-args": [me.displayName],
+      }, {
+        type: "friend_request",
+        fromUserID: me.id,
       });
 
       return res.status(200).json({
@@ -3823,6 +3833,9 @@ async function main() {
         body: `${me.displayName} 通过了你的好友申请`,
         "loc-key": "notification_friend_request_accepted_format",
         "loc-args": [me.displayName],
+      }, {
+        type: "friend_request_accepted",
+        fromUserID: me.id,
       });
 
       return res.status(200).json({
@@ -4215,6 +4228,12 @@ async function main() {
           body: `${viewer.displayName} 赞了你的旅程`,
           "loc-key": "notification_journey_like_short_format",
           "loc-args": [viewer.displayName],
+        }, {
+          type: "journey_like",
+          journeyID,
+          fromUserID: viewerID,
+        }, {
+          collapseId: pushCollapseID("like", journeyID),
         });
       }
 
@@ -4417,6 +4436,13 @@ async function main() {
         body: `${me.displayName} 给你寄了一张明信片`,
         "loc-key": "notification_postcard_received_format",
         "loc-args": [me.displayName],
+      }, {
+        type: "postcard_received",
+        messageID: canonicalMessage.messageID,
+        fromUserID: me.id,
+        // Lets the app skip its local fallback notification for this inbox
+        // item when the remote push already reached the device.
+        notifID: notif.id,
       });
       const saveDurationMs = elapsedMs(saveStartedAt);
 
@@ -4628,6 +4654,14 @@ async function main() {
         body: notifBody,
         "loc-key": reactionLocKey,
         "loc-args": reactionLocArgs,
+      }, {
+        type: "postcard_reaction",
+        messageID,
+        fromUserID: me.id,
+      }, {
+        // Repeated reactions on the same postcard replace each other on the
+        // lock screen instead of stacking.
+        collapseId: pushCollapseID("pcr", messageID),
       });
 
       return res.status(200).json({
@@ -4759,6 +4793,8 @@ async function main() {
         journeyID,
         senderID: uid,
         ownerID,
+      }, {
+        collapseId: pushCollapseID("jc", journeyID),
       });
 
       return res.status(200).json({
@@ -4835,6 +4871,9 @@ async function main() {
       }
       const threadKey = makeJourneyCommentThreadKey(journeyID, uid, otherUserID);
       const marked = await DB.markThreadRead(pgPool, threadKey, uid);
+      // Reading the thread also clears the matching inbox notifications so
+      // the bell badge and the thread unread state can't disagree.
+      await DB.markJourneyCommentNotificationsRead(pgPool, uid, journeyID, otherUserID);
       return res.status(200).json({ marked });
     } catch (err) {
       if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
@@ -4883,14 +4922,7 @@ async function main() {
       const source = await getUserNotifications(uid);
       const unreadOnlyRaw = String(req.query.unreadOnly || "1").trim().toLowerCase();
       const unreadOnly = !(unreadOnlyRaw === "0" || unreadOnlyRaw === "false" || unreadOnlyRaw === "no");
-      const filtered = unreadOnly ? source.filter((x) => !x.read) : source;
-      const items = filtered.map((item) => {
-        if (!item || item.type !== "postcard_received") return item;
-        return {
-          ...item,
-          photoURL: absolutizePostcardPhotoURL(item.photoURL, req)
-        };
-      });
+      const items = unreadOnly ? source.filter((x) => !x.read) : source;
       return res.status(200).json({ items });
     } catch (err) {
       if (err?.message !== "missing bearer" && err?.message !== "invalid token") console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, err);
@@ -5002,6 +5034,12 @@ async function main() {
         body: `${viewer.displayName}在你的沙发上坐了一坐`,
         "loc-key": "notification_profile_stomp_format",
         "loc-args": [viewer.displayName],
+      }, {
+        type: "profile_stomp",
+        fromUserID: viewer.id,
+      }, {
+        // Repeat visits from the same friend collapse into one banner.
+        collapseId: pushCollapseID("stomp", viewer.id),
       });
       return res.status(200).json({ ok: true, message: `已踩一踩 ${target.displayName} 的主页` });
     } catch (err) {

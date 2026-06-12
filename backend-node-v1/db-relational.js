@@ -873,8 +873,12 @@ async function getPushTokens(pool, userID) {
 }
 
 async function countUnreadNotifications(pool, userID) {
+  // 30-day window matches the client inbox cutoff so the APNs badge number
+  // and the in-app unread count agree; older unread rows would otherwise
+  // inflate the badge forever (they are invisible in the app and can never
+  // be individually marked read).
   const { rows } = await pool.query(
-    "SELECT COUNT(*)::int AS cnt FROM notifications WHERE user_id = $1 AND read = false",
+    "SELECT COUNT(*)::int AS cnt FROM notifications WHERE user_id = $1 AND read = false AND created_at >= NOW() - INTERVAL '30 days'",
     [userID]
   );
   return rows[0]?.cnt ?? 0;
@@ -1152,6 +1156,18 @@ async function markThreadRead(pool, threadKey, recipientID) {
   return rowCount;
 }
 
+// Keeps the two unread tracks consistent: reading a comment thread also
+// clears the matching inbox notifications, so the bell badge doesn't keep
+// counting comments the user has already seen in the thread.
+async function markJourneyCommentNotificationsRead(pool, userID, journeyID, fromUserID) {
+  await pool.query(
+    `UPDATE notifications SET read = true
+     WHERE user_id = $1 AND type = 'journey_comment'
+       AND journey_id = $2 AND from_user_id = $3 AND read = false`,
+    [userID, journeyID, fromUserID]
+  );
+}
+
 async function softDeleteJourneyComment(pool, id, senderID) {
   const { rowCount } = await pool.query(
     `UPDATE journey_comments
@@ -1299,6 +1315,7 @@ module.exports = {
   getThreadMessages,
   getOwnerThreadSummaries,
   markThreadRead,
+  markJourneyCommentNotificationsRead,
   softDeleteJourneyComment,
   getJourneyCommentUnreadSummary,
 

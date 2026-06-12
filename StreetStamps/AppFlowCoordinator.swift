@@ -37,6 +37,8 @@ final class AppFlowCoordinator: ObservableObject {
     @Published private(set) var pendingModalDestination: ModalNavDestination?
     @Published private(set) var pendingJourneyCommentLink: JourneyCommentDeepLink?
     @Published private(set) var openJourneyCommentSignal: Int = 0
+    @Published private(set) var pendingFriendsHubRoute: FriendsHubPushRoute?
+    @Published private(set) var openFriendsHubRouteSignal: Int = 0
     @Published private(set) var sidebarHiddenTokens: Set<String> = []
     @Published private(set) var requestedTab: NavigationTab?
     @Published private(set) var requestedCollectionPage: Int?
@@ -83,6 +85,20 @@ final class AppFlowCoordinator: ObservableObject {
 
     func consumePendingJourneyCommentLink() {
         pendingJourneyCommentLink = nil
+    }
+
+    /// Routes an APNs tap on a social notification to the Friends hub,
+    /// mirroring what tapping the same item in the in-app inbox does.
+    /// Selecting the Friends tab and parking the route here lets
+    /// FriendsHubView consume it on appear even if it isn't mounted yet.
+    func requestOpenFriendsHubRoute(_ route: FriendsHubPushRoute) {
+        pendingFriendsHubRoute = route
+        openFriendsHubRouteSignal += 1
+        requestSelectTab(.friends)
+    }
+
+    func consumePendingFriendsHubRoute() {
+        pendingFriendsHubRoute = nil
     }
 
     func requestSelectTab(_ tab: NavigationTab) {
@@ -132,6 +148,14 @@ struct FriendInviteIntent: Equatable {
 struct PostcardInboxIntent: Equatable {
     var box: String
     var messageID: String?
+}
+
+/// Friends-hub destination of a social push tap. Mirrors the private
+/// `FriendsRoute` cases the inbox rows navigate to.
+enum FriendsHubPushRoute: Equatable {
+    case myJourney(journeyID: String)
+    case friendProfile(friendID: String)
+    case friendRequests
 }
 
 @MainActor

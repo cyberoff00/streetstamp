@@ -110,7 +110,7 @@ function sendPush(deviceToken, payload, options = {}) {
  * Send a push to multiple device tokens for a user.
  * Removes invalid tokens via the provided cleanup callback.
  */
-async function sendToUser(tokens, alert, data, onInvalidToken, badge) {
+async function sendToUser(tokens, alert, data, onInvalidToken, badge, options = {}) {
   if (!isConfigured() || !tokens?.length) return;
 
   const payload = {
@@ -124,7 +124,7 @@ async function sendToUser(tokens, alert, data, onInvalidToken, badge) {
 
   for (const { token } of tokens) {
     try {
-      const result = await sendPush(token, payload);
+      const result = await sendPush(token, payload, options);
       if (!result.success) {
         console.log(`[APNs] push failed token=${token.slice(0, 8)}... status=${result.status} reason=${result.reason}`);
         // Clean up invalid/unregistered tokens

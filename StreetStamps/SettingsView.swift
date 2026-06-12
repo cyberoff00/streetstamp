@@ -513,6 +513,11 @@ struct SettingsView: View {
         .alert(L10n.t("settings_logout_confirm_title"), isPresented: $showLogoutConfirmation) {
             Button(L10n.t("cancel"), role: .cancel) {}
             Button(L10n.t("settings_logout"), role: .destructive) {
+                // Unbind this device from the account before the session drops,
+                // otherwise the device keeps receiving the old account's pushes.
+                AppNotificationDelegate.unregisterPushTokenFromServer(
+                    accessToken: sessionStore.currentAccessToken
+                )
                 sessionStore.logoutToGuest()
                 displayNameDraft = ""
                 displayNameInput = ""
