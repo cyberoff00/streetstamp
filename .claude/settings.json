@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(xcodebuild *)",
-      "Bash(npm test)"
+      "Bash(npm test)",
+      "Bash(curl -s *)",
+      "Bash(xcrun swiftc *)",
+      "Bash(node --check *)",
+      "Bash(node -c *)"
     ]
   }
 }
