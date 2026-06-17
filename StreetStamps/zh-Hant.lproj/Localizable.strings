@@ -985,6 +985,15 @@
 "membership_refund_processed_message" = "你的訂閱退款已處理完成。訂閱贈送的歡迎獎勵金幣（1500）已收回；你透過步數等正常獲得的金幣不受影響。";
 "membership_refund_processed_ok" = "知道了";
 "membership_auto_renew_note" = "訂閱自動續期，可隨時在「設定」中取消。";
+"membership_plan_lifetime" = "買斷";
+"membership_lifetime_badge" = "一次買斷";
+"membership_cta_lifetime" = "買斷永久會員";
+"membership_lifetime_note" = "一次性買斷，非訂閱，不會自動續費。";
+"membership_lifetime_expiry" = "永久";
+"membership_cancel_sub_reminder_title" = "請取消自動訂閱";
+"membership_cancel_sub_reminder_message" = "你已買斷永久會員。為避免重複扣費，請記得在「設定」中取消正在自動續期的訂閱。";
+"membership_cancel_sub_reminder_manage" = "管理訂閱";
+"membership_cancel_sub_reminder_later" = "稍後";
 "membership_welcome_bonus_title" = "歡迎獎勵！";
 "membership_welcome_bonus_message" = "已贈送 %d 金幣，快去買裝備裝扮自己吧！";
 "membership_welcome_bonus_ok" = "知道了";
@@ -1323,3 +1332,74 @@
 "coin_rules_premium_body" = "Premium 會員每次走路獲得 5 倍金幣。";
 "coin_rules_spend_title" = "購買裝備";
 "coin_rules_spend_body" = "用金幣在裝備商店解鎖和試穿裝備。";
+
+/* MARK: - 你的小世界 / Your Small World (足跡回溯) */
+"footprint_title" = "足跡";
+"smallworld_hero_format" = "你 %d%% 的人生，\n都發生在方圓 %@ 之內。";
+"smallworld_hero_caption" = "不是你去過多少地方，\n而是有多少地方，記得你。";
+"smallworld_places_title" = "你總是回來的地方";
+"smallworld_visit_days_format" = "回來過 %d 天";
+"smallworld_center_label" = "你的中心";
+"smallworld_from_center_format" = "離中心 %@";
+"smallworld_place_fallback" = "常去的一帶";
+"smallworld_reunion_title" = "重逢";
+"smallworld_ordinary_day" = "一個普通的日子";
+"smallworld_mood_happy" = "心情不錯";
+"smallworld_mood_notbad" = "還算平靜";
+"smallworld_mood_sad" = "有些低落";
+"smallworld_reunion_body_format" = "那天你%@，在這一帶停留了一會兒。";
+"smallworld_reunion_body_plain" = "一個普通的日子，你也在好好生活。";
+"smallworld_footer_format" = "在 %d 天的日子裡，你走過了 %d 個地方。";
+"smallworld_empty_title" = "你的小世界正在浮現";
+"smallworld_empty_body" = "再多記錄幾天，\n這裡會慢慢長出你的生活。";
+"unit_km_format" = "%@ 公里";
+"unit_meters_format" = "%d 米";
+"globe_theme_dark" = "深色";
+"globe_theme_light" = "淺色";
+"globe_theme_standard" = "標準";
+"globe_theme_satellite" = "衛星";
+"globe_theme_outdoors" = "戶外";
+"globe_theme_streets" = "街道";
+"globe_visited_summary" = "去過 %d 個國家 · %d 個城市";
+
+"smallworld_hero_anchor_format" = "以 %@ 為中心";
+
+/* MARK: - Footprint facts (你的小世界 final) */
+"fp_coverage_format" = "去過 %d 國 · %d 城";
+"fp_tap_globe" = "點擊查看";
+"fp_card_newcity_title" = "上次去新城市";
+"fp_card_newcity_body" = "%@，你第一次到了 %@。";
+"fp_card_farthest_title" = "最遠的旅程";
+"fp_card_farthest_body" = "你走得最遠的一次到了 %@。";
+"fp_card_farthest_dist" = "離你現在 %@ · %@";
+"fp_card_totals_title" = "旅程總計";
+"fp_card_totals_body" = "你已完成 %d 次旅程，共走了 %@。";
+"fp_card_newarea_title" = "新區域";
+"fp_card_newarea_body" = "%@，你在 %@ 走到了一個新角落 %@。";
+"fp_reunion_lead" = "重溫那一天";
+"fp_empty_title" = "你的第一段足跡，從這裡開始";
+"fp_empty_body" = "出門走走，點亮你的第一個國家。";
+"fp_today" = "今天";
+"fp_yesterday" = "昨天";
+"fp_days_ago" = "%d 天前";
+"fp_somewhere" = "遠方";
+
+"fp_card_newarea_body_plain" = "%@，你在 %@ 發現了一個沒去過的地方。";
+
+/* MARK: - Globe share poster */
+"globe_poster_title" = "我的世界";
+"globe_poster_countries" = "國家";
+"globe_poster_cities" = "城市";
+
+/* MARK: - Footprint recency facts */
+"fp_card_explore_current" = "你上一次在 %@ 探索是 %@";
+"fp_card_other_city" = "你上一次去 %@ 是 %@";
+
+/* MARK: - Footprint timeline + stats */
+"fp_tl_explore" = "上一次在 %@ 同城探索";
+"fp_tl_other" = "上一次去 %@";
+"fp_tl_newcity" = "第一次到 %@";
+"fp_stat_journeys" = "旅程";
+"fp_stat_distance" = "里程";
+
+"fp_map_summary_format" = "%d 次旅程 · %@";

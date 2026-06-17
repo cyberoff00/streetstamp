@@ -160,12 +160,28 @@ final class MembershipStore: NSObject, ObservableObject {
     @Published private(set) var tier: MembershipTier = .free
     @Published private(set) var expirationDate: Date?
 
+    /// True when premium is held via the one-time lifetime buyout rather than an
+    /// auto-renewing subscription. Lifetime has no expiration date, so the UI
+    /// shows "Lifetime" instead of an expiry and suppresses the auto-renew copy.
+    @Published private(set) var isLifetime: Bool = false
+
+    /// True when the user still has a live auto-renewing subscription (monthly or
+    /// yearly), independent of which product currently backs the entitlement.
+    /// Drives the "you bought lifetime — cancel your subscription" reminder so a
+    /// buyout customer isn't silently charged twice.
+    @Published private(set) var hasActiveAutoRenewingSubscription = false
+
+    /// Set right after a lifetime purchase when an auto-renewing subscription is
+    /// still active, so the view can present a one-shot cancel reminder.
+    @Published var showCancelSubscriptionReminder = false
+
     /// Set when a refund is detected so the UI can present a notice that
     /// the welcome bonus coins have been clawed back.
     @Published var showRefundProcessedAlert = false
 
     private let tierKey = "streetstamps.membership.tier"
     private let expirationKey = "streetstamps.membership.expiration"
+    private let lifetimeKey = "streetstamps.membership.lifetime"
     private let sandboxPurchasedOnceKey = "streetstamps.membership.sandbox_purchased_once"
     nonisolated static let welcomeBonusGrantedKey = "streetstamps.membership.welcome_bonus_granted"
 
@@ -207,6 +223,7 @@ final class MembershipStore: NSObject, ObservableObject {
         if let ts = UserDefaults.standard.object(forKey: expirationKey) as? Double, ts > 0 {
             expirationDate = Date(timeIntervalSince1970: ts)
         }
+        isLifetime = UserDefaults.standard.bool(forKey: lifetimeKey)
 
         Purchases.shared.delegate = self
 
@@ -254,6 +271,12 @@ final class MembershipStore: NSObject, ObservableObject {
     static let subscriptionProductID = "com.streetstamps.premium.monthly"
     static let yearlyProductID = "com.streetstamps.premium.yearly"
 
+    /// One-time lifetime buyout. Configured in App Store Connect as a
+    /// NON-CONSUMABLE (not an auto-renewable subscription) and attached to the
+    /// same `premium` RevenueCat entitlement. A non-consumable reports no
+    /// expiration date and `willRenew == false`; both are handled below.
+    static let lifetimeProductID = "com.streetstamps.premium.forever"
+
     /// Check current entitlement on launch or after purchase.
     /// Source of truth is RevenueCat's customerInfo, which reflects Apple's
     /// real-time subscription state across devices and survives transient
@@ -280,17 +303,27 @@ final class MembershipStore: NSObject, ObservableObject {
         let isActive = entitlement?.isActive == true
         let isSandbox = Self.isSandboxEnvironment
 
+        // A live auto-renewing subscription, regardless of which product backs
+        // the entitlement right now. After a lifetime buyout this stays true
+        // until the user actually cancels in App Store settings, which is what
+        // the cancel reminder watches.
+        hasActiveAutoRenewingSubscription = !info.activeSubscriptions
+            .isDisjoint(with: [Self.subscriptionProductID, Self.yearlyProductID])
+
         if isActive, let entitlement = entitlement {
             let wasFreeBefore = tier == .free
+            // Lifetime is a non-consumable: no expiration, willRenew == false.
+            let isLifetimePurchase = entitlement.productIdentifier == Self.lifetimeProductID
             var expiration = entitlement.expirationDate
-            if isSandbox {
+            if isSandbox && !isLifetimePurchase {
                 // Reviewer/tester completed a real purchase flow — extend the
                 // 5-minute sandbox window to 30 days so they keep premium for
-                // the rest of the session. See sandboxGrantSeconds doc.
+                // the rest of the session. See sandboxGrantSeconds doc. Lifetime
+                // never expires, so it needs no sandbox extension.
                 expiration = Date().addingTimeInterval(Self.sandboxGrantSeconds)
                 UserDefaults.standard.set(true, forKey: sandboxPurchasedOnceKey)
             }
-            applyTier(.premium, expiration: expiration)
+            applyTier(.premium, expiration: expiration, lifetime: isLifetimePurchase)
             if wasFreeBefore {
                 autoEnableICloudSyncIfNeeded()
                 // Strategy A: skip the welcome bonus when the entitlement
@@ -298,8 +331,10 @@ final class MembershipStore: NSObject, ObservableObject {
                 // gifts) typically activate as non-renewing — we still give
                 // them premium access but withhold the 1500-coin freebie that
                 // would otherwise dilute the gear economy. Trials and intro
-                // offers still set willRenew=true and remain eligible.
-                if !welcomeBonusGranted && entitlement.willRenew {
+                // offers still set willRenew=true and remain eligible. The
+                // lifetime buyout is a real paid purchase, so it qualifies even
+                // though a non-consumable never renews.
+                if !welcomeBonusGranted && (entitlement.willRenew || isLifetimePurchase) {
                     awardWelcomeBonus()
                 }
             }
@@ -318,6 +353,13 @@ final class MembershipStore: NSObject, ObservableObject {
         // inactive, but the entitlement's recorded expiration date is still
         // in the future → refund or family sharing removal. Coins clawed back.
         let wasPremium = tier == .premium
+        // Lifetime has no expiration, so the recorded-expiry check below can't
+        // catch a refund. An inactive entitlement on a previously-lifetime user
+        // means the non-consumable was refunded → revoke and claw back.
+        if wasPremium && isLifetime {
+            handleRevocation()
+            return
+        }
         if wasPremium, let recordedExp = entitlement?.expirationDate, recordedExp > Date() {
             handleRevocation()
             return
@@ -400,7 +442,15 @@ final class MembershipStore: NSObject, ObservableObject {
         let result = try await Purchases.shared.purchase(product: storeProduct)
         if result.userCancelled { return false }
         applyCustomerInfo(result.customerInfo)
-        return result.customerInfo.entitlements[Self.entitlementID]?.isActive == true
+        let active = result.customerInfo.entitlements[Self.entitlementID]?.isActive == true
+        // Apple does not auto-cancel an existing subscription when the user buys
+        // the lifetime non-consumable. If one is still renewing, prompt them to
+        // cancel so they aren't charged on top of a purchase they already own
+        // forever. `applyCustomerInfo` above refreshed hasActiveAutoRenewingSubscription.
+        if active, product.id == Self.lifetimeProductID, hasActiveAutoRenewingSubscription {
+            showCancelSubscriptionReminder = true
+        }
+        return active
     }
 
     /// Restore purchases on demand (Settings / paywall "Restore" button).
@@ -424,11 +474,13 @@ final class MembershipStore: NSObject, ObservableObject {
 
     // MARK: - Internal
 
-    private func applyTier(_ newTier: MembershipTier, expiration: Date?) {
+    private func applyTier(_ newTier: MembershipTier, expiration: Date?, lifetime: Bool = false) {
         let wasPremium = (tier == .premium)
         tier = newTier
         expirationDate = expiration
+        isLifetime = (newTier == .premium) && lifetime
         UserDefaults.standard.set(newTier.rawValue, forKey: tierKey)
+        UserDefaults.standard.set(isLifetime, forKey: lifetimeKey)
         if let exp = expiration {
             UserDefaults.standard.set(exp.timeIntervalSince1970, forKey: expirationKey)
         } else {

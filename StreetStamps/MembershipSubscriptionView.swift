@@ -91,6 +91,21 @@ struct MembershipSubscriptionView: View {
         } message: {
             Text(L10n.t("membership_refund_processed_message"))
         }
+        .alert(
+            L10n.t("membership_cancel_sub_reminder_title"),
+            isPresented: $membership.showCancelSubscriptionReminder
+        ) {
+            Button(L10n.t("membership_cancel_sub_reminder_manage")) {
+                Task {
+                    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+                        try? await AppStore.showManageSubscriptions(in: windowScene)
+                    }
+                }
+            }
+            Button(L10n.t("membership_cancel_sub_reminder_later"), role: .cancel) {}
+        } message: {
+            Text(L10n.t("membership_cancel_sub_reminder_message"))
+        }
         .onAppear { triggerICloudAutoEnableAlertIfPending() }
         .onChange(of: membership.pendingICloudAutoEnableNotice) { _, pending in
             if pending { triggerICloudAutoEnableAlertIfPending() }
@@ -145,13 +160,19 @@ struct MembershipSubscriptionView: View {
                     id: MembershipStore.subscriptionProductID,
                     name: L10n.t("membership_plan_monthly"),
                     price: "$2.99",
-                    isYearly: false
+                    badge: nil
                 )
                 fallbackPlanCard(
                     id: MembershipStore.yearlyProductID,
                     name: L10n.t("membership_plan_yearly"),
                     price: "$19.99",
-                    isYearly: true
+                    badge: L10n.t("membership_save_badge")
+                )
+                fallbackPlanCard(
+                    id: MembershipStore.lifetimeProductID,
+                    name: L10n.t("membership_plan_lifetime"),
+                    price: "$34.99",
+                    badge: L10n.t("membership_lifetime_badge")
                 )
             } else {
                 ProgressView()
@@ -166,7 +187,7 @@ struct MembershipSubscriptionView: View {
     private func planCardBody(
         name: String,
         price: String,
-        isYearly: Bool,
+        badge: String?,
         isSelected: Bool
     ) -> some View {
         HStack(alignment: .center, spacing: 0) {
@@ -183,8 +204,8 @@ struct MembershipSubscriptionView: View {
                     .minimumScaleFactor(0.7)
             }
             Spacer(minLength: 8)
-            if isYearly {
-                planBadge(L10n.t("membership_save_badge"), bg: FigmaTheme.secondary.opacity(0.5))
+            if let badge {
+                planBadge(badge, bg: FigmaTheme.secondary.opacity(0.5))
             }
         }
         .padding(.horizontal, 18)
@@ -209,26 +230,35 @@ struct MembershipSubscriptionView: View {
             .clipShape(Capsule())
     }
 
-    private func fallbackPlanCard(id: String, name: String, price: String, isYearly: Bool) -> some View {
+    private func fallbackPlanCard(id: String, name: String, price: String, badge: String?) -> some View {
         let isSelected = selectedProductID == id
         return Button {
             selectedProductID = id
         } label: {
-            planCardBody(name: name, price: price, isYearly: isYearly, isSelected: isSelected)
+            planCardBody(name: name, price: price, badge: badge, isSelected: isSelected)
         }
         .buttonStyle(.plain)
     }
 
+    /// Badge shown on the right of a plan card: "SAVE" for yearly, a one-time
+    /// marker for the lifetime buyout, nothing for monthly.
+    private func planBadgeText(for productID: String) -> String? {
+        switch productID {
+        case MembershipStore.yearlyProductID:   return L10n.t("membership_save_badge")
+        case MembershipStore.lifetimeProductID: return L10n.t("membership_lifetime_badge")
+        default:                                return nil
+        }
+    }
+
     private func planCard(product: Product) -> some View {
         let isSelected = selectedProductID == product.id
-        let isYearly = product.id == MembershipStore.yearlyProductID
         return Button {
             selectedProductID = product.id
         } label: {
             planCardBody(
                 name: product.displayName,
                 price: product.displayPrice,
-                isYearly: isYearly,
+                badge: planBadgeText(for: product.id),
                 isSelected: isSelected
             )
         }
@@ -491,7 +521,9 @@ struct MembershipSubscriptionView: View {
                 }
             }
 
-            Text(L10n.t("membership_auto_renew_note"))
+            Text(isLifetimeSelected
+                 ? L10n.t("membership_lifetime_note")
+                 : L10n.t("membership_auto_renew_note"))
                 .font(.system(size: 11))
                 .foregroundColor(FigmaTheme.subtext.opacity(0.7))
                 .multilineTextAlignment(.center)
@@ -530,14 +562,19 @@ struct MembershipSubscriptionView: View {
         )
     }
 
+    private var isLifetimeSelected: Bool {
+        selectedProductID == MembershipStore.lifetimeProductID
+    }
+
     private var stickyButtonLabel: String {
         guard let id = selectedProductID else {
             return L10n.t("membership_subscribe_button")
         }
-        if id == MembershipStore.yearlyProductID {
-            return L10n.t("membership_cta_yearly")
+        switch id {
+        case MembershipStore.yearlyProductID:   return L10n.t("membership_cta_yearly")
+        case MembershipStore.lifetimeProductID: return L10n.t("membership_cta_lifetime")
+        default:                                return L10n.t("membership_cta_monthly")
         }
-        return L10n.t("membership_cta_monthly")
     }
 
     // MARK: - Active Benefits Card (premium users)
@@ -572,7 +609,11 @@ struct MembershipSubscriptionView: View {
                     .font(.system(size: 13, weight: .bold))
                     .foregroundColor(FigmaTheme.subtext)
                 Spacer()
-                if let exp = membership.expirationDate {
+                if membership.isLifetime {
+                    Text(L10n.t("membership_lifetime_expiry"))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(FigmaTheme.primary)
+                } else if let exp = membership.expirationDate {
                     let formatter: DateFormatter = {
                         let f = DateFormatter()
                         f.dateStyle = .medium
@@ -610,6 +651,24 @@ struct MembershipSubscriptionView: View {
                 }
             }
 
+            if membership.isLifetime && membership.hasActiveAutoRenewingSubscription {
+                FigmaTheme.border.frame(height: 1)
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(.orange)
+                        .padding(.top, 1)
+                    Text(L10n.t("membership_cancel_sub_reminder_message"))
+                        .font(.system(size: 13))
+                        .foregroundColor(FigmaTheme.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(Color.orange.opacity(0.08))
+            }
+
             FigmaTheme.border.frame(height: 1)
             Button {
                 Task {
@@ -618,9 +677,12 @@ struct MembershipSubscriptionView: View {
                     }
                 }
             } label: {
-                Text(L10n.t("membership_manage_subscription"))
+                Text(membership.isLifetime && membership.hasActiveAutoRenewingSubscription
+                     ? L10n.t("membership_cancel_sub_reminder_manage")
+                     : L10n.t("membership_manage_subscription"))
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(FigmaTheme.subtext)
+                    .foregroundColor(membership.isLifetime && membership.hasActiveAutoRenewingSubscription
+                                     ? .orange : FigmaTheme.subtext)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
             }
@@ -638,7 +700,8 @@ struct MembershipSubscriptionView: View {
     private func loadProducts() async {
         let ids: Set<String> = [
             MembershipStore.subscriptionProductID,
-            MembershipStore.yearlyProductID
+            MembershipStore.yearlyProductID,
+            MembershipStore.lifetimeProductID
         ]
         do {
             let loaded = try await Product.products(for: ids)

@@ -379,7 +379,14 @@ struct StreetStampsApp: App {
 
     @ViewBuilder
     private var mainEntryContent: some View {
-        if hasSeenIntroSlides {
+        // TEMP (screenshot scaffold — revert): launch with `-SHOW_PAYWALL` to
+        // root directly at the subscription paywall for App Store review captures.
+        if CommandLine.arguments.contains("-SHOW_PAYWALL") {
+            NavigationStack {
+                MembershipSubscriptionView()
+                    .environmentObject(MembershipStore.shared)
+            }
+        } else if hasSeenIntroSlides {
             MainTabView()
         } else {
             IntroSlidesView {

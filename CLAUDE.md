@@ -227,17 +227,17 @@
 
 #### iOS Build
 ```bash
-xcodebuild build -scheme StreetStamps -project StreetStamps.xcodeproj -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.3.1'
+xcodebuild build -scheme StreetStamps -project StreetStamps.xcodeproj -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5'
 ```
 
 #### Focused iOS Test Pattern
 ```bash
-xcodebuild test -scheme StreetStamps -project StreetStamps.xcodeproj -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.3.1' -only-testing:StreetStampsTests/<TestCaseName>
+xcodebuild test -scheme StreetStamps -project StreetStamps.xcodeproj -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' -only-testing:StreetStampsTests/<TestCaseName>
 ```
 
 #### Widget Build
 ```bash
-xcodebuild build -scheme TrackingWidgeExtension -project StreetStamps.xcodeproj -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.3.1'
+xcodebuild build -scheme TrackingWidgeExtension -project StreetStamps.xcodeproj -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5'
 ```
 
 #### Backend

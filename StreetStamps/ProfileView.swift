@@ -406,9 +406,8 @@ struct ProfileView: View {
                 .buttonStyle(.plain)
             }
 
-            Button {
-                flow.requestSelectCollectionPage(0)
-                flow.requestSelectTab(.cities)
+            NavigationLink {
+                FootprintView()
             } label: {
                 collectionTile
             }

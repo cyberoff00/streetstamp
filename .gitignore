@@ -14,3 +14,4 @@ build/postcard-status-test.*/
 
 # Local Xcode derived data used for test builds
 .dd_test/
+.claude/settings.local.json

@@ -2231,7 +2231,6 @@ private struct SettingsDebugToolsEntryView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var lifelogStore: LifelogStore
     @ObservedObject private var weatherService = WeatherService.shared
-    @State private var showingFogGlobeDemo = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -2239,15 +2238,9 @@ private struct SettingsDebugToolsEntryView: View {
                 lifelogStore.diagnosePassiveGaps()
             }
             .padding()
-            Button("Fog Globe Demo (flicker test)") {
-                showingFogGlobeDemo = true
-            }
             .padding(.bottom)
             DebugChinaTestModule()
             DebugWeatherOverrideSection(weatherService: weatherService)
-        }
-        .fullScreenCover(isPresented: $showingFogGlobeDemo) {
-            FogGlobeDemoView()
         }
             .safeAreaInset(edge: .top, spacing: 0) {
                 UnifiedNavigationHeader(

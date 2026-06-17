@@ -1,12 +1,10 @@
 {
+  "env": {
+    "DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer"
+  },
   "permissions": {
     "allow": [
-      "Bash(xcodebuild *)",
-      "Bash(npm test)",
-      "Bash(curl -s *)",
-      "Bash(xcrun swiftc *)",
-      "Bash(node --check *)",
-      "Bash(node -c *)"
+      "Bash(*)"
     ]
   }
 }

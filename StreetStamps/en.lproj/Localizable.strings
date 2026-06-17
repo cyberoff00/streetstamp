@@ -1140,6 +1140,15 @@
 "membership_refund_processed_message" = "Your subscription refund has been processed. The welcome bonus coins (1500) granted with the subscription have been reclaimed; coins you earned from steps and other normal activity are unaffected.";
 "membership_refund_processed_ok" = "OK";
 "membership_auto_renew_note" = "Subscription auto-renews. Cancel anytime in Settings.";
+"membership_plan_lifetime" = "Lifetime";
+"membership_lifetime_badge" = "ONE-TIME";
+"membership_cta_lifetime" = "Unlock Lifetime Premium";
+"membership_lifetime_note" = "One-time purchase. No subscription, no auto-renewal.";
+"membership_lifetime_expiry" = "Lifetime";
+"membership_cancel_sub_reminder_title" = "Cancel Your Subscription";
+"membership_cancel_sub_reminder_message" = "You now own lifetime premium. To avoid being charged again, remember to cancel your active auto-renewing subscription.";
+"membership_cancel_sub_reminder_manage" = "Manage Subscription";
+"membership_cancel_sub_reminder_later" = "Later";
 "membership_welcome_bonus_title" = "Welcome Bonus!";
 "membership_welcome_bonus_message" = "You've received %d coins! Go get some gear and customize your look!";
 "membership_welcome_bonus_ok" = "Got it";
@@ -1365,3 +1374,74 @@
 "coin_rules_premium_body" = "Premium members earn 5× the coins on every walk.";
 "coin_rules_spend_title" = "Spend on gear";
 "coin_rules_spend_body" = "Use coins to unlock and try on equipment in the shop.";
+
+/* MARK: - 你的小世界 / Your Small World (footprint retrospective) */
+"footprint_title" = "Footprints";
+"smallworld_hero_format" = "%d%% of your life\nunfolds within %@ of home.";
+"smallworld_hero_caption" = "Not how far you've gone —\nhow many places remember you.";
+"smallworld_places_title" = "Where you keep coming back";
+"smallworld_visit_days_format" = "%d days here";
+"smallworld_center_label" = "Your center";
+"smallworld_from_center_format" = "%@ from center";
+"smallworld_place_fallback" = "A familiar place";
+"smallworld_reunion_title" = "Reunion";
+"smallworld_ordinary_day" = "an ordinary day";
+"smallworld_mood_happy" = "in good spirits";
+"smallworld_mood_notbad" = "feeling calm";
+"smallworld_mood_sad" = "a little down";
+"smallworld_reunion_body_format" = "That day you were %@, lingering around here for a while.";
+"smallworld_reunion_body_plain" = "An ordinary day — and you were living it, fully.";
+"smallworld_footer_format" = "Across %d days, you moved through %d places.";
+"smallworld_empty_title" = "Your small world is taking shape";
+"smallworld_empty_body" = "Keep recording a few more days,\nand your life will surface here.";
+"unit_km_format" = "%@ km";
+"unit_meters_format" = "%d m";
+"globe_theme_dark" = "Dark";
+"globe_theme_light" = "Light";
+"globe_theme_standard" = "Standard";
+"globe_theme_satellite" = "Satellite";
+"globe_theme_outdoors" = "Outdoors";
+"globe_theme_streets" = "Streets";
+"globe_visited_summary" = "Been to %d countries · %d cities";
+
+"smallworld_hero_anchor_format" = "centered on %@";
+
+/* MARK: - Footprint facts (你的小世界 final) */
+"fp_coverage_format" = "%d countries · %d cities";
+"fp_tap_globe" = "Tap to explore";
+"fp_card_newcity_title" = "Last new city";
+"fp_card_newcity_body" = "%@, you first set foot in %@.";
+"fp_card_farthest_title" = "Farthest journey";
+"fp_card_farthest_body" = "Your farthest journey reached %@.";
+"fp_card_farthest_dist" = "%@ from you now · %@";
+"fp_card_totals_title" = "All your journeys";
+"fp_card_totals_body" = "You've completed %d journeys — %@ in all.";
+"fp_card_newarea_title" = "A new corner";
+"fp_card_newarea_body" = "%@, you reached a new corner of %@: %@.";
+"fp_reunion_lead" = "Relive that day";
+"fp_empty_title" = "Your first footprint starts here";
+"fp_empty_body" = "Take a walk — light up your first country.";
+"fp_today" = "Today";
+"fp_yesterday" = "Yesterday";
+"fp_days_ago" = "%d days ago";
+"fp_somewhere" = "somewhere far";
+
+"fp_card_newarea_body_plain" = "%@, you reached an unexplored corner of %@.";
+
+/* MARK: - Globe share poster */
+"globe_poster_title" = "MY WORLD";
+"globe_poster_countries" = "Countries";
+"globe_poster_cities" = "Cities";
+
+/* MARK: - Footprint recency facts */
+"fp_card_explore_current" = "You last explored %@ %@.";
+"fp_card_other_city" = "You last visited %@ %@.";
+
+/* MARK: - Footprint timeline + stats */
+"fp_tl_explore" = "Last explored around %@";
+"fp_tl_other" = "Last went to %@";
+"fp_tl_newcity" = "First reached %@";
+"fp_stat_journeys" = "Journeys";
+"fp_stat_distance" = "Distance";
+
+"fp_map_summary_format" = "%d journeys · %@";

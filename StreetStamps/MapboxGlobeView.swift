@@ -1,6 +1,6 @@
 import SwiftUI
 import Combine
-import MapboxMaps
+@_spi(Restricted) import MapboxMaps
 import Turf
 import CoreLocation
 import UIKit
@@ -81,8 +81,14 @@ struct MapboxGlobeView: View {
 
     @StateObject private var mapHolder = GlobeMapViewHolder()
     @State private var didSetup = false
+    @State private var preserveCameraOnNextStyleLoad = false
 
     @EnvironmentObject private var cityCache: CityCache
+
+    /// Selected base-map style. Shared with the picker in GlobeViewScreen via
+    /// the same AppStorage key, so changing it there reloads the style here.
+    @AppStorage("streetstamps.globe.mapTheme") private var themeID = GlobeMapTheme.defaultID
+    private var currentTheme: GlobeMapTheme { GlobeMapTheme.theme(for: themeID) }
 
     // ====== IDs ======
     private let countriesSourceId = "ss-countries-source"
@@ -132,38 +138,25 @@ struct MapboxGlobeView: View {
                     print("🔵 [Globe] onChange styleLoadRevision: \(rev)")
                     Task { await refreshData() }
                     updateCountryGlow()
-                    flyToJourneysIfPossible()
-                }
-
-            // Top bar
-            VStack {
-                HStack {
-                    if showsCloseButton {
-                        AppCloseButton(style: .circleDark) {
-                            isPresented = false
-                        }
+                    // Don't re-frame on a theme reload — keep the user's view.
+                    if preserveCameraOnNextStyleLoad {
+                        preserveCameraOnNextStyleLoad = false
                     } else {
-                        Color.clear.frame(width: 44, height: 44)
+                        flyToJourneysIfPossible()
                     }
-
-                    Spacer()
-
-                    Text(L10n.key("globe"))
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.9))
-
-                    Spacer()
-
-                    Color.clear.frame(width: 44, height: 44)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-
-                Spacer()
-            }
-
+                .onChange(of: themeID) { _, _ in
+                    // Theme switch = full style reload; preserve the camera so
+                    // the user stays where they were looking.
+                    print("🔵 [Globe] theme changed → \(themeID)")
+                    preserveCameraOnNextStyleLoad = true
+                    loadGlobeStyle(resetCamera: false)
+                }
+            // No in-map chrome — GlobeViewScreen owns the header (back + stats).
         }
-        .background(Color.black)
+        // Surround is always the app background — only the globe sphere's style
+        // changes between themes (the atmosphere paints the space app-white too).
+        .background(FigmaTheme.background)
     }
 
     private var mapView: MBMapView { mapHolder.mapView }
@@ -171,14 +164,33 @@ struct MapboxGlobeView: View {
     // MARK: - Setup
 
     private func setup() {
+        // Declutter the hero map: hide logo, attribution, scale bar and compass.
+        // TRADEOFF: Mapbox's Terms of Service require their attribution/logo to be
+        // shown. Hiding them here (per product request) means the required
+        // attribution MUST be surfaced elsewhere in the app (Settings/About) to
+        // stay compliant. Revisit if Mapbox flags the account.
+        mapView.ornaments.options.logo.visibility = .hidden
+        mapView.ornaments.options.attributionButton.visibility = .hidden
+        mapView.ornaments.options.scaleBar.visibility = .hidden
+        mapView.ornaments.options.compass.visibility = .hidden
+        loadGlobeStyle(resetCamera: true)
+    }
+
+    /// Loads (or reloads) the base style for the active theme, then rebuilds all
+    /// overlay layers with that theme's palette. A style reload wipes every
+    /// custom layer, so this same path serves the theme-switch case — only the
+    /// first setup resets the camera; a theme switch keeps the user's view.
+    private func loadGlobeStyle(resetCamera: Bool) {
         let holder = mapHolder
-        mapView.mapboxMap.loadStyle(.dark) { error in
+        mapView.mapboxMap.loadStyle(currentTheme.styleURI) { error in
             if let error { print("❌ Map style load error:", error) }
 
-            // far view camera (globe)
-            holder.mapView.mapboxMap.setCamera(
-                to: CameraOptions(center: CLLocationCoordinate2D(latitude: 20, longitude: 0), zoom: 1.1)
-            )
+            if resetCamera {
+                // far view camera — small globe with white margin around it
+                holder.mapView.mapboxMap.setCamera(
+                    to: CameraOptions(center: CLLocationCoordinate2D(latitude: 20, longitude: 0), zoom: 0.55)
+                )
+            }
 
             // globe projection (enable if available)
             do {
@@ -195,6 +207,7 @@ struct MapboxGlobeView: View {
             holder.mapView.gestures.options.panEnabled = true
 
             addFallbackBackground()
+            applyAppWhiteSpace()
             addSourcesAndLayers()
 
             // Signal style readiness via reference type — onChange will
@@ -205,12 +218,30 @@ struct MapboxGlobeView: View {
         }
     }
 
+    /// Paint the globe's surrounding space the app background colour and kill the
+    /// star field, so every theme's globe floats on app-white (been-style)
+    /// regardless of whether the base style is dark, light or satellite.
+    private func applyAppWhiteSpace() {
+        let appBG = StyleColor(UIColor(FigmaTheme.background))
+        var atmo = Atmosphere()
+        atmo.spaceColor = .constant(appBG)
+        atmo.color = .constant(appBG)
+        atmo.starIntensity = .constant(0.0)
+        // No horizon glow — a clean globe edge with no halo/光晕 around it.
+        atmo.horizonBlend = .constant(0.0)
+        do {
+            try mapView.mapboxMap.setAtmosphere(atmo)
+        } catch {
+            print("⚠️ setAtmosphere failed:", error)
+        }
+    }
+
     private func addFallbackBackground() {
         let map: MapboxMap = mapView.mapboxMap
         do {
             if !map.layerExists(withId: "ss-bg") {
                 var bg = BackgroundLayer(id: "ss-bg")
-                bg.backgroundColor = .constant(StyleColor(.black))
+                bg.backgroundColor = .constant(StyleColor(UIColor(FigmaTheme.background)))
                 bg.backgroundOpacity = .constant(1.0)
                 try map.addLayer(bg, layerPosition: .at(0))
             }
@@ -249,18 +280,6 @@ struct MapboxGlobeView: View {
             try? map.addSource(src)
         }
 
-        // --- City pin icon ---
-        do {
-            if map.image(withId: cityIconId) == nil {
-                let img = UIImage(systemName: "mappin.circle.fill")?
-                    .withTintColor(.white, renderingMode: .alwaysOriginal)
-                if let img {
-                    try map.addImage(img, id: cityIconId, sdf: false)
-                }
-            }
-        } catch {
-            print("⚠️ add city icon failed:", error)
-        }
 
 
         // --- Country fill layer (cyan; keep visible when zooming in) ---
@@ -269,16 +288,19 @@ struct MapboxGlobeView: View {
             fill.sourceLayer = "country_boundaries"
             // ✅ do NOT set maxZoom; we want it to remain visible
 
-            fill.fillColor = .constant(StyleColor(.cyan))
+            fill.fillColor = .constant(StyleColor(currentTheme.countryFill))
+            // Peak opacity is per-theme so busy bases (satellite) get a strong
+            // enough tint to be obvious, while clean bases stay subtle.
+            let maxOp = currentTheme.countryFillMaxOpacity
             fill.fillOpacity = .expression(Exp(.interpolate) {
                 Exp(.linear); Exp(.zoom)
-                0;  0.30
-                2;  0.28
-                6;  0.26
-                10; 0.24
-                14; 0.22
+                0;  maxOp
+                2;  maxOp * 0.93
+                6;  maxOp * 0.87
+                10; maxOp * 0.80
+                14; maxOp * 0.73
             })
-            fill.fillOutlineColor = .constant(StyleColor(UIColor.cyan.withAlphaComponent(0.45)))
+            fill.fillOutlineColor = .constant(StyleColor(currentTheme.countryFill.withAlphaComponent(0.45)))
 
             try? map.addLayer(fill)
         }
@@ -287,7 +309,7 @@ struct MapboxGlobeView: View {
         if !map.layerExists(withId: countriesBorderLayerId) {
             var border = LineLayer(id: countriesBorderLayerId, source: countriesSourceId)
             border.sourceLayer = "country_boundaries"
-            border.lineColor = .constant(StyleColor(UIColor.cyan.withAlphaComponent(0.95)))
+            border.lineColor = .constant(StyleColor(currentTheme.countryBorder))
             border.lineCap = .constant(.round)
             border.lineJoin = .constant(.round)
             border.lineOpacity = .expression(Exp(.interpolate) {
@@ -318,10 +340,10 @@ struct MapboxGlobeView: View {
             heat.heatmapColor = .expression(Exp(.interpolate) {
                 Exp(.linear); Exp(.heatmapDensity)
                 0; UIColor.clear
-                0.15; UIColor.systemRed.withAlphaComponent(0.06)
-                0.45; UIColor.systemRed.withAlphaComponent(0.16)
-                0.75; UIColor.systemRed.withAlphaComponent(0.28)
-                1.0; UIColor.systemRed.withAlphaComponent(0.42)
+                0.15; currentTheme.heatTint.withAlphaComponent(0.06)
+                0.45; currentTheme.heatTint.withAlphaComponent(0.16)
+                0.75; currentTheme.heatTint.withAlphaComponent(0.28)
+                1.0; currentTheme.heatTint.withAlphaComponent(0.42)
             })
 
             // ✅ remove red overlay per request
@@ -353,7 +375,7 @@ struct MapboxGlobeView: View {
             var glow = LineLayer(id: routesGlowLayerId, source: routesSourceId)
             glow.minZoom = 1.0
 
-            glow.lineColor = .constant(StyleColor(UIColor(red: 221.0 / 255.0, green: 247.0 / 255.0, blue: 161.0 / 255.0, alpha: 1.0)))
+            glow.lineColor = .constant(StyleColor(currentTheme.routeColor))
             glow.lineCap = .constant(.round)
             glow.lineJoin = .constant(.round)
 
@@ -392,7 +414,7 @@ struct MapboxGlobeView: View {
             var line = LineLayer(id: routesLayerId, source: routesSourceId)
             line.minZoom = 1.0
 
-            line.lineColor = .constant(StyleColor(UIColor(red: 221.0 / 255.0, green: 247.0 / 255.0, blue: 161.0 / 255.0, alpha: 1.0)))
+            line.lineColor = .constant(StyleColor(currentTheme.routeColor))
             line.lineCap = .constant(.round)
             line.lineJoin = .constant(.round)
 
@@ -420,67 +442,25 @@ struct MapboxGlobeView: View {
             try? map.addLayer(line)
         }
 
-        // --- Cities glow + pin (always visible, and kept above routes) ---
-        if !map.layerExists(withId: citiesGlowLayerId) {
-            var glow = CircleLayer(id: citiesGlowLayerId, source: citiesSourceId)
-
-            glow.circleColor = .constant(StyleColor(UIColor.cyan))
-            glow.circleBlur  = .expression(Exp(.interpolate) {
-                Exp(.linear); Exp(.zoom)
-                1.0; 0.95
-                4.0; 0.88
-                8.0; 0.82
-                14.0; 0.76
-            })
-            glow.circleRadius = .expression(Exp(.interpolate) {
-                Exp(.linear); Exp(.zoom)
-                1.0; 10
-                3.0; 14
-                8.0; 17
-                14.0; 19
-            })
-            glow.circleOpacity = .expression(Exp(.interpolate) {
-                Exp(.linear); Exp(.zoom)
-                1.0; 0.36
-                5.0; 0.34
-                10.0; 0.32
-                14.0; 0.30
-            })
-
-            try? map.addLayer(glow)
+        // --- City markers: a friendly balloon pin in the theme colour, tip
+        // anchored at the city. Re-generated per theme (style reload clears
+        // images), so the pin always matches the active highlight colour. ---
+        if map.image(withId: cityIconId) == nil {
+            try? map.addImage(currentTheme.cityPinImage(), id: cityIconId, sdf: false)
         }
-
         if !map.layerExists(withId: citiesLayerId) {
             var sym = SymbolLayer(id: citiesLayerId, source: citiesSourceId)
-
             sym.iconImage = .constant(.name(cityIconId))
+            sym.iconAnchor = .constant(.bottom)
             sym.iconAllowOverlap = .constant(true)
             sym.iconIgnorePlacement = .constant(true)
-
             sym.iconSize = .expression(Exp(.interpolate) {
                 Exp(.linear); Exp(.zoom)
-                1.0; 0.85
-                3.0; 0.82
-                8.0; 0.76
-                14.0; 0.72
+                1.0; 0.55
+                4.0; 0.66
+                10.0; 0.82
+                14.0; 0.92
             })
-
-            sym.iconOpacity = .expression(Exp(.interpolate) {
-                Exp(.linear); Exp(.zoom)
-                1.0; 0.95
-                8.0; 0.92
-                14.0; 0.90
-            })
-
-            sym.iconHaloColor = .constant(StyleColor(UIColor.cyan.withAlphaComponent(0.9)))
-            sym.iconHaloWidth = .expression(Exp(.interpolate) {
-                Exp(.linear); Exp(.zoom)
-                1.0; 1.6
-                8.0; 1.4
-                14.0; 1.3
-            })
-            sym.iconHaloBlur = .constant(0.8)
-
             try? map.addLayer(sym)
         }
     }
@@ -570,9 +550,11 @@ struct MapboxGlobeView: View {
     }
 
     private func resolvedWorldviewCode() -> String {
-        let supported: Set<String> = ["AR", "CN", "IN", "JP", "MA", "RS", "RU", "TR", "US"]
-        let region = Locale.current.region?.identifier.uppercased() ?? "US"
-        return supported.contains(region) ? region : "US"
+        // ALWAYS the China worldview, regardless of device region. As a
+        // China-domiciled app, the map must render Taiwan / disputed borders per
+        // the PRC viewpoint for every user — a device-locale-based worldview
+        // (e.g. "US") would show Taiwan separate from China, which is not allowed.
+        return "CN"
     }
 
     private func isoFromCityKey(_ cityKey: String?) -> String? {
@@ -858,8 +840,11 @@ struct MapboxGlobeView: View {
         samples.append(last)
 
         func q(_ c: CLLocationCoordinate2D) -> String {
-            let lat = Int((c.latitude * 2_000).rounded()) // ~55m
-            let lon = Int((c.longitude * 2_000).rounded())
+            // ~110m cells: repeated walks of the same street (with GPS variance)
+            // collapse to one signature and merge into a single line, instead of
+            // stacking into thick parallel "杂线".
+            let lat = Int((c.latitude * 1_000).rounded())
+            let lon = Int((c.longitude * 1_000).rounded())
             return "\(lat):\(lon)"
         }
 
@@ -948,6 +933,10 @@ struct MapboxGlobeView: View {
         guard let tPrev = prev.t, let tCur = cur.t, tCur > tPrev else {
             if dd < Self.fallbackConnectMeters      { return .continueSolid }
             if dd >= Self.crossCityArcMeters        { return .arcThenContinue }
+            // 2–50 km with no timestamps: BREAK. Connecting here (previous
+            // attempt) drew spurious "首尾连线" between genuinely separate
+            // records that happened to be a few km apart. Better to leave a
+            // small gap than invent a line that wasn't walked.
             return .breakSolid
         }
 
@@ -1031,13 +1020,15 @@ struct MapboxGlobeView: View {
         let ne = CLLocationCoordinate2D(latitude: maxLat, longitude: maxLon)
         let bounds = CoordinateBounds(southwest: sw, northeast: ne)
 
-        let padding = UIEdgeInsets(top: 120, left: 60, bottom: 140, right: 60)
+        // Generous padding keeps the globe small and floating, with room for
+        // the top stats and the bottom style picker.
+        let padding = UIEdgeInsets(top: 200, left: 90, bottom: 260, right: 90)
         let mapboxMap: MapboxMap = mapView.mapboxMap
         var cam = mapboxMap.camera(for: bounds, padding: padding, bearing: 0, pitch: 0, maxZoom: nil, offset: nil)
 
-        // keep "far view feel"
+        // keep "far view feel" — cap so the sphere stays small
         if let z = cam.zoom {
-            cam.zoom = min(z, 2.2)
+            cam.zoom = min(z, 1.5)
         }
 
         mapView.camera.ease(to: cam, duration: 0.7)

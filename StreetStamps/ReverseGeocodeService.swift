@@ -72,6 +72,13 @@ actor ReverseGeocodeService {
     private let canonicalGeocoder = CLGeocoder()
     private let fixedLocale = Locale(identifier: "en_US")
 
+    /// Separate geocoder for fine place labels so it never cancels an in-flight
+    /// city-level lookup (CLGeocoder serializes per instance). Cache keyed by a
+    /// ~110m cell so adjacent neighborhoods resolve distinctly.
+    private let labelGeocoder = CLGeocoder()
+    private var placeLabelCacheByLocaleCell: [String: String] = [:]
+    private var placePartsCacheByLocaleCell: [String: PlaceParts] = [:]
+
     // MARK: - Models
     struct CanonicalResult: Sendable {
         let cityName: String
@@ -254,6 +261,91 @@ actor ReverseGeocodeService {
             try? await Task.sleep(nanoseconds: UInt64(minIntervalSeconds * 1_100_000_000))
         }
         return nil
+    }
+
+    /// Fine-grained place label for the 「你的小世界」 retrospective: a recognizable
+    /// POI / street / neighborhood, NOT the city (city-level names collide across
+    /// every place in the same town and read as fake). Returns nil when
+    /// rate-limited or unresolved — callers keep their fallback and may retry.
+    func placeLabel(for location: CLLocation) async -> String? {
+        let displayLocale = LanguagePreference.shared.displayLocale
+        let cell = "\(fineCellKey(for: location))|\(displayLocale.identifier)"
+        if let cached = placeLabelCacheByLocaleCell[cell] { return cached }
+
+        let now = Date()
+        if now < throttledUntil { return nil }
+        if now.timeIntervalSince(lastRequestAt) < minIntervalSeconds { return nil }
+        lastRequestAt = now
+
+        let geocoder = labelGeocoder
+        let label: String? = await withCheckedContinuation { cont in
+            geocoder.reverseGeocodeLocation(location, preferredLocale: displayLocale) { placemarks, error in
+                if let nsErr = error as NSError? {
+                    Task { await self.handlePossibleThrottle(nsErr) }
+                }
+                guard let pm = placemarks?.first else {
+                    cont.resume(returning: nil)
+                    return
+                }
+                cont.resume(returning: Self.fineLabel(from: pm))
+            }
+        }
+        if let label, !label.isEmpty { placeLabelCacheByLocaleCell[cell] = label }
+        return label
+    }
+
+    /// Localized (city, district) pair for the retrospective cards. Both come
+    /// from a single geocode in the user's display locale, so the city shows in
+    /// Chinese (not the stored English fallback) and the district is the real 区.
+    struct PlaceParts: Sendable, Equatable { let city: String?; let district: String? }
+
+    func localizedPlace(for location: CLLocation) async -> PlaceParts? {
+        let displayLocale = LanguagePreference.shared.displayLocale
+        let cell = "P|\(fineCellKey(for: location))|\(displayLocale.identifier)"
+        if let cached = placePartsCacheByLocaleCell[cell] { return cached }
+
+        let now = Date()
+        if now < throttledUntil { return nil }
+        if now.timeIntervalSince(lastRequestAt) < minIntervalSeconds { return nil }
+        lastRequestAt = now
+
+        let geocoder = labelGeocoder
+        let parts: PlaceParts? = await withCheckedContinuation { cont in
+            geocoder.reverseGeocodeLocation(location, preferredLocale: displayLocale) { placemarks, error in
+                if let nsErr = error as NSError? { Task { await self.handlePossibleThrottle(nsErr) } }
+                guard let pm = placemarks?.first else { cont.resume(returning: nil); return }
+                func clean(_ s: String?) -> String? {
+                    guard let s = s?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
+                    return s
+                }
+                let city = clean(pm.locality) ?? clean(pm.subAdministrativeArea)
+                let district = clean(pm.subLocality) ?? clean(pm.subAdministrativeArea)
+                cont.resume(returning: PlaceParts(city: city, district: district))
+            }
+        }
+        if let parts { placePartsCacheByLocaleCell[cell] = parts }
+        return parts
+    }
+
+    /// District-level label (区/县), NOT street-level — street names are noisy and
+    /// over-specific for a retrospective. Prefer the administrative district
+    /// (徐汇区 / a county), then a sub-locality, then the city as a last resort.
+    nonisolated static func fineLabel(from pm: CLPlacemark) -> String? {
+        func clean(_ s: String?) -> String? {
+            guard let s = s?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
+            return s
+        }
+        if let district = clean(pm.subAdministrativeArea) { return district }
+        if let sub = clean(pm.subLocality) { return sub }
+        if let loc = clean(pm.locality) { return loc }
+        return clean(pm.administrativeArea)
+    }
+
+    /// ~110m cell so neighboring places cache separately (finer than `cellKey`).
+    private func fineCellKey(for location: CLLocation) -> String {
+        let lat = roundPlaces(location.coordinate.latitude, places: 3)
+        let lon = roundPlaces(location.coordinate.longitude, places: 3)
+        return "\(lat),\(lon)"
     }
 
     /// Seconds remaining until the throttle window expires, or 0 if not throttled.

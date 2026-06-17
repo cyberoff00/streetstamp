@@ -1217,7 +1217,11 @@ final class CityThumbnailLoader: ObservableObject {
         // as a permanent blank. ensurePersistentCache now rejects fully-uniform frames for
         // route-bearing cities before caching; bump to force a re-render of any blank
         // already saved to disk under v11.
-        let styleVersion = 12
+        // v13: extend the uniform-frame rejection to route-less (photo-discovered) cities.
+        // v12 only guarded route-bearing cities, so a Mapbox cold-start blank frame for a
+        // photo city slipped through and was cached permanently (renderedKey set → never
+        // retried). Bump to flush any blank photo-city thumbnail already saved under v12.
+        let styleVersion = 13
         let colorVersion = (MapLayerStyle(rawValue: appearanceRaw) ?? .mutedDark).isSatelliteStyle ? 2 : 1
         // Include only the masks for journeys that belong to this city, so
         // edits to one city's polylines don't invalidate every other city's
@@ -1419,17 +1423,22 @@ final class CityThumbnailLoader: ObservableObject {
 
         guard let img else { return }
 
-        // A route-bearing city whose rendered frame is a single flat colour means the
-        // renderer reported success but the tiles/route never rasterised — observed with
-        // Mapbox Snapshotter on cold start, which can return .success with an unrendered
-        // frame (see makeMapboxSnapshot). Caching it would persist a blank thumbnail on
-        // disk forever (renderedKey gets set → never retried). Do NOT cache it: returning
-        // here leaves the cache empty so renderOnDemand/scheduleRetry re-render on a now-warm
-        // GPU instead. This is deliberately NOT the old isBlankImage 9-point heuristic: it
-        // only fires for route-bearing cities (so valid uniform-terrain maps over open
-        // sea/desert without routes are never touched) AND requires the WHOLE frame to be a
-        // single colour, which for a city that has routes is unambiguous render failure.
-        if hasRoutes, Self.isFullyUniformFrame(img) {
+        // A rendered frame that is a single flat colour means the renderer reported success
+        // but the tiles/route never rasterised — observed with Mapbox Snapshotter on cold
+        // start, which can return .success with an unrendered frame (see makeMapboxSnapshot).
+        // Caching it would persist a blank thumbnail on disk forever (renderedKey gets set →
+        // never retried). Do NOT cache it: returning here leaves the cache empty so
+        // renderOnDemand/scheduleRetry re-render on a now-warm GPU instead.
+        //
+        // This applies to BOTH route-bearing and route-less (photo-discovered) cities. The
+        // v12 guard was route-bearing only, on the theory that a uniform-terrain map over
+        // open sea/desert is a legitimate blank-looking frame for a route-less city. But
+        // photo-discovered cities are by definition populated places the user photographed,
+        // so a real render is never a single flat colour; whereas a Mapbox cold-start blank
+        // frame for such a city was silently cached forever. False-rejecting here only costs
+        // a retry (capped at maxAutoRetries → "tap to retry"), which is strictly better than
+        // a permanent silent blank. Still requires the WHOLE frame to be one colour.
+        if Self.isFullyUniformFrame(img) {
             await MainActor.run {
                 CityThumbnailDebugLogger.shared.log(
                     .renderMiss,

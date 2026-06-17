@@ -13,6 +13,56 @@ private struct GlobeShareImageItem: Identifiable {
     let image: UIImage
 }
 
+/// Shareable poster: a screenshot of the live 3D globe with a counts + Worldo
+/// wordmark strip composited over a bottom gradient. Fixed size so `ImageRenderer`
+/// produces a consistent image.
+private struct GlobeSharePoster: View {
+    let globeImage: UIImage
+    let countryCount: Int
+    let cityCount: Int
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            Image(uiImage: globeImage)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 1080, height: 1350)
+                .clipped()
+
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.10), .black.opacity(0.65)],
+                startPoint: .center, endPoint: .bottom
+            )
+
+            VStack(spacing: 22) {
+                HStack(spacing: 48) {
+                    statColumn(countryCount, L10n.t("globe_poster_countries"))
+                    Rectangle().fill(Color.white.opacity(0.3)).frame(width: 1, height: 64)
+                    statColumn(cityCount, L10n.t("globe_poster_cities"))
+                }
+                Text("WORLDO")
+                    .font(.system(size: 24, weight: .bold))
+                    .tracking(10)
+                    .foregroundColor(.white.opacity(0.9))
+            }
+            .padding(.bottom, 80)
+        }
+        .frame(width: 1080, height: 1350)
+        .background(Color.black)
+    }
+
+    private func statColumn(_ n: Int, _ label: String) -> some View {
+        VStack(spacing: 8) {
+            Text("\(n)")
+                .font(.system(size: 72, weight: .bold))
+                .foregroundColor(.white)
+            Text(label)
+                .font(.system(size: 24, weight: .medium))
+                .foregroundColor(.white.opacity(0.75))
+        }
+    }
+}
+
 /// Standalone page for Sidebar tab: Globe View
 struct GlobeViewScreen: View {
     var externalJourneys: [JourneyRoute]? = nil
@@ -34,6 +84,11 @@ struct GlobeViewScreen: View {
     @State private var refreshGate = GlobeRefreshGate()
     @State private var didRequestInitialRefresh = false
     @State private var showMembershipGate = false
+    @State private var isCapturingPoster = false
+
+    /// Selected globe base-map style. MapboxGlobeView reads the same AppStorage
+    /// key and reloads its style when this changes.
+    @AppStorage("streetstamps.globe.mapTheme") private var globeThemeID = GlobeMapTheme.defaultID
 
     var body: some View {
         ZStack {
@@ -53,13 +108,14 @@ struct GlobeViewScreen: View {
             }
 
             VStack(spacing: 0) {
-                topHeader
+                // Hidden during capture so the poster screenshot is pure globe.
+                if !isCapturingPoster { topHeader }
                 Spacer()
-                bottomSummaryCard
+                if !isCapturingPoster { themePicker }
             }
             .padding(.horizontal, 20)
             .padding(.top, 14)
-            .padding(.bottom, 70)
+            .padding(.bottom, 28)
         }
         .sheet(item: $shareItem) { item in
             ShareSheet(activityItems: [item.image])
@@ -84,106 +140,164 @@ struct GlobeViewScreen: View {
         .onChange(of: globeRefreshCoordinator.revision) { _, _ in
             refreshGlobeData()
         }
+        // When pushed (e.g. from FootprintView's NavigationLink) the system adds
+        // its own back button. Hide the nav bar so only our custom close (✕)
+        // shows — dismiss() pops the push or dismisses the cover either way.
+        .toolbar(.hidden, for: .navigationBar)
+        .navigationBarBackButtonHidden(true)
+    }
+
+    /// Horizontal carousel of base-map styles. Floats over the map on a dark
+    /// glass pill so labels stay readable on any theme (light or dark).
+    private var themePicker: some View {
+        // Exactly 5 styles — distribute evenly across the width (no scrolling)
+        // with larger swatches for a cleaner, more deliberate look.
+        HStack(spacing: 0) {
+            ForEach(GlobeMapTheme.all) { theme in
+                let selected = globeThemeID == theme.id
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { globeThemeID = theme.id }
+                } label: {
+                    VStack(spacing: 7) {
+                        globeSwatch(theme, selected: selected)
+                        Text(L10n.t(theme.nameKey))
+                            .font(.system(size: 11, weight: selected ? .semibold : .regular))
+                            .foregroundColor(selected ? .black : .black.opacity(0.45))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    private var mapboxToken: String {
+        Bundle.main.object(forInfoDictionaryKey: "MBXAccessToken") as? String ?? ""
+    }
+
+    /// Style picker thumbnail: a real Mapbox preview of the style (clipped to a
+    /// circle for a globe feel), falling back to a simulated sphere while the
+    /// image loads or offline.
+    private func globeSwatch(_ theme: GlobeMapTheme, selected: Bool) -> some View {
+        ZStack {
+            if let url = theme.staticThumbnailURL(token: mapboxToken) {
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFill()
+                    } else {
+                        simulatedSphere(theme)
+                    }
+                }
+            } else {
+                simulatedSphere(theme)
+            }
+        }
+        .frame(width: 40, height: 40)
+        .clipShape(Circle())
+        .overlay(Circle().strokeBorder(Color.black.opacity(0.12), lineWidth: 0.5))
+        .overlay(
+            Circle()
+                .strokeBorder(selected ? theme.swatchAccent : .clear, lineWidth: 2.5)
+                .padding(-3)
+        )
+        .shadow(color: .black.opacity(0.18), radius: 4, x: 0, y: 2)
+        .scaleEffect(selected ? 1.06 : 1.0)
+    }
+
+    /// Offline/loading fallback: a shaded sphere in the theme's base colour.
+    private func simulatedSphere(_ theme: GlobeMapTheme) -> some View {
+        ZStack {
+            Circle().fill(theme.swatchBase)
+            Circle().fill(
+                RadialGradient(
+                    gradient: Gradient(colors: [Color.white.opacity(0.55), Color.clear]),
+                    center: UnitPoint(x: 0.32, y: 0.28), startRadius: 0, endRadius: 28
+                )
+            )
+            Circle().fill(
+                RadialGradient(
+                    gradient: Gradient(colors: [Color.clear, Color.black.opacity(0.32)]),
+                    center: UnitPoint(x: 0.72, y: 0.78), startRadius: 6, endRadius: 32
+                )
+            )
+            Circle().fill(theme.swatchAccent)
+                .frame(width: 12, height: 12)
+                .offset(x: 6, y: -3)
+        }
     }
 
     private var topHeader: some View {
-        HStack {
-            AppBackButton(foreground: .black)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                circleIconButton("square.and.arrow.up") { shareGlobe() }
+                Spacer()
+                circleIconButton("xmark") { dismiss() }
+            }
 
-            Spacer()
+            Text(visitedSummaryText)
+                .font(.system(size: 24, weight: .bold))
+                .foregroundColor(.black)
+                .padding(.horizontal, 4)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
-            Text(L10n.t("globe_view_title"))
-                .appHeaderStyle()
-                .foregroundColor(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Color.black.opacity(0.45), in: Capsule())
-                .shadow(color: .black.opacity(0.45), radius: 6, x: 0, y: 2)
+    private func circleIconButton(_ systemName: String, highlighted: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(highlighted ? .white : .black)
+                .frame(width: 36, height: 36)
+                .background(highlighted ? FigmaTheme.primary : Color.black.opacity(0.06))
+                .clipShape(Circle())
+                .appMinTapTarget()
+        }
+    }
 
-            Spacer()
+    /// POSTER = a screenshot of the live 3D globe + a counts/brand strip. Hides
+    /// the UI chrome for one frame, captures the window (drawHierarchy captures
+    /// the Metal-backed globe), then composes the poster via ImageRenderer.
+    private func shareGlobe() {
+        // China-unified counts (Taiwan/HK/Macao fold into China).
+        let isoSet = Set(visitedCountries.map { FootprintFactsBuilder.unifiedISO($0) })
+        let countryCount = isoSet.count
+        let cityCount = cityCache.cachedCities.filter { !($0.isTemporary ?? false) }.count
 
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(.black)
-                    .frame(width: 36, height: 36)
-                    .background(Color.white.opacity(0.92))
-                    .clipShape(Circle())
-                    .appMinTapTarget()
+        isCapturingPoster = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 220_000_000) // let chrome hide + globe redraw
+            let globeImage = captureWindowImage()
+            isCapturingPoster = false
+            guard let globeImage else { return }
+            let poster = GlobeSharePoster(globeImage: globeImage, countryCount: countryCount, cityCount: cityCount)
+            let renderer = ImageRenderer(content: poster)
+            renderer.scale = 2
+            if let image = renderer.uiImage {
+                shareItem = GlobeShareImageItem(image: image)
             }
         }
     }
 
-    private var bottomSummaryCard: some View {
-        let nonTemporaryCities = cityCache.cachedCities.filter { !($0.isTemporary ?? false) }
-        let cityCount = nonTemporaryCities.count
-        let totalMemories = nonTemporaryCities.reduce(0) { $0 + max(0, $1.memories) }
-        let levelProgress = UserLevelProgress.from(journeys: store.journeys)
-        let cardContent = ProfileSummaryCardContent(
-            level: levelProgress.level,
-            cityCount: cityCount,
-            memoryCount: totalMemories,
-            locale: LanguagePreference.shared.displayLocale
-        )
-
-        return HStack(spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color(red: 200.0 / 255.0, green: 232.0 / 255.0, blue: 221.0 / 255.0))
-                    .frame(width: 68, height: 68)
-
-                RobotRendererView(size: 56, face: .front, loadout: AvatarLoadoutStore.load())
-            }
-            .overlay(alignment: .topTrailing) {
-                LevelBadgeView(level: levelProgress.level)
-                    .offset(x: 10, y: -10)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(normalizedDisplayName(profileName))
-                    .appBodyStrongStyle()
-                    .foregroundColor(.black)
-                    .lineLimit(1)
-
-                Text(cardContent.levelText)
-                    .appCaptionStyle()
-                    .foregroundColor(.black.opacity(0.62))
-                    .lineLimit(1)
-
-                Text(cardContent.statsText)
-                    .appFootnoteStyle()
-                    .foregroundColor(.black.opacity(0.56))
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 10)
-
-            Button {
-                if let image = captureCurrentPageImage() {
-                    shareItem = GlobeShareImageItem(image: image)
-                }
-            } label: {
-                Label(L10n.t("share"), systemImage: "square.and.arrow.up")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(UITheme.accent)
-                    .clipShape(Capsule())
-            }
-            .buttonStyle(.plain)
+    private func captureWindowImage() -> UIImage? {
+        guard let window = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .flatMap({ $0.windows })
+            .first(where: { $0.isKeyWindow }) else { return nil }
+        let renderer = UIGraphicsImageRenderer(bounds: window.bounds)
+        return renderer.image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(Color.white.opacity(0.95))
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color.black.opacity(0.06), lineWidth: 1)
-        }
-        .shadow(color: Color.black.opacity(0.10), radius: 16, x: 0, y: 8)
+    }
+
+    /// "去过 N 个国家 · M 个城市" — shown in the top blank area.
+    private var visitedSummaryText: String {
+        let cityCount = cityCache.cachedCities.filter { !($0.isTemporary ?? false) }.count
+        let countryCount = visitedCountries.count
+        return String(format: L10n.t("globe_visited_summary"), countryCount, cityCount)
     }
 
     private func normalizedDisplayName(_ name: String) -> String {
@@ -344,7 +458,9 @@ struct GlobeViewScreen: View {
         for iso in cityISO2 {
             set.insert(iso)
         }
-        return Array(set).sorted()
+        // Shared canonicalization: China-unify (TW/HK/MO → CN) + dedup + sort,
+        // identical to the footprint page so the two country counts always match.
+        return FootprintFactsBuilder.canonicalVisitedISO2(Array(set))
     }
 
     private static func isoFromCityKey(_ cityKey: String?) -> String? {

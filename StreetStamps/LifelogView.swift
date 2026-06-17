@@ -372,6 +372,9 @@ struct LifelogView: View {
         }
         .animation(.easeInOut(duration: 0.3), value: activeLifelogHint?.id)
         .onAppear {
+            #if DEBUG
+            MainThreadHeartbeat.shared.start(label: "lifelog")
+            #endif
             isOnScreen = true
             didCenterOnEnter = false
             didAutoFitToRoute = false
@@ -420,6 +423,9 @@ struct LifelogView: View {
             Task { await runHealthAndPopupFlow() }
         }
         .onDisappear {
+            #if DEBUG
+            MainThreadHeartbeat.shared.stop()
+            #endif
             isOnScreen = false
             renderTask?.cancel()
             renderTask = nil
@@ -501,6 +507,9 @@ struct LifelogView: View {
                 Spacer()
 
                 Button {
+                    #if DEBUG
+                    print("👆 [Heartbeat:lifelog] globe button tapped → presenting")
+                    #endif
                     showGlobe = true
                 } label: {
                     Image(systemName: "globe.asia.australia.fill")

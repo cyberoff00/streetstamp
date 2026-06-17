@@ -60,7 +60,7 @@ final class LifelogStore: ObservableObject {
         static let empty = DayShardIndex()
     }
 
-    struct LifelogTrackPoint: Codable {
+    struct LifelogTrackPoint: Codable, Sendable {
         var id: String
         var lat: Double
         var lon: Double
@@ -1257,6 +1257,35 @@ final class LifelogStore: ObservableObject {
             }
         }
         return result
+    }
+
+    /// Off-main builder of 「你的小世界」 inputs. Only cheap index/path/in-memory
+    /// capture happens on the main actor; per-day shard files are read from disk
+    /// on a utility task. Safe to await from anywhere — keeps growing passive
+    /// history off the main thread (see CLAUDE.md: O(n) over lifetime data must
+    /// not run synchronously on main).
+    func loadSmallWorldPoints() async -> [SmallWorldPoint] {
+        let dir = paths.lifelogDaysDir
+        let dayKeys = shardIndex.cachedAvailableDayKeys
+        // Capture already-resident points (today + LRU-loaded shards) as plain
+        // Sendable arrays on the main actor; everything else is read from disk
+        // off-main. Avoids capturing the non-Sendable shard cache into the task.
+        var inMemoryByDay: [String: [LifelogTrackPoint]] = [:]
+        inMemoryByDay[todayShard.dayKey] = todayShard.points
+        for (key, shard) in loadedShards { inMemoryByDay[key] = shard.points }
+
+        return await Task.detached(priority: .utility) {
+            var out: [SmallWorldPoint] = []
+            for dayKey in dayKeys {
+                let points = inMemoryByDay[dayKey]
+                    ?? LifelogStore.loadShardFromDisk(dir: dir, dayKey: dayKey).points
+                out.reserveCapacity(out.count + points.count)
+                for p in points {
+                    out.append(SmallWorldPoint(lat: p.lat, lon: p.lon, cellID: p.cellID, dayKey: dayKey))
+                }
+            }
+            return out
+        }.value
     }
 
     func snapshotDirtyPointsByDay() -> [String: [LifelogTrackPoint]] {
