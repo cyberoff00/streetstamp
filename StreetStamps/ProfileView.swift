@@ -20,6 +20,7 @@ struct ProfileView: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var store: JourneyStore
     @EnvironmentObject private var cityCache: CityCache
+    @EnvironmentObject private var lifelogStore: LifelogStore
     @EnvironmentObject private var sessionStore: UserSessionStore
     @EnvironmentObject private var socialStore: SocialGraphStore
     @EnvironmentObject private var notificationStore: SocialNotificationStore
@@ -56,13 +57,11 @@ struct ProfileView: View {
 
     
     // Cheap O(1) counts — fine to keep as computed properties.
-    private var totalJourneys: Int { store.journeys.count }
     private var citiesVisited: Int { cityCache.cachedCities.count }
 
     // Cached stats — O(n) reductions that must not run on every render.
     // Updated by .task(id: store.metadataRevision) below.
     @State private var cachedTotalMemories: Int = 0
-    @State private var cachedTotalDistance: Double = 0
     @State private var cachedJourneyDates: [Date] = []
     @State private var accountCreatedAt: Date?
     @State private var cachedLevelProgress: UserLevelProgress = UserLevelProgress.from(journeys: [])
@@ -78,13 +77,6 @@ struct ProfileView: View {
         formatter.dateFormat = "yyyy/M/d"
         let date = accountCreatedAt ?? cachedJourneyDates.min() ?? Date()
         return formatter.string(from: date)
-    }
-
-    private var collectionBadges: [String] {
-        [
-            "\(totalJourneys) \(L10n.t("activity_stat_journeys"))",
-            String(format: "%.0f KM", cachedTotalDistance / 1000.0)
-        ]
     }
 
     var body: some View {
@@ -177,7 +169,6 @@ struct ProfileView: View {
             // Recompute O(n) stats only when journey data actually changes, not on
             // every unrelated render triggered by other EnvironmentObjects.
             cachedTotalMemories  = store.journeys.reduce(0) { $0 + $1.memories.count }
-            cachedTotalDistance  = store.journeys.reduce(0) { $0 + $1.distance }
             cachedJourneyDates   = store.journeys.compactMap { $0.endTime ?? $0.startTime }
             cachedLevelProgress  = UserLevelProgress.from(journeys: store.journeys)
         }
@@ -289,40 +280,29 @@ struct ProfileView: View {
                 }
                 .frame(height: 268)
 
-                if featureFlags.socialEnabled,
-                   ProfileHeaderPresentation.showsNotificationCloud(notificationCount: notificationStore.notifications.count) {
-                    Button {
-                        showNotificationsSheet = true
+                // Postcard inbox entry — a plain icon in the scene's top-left.
+                // (Social notifications inbox lives in FriendsHub now.)
+                if featureFlags.socialEnabled {
+                    NavigationLink {
+                        PostcardInboxView()
                     } label: {
-                        ZStack(alignment: .topTrailing) {
-                            Image(systemName: "cloud.fill")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(Color(red: 0.22, green: 0.45, blue: 0.89))
-                                .frame(width: 30, height: 30)
-                                .background(FigmaTheme.card.opacity(0.95))
-                                .clipShape(Circle())
-                                .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
-
-                            if notificationStore.unreadCount > 0 {
-                                Text("\(min(notificationStore.unreadCount, 99))")
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 5)
-                                    .padding(.vertical, 2)
-                                    .background(Color.red)
-                                    .clipShape(Capsule())
-                                    .offset(x: 10, y: -8)
-                            }
-                        }
-                        .appMinTapTarget()
+                        Image(systemName: "envelope.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(FigmaTheme.primary)
+                            .frame(width: 34, height: 34)
+                            .background(FigmaTheme.card.opacity(0.95))
+                            .clipShape(Circle())
+                            .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
+                            .appMinTapTarget()
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(L10n.t("profile_notifications_title"))
-                    .accessibilityValue(notificationStore.unreadCount > 0 ? "\(notificationStore.unreadCount)" : "")
-                    .padding(6)
+                    .accessibilityLabel(L10n.t("postcard_profile_title"))
+                    .padding(10)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
             }
+
+            nameEquipmentRow
         }
         .frame(maxWidth: .infinity)
         .background(FigmaTheme.card)
@@ -336,90 +316,67 @@ struct ProfileView: View {
 
     private var topActionRow: some View {
         VStack(spacing: 20) {
-            ProfileHeroInfoStatsSection(stats: []) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Button {
-                        nameDraft = displayName == L10n.t("explorer_fallback") ? "" : displayName
-                        nameError = ""
-                        showNameEditor = true
-                    } label: {
-                        HStack(spacing: 6) {
-                            Text(displayName)
-                                .font(.system(size: 22, weight: .bold, design: .rounded))
-                                .tracking(-0.4)
-                                .foregroundColor(FigmaTheme.text)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.72)
-                                .layoutPriority(1)
+            // 「足迹」inlined: world map → activity rings → recent moments.
+            ProfileFootprintSection {
+                ProfileHeroActivitySummarySection(
+                    levelProgress: cachedLevelProgress,
+                    citiesCount: citiesVisited,
+                    memoriesCount: cachedTotalMemories,
+                    journeyDates: cachedJourneyDates
+                )
+            }
+        }
+    }
 
-                            Image(systemName: "pencil")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(FigmaTheme.text.opacity(0.45))
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .buttonStyle(.plain)
-
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 8) {
-                            ProfileHeroLevelPill(level: cachedLevelProgress.level)
-
-                            Text(profileSinceDateText)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(FigmaTheme.subtext)
-                                .lineLimit(1)
-                        }
-
-                        VStack(alignment: .leading, spacing: 6) {
-                            ProfileHeroLevelPill(level: cachedLevelProgress.level)
-
-                            Text(profileSinceDateText)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(FigmaTheme.subtext)
-                                .lineLimit(1)
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            } trailingContent: {
-                NavigationLink {
-                    EquipmentView(loadout: $loadout)
+    // Name + joined date + equipment — merged into the bottom of the room card.
+    private var nameEquipmentRow: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Button {
+                    nameDraft = displayName == L10n.t("explorer_fallback") ? "" : displayName
+                    nameError = ""
+                    showNameEditor = true
                 } label: {
-                    Image(systemName: "tshirt")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(.white)
-                        .frame(width: 54, height: 54)
-                        .background(FigmaTheme.primary)
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        .shadow(color: FigmaTheme.primary.opacity(0.22), radius: 10, x: 0, y: 6)
-                        .appMinTapTarget()
+                    HStack(spacing: 6) {
+                        Text(displayName)
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .tracking(-0.4)
+                            .foregroundColor(FigmaTheme.text)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+                            .layoutPriority(1)
+
+                        Image(systemName: "pencil")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(FigmaTheme.text.opacity(0.45))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.plain)
-            }
 
-            if featureFlags.socialEnabled {
-                NavigationLink {
-                    PostcardInboxView()
-                } label: {
-                    postcardTile
-                }
-                .buttonStyle(.plain)
+                Text(String(format: L10n.t("friends_joined_format"), profileSinceDateText))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(FigmaTheme.subtext)
+                    .lineLimit(1)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             NavigationLink {
-                FootprintView()
+                EquipmentView(loadout: $loadout)
             } label: {
-                collectionTile
+                Image(systemName: "tshirt")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(FigmaTheme.primary)
+                    .frame(width: 40, height: 40)
+                    .background(FigmaTheme.primary.opacity(0.10))
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    .appMinTapTarget()
             }
             .buttonStyle(.plain)
-
-            ProfileHeroActivitySummarySection(
-                levelProgress: cachedLevelProgress,
-                citiesCount: citiesVisited,
-                memoriesCount: cachedTotalMemories,
-                journeyDates: cachedJourneyDates
-            )
         }
+        .padding(.horizontal, 18)
+        .padding(.top, 4)
+        .padding(.bottom, 16)
     }
 
     private func profileMenuTile(icon: String, iconColor: Color, iconBg: Color, title: String) -> some View {
@@ -470,24 +427,6 @@ struct ProfileView: View {
                 .foregroundColor(FigmaTheme.subtext)
         }
         .frame(maxWidth: .infinity)
-    }
-
-    private var postcardTile: some View {
-        ProfilePostcardEntryCard(
-            title: L10n.t("postcard_profile_title"),
-            subtitle: L10n.t("postcard_profile_subtitle")
-        )
-    }
-
-    private var collectionTile: some View {
-        ProfilePostcardEntryCard(
-            systemImage: "square.on.square",
-            iconColor: FigmaTheme.primary,
-            iconBackground: FigmaTheme.primary.opacity(0.10),
-            title: L10n.t("friend_collection"),
-            subtitle: nil,
-            badges: collectionBadges
-        )
     }
 
     @ViewBuilder

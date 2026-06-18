@@ -294,18 +294,11 @@ enum FootprintFactsBuilder {
             .sorted { $0.date != $1.date ? $0.date < $1.date : $0.id < $1.id }
         guard !eligible.isEmpty else { return nil }
 
-        // Prefer "this day in a past year" when such a journey exists — otherwise
-        // rotate through ALL past journeys. Either way the choice is seeded by the
-        // calendar day, so it CHANGES EVERY DAY but stays stable within a day.
-        let refYear = cal.component(.year, from: referenceDate)
-        let anniversary = eligible.filter {
-            cal.component(.year, from: $0.date) < refYear && calendarDayDistance($0.date, referenceDate) <= 3
-        }
-        let pool = anniversary.isEmpty ? eligible : anniversary
-
+        // Rotate through ALL past journeys, seeded by the calendar day: a different
+        // old journey surfaces every day, but the pick stays stable within a day.
         let dayNumber = Int(today.timeIntervalSince1970 / 86_400)
-        let idx = ((dayNumber % pool.count) + pool.count) % pool.count
-        let j = pool[idx]
+        let idx = ((dayNumber % eligible.count) + eligible.count) % eligible.count
+        let j = eligible[idx]
 
         let fmt = dayKeyFormatter()
         return ReunionRef(journeyID: j.id, date: j.date, mood: moodByDay[fmt.string(from: j.date)], cityName: j.cityName)
@@ -400,16 +393,6 @@ enum FootprintFactsBuilder {
     static func daysBetween(_ from: Date, _ to: Date) -> Int {
         let cal = Calendar.current
         return cal.dateComponents([.day], from: cal.startOfDay(for: from), to: cal.startOfDay(for: to)).day ?? 0
-    }
-
-    /// Cyclic distance in days between two dates' (month, day), ignoring year.
-    /// 0 = same calendar day; max ~182.
-    static func calendarDayDistance(_ a: Date, _ b: Date) -> Int {
-        let cal = Calendar.current
-        let da = cal.ordinality(of: .day, in: .year, for: a) ?? 0
-        let db = cal.ordinality(of: .day, in: .year, for: b) ?? 0
-        let diff = abs(da - db)
-        return min(diff, 365 - diff)
     }
 
     static func dayKeyFormatter() -> DateFormatter {

@@ -154,9 +154,9 @@ struct MapboxGlobeView: View {
                 }
             // No in-map chrome — GlobeViewScreen owns the header (back + stats).
         }
-        // Surround is always the app background — only the globe sphere's style
-        // changes between themes (the atmosphere paints the space app-white too).
-        .background(FigmaTheme.background)
+        // Surround is clean white so the globe floats on white (matching the
+        // Profile map card) — crisper than the app's slightly grey off-white.
+        .background(Color.white)
     }
 
     private var mapView: MBMapView { mapHolder.mapView }
@@ -222,7 +222,7 @@ struct MapboxGlobeView: View {
     /// star field, so every theme's globe floats on app-white (been-style)
     /// regardless of whether the base style is dark, light or satellite.
     private func applyAppWhiteSpace() {
-        let appBG = StyleColor(UIColor(FigmaTheme.background))
+        let appBG = StyleColor(UIColor.white)
         var atmo = Atmosphere()
         atmo.spaceColor = .constant(appBG)
         atmo.color = .constant(appBG)
@@ -241,7 +241,7 @@ struct MapboxGlobeView: View {
         do {
             if !map.layerExists(withId: "ss-bg") {
                 var bg = BackgroundLayer(id: "ss-bg")
-                bg.backgroundColor = .constant(StyleColor(UIColor(FigmaTheme.background)))
+                bg.backgroundColor = .constant(StyleColor(UIColor.white))
                 bg.backgroundOpacity = .constant(1.0)
                 try map.addLayer(bg, layerPosition: .at(0))
             }

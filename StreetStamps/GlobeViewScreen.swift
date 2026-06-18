@@ -20,45 +20,49 @@ private struct GlobeSharePoster: View {
     let globeImage: UIImage
     let countryCount: Int
     let cityCount: Int
+    /// Sampled from the captured globe's surround so the whole poster (globe band
+    /// + stats panel) is one uniform colour — no white seam under the numbers.
+    let backgroundColor: Color
 
     var body: some View {
-        ZStack(alignment: .bottom) {
+        VStack(spacing: 0) {
+            // Captured globe (already on clean white) fills the upper area.
             Image(uiImage: globeImage)
                 .resizable()
                 .scaledToFill()
-                .frame(width: 1080, height: 1350)
+                .frame(width: 1080, height: 1000)
                 .clipped()
 
-            LinearGradient(
-                colors: [.clear, .black.opacity(0.10), .black.opacity(0.65)],
-                startPoint: .center, endPoint: .bottom
-            )
-
-            VStack(spacing: 22) {
-                HStack(spacing: 48) {
+            // Light stats panel — the same white as the globe surround, so the
+            // whole poster reads as one clean canvas in the app's palette.
+            VStack(spacing: 28) {
+                HStack(spacing: 64) {
                     statColumn(countryCount, L10n.t("globe_poster_countries"))
-                    Rectangle().fill(Color.white.opacity(0.3)).frame(width: 1, height: 64)
+                    Rectangle()
+                        .fill(FigmaTheme.text.opacity(0.12))
+                        .frame(width: 1, height: 72)
                     statColumn(cityCount, L10n.t("globe_poster_cities"))
                 }
                 Text("WORLDO")
-                    .font(.system(size: 24, weight: .bold))
-                    .tracking(10)
-                    .foregroundColor(.white.opacity(0.9))
+                    .font(.system(size: 26, weight: .heavy))
+                    .tracking(12)
+                    .foregroundColor(FigmaTheme.primary)
             }
-            .padding(.bottom, 80)
+            .frame(maxWidth: .infinity)
+            .frame(height: 350)
         }
         .frame(width: 1080, height: 1350)
-        .background(Color.black)
+        .background(backgroundColor)
     }
 
     private func statColumn(_ n: Int, _ label: String) -> some View {
         VStack(spacing: 8) {
             Text("\(n)")
-                .font(.system(size: 72, weight: .bold))
-                .foregroundColor(.white)
+                .font(.system(size: 76, weight: .bold, design: .rounded))
+                .foregroundColor(FigmaTheme.text)
             Text(label)
-                .font(.system(size: 24, weight: .medium))
-                .foregroundColor(.white.opacity(0.75))
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundColor(FigmaTheme.subtext)
         }
     }
 }
@@ -115,7 +119,7 @@ struct GlobeViewScreen: View {
             }
             .padding(.horizontal, 20)
             .padding(.top, 14)
-            .padding(.bottom, 28)
+            .padding(.bottom, 8)
         }
         .sheet(item: $shareItem) { item in
             ShareSheet(activityItems: [item.image])
@@ -143,7 +147,9 @@ struct GlobeViewScreen: View {
         // When pushed (e.g. from FootprintView's NavigationLink) the system adds
         // its own back button. Hide the nav bar so only our custom close (✕)
         // shows — dismiss() pops the push or dismisses the cover either way.
-        .toolbar(.hidden, for: .navigationBar)
+        // Globe is full-screen — hide both the nav bar and the app's bottom tab
+        // bar while it's pushed (own ✕ dismisses).
+        .toolbar(.hidden, for: .navigationBar, .tabBar)
         .navigationBarBackButtonHidden(true)
     }
 
@@ -162,7 +168,7 @@ struct GlobeViewScreen: View {
                         globeSwatch(theme, selected: selected)
                         Text(L10n.t(theme.nameKey))
                             .font(.system(size: 11, weight: selected ? .semibold : .regular))
-                            .foregroundColor(selected ? .black : .black.opacity(0.45))
+                            .foregroundColor(selected ? FigmaTheme.text : FigmaTheme.subtext.opacity(0.7))
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                     }
@@ -172,7 +178,13 @@ struct GlobeViewScreen: View {
             }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .strokeBorder(Color.black.opacity(0.06), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(0.10), radius: 12, x: 0, y: 4)
     }
 
     private var mapboxToken: String {
@@ -231,17 +243,16 @@ struct GlobeViewScreen: View {
     }
 
     private var topHeader: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 12) {
-                circleIconButton("square.and.arrow.up") { shareGlobe() }
-                Spacer()
                 circleIconButton("xmark") { dismiss() }
+                Spacer()
+                circleIconButton("square.and.arrow.up") { shareGlobe() }
             }
 
             Text(visitedSummaryText)
-                .font(.system(size: 24, weight: .bold))
-                .foregroundColor(.black)
-                .padding(.horizontal, 4)
+                .font(.system(size: 25, weight: .bold))
+                .foregroundColor(FigmaTheme.text)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -250,10 +261,17 @@ struct GlobeViewScreen: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 16, weight: .bold))
-                .foregroundColor(highlighted ? .white : .black)
-                .frame(width: 36, height: 36)
-                .background(highlighted ? FigmaTheme.primary : Color.black.opacity(0.06))
-                .clipShape(Circle())
+                .foregroundColor(highlighted ? .white : FigmaTheme.text)
+                .frame(width: 38, height: 38)
+                .background {
+                    if highlighted {
+                        Circle().fill(FigmaTheme.primary)
+                    } else {
+                        Circle().fill(.ultraThinMaterial)
+                    }
+                }
+                .overlay(Circle().strokeBorder(Color.black.opacity(0.06), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.10), radius: 5, x: 0, y: 2)
                 .appMinTapTarget()
         }
     }
@@ -273,7 +291,15 @@ struct GlobeViewScreen: View {
             let globeImage = captureWindowImage()
             isCapturingPoster = false
             guard let globeImage else { return }
-            let poster = GlobeSharePoster(globeImage: globeImage, countryCount: countryCount, cityCount: cityCount)
+            // Sample the surround (top-centre, above the globe) so the poster's
+            // panel matches the captured globe background exactly.
+            let surround = globeImage.ss_pixelColor(atUnit: CGPoint(x: 0.5, y: 0.12)) ?? .white
+            let poster = GlobeSharePoster(
+                globeImage: globeImage,
+                countryCount: countryCount,
+                cityCount: cityCount,
+                backgroundColor: Color(surround)
+            )
             let renderer = ImageRenderer(content: poster)
             renderer.scale = 2
             if let image = renderer.uiImage {
@@ -481,6 +507,25 @@ struct GlobeViewScreen: View {
         return renderer.image { _ in
             window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
         }
+    }
+}
+
+private extension UIImage {
+    /// Colour of the pixel at a unit point (0…1). Used to match the share
+    /// poster's background to the captured globe's surround. The surround is
+    /// near-grey/white so RGBA-vs-BGRA channel order is irrelevant here.
+    func ss_pixelColor(atUnit p: CGPoint) -> UIColor? {
+        guard let cg = cgImage,
+              let data = cg.dataProvider?.data,
+              let ptr = CFDataGetBytePtr(data) else { return nil }
+        let x = max(0, min(cg.width - 1, Int(CGFloat(cg.width) * p.x)))
+        let y = max(0, min(cg.height - 1, Int(CGFloat(cg.height) * p.y)))
+        let bpp = cg.bitsPerPixel / 8
+        let offset = y * cg.bytesPerRow + x * bpp
+        let c0 = CGFloat(ptr[offset]) / 255.0
+        let c1 = CGFloat(ptr[offset + 1]) / 255.0
+        let c2 = CGFloat(ptr[offset + 2]) / 255.0
+        return UIColor(red: c0, green: c1, blue: c2, alpha: 1.0)
     }
 }
 
